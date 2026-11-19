@@ -12,7 +12,7 @@ import { TrapScreen } from "./features/extras";
 import { GuideHowTo, TryScreen } from "./features/guide";
 import { CatchupScreen, MeetingScreen } from "./features/meeting";
 import { PlanScreen } from "./features/plan";
-import { ExamsScreen, PracticeScreen } from "./features/practice";
+import { ExamsScreen, MockScreen, PracticeScreen } from "./features/practice";
 import { EveScreen, MarathonScreen, ProgressScreen } from "./features/progress";
 import { MuseumScreen, PulseScreen } from "./features/pulse";
 import { QuizScreen } from "./features/quiz";
@@ -277,6 +277,8 @@ function renderRoute(route: Route, ctx: Ctx, courses: string[]) {
       return <PracticeScreen route={route} ctx={ctx} />;
     case "exams":
       return <ExamsScreen route={route} ctx={ctx} />;
+    case "mock":
+      return <MockScreen route={route} ctx={ctx} />;
     case "quiz":
       return <QuizScreen route={route} ctx={ctx} />;
     case "cards":

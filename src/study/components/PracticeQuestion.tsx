@@ -62,6 +62,8 @@ export type PracticeQuestionProps = {
   onSlide: (slide: number) => void;
   /** More chips beside the style (the lecture's title in a course session). */
   chips?: ReactNode;
+  /** Under the question: a past exam's crop of its page (sources.md B1 S 2, the pg: figure). */
+  media?: ReactNode;
   /** A line beside the verdict ("השאלה תחזור מחר…"). */
   note?: ReactNode;
   /** "טעויות ׳על בטוח׳" is promised only where progress shows it. */
@@ -224,6 +226,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
         {showFlags ? flagList(flags) : null}
         {stem}
         {figure(null)}
+        {p.media}
         {set ? (
           <Suspense fallback={<p className="a-small a-muted">רגע…</p>}>
             <SetAnswer
@@ -311,6 +314,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
         </div>
         {meta}
         {stem}
+        {p.media}
         <Suspense fallback={<p className="a-small a-muted">רגע…</p>}>
           <SetAnswer qid={q.id} options={q.options} prompts={prompts} value={[]} feedback={{ ...fb, choices: Array.isArray(chosen) ? chosen : null }} />
         </Suspense>
@@ -343,6 +347,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
       {meta}
       {stem}
       {figure({ right: fb.answer, chosen: one, names: q.layout?.kind === "label" ? pinNames(q, fb) : undefined })}
+      {p.media}
       <ol className="a-opts pq-autopsy" aria-label="התשובות וההסברים">
         {order.map((i) => {
           const right = i === fb.answer;

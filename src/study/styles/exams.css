@@ -1,0 +1,595 @@
+/* Past exams and the simulation (sources.md, phase 2): the upload, the
+   reading, the review, the simulation's setup, its run and its result.
+   Tokens and kit classes only (tokens.css, kit.css): this file places the
+   kit's pieces, as the approved mockups do (exam-upload.html,
+   exam-reading.html, exam-review.html, sim-setup.html, sim-running.html,
+   sim-grid.html, sim-result.html). */
+
+/* ── the upload ── */
+.x-file {
+  gap: var(--sp-3);
+}
+.x-picked {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.x-name {
+  display: grid;
+  min-width: 0;
+}
+.x-name b {
+  overflow-wrap: anywhere;
+}
+.x-strip {
+  display: flex;
+  gap: var(--sp-5);
+  margin: 0 calc(-1 * var(--gutter, 16px));
+  padding: var(--sp-1) var(--gutter, 16px) var(--sp-4);
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: none;
+}
+.x-th {
+  flex: none;
+  width: 142px;
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+}
+.x-page {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--r-sm);
+  background: #fbfaf6;
+  box-shadow: inset 0 0 0 1px rgba(28, 24, 56, 0.12);
+  overflow: hidden;
+}
+.x-page img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.x-page .n {
+  position: absolute;
+  inset-block-end: 6px;
+  inset-inline-start: 6px;
+  min-width: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: #1c1838;
+  color: #ffffff;
+  font: 700 var(--text-chip) / 1.6 var(--font-body);
+  text-align: center;
+}
+.x-tools {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+.x-tools .a-btn {
+  min-height: 36px;
+  padding: 0;
+  font-size: 0.95rem;
+}
+.x-years {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: var(--sp-5);
+  align-items: end;
+}
+.x-years .a-seg > .a-btn {
+  flex: 1;
+}
+.x-keys {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+/* The legend inside the card, as the mockup's bold line (not cut into its border). */
+.x-keys legend {
+  float: inline-start;
+  width: 100%;
+  padding: 0;
+  margin-bottom: var(--sp-2);
+}
+.x-keys legend + * {
+  clear: both;
+}
+.x-keyfile {
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.x-keypick {
+  justify-self: start;
+  cursor: pointer;
+}
+.x-keynote {
+  margin: var(--sp-3) 0 0;
+}
+.x-minutes {
+  max-width: 8rem;
+}
+.x-go-short {
+  display: none;
+}
+@media (max-width: 380px) {
+  .x-go-long {
+    display: none;
+  }
+  .x-go-short {
+    display: inline;
+  }
+}
+
+/* ── the reading ── */
+.x-units .a-li {
+  align-items: center;
+}
+.x-units .a-li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── a page, or its box (PageCrop) ── */
+.x-crop {
+  position: relative;
+  width: 100%;
+  border-radius: var(--r-sm);
+  background: #fbfaf6;
+  box-shadow: inset 0 0 0 1px rgba(28, 24, 56, 0.14);
+  overflow: hidden;
+  direction: ltr;
+}
+.x-crop img {
+  position: absolute;
+  display: block;
+  max-width: none;
+  height: auto;
+}
+.x-crop.is-wait,
+.x-crop.is-error {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 3 / 4;
+  padding: var(--sp-3);
+  text-align: center;
+}
+.pq .x-crop.is-box {
+  max-width: 420px;
+}
+
+/* ── the review ── */
+.r-sum {
+  display: grid;
+  gap: var(--sp-3);
+}
+.r-sum .nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.r-sum .nums > div {
+  display: grid;
+  justify-items: center;
+  padding: var(--sp-4) var(--sp-2);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.r-sum .nums b {
+  font: 800 var(--text-h2) / 1.2 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+.r-sum .nums span {
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+.r-sum p {
+  margin: 0;
+}
+.r-sum .a-btn {
+  text-align: center;
+}
+.r-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.r-filters .a-chip {
+  min-height: 36px;
+  cursor: pointer;
+}
+.r-filters .a-chip[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.r-rows {
+  list-style: none;
+}
+.r-head {
+  width: 100%;
+  align-items: center;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.r-head > div {
+  flex: 1;
+  min-width: 0;
+}
+.r-head .m {
+  overflow-wrap: anywhere;
+}
+.r-head > .a-chip {
+  flex: none;
+}
+.r-item {
+  gap: var(--sp-5);
+  margin: var(--sp-3) 0;
+}
+.r-split {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: start;
+}
+.r-crop {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: center;
+}
+.r-text p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.r-prompts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.r-opts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.r-opts .a-opt {
+  grid-template-columns: 26px minmax(0, 1fr);
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--text-small);
+  overflow-wrap: anywhere;
+}
+.r-opts .a-opt > .l {
+  width: 26px;
+  height: 26px;
+  font-size: var(--text-chip);
+}
+.r-opts .a-opt:has(> .r-optbtn) {
+  display: block;
+  padding: 0;
+}
+.r-optbtn {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-5);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--sp-3) var(--sp-5);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.r-optbtn > .l {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-weight: 800;
+}
+.r-pickhint {
+  margin: 0;
+  font-weight: 700;
+}
+.r-acts {
+  flex-wrap: wrap;
+}
+.r-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0;
+  color: var(--muted);
+}
+.r-head .r-who {
+  margin-top: var(--sp-1);
+}
+.r-log summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.r-log ul {
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.r-edit {
+  gap: var(--sp-4);
+}
+.r-hide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  cursor: pointer;
+}
+.r-hide input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+/* ── the simulation's setup ── */
+.s-src {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-1) var(--sp-6);
+  width: 100%;
+  padding: var(--sp-6) var(--sp-7);
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.s-dot {
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  border: 2px solid var(--field-line);
+  border-radius: 50%;
+}
+.s-src[aria-checked="true"] .s-dot {
+  border: 6px solid var(--accent);
+}
+.s-src b {
+  font-size: var(--text-para);
+  overflow-wrap: anywhere;
+}
+.s-src .m {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+button.a-card.s-src[aria-checked="true"] {
+  border-color: var(--accent);
+  border-bottom-color: var(--accent-edge);
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+}
+.s-len {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.s-len[data-n="1"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.s-len[data-n="2"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.s-len > button {
+  min-height: 74px;
+  gap: 1px;
+  font-size: var(--text-btn);
+}
+.s-len small {
+  font-size: 0.75rem;
+}
+.s-unseen {
+  align-items: center;
+  padding: var(--sp-2) 0;
+  cursor: pointer;
+}
+.s-unseen input {
+  width: 22px;
+  height: 22px;
+}
+.s-open {
+  display: grid;
+  gap: var(--sp-3);
+}
+.s-open .a-btn {
+  justify-self: start;
+}
+
+/* ── the simulation running ── */
+.m-clock {
+  font-variant-numeric: tabular-nums;
+  background: var(--group-soft);
+  color: var(--group-text);
+  white-space: nowrap;
+}
+.m-clock.warn {
+  background: var(--warn-bg);
+  color: var(--ink);
+}
+.m-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.m-pos {
+  font: 800 var(--text-body) / 1.3 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+.m-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.m-flag svg {
+  flex: none;
+}
+.m-flag[aria-pressed="true"] {
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+}
+.m-kept {
+  margin: 0;
+}
+.m-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-6);
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+.m-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.m-legend i {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+}
+.m-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: 6px;
+  margin: var(--sp-4) 0;
+  padding: 0;
+  list-style: none;
+}
+.m-grid button,
+.m-legend i {
+  border: 1.5px solid var(--accent-fill);
+  background: var(--accent-soft);
+}
+.m-grid button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 46px;
+  border-radius: 8px;
+  color: var(--accent);
+  font: 700 0.8rem / 1 var(--font-body);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.m-grid button.e,
+.m-legend i.e {
+  border: 1.5px dashed var(--field-line);
+  background: transparent;
+  color: var(--muted);
+}
+.m-grid button.f,
+.m-legend i.f {
+  border: 2px solid var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--ink);
+}
+.m-grid button.f::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  inset-inline-end: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--sun-pop);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.m-grid button.now {
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+}
+.m-submit {
+  display: grid;
+  gap: var(--sp-4);
+}
+.m-submit .a-row {
+  flex-wrap: wrap;
+}
+.a-sheet.m-sheet {
+  max-height: 82vh;
+  overflow-y: auto;
+}
+
+/* ── the result ── */
+.e-score {
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-10) var(--sp-8);
+  border: var(--b) solid color-mix(in srgb, var(--me-pop) 40%, var(--line));
+  border-radius: var(--r-xl);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-soft);
+}
+.e-score .big {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+.e-score .big b {
+  color: var(--accent);
+  font: 900 2.8rem / 1.05 var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+.e-score .big span {
+  font-weight: 700;
+}
+.e-t {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4) 0;
+}
+.e-t + .e-t {
+  border-top: 1.5px solid var(--line);
+}
+.e-t .top {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.e-t .top span {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.e-t .m {
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+.e-wrong,
+.e-uncounted {
+  list-style: none;
+}
+.e-row > .a-li {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.e-item {
+  display: grid;
+  gap: var(--sp-4);
+  margin: var(--sp-2) 0 var(--sp-4);
+}
+.e-item p {
+  margin: 0;
+}

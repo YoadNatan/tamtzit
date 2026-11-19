@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
-import { Loading, RouteLink, Soon } from "../components/Shell";
+import { Head, Loading, RouteLink } from "../components/Shell";
 import { flags } from "../lib/flags";
 import { BlankTableSession } from "./extras";
 import "../styles/practice.css";
@@ -11,8 +11,11 @@ import type { Ctx, ScreenProps } from "./types";
  * screens of a lecture (?v=practice&l=…&x=: מה ליצור and דוגמה ומיקוד in one
  * chunk, הבנק נבנה, סבב חדש), and a session (?v=practice&s=…). The library's
  * chip stays here, small: a lecture's question count, linking to its practice.
- * Past exams (?v=exams) are Q-2 (release 12): until then the screen is the
- * seed's placeholder, and nothing links to it. */
+ * Past exams (sources.md, phase 2; VITE_STUDY_EXAMS, section S at 2): the
+ * upload (?v=exams&new=1&c=), one exam's reading and review (?v=exams&e=),
+ * the simulation's setup (?v=mock&c=) and the simulation itself
+ * (?v=practice&s=x.<attempt>), each a lazy chunk. They replace the seed's
+ * "בקרוב" screen; ?v=exams with neither goes to the course pages. */
 
 const PracticeHome = lazy(() => import("../components/PracticeHome"));
 const LecturePractice = lazy(() => import("../components/LecturePractice"));
@@ -20,15 +23,25 @@ const PracticeSession = lazy(() => import("../components/PracticeSession"));
 const PracticeCreate = lazy(() => import("../components/PracticeCreate"));
 const PracticeBank = lazy(() => import("../components/PracticeBank"));
 const PracticeRound = lazy(() => import("../components/PracticeRound"));
+const ExamUpload = lazy(() => import("../components/ExamUpload"));
+const ExamView = lazy(() => import("../components/ExamView"));
+const MockSetup = lazy(() => import("../components/MockSetup"));
+const MockRun = lazy(() => import("../components/MockRun"));
+
+/** A simulation's key (?v=practice&s=x.<attempt>). */
+const MOCK_KEY = /^x\.([0-9a-f-]{36})$/;
 
 /** A blank table's session key (§12.2.1, route.ts's KEYED): b.<lecture>.<slide>. */
 const BLANK_KEY = /^b\.([0-9a-f-]{36})\.([1-9]\d{0,2})$/;
 
 export function PracticeScreen({ route, ctx }: ScreenProps<"practice">) {
   const blank = route.s ? BLANK_KEY.exec(route.s) : null;
+  const mock = route.s ? MOCK_KEY.exec(route.s) : null;
   return (
     <Suspense fallback={<Loading />}>
-      {blank ? (
+      {mock ? (
+        <MockRun key={mock[1]} ctx={ctx} attemptId={mock[1]} />
+      ) : blank ? (
         // E's "טבלה ריקה" (s=b.<lecture>.<slide>): its own screen, $0 (allowed() checks its flag).
         <BlankTableSession ctx={ctx} lectureId={blank[1]} slide={Number(blank[2])} />
       ) : route.s ? (
@@ -48,8 +61,61 @@ export function PracticeScreen({ route, ctx }: ScreenProps<"practice">) {
   );
 }
 
-export function ExamsScreen(_p: ScreenProps<"exams">) {
-  return <Soon title="מבחנים קודמים" />;
+export function ExamsScreen({ route, ctx }: ScreenProps<"exams">) {
+  return (
+    <Suspense fallback={<Loading />}>
+      {route.e ? (
+        <ExamView key={route.e} route={route} ctx={ctx} />
+      ) : route.isNew && route.c ? (
+        <ExamUpload key={route.c} route={route} ctx={ctx} />
+      ) : (
+        <ExamsHome ctx={ctx} />
+      )}
+    </Suspense>
+  );
+}
+
+/** "סימולציה": its setup (?v=mock&c=<course>). */
+export function MockScreen({ route, ctx }: ScreenProps<"mock">) {
+  return (
+    <Suspense fallback={<Loading />}>
+      <MockSetup key={`${route.c}|${route.e ?? ""}`} route={route} ctx={ctx} />
+    </Suspense>
+  );
+}
+
+/** ?v=exams on its own: past exams live in their courses, so the courses that have them. */
+function ExamsHome({ ctx }: { ctx: Ctx }) {
+  const [rows, setRows] = useState<Array<{ id: string; name: string; exams: number }> | null>(null);
+  useEffect(() => {
+    let alive = true;
+    import("../lib/courses")
+      .then(({ coursesOf }) => coursesOf(ctx.group.id))
+      .then((r) => alive && setRows(r))
+      .catch(() => alive && setRows([]));
+    return () => {
+      alive = false;
+    };
+  }, [ctx.group.id]);
+  if (!rows) return <Loading />;
+  return (
+    <main className="exams-home">
+      <Head title="מבחנים קודמים" />
+      <p className="a-para a-muted">מבחנים קודמים נמצאים בעמוד של כל קורס.</p>
+      <ul className="a-list">
+        {rows.map((c) => (
+          <li key={c.id}>
+            <RouteLink to={{ v: "course", c: c.id, seg: "exams" }} go={ctx.go} className="a-li c-row">
+              <div>
+                <b dir="auto">{c.name}</b>
+                <span className="m">{c.exams === 1 ? "מבחן קודם אחד" : `${c.exams} מבחנים קודמים`}</span>
+              </div>
+            </RouteLink>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
 }
 
 /** The library card's practice chip for a lecture ("15 שאלות"), or null. */

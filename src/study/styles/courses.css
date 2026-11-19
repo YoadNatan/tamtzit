@@ -188,3 +188,11 @@
   color: inherit;
   text-decoration: none;
 }
+/* With a simulation (past exams, phase 2), "לתרגל מה שכבר יש" is a link under the two buttons. */
+.c-actions > .a-link.c-free {
+  justify-self: start;
+  padding: var(--sp-2) 0;
+}
+.a-li.c-exam-row .m {
+  overflow-wrap: anywhere;
+}

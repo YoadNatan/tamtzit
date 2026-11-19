@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { listLectures, watchGroup, type LectureRow } from "../lib/api";
 import { pickerDir } from "../lib/bidi";
 import { courseKey, courseMerge, courseOverview, courseRename, coursesOf, courseSet, examLength, examWhen, lecturesWord, type CourseOverview, type CourseRow } from "../lib/courses";
+import { examLengthLine, type CourseExam } from "../lib/exams";
 import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import type { ScreenProps } from "../features/types";
@@ -30,6 +31,8 @@ const STATUS: Record<LectureRow["status"], { label: string; cls: string }> = {
 const EXAM_STATUS: Record<string, { label: string; cls: string }> = {
   ready: { label: "מוכן", cls: "a-chip ok" },
   failed: { label: "נתקע", cls: "a-chip bad" },
+  uploading: { label: "לא עלה עד הסוף", cls: "a-chip" },
+  new: { label: "לא עלה עד הסוף", cls: "a-chip" },
 };
 
 function formatDate(d: string | null): string {
@@ -103,6 +106,12 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
   const when = examWhen(course.exam_date, course.days_left);
   const length = examLength(course.exam_n, course.exam_minutes);
   const exams = course.exams.length;
+  // Past exams (phase 2): the newest ready exam is the simulation's and the replay's default.
+  const examRows = course.exams as CourseExam[];
+  const ready = flags.exams ? examRows.filter((e) => e.status === "ready" && (e.questions ?? 0) > 0).sort((a, b) => ((a.created_at ?? "") < (b.created_at ?? "") ? 1 : -1)) : [];
+  const simulation = ready.some((e) => (e.questions ?? 0) >= 5);
+  // "(184)": what a course session may ask, the exams' items too once they are on (s=c includes them).
+  const free = course.questions + ready.reduce((n, e) => n + (e.questions ?? 0), 0);
   // The course question reads ready parts: none while no lecture is ready or
   // being written (a lecture being written may have ready parts already).
   const noSummary = course.ready === 0 && list !== null && !list.some((l) => l.status === "writing");
@@ -145,10 +154,20 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
       </section>
 
       <div className="c-actions">
+        {simulation ? (
+          <>
+            <RouteLink to={{ v: "mock", c: course.id }} go={ctx.go} className="a-btn primary wide">
+              סימולציה
+            </RouteLink>
+            <RouteLink to={{ v: "practice", s: `e.${ready[0].id}`, n: "all" }} go={ctx.go} className="a-btn wide">
+              לתרגל מבחן קודם
+            </RouteLink>
+          </>
+        ) : null}
         {flags.practice ? (
-          course.questions > 0 ? (
-            <RouteLink to={{ v: "practice", s: `c.${course.name}` }} go={ctx.go} className="a-btn primary wide c-free">
-              {`לתרגל מה שכבר יש · בחינם (${course.questions})`}
+          free > 0 ? (
+            <RouteLink to={{ v: "practice", s: `c.${course.name}` }} go={ctx.go} className={simulation ? "a-link c-free" : "a-btn primary wide c-free"}>
+              {`לתרגל מה שכבר יש · בחינם (${free})`}
             </RouteLink>
           ) : (
             <p className="a-small a-muted c-free-none">עוד אין שאלות בהרצאות של הקורס. יוצרים אותן בתרגול של כל הרצאה.</p>
@@ -165,7 +184,7 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
               </p>
             </>
           ) : (
-            <RouteLink to={{ v: "ask", c: course.id }} go={ctx.go} className={`a-btn wide${flags.practice && course.questions > 0 ? "" : " primary"}`}>
+            <RouteLink to={{ v: "ask", c: course.id }} go={ctx.go} className={`a-btn wide${(flags.practice && free > 0) || simulation ? "" : " primary"}`}>
               לשאול על כל הקורס
             </RouteLink>
           )
@@ -187,15 +206,17 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
         <section className="a-stack" aria-label="מבחנים קודמים">
           {course.exams.length ? (
             <ul className="a-list">
-              {course.exams.map((e) => {
+              {examRows.map((e) => {
                 const st = EXAM_STATUS[e.status] ?? { label: "בקריאה", cls: "a-chip busy" };
+                const meta = e.status === "ready" ? examLengthLine(e) : e.status === "reading" || e.status === "linking" ? "מעתיקים את השאלות…" : "";
                 return (
                   <li key={e.id}>
-                    <RouteLink to={{ v: "exams", e: e.id }} go={ctx.go} className="a-li c-row">
+                    <RouteLink to={{ v: "exams", e: e.id, c: course.id }} go={ctx.go} className="a-li c-row c-exam-row">
                       <div>
                         <b>
                           <bdi>{e.title}</bdi>
                         </b>
+                        {meta ? <span className="m">{meta}</span> : null}
                       </div>
                       <span className={st.cls}>{st.label}</span>
                     </RouteLink>

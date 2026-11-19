@@ -33,6 +33,8 @@ import { getSignals, pulseReady } from "../lib/pulse";
 import { shortName } from "../lib/questionText";
 import { myDangerDue, myRewordings } from "../lib/progress";
 import type { Route } from "../lib/route";
+import { groupExams, keyOrigins, listExamQuestions, listQuestionsAll, mockGet, notCounted, type KeyOrigin } from "../lib/exams";
+import { PageCrop } from "./ExamParts";
 import FlagSheet from "./FlagSheet";
 import PracticeQuestion from "./PracticeQuestion";
 import { backTarget, Head, Loading, StickyActions } from "./Shell";
@@ -70,6 +72,9 @@ type Data = {
   again: S.Again[];
   /** The danger list's questions among them (two right "על בטוח" to leave it). */
   danger: Set<string>;
+  /** Past exams' items (sources.md, phase 2): where each key came from, and the exams' titles. */
+  origins?: Map<string, { origin: KeyOrigin | null; conf: number | null }>;
+  examTitles?: Record<string, string>;
 };
 const NO_AGAIN = { again: [] as S.Again[], danger: new Set<string>() };
 
@@ -105,10 +110,23 @@ async function scopeQuestions(scope: S.Scope, groupId: string): Promise<PublicQu
       // (courseKey): the course page's "(184)" counts the same lectures, and
       // "תרגול" groups them so. Without it, the exact text, as before.
       const same = flags.courses ? (c: string) => courseKey(c) === courseKey(scope.course) : (c: string) => c.trim() === scope.course;
-      return listCourseQuestions(lectures.filter((l) => same(l.course)).map((l) => l.id));
+      const own = await listCourseQuestions(lectures.filter((l) => same(l.course)).map((l) => l.id));
+      if (!flags.exams) return own;
+      // With past exams, the course's exam items too (sources.md B5: s=c includes them).
+      const exams = (await groupExams(groupId).catch(() => [])).filter((e) => e.status === "ready" && same(e.course));
+      return exams.length ? [...own, ...examItems(await listExamQuestions(exams.map((e) => e.id)).catch(() => []))] : own;
     }
     case "topic":
       return listGroupQuestions(groupId);
+    case "exam":
+      // A past exam, replayed in its own order with its options as printed (orderFor).
+      return examItems(await listExamQuestions([scope.exam]));
+    case "mockWrong": {
+      // A simulation's mistakes (blanks too), in the simulation's order.
+      const a = await mockGet(scope.attempt);
+      const ids = (a.score?.items ?? []).filter((it) => it.counted && !it.correct).map((it) => it.id);
+      return ids.length ? examItems(await listQuestionsAll(ids)) : [];
+    }
     case "mistakes": {
       const [open, more] = await Promise.all([myMistakes(groupId, scope.lecture ?? undefined), againOf(scope, groupId)]);
       const ids = [...new Set([...open.map((m) => m.question_id), ...more.again.map((a) => a.ask)])];
@@ -131,8 +149,22 @@ async function scopeQuestions(scope: S.Scope, groupId: string): Promise<PublicQu
   }
 }
 
+/** A build without the question types never asks an exam's true/false or match item (it would read as one-answer). */
+const examItems = (qs: PublicQuestion[]): PublicQuestion[] => (flags.qtypes ? qs : qs.filter((q) => (q.form ?? "one") === "one"));
+
+/** Past exams' items of a session: their keys' origins and their exams' titles (the review's). */
+async function examInfo(byId: Record<string, PublicQuestion>): Promise<Pick<Data, "origins" | "examTitles">> {
+  if (!flags.exams) return {};
+  const exams = [...new Set(Object.values(byId).filter((q) => q.source === "exam" && q.exam_id).map((q) => q.exam_id as string))];
+  if (!exams.length) return {};
+  const { origins, titles } = await keyOrigins(exams).catch(() => ({ origins: new Map(), titles: {} }));
+  return { origins, examTitles: titles };
+}
+
 /** Where the back arrow and "חזרה לתרגול" lead: a lecture's practice, else the hub. */
 function parentOf(scope: S.Scope | null): Route {
+  if (scope?.kind === "exam") return { v: "exams", e: scope.exam };
+  if (scope?.kind === "mockWrong") return { v: "practice", s: `x.${scope.attempt}` };
   if (scope?.kind === "lecture") return { v: "practice", l: scope.lecture };
   if (scope?.kind === "mistakes" && scope.lecture) return { v: "practice", l: scope.lecture };
   if (scope?.kind === "paragraph") return { v: "lecture", l: scope.lecture, at: { part: scope.part, anchor: scope.anchor } };
@@ -203,7 +235,8 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         signals,
       });
       const state = ids.length ? S.startSession({ key, timed, queue: ids.map((id) => byId[id]), now: Date.now(), pick }) : null;
-      return { data: { byId, candidates, latest, mistakes, hidden, ...more }, state };
+      const info = await examInfo(byId);
+      return { data: { byId, candidates, latest, mistakes, hidden, ...more, ...info }, state };
     },
     [scope, groupId, ctx.userId, key, size],
   );
@@ -220,8 +253,9 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         const byId: Record<string, PublicQuestion> = Object.fromEntries(candidates.map((q) => [q.id, q]));
         const missing = saved.ids.filter((id) => !byId[id]);
         if (missing.length) for (const q of await listQuestionsByIds(missing)) byId[q.id] = q;
+        const info = await examInfo(byId);
         if (!alive) return;
-        setData({ byId, candidates, latest, mistakes, hidden: S.loadHidden(ctx.userId), ...more });
+        setData({ byId, candidates, latest, mistakes, hidden: S.loadHidden(ctx.userId), ...more, ...info });
         setS(saved);
         setPhase("ready");
         return;
@@ -443,11 +477,18 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     </button>
   );
   const lectureTitle = scope?.kind === "lecture" || scope?.kind === "paragraph" ? titles[scope.lecture] : undefined;
+  const examTitle = scope?.kind === "exam" ? data?.examTitles?.[scope.exam] : undefined;
   const title =
     scope?.kind === "mistakes" ? (
       "הטעויות שלי"
     ) : scope?.kind === "again" ? (
       "חוזרות היום"
+    ) : scope?.kind === "mockWrong" ? (
+      "הטעויות מהסימולציה"
+    ) : examTitle ? (
+      <>
+        תרגול · <bdi>{examTitle}</bdi>
+      </>
     ) : (
       <>
         תרגול
@@ -548,11 +589,19 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
               </span>
             ) : null}
             {origin && origin !== qq.id ? <span className="a-chip busy pq-again">בניסוח אחר</span> : null}
+            {qq.source === "exam" && scope?.kind !== "exam" && qq.exam_id && data.examTitles?.[qq.exam_id] ? (
+              <span className="a-chip pq-source">
+                <bdi>{data.examTitles[qq.exam_id]}</bdi>
+                {qq.exam_no ? ` · שאלה ${qq.exam_no}` : ""}
+              </span>
+            ) : null}
+            {data.origins?.get(qq.id)?.origin === "solved" ? <span className="a-chip warn pq-suggested">תשובה מוצעת · לא נבדקה</span> : null}
             {/* E: a member's trap ("שאלה של מישהו מהקבוצה"), named once a live quiz unmasked it. */}
             <TrapChip ctx={ctx} questionId={qq.id} source={qq.source} />
           </>
         }
-        note={note}
+        note={notCounted(data.origins?.get(qq.id)) && fb ? "לא נספרה: התשובה המוצעת לא בטוחה" : note}
+        media={qq.source === "exam" && qq.exam_id && (qq.figure ?? "").startsWith("pg:") ? <PageCrop groupId={ctx.group.id} examId={qq.exam_id} figure={qq.figure} /> : undefined}
         dangerList={flags.progress}
         autoFocus={!read}
       />
@@ -618,7 +667,8 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
 
   /* ── The end of a round ── */
   if (over) {
-    const sc = S.score(s);
+    // A suggested answer the app is not sure of counts in no score (decision 2, B7).
+    const sc = S.score({ ...s, results: s.results.filter((r) => !notCounted(data.origins?.get(r.id))) });
     const wrong = s.results.filter((r) => !r.correct && data.byId[r.id]);
     // "רק הטעויות מהסבב" asks them again, except the ones this person hid since
     // ("להסתיר ממני") and any that left practice (finding Q6).
