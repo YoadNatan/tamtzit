@@ -16,6 +16,8 @@ import {
   plannedStyles,
   readOptions,
   requestUsd,
+  ROUND_MAX_LECTURES,
+  ROUND_MIN_PER_LECTURE,
   solverUsd,
   type Style,
   type StyleAnswer,
@@ -54,6 +56,7 @@ import { checkQuestion, type Known, QuestionIn, QuestionSet, type SaveItem, tidy
 import { solveQuestions, solverEstimate, type Verdict } from "./solver.js";
 import {
   anthropic,
+  assertSchema,
   deckText,
   detachedStream,
   errorText,
@@ -316,6 +319,25 @@ const CREATE_STATUS: Record<string, number> = {
   "not signed in": 401,
 };
 
+/** study_request_plan's refusals, as HTTP statuses. */
+const ROUND_STATUS: Record<string, number> = {
+  "too many lectures": 409,
+  "too few questions": 400,
+  "bad plan": 400,
+  "request not found": 404,
+  forbidden: 403,
+  "not signed in": 401,
+};
+
+/** The body's planId: absent or null is a lecture's own request; anything
+ *  but an id is 400 "bad plan". */
+function planIdOf(body: Record<string, unknown>): string | null {
+  if (body.planId === undefined || body.planId === null) return null;
+  const id = idOf(body.planId);
+  if (!id) throw new HttpError(400, "bad plan");
+  return id;
+}
+
 /** { lectureId, options }: checks the options (400), the style's signature
  *  (400 "bad style"), that every chosen part is written (409 "summary not
  *  ready") and its points current (409 "points stale": action "points"
@@ -325,8 +347,11 @@ const CREATE_STATUS: Record<string, number> = {
 export const createAction: Op = async (req, body) => {
   const lectureId = lectureIdOf(body);
   const options = optionsOf(body.options);
+  const planId = planIdOf(body);
   const { sb } = await memberClient(req);
   const key = serverKey();
+  // A round over several lectures writes plan_id (section S at 1).
+  if (planId) await assertSchema(sb, "questions_plan");
   const lecture = await loadLecture(sb, lectureId);
   if (options.style && !(await verifyStyle(key, lectureId, options.style))) throw new HttpError(400, "bad style");
   await needTypes(sb, options.styles);
@@ -345,6 +370,15 @@ export const createAction: Op = async (req, body) => {
   const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, partFacts: facts });
   if (plan.total === 0) throw new HttpError(400, "no points");
   const used = plan.parts.filter((p) => p.questions > 0).map((p) => p.part_idx);
+  if (planId) {
+    // Checked before the request is made, so a refused round leaves none
+    // behind; study_request_plan checks again under its lock.
+    if (plan.total < ROUND_MIN_PER_LECTURE) throw new HttpError(400, "too few questions");
+    const others = await sb.from("study_question_requests").select("lecture_id").eq("plan_id", planId);
+    if (others.error) throw new HttpError(500, others.error.message);
+    const lectures = new Set(((others.data ?? []) as Array<{ lecture_id: string }>).map((r) => r.lecture_id).filter((l) => l !== lectureId));
+    if (lectures.size >= ROUND_MAX_LECTURES) throw new HttpError(409, "too many lectures");
+  }
   const { data, error } = await sb.rpc(
     "study_request_create",
     keyed({
@@ -379,6 +413,11 @@ export const createAction: Op = async (req, body) => {
     plan: plan.parts,
     estimate: { questionsUsd: requestUsd(plannedStyles(plan)) },
   };
+  if (planId) {
+    const linked = await sb.rpc("study_request_plan", keyed({ p_request: answer.request.id, p_plan: planId }));
+    if (linked.error) throw new HttpError(ROUND_STATUS[linked.error.message] ?? 500, linked.error.message);
+    answer.round = { planId, lectures: Number(linked.data) };
+  }
   return json(200, answer);
 };
 

@@ -256,6 +256,16 @@ part is still being written); 409 `points stale` (call `points` first); 400
 has 150 active questions, or 400 drafts were ever written for it); 400 `bad
 parts`.
 
+**A round over several lectures** (courses, `docs/study/sources.md` B6.7):
+the phone makes one id for the round and sends `create` once per lecture
+with `{ options, planId }`. Each lecture's request and batches are made
+exactly as above (the same caps), then `study_request_plan` puts the request
+in the round, and the answer adds `"round": { "planId": "…", "lectures": 3 }`.
+A round stays in one group, takes at most 5 lectures and at least 4
+questions of each. It needs section S at 1 (503 `schema`). Refusals, before
+any request is made: 400 `bad plan` (not an id, or the request is in another
+round), 400 `too few questions`, 409 `too many lectures`.
+
 Each batch writes at most 5 questions; a part with more has several batches
 (`seq`). Each batch carries the points it must cover and the style of each of
 its questions (the request's styles in turn; a blank table only on a part
@@ -514,6 +524,9 @@ Every code below has Hebrew in `failText(code, "practice")` or is internal
 | `reword limit` | reword | השאלה הזו כבר נוסחה מחדש ארבע פעמים. אפשר להשאיר אותה או להוריד. |
 | `request not found` | keep all, progress | הבקשה הזו לא נמצאה. כדאי לרענן. |
 | `enough questions` | create, keep (also release 1's round) | להרצאה הזו יש כבר את מספר השאלות המרבי. |
+| `too many lectures` | create (a round) | בסבב אחד אפשר לבחור עד 5 הרצאות. |
+| `too few questions` | create (a round) | בסבב על כמה הרצאות בוחרים לפחות 4 שאלות מכל הרצאה. |
+| `bad plan` | create (a round) | הסבב הזה לא נמצא. כדאי להתחיל אותו שוב. |
 
 `busy`, `gave up`, `refusal`, `timeout`, `budget`, `reserve`,
 `member_share`, `daily_limit`, `hidden`, `not flagged`, `bad source`, `in

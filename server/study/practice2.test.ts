@@ -175,6 +175,9 @@ let goneDrafts = new Set<string>();
 let createRows: (body: Record<string, unknown>) => unknown[] = () => [];
 /** The request batch's styles (question types: a staged case). */
 let batchStyles: string[] = ["case", "mechanism"];
+// A round over several lectures (sources.md B6.7): the round's requests so far, and study_request_plan's answer.
+let planRows: Array<{ lecture_id: string }> = [];
+let planLink: number | string = 2;
 
 const pause = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const readAll = (req: IncomingMessage) =>
@@ -232,6 +235,8 @@ const rest = createServer(async (req, res) => {
   if (p === "/rest/v1/rpc/study_question_claim") {
     return send(res, 200, [{ lecture_id: LECTURE, round: 3, part_idx: 1, heading: "מנגנונים", slide_from: 13, slide_to: 24, wanted: 2, effort: "high" }]);
   }
+  if (p === "/rest/v1/rpc/study_request_plan") return typeof planLink === "string" ? send(res, 400, pgError(planLink)) : send(res, 200, planLink);
+  if (p === "/rest/v1/study_question_requests" && eqOf(q, "plan_id")) return send(res, 200, planRows);
   if (p === "/rest/v1/study_question_requests") {
     return send(res, 200, [{ id: REQ, difficulty: "hard", focus: "רק מה שבודקים לפני טיפול", style_note: "מקרה קצר עם גיל ומין, חמש אפשרויות.", style_example: "אישה בת 28 עם חום. מה הצעד הבא?" }]);
   }
@@ -361,6 +366,8 @@ after(() => {
 beforeEach(() => {
   log = [];
   batchStyles = ["case", "mechanism"];
+  planRows = [];
+  planLink = 2;
   schemaAnswer = { ...REQUIRED_SCHEMA, Q: 2 };
   claimRows = [];
   pointsState = state([true, true]);
@@ -793,6 +800,71 @@ test("create: stale points are 409 points stale; no points in the parts is 400; 
   assert.equal(signed.status, 200);
   const last = args(rpcs("study_request_create").at(-1)!);
   assert.deepEqual([last.p_request.style_note, last.p_request.style_example], ["מקרה קצר", "שאלה?"]);
+});
+
+// ═══ create in a round over several lectures (sources.md B6.7) ═══
+
+const PLAN = "88888888-0000-4000-8000-000000000001";
+const OTHER = (k: number) => `99999999-0000-4000-8000-${String(k).padStart(12, "0")}`;
+
+test("create in a round: without section S, 503 schema and no request; a planId that is not an id, 400", async () => {
+  // First, before a passing check of the same needs is remembered.
+  const r = await call({ action: "create", options: { level: "deep" }, planId: PLAN });
+  assert.deepEqual([r.status, r.json], [503, { error: "schema" }]);
+  schemaAnswer = { ...REQUIRED_SCHEMA, Q: 2, S: 1 };
+  const bad = await call({ action: "create", options: { level: "deep" }, planId: "round-1" });
+  assert.deepEqual([bad.status, bad.json], [400, { error: "bad plan" }]);
+  assert.equal(rpcs("study_request_create").length, 0);
+  // Without a planId nothing of S is needed: the lecture's own request, as before.
+  schemaAnswer = { ...REQUIRED_SCHEMA, Q: 2 };
+  const own = await call({ action: "create", options: { level: "deep" } });
+  assert.equal(own.status, 200);
+  assert.equal(own.json.round, undefined);
+  assert.equal(rpcs("study_request_plan").length, 0);
+});
+
+test("create in a round: the request is made as before, then put in the round (study_request_plan, with the key); caps unchanged", async () => {
+  schemaAnswer = { ...REQUIRED_SCHEMA, Q: 2, S: 1 };
+  planRows = [{ lecture_id: OTHER(1) }, { lecture_id: OTHER(1) }];
+  const alone = await call({ action: "create", options: { level: "deep", styles: ["case", "blank_table"], difficulty: "hard" } });
+  const [own] = rpcs("study_request_create").map(args);
+  log = [];
+  const r = await call({ action: "create", options: { level: "deep", styles: ["case", "blank_table"], difficulty: "hard" }, planId: PLAN });
+  assert.equal(r.status, 200);
+  // The request and its batches are exactly a lecture's own: the same plan, the same caps.
+  const [c] = rpcs("study_request_create").map(args);
+  assert.deepEqual([c.p_request, c.p_batches], [own.p_request, own.p_batches]);
+  assert.deepEqual({ ...r.json, round: undefined }, { ...alone.json, round: undefined });
+  const [link] = rpcs("study_request_plan").map(args);
+  assert.deepEqual(link, { p_request: REQ, p_plan: PLAN, p_key: KEY });
+  assert.deepEqual(r.json.round, { planId: PLAN, lectures: 2 });
+  const order = log.filter((l) => l.path.endsWith("study_request_create") || l.path.endsWith("study_request_plan")).map((l) => l.path.split("_").pop());
+  assert.deepEqual(order, ["create", "plan"]);
+  assert.equal(models().length, 0, "no model");
+});
+
+test("create in a round: a sixth lecture, or fewer than 4 questions, is refused before any request; the RPC's refusals are their statuses", async () => {
+  schemaAnswer = { ...REQUIRED_SCHEMA, Q: 2, S: 1 };
+  planRows = [1, 2, 3, 4, 5].map((k) => ({ lecture_id: OTHER(k) }));
+  const sixth = await call({ action: "create", options: { level: "deep" }, planId: PLAN });
+  assert.deepEqual([sixth.status, sixth.json], [409, { error: "too many lectures" }]);
+  // This lecture already in the round counts once.
+  planRows = [1, 2, 3, 4].map((k) => ({ lecture_id: OTHER(k) })).concat([{ lecture_id: LECTURE }]);
+  assert.equal((await call({ action: "create", options: { level: "deep" }, planId: PLAN })).status, 200);
+  planRows = [];
+  log = [];
+  const few = await call({ action: "create", options: { level: "custom", count: 3 }, planId: PLAN });
+  assert.deepEqual([few.status, few.json], [400, { error: "too few questions" }]);
+  assert.equal(rpcs("study_request_create").length, 0, "nothing made");
+  for (const [code, status] of [
+    ["too many lectures", 409],
+    ["bad plan", 400],
+    ["request not found", 404],
+  ] as const) {
+    planLink = code;
+    const res = await call({ action: "create", options: { level: "deep" }, planId: PLAN });
+    assert.deepEqual([res.status, res.json], [status, { error: code }], code);
+  }
 });
 
 test("POLICY: practice 2.0's kinds are optional (80%), 40% a member, with daily limits; the writer and the solver keep theirs", async () => {

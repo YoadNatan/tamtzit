@@ -565,7 +565,16 @@ export type CreateAnswer = {
   batches: Array<{ id: string; part_idx: number; seq: number; wanted: number }>;
   plan: Plan["parts"];
   estimate: { questionsUsd: number };
+  /** A round over several lectures (sources.md B6.7): the phone's plan id
+   *  and how many lectures the round has with this one. */
+  round?: { planId: string; lectures: number };
 };
+
+/** A round over several lectures (sources.md B6.7): one request per
+ *  lecture sharing a plan id, at most this many lectures, at least this
+ *  many questions of each (study_request_plan checks both). */
+export const ROUND_MAX_LECTURES = 5;
+export const ROUND_MIN_PER_LECTURE = 4;
 
 /** Action "style": the example read back, to send again with "create". */
 export type StyleAnswer = StyleRead & { optionCount: number; case: boolean; costUsd: number; unsettled: number };
