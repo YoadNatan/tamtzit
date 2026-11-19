@@ -148,8 +148,10 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     ...(f.boss ? { H: 2 } : {}),
     ...(f.groupPlan ? { G: 2 } : {}),
     ...(f.traps || f.blankTable ? { E: 1 } : {}),
-    // Courses (sources.md B8): section S at 1.
+    // Courses (sources.md B8): section S at 1. Past exams and their
+    // simulation (phase 2): S at 2, which has S 1 in it.
     ...(f.courses ? { S: 1 } : {}),
+    ...(f.exams ? { S: 2 } : {}),
     // f.guide needs nothing: the guide keeps its memory on the device.
   };
 }

@@ -1,6 +1,7 @@
 /// <reference path="../../server/study/env.d.ts" />
 import { getDeadline, waitUntil } from "@vercel/functions"; // 3.10.5, pinned
 import { pointsAheadStep } from "../../server/study/bank.js";
+import { claimExam, runExamUnit, UNIT_STOP_MS, type ExamClaim } from "../../server/study/exams.js";
 import { assertSchema, errorText, HttpError, json, serverClient, workerKey } from "../../server/study/study.js";
 import { rpcStore, writeUnit, type Unit } from "../../server/study/writer.js";
 
@@ -10,6 +11,11 @@ import { rpcStore, writeUnit, type Unit } from "../../server/study/writer.js";
  *                                      points to know ahead (package B,
  *                                      server/study/bank.ts; section B's
  *                                      trigger kicks it when the summary is done)
+ * POST /api/study/work  { exam }       the same key: one unit of a past exam
+ *                                      (read 4 pages, its key sheet, or solve
+ *                                      items without a key; section S 2,
+ *                                      server/study/exams.ts), kicked by
+ *                                      study_private.exam_dispatch
  *
  * The server writer (spec §2.3, §4.3.3). Only pg_net calls it: study_queue
  * kicks it when a lecture is saved or "המשך כתיבה" is tapped, study_finish
@@ -27,7 +33,10 @@ import { rpcStore, writeUnit, type Unit } from "../../server/study/writer.js";
  *   500  {error}                       the claim failed; the sweeper kicks again
  * A read ahead ({points}) answers 200 {claimed:false} (nothing to read, or
  * skipped: the cap), 202 {claimed:true, parts} (the read runs on in
- * waitUntil), 503 schema (no section B) or 500.
+ * waitUntil), 503 schema (no section B) or 500. An exam's unit ({exam})
+ * answers 200 {claimed:false}, 202 {claimed:true, kind} (the unit runs on
+ * in waitUntil and stops at 200 s), 400 {error:"exam"}, 503 schema (no
+ * section S at 2) or 500.
  *
  * The unit stops 25 s before the invocation's deadline (getDeadline(), which
  * includes waitUntil) and never after 270 s, so it is saved in time. A
@@ -61,12 +70,18 @@ async function handler(req: Request): Promise<Response> {
   if (key.length < 32 || !keyMatches(req.headers.get("authorization"), key)) return new Response(null, { status: 401 });
   let lectureId: unknown = "";
   let points: unknown;
+  let exam: unknown;
   try {
-    const body = (await req.json()) as { lectureId?: unknown; points?: unknown };
+    const body = (await req.json()) as { lectureId?: unknown; points?: unknown; exam?: unknown };
     lectureId = body.lectureId ?? "";
     points = body.points;
+    exam = body.exam;
   } catch {
     /* below */
+  }
+  if (exam !== undefined) {
+    if (typeof exam !== "string" || !UUID.test(exam)) return json(400, { error: "exam" });
+    return examStep(exam.toLowerCase());
   }
   if (points !== undefined) {
     if (typeof points !== "string" || !UUID.test(points)) return json(400, { error: "points" });
@@ -93,6 +108,27 @@ async function handler(req: Request): Promise<Response> {
     writeUnit(rpcStore(sb, key), id, u, { stopAt }).catch((e) => console.error(`study work ${id} ${u.kind}${u.idx ?? ""}: ${errorText(e)}`)),
   );
   return json(202, { claimed: true, kind: u.kind, idx: u.idx });
+}
+
+/** One unit of a past exam: claimed with the key alone, answered 202 at
+ *  once, run in waitUntil until 200 s (B6.2), or 25 s before the
+ *  invocation's deadline. */
+async function examStep(examId: string): Promise<Response> {
+  const sb = serverClient();
+  let claim: ExamClaim | null;
+  try {
+    await assertSchema(sb, "exams");
+    claim = await claimExam(sb, examId);
+  } catch (e) {
+    return json(e instanceof HttpError && e.status === 503 ? 503 : 500, { error: errorText(e) });
+  }
+  if (!claim) return json(200, { claimed: false });
+  const c = claim;
+  const started = Date.now();
+  const deadline = getDeadline()?.getTime() ?? started + 300_000;
+  const stopAt = Math.min(deadline - 25_000, started + UNIT_STOP_MS);
+  waitUntil(runExamUnit(sb, c, { stopAt }).catch((e) => console.error(`study exam ${examId} ${c.kind}: ${errorText(e)}`)));
+  return json(202, { claimed: true, kind: c.kind });
 }
 
 export default { fetch: handler };

@@ -1,0 +1,609 @@
+{
+ "about": "A synthetic 12-page Hebrew exam (fictional drugs; no real exam text) for server/study/exams.test.ts: the pages' text lines as a text PDF has them, the model's replies per unit, a key sheet and solved keys. The scan case is the same pages without lines.",
+ "pages": [
+  {
+   "n": 1,
+   "lines": [
+    "עמוד 1 מתוך 12 (synthetic)",
+    "1. מהו מנגנון הפעולה של Examplomycin?",
+    "א. עיכוב תת-היחידה 30S",
+    "ב. עיכוב תת-היחידה 50S",
+    "ג. א+ב נכונות",
+    "ד. אף תשובה אינה נכונה"
+   ]
+  },
+  {
+   "n": 2,
+   "lines": [
+    "עמוד 2 מתוך 12 (synthetic)",
+    "2. איזו מהתרופות הבאות פועלת על DNA gyrase?",
+    "א. Fictazole",
+    "ב. Mockacillin",
+    "ג. Placebrin",
+    "ד. Stubamide"
+   ]
+  },
+  {
+   "n": 3,
+   "lines": [
+    "עמוד 3 מתוך 12 (synthetic)",
+    "3. מה הטיפול המתאים?",
+    "א. Testoquine",
+    "ב. Sampleomycin",
+    "ג. Dummycycline",
+    "ד. Examplomycin"
+   ]
+  },
+  {
+   "n": 4,
+   "lines": [
+    "עמוד 4 מתוך 12 (synthetic)",
+    "4. מהי תופעת הלוואי השכיחה של Placebrin?"
+   ]
+  },
+  {
+   "n": 5,
+   "lines": [
+    "עמוד 5 מתוך 12 (synthetic)",
+    "א. בחילה",
+    "ב. פריחה",
+    "ג. עלייה באנזימי כבד",
+    "ד. כל התשובות נכונות",
+    "5. סמנו נכון או לא נכון לגבי Stubamide:",
+    "א. היא נקשרת לחלבון בפלסמה",
+    "ב. היא מופרשת בשתן",
+    "ג. היא בטוחה בהיריון"
+   ]
+  },
+  {
+   "n": 6,
+   "lines": [
+    "עמוד 6 מתוך 12 (synthetic)",
+    "6. התאימו כל תרופה למנגנון שלה:",
+    "א. עיכוב סינתזת דופן",
+    "ב. עיכוב ריבוזום",
+    "ג. עיכוב DNA gyrase",
+    "שאלה פתוחה: הסבירו בקצרה את מנגנון הפעולה (synthetic)."
+   ]
+  },
+  {
+   "n": 7,
+   "lines": [
+    "עמוד 7 מתוך 12 (synthetic)",
+    "7. מה מוצג בא.ק.ג. שבתמונה?",
+    "א. פרפור פרוזדורים",
+    "ב. חסם הולכה מדרגה ראשונה",
+    "ג. טכיקרדיה חדרית"
+   ]
+  },
+  {
+   "n": 8,
+   "lines": [
+    "עמוד 8 מתוך 12 (synthetic)",
+    "8. איזה אנזים מפרק את Sampleomycin?",
+    "א. Examplase",
+    "ב. Mockase",
+    "ג. Fictase",
+    "ד. Stubase"
+   ]
+  },
+  {
+   "n": 9,
+   "lines": [
+    "עמוד 9 מתוך 12 (synthetic)",
+    "9. מהו זמן מחצית החיים של Testoquine?",
+    "א. שעה",
+    "ב. יום",
+    "ג. שבוע",
+    "ד. חודש"
+   ]
+  },
+  {
+   "n": 10,
+   "lines": [
+    "עמוד 10 מתוך 12 (synthetic)",
+    "10. באיזו קבוצה Dummycycline אסורה?",
+    "א. ילדים מתחת לגיל 8",
+    "ב. מבוגרים",
+    "ג. ספורטאים",
+    "ד. אף תשובה אינה נכונה"
+   ]
+  },
+  {
+   "n": 11,
+   "lines": [
+    "עמוד 11 מתוך 12 (synthetic)",
+    "11. מהי האינטראקציה של Fictazole עם Stubamide?",
+    "א. הגברת רעילות",
+    "ב. ירידה ביעילות",
+    "ג. אין אינטראקציה",
+    "ד. ב+ג נכונות",
+    "שאלה פתוחה: הסבירו בקצרה את מנגנון הפעולה (synthetic)."
+   ]
+  },
+  {
+   "n": 12,
+   "lines": [
+    "עמוד 12 מתוך 12 (synthetic)",
+    "12. מה מנגנון העמידות ל-Mockacillin?",
+    "א. בטא-לקטמאז",
+    "ב. משאבת efflux",
+    "ג. שינוי באתר הקישור",
+    "ד. כל התשובות נכונות"
+   ]
+  }
+ ],
+ "units": [
+  {
+   "pages": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "next": 5,
+   "reply": {
+    "questions": [
+     {
+      "no": 1,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "מהו מנגנון הפעולה של Examplomycin?",
+      "options": [
+       "עיכוב תת-היחידה 30S",
+       "עיכוב תת-היחידה 50S",
+       "א+ב נכונות",
+       "אף תשובה אינה נכונה"
+      ],
+      "prompts": [],
+      "answer": 2,
+      "seq": [],
+      "marked_by": "circle",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 1
+     },
+     {
+      "no": 2,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "איזו מהתרופות הבאות פועלת על DNA gyrase?",
+      "options": [
+       "Fictazole",
+       "Mockacillin",
+       "Placebrin",
+       "Stubamide"
+      ],
+      "prompts": [],
+      "answer": -1,
+      "seq": [],
+      "marked_by": "none",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 2
+     },
+     {
+      "no": 3,
+      "kind": "case",
+      "form": "one",
+      "vignette": "מטופלת בת 34 מגיעה למיון עם חום של 39 מעלות ושיעול.",
+      "question": "מה הטיפול המתאים?",
+      "options": [
+       "Testoquine",
+       "Sampleomycin",
+       "Dummycycline",
+       "Examplomycin"
+      ],
+      "prompts": [],
+      "answer": 1,
+      "seq": [],
+      "marked_by": "bold",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 3
+     },
+     {
+      "no": 4,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "מהי תופעת הלוואי השכיחה של Placebrin?",
+      "options": [
+       "בחילה",
+       "פריחה",
+       "עלייה באנזימי כבד",
+       "כל התשובות נכונות"
+      ],
+      "prompts": [],
+      "answer": -1,
+      "seq": [],
+      "marked_by": "none",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 4
+     }
+    ],
+    "skipped_open": 0
+   }
+  },
+  {
+   "pages": [
+    5,
+    6,
+    7,
+    8
+   ],
+   "next": 9,
+   "reply": {
+    "questions": [
+     {
+      "no": 4,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "(המשך) מהי תופעת הלוואי השכיחה של Placebrin?",
+      "options": [
+       "בחילה",
+       "פריחה"
+      ],
+      "prompts": [],
+      "answer": -1,
+      "seq": [],
+      "marked_by": "none",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 1,
+      "page": 5
+     },
+     {
+      "no": 5,
+      "kind": "mcq",
+      "form": "tf",
+      "vignette": "",
+      "question": "סמנו נכון או לא נכון לגבי Stubamide:",
+      "options": [
+       "היא נקשרת לחלבון בפלסמה",
+       "היא מופרשת בשתן",
+       "היא בטוחה בהיריון"
+      ],
+      "prompts": [],
+      "answer": -1,
+      "seq": [
+       1,
+       1,
+       0
+      ],
+      "marked_by": "circle",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 5
+     },
+     {
+      "no": 6,
+      "kind": "mcq",
+      "form": "match",
+      "vignette": "",
+      "question": "התאימו כל תרופה למנגנון שלה:",
+      "options": [
+       "עיכוב סינתזת דופן",
+       "עיכוב ריבוזום",
+       "עיכוב DNA gyrase"
+      ],
+      "prompts": [
+       "Mockacillin",
+       "Examplomycin",
+       "Fictazole"
+      ],
+      "answer": -1,
+      "seq": [],
+      "marked_by": "none",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 6
+     },
+     {
+      "no": 7,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "מה מוצג בא.ק.ג. שבתמונה?",
+      "options": [
+       "פרפור פרוזדורים",
+       "חסם הולכה מדרגה ראשונה",
+       "טכיקרדיה חדרית"
+      ],
+      "prompts": [],
+      "answer": -1,
+      "seq": [],
+      "marked_by": "none",
+      "figure": {
+       "page": 7,
+       "x": 120,
+       "y": 300,
+       "w": 760,
+       "h": 250
+      },
+      "parse_conf": 2,
+      "page": 7
+     },
+     {
+      "no": 8,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "איזה אנזים מפרק את Sampleomycin?",
+      "options": [
+       "Examplase",
+       "Mockase",
+       "Fictase",
+       "Stubase"
+      ],
+      "prompts": [],
+      "answer": -1,
+      "seq": [],
+      "marked_by": "none",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 8
+     }
+    ],
+    "skipped_open": 1
+   }
+  },
+  {
+   "pages": [
+    9,
+    10,
+    11,
+    12
+   ],
+   "next": null,
+   "reply": {
+    "questions": [
+     {
+      "no": 9,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "מהו זמן מחצית החיים של Testoquine?",
+      "options": [
+       "שעה",
+       "יום",
+       "שבוע",
+       "חודש"
+      ],
+      "prompts": [],
+      "answer": -1,
+      "seq": [],
+      "marked_by": "none",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 1,
+      "page": 9
+     },
+     {
+      "no": 10,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "באיזו קבוצה Dummycycline אסורה?",
+      "options": [
+       "ילדים מתחת לגיל 8",
+       "מבוגרים",
+       "ספורטאים",
+       "אף תשובה אינה נכונה"
+      ],
+      "prompts": [],
+      "answer": 0,
+      "seq": [],
+      "marked_by": "circle",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 10
+     },
+     {
+      "no": 11,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "מהי האינטראקציה של Fictazole עם Stubamide?",
+      "options": [
+       "הגברת רעילות",
+       "ירידה ביעילות",
+       "אין אינטראקציה",
+       "ב+ג נכונות"
+      ],
+      "prompts": [],
+      "answer": -1,
+      "seq": [],
+      "marked_by": "none",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 11
+     },
+     {
+      "no": 12,
+      "kind": "mcq",
+      "form": "one",
+      "vignette": "",
+      "question": "מה מנגנון העמידות ל-Mockacillin?",
+      "options": [
+       "בטא-לקטמאז",
+       "משאבת efflux",
+       "שינוי באתר הקישור",
+       "כל התשובות נכונות"
+      ],
+      "prompts": [],
+      "answer": -1,
+      "seq": [],
+      "marked_by": "none",
+      "figure": {
+       "page": 0,
+       "x": 0,
+       "y": 0,
+       "w": 0,
+       "h": 0
+      },
+      "parse_conf": 3,
+      "page": 12
+     }
+    ],
+    "skipped_open": 1
+   }
+  }
+ ],
+ "key": {
+  "pages": [
+   13
+  ],
+  "lines": [
+   "מפתח תשובות (synthetic)",
+   "1 ג",
+   "2 א",
+   "4 ד",
+   "8 ב",
+   "11 א",
+   "12 ד"
+  ],
+  "reply": {
+   "keys": [
+    {
+     "no": 1,
+     "answer": 2,
+     "seq": []
+    },
+    {
+     "no": 2,
+     "answer": 0,
+     "seq": []
+    },
+    {
+     "no": 4,
+     "answer": 3,
+     "seq": []
+    },
+    {
+     "no": 8,
+     "answer": 1,
+     "seq": []
+    },
+    {
+     "no": 11,
+     "answer": 0,
+     "seq": []
+    },
+    {
+     "no": 12,
+     "answer": 3,
+     "seq": []
+    },
+    {
+     "no": 40,
+     "answer": 1,
+     "seq": []
+    }
+   ]
+  }
+ },
+ "solve": {
+  "reply": {
+   "answers": [
+    {
+     "no": 6,
+     "answer": -1,
+     "seq": [
+      0,
+      1,
+      2
+     ],
+     "conf": 3
+    },
+    {
+     "no": 7,
+     "answer": 0,
+     "seq": [],
+     "conf": 2
+    },
+    {
+     "no": 9,
+     "answer": 1,
+     "seq": [],
+     "conf": 1
+    },
+    {
+     "no": 3,
+     "answer": 0,
+     "seq": [],
+     "conf": 3
+    }
+   ]
+  }
+ },
+ "open_questions": 2
+}

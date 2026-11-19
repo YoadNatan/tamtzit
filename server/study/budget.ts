@@ -148,7 +148,10 @@ export const POLICY: Record<string, Policy> = {
   notes: { share: 0.8, memberShare: null, daily: null },
   practice: { share: 0.8, memberShare: 0.4, daily: null },
   cards: { share: 0.8, memberShare: 0.4, daily: null },
-  exam: { share: 0.8, memberShare: 0.4, daily: 15 },
+  // Past exams (sources.md B8): group work like the bank, so no member's
+  // share; the daily limit counts exams started (ref "read", one per upload),
+  // not the worker's units (ref "unit", reserved without the daily check).
+  exam: { share: 0.8, memberShare: null, daily: 3, dailyRef: "read" },
   transcribe: { share: 0.8, memberShare: 0.4, daily: null },
   ask: { share: 0.8, memberShare: 0.4, daily: 20, dailyRef: "answer" },
   mnemonic: { share: 0.8, memberShare: 0.4, daily: 5 }, // J's drafts: 5 paid requests a day (review F-19)

@@ -571,7 +571,8 @@ test("the schema a build needs follows its flags (§2.11, §12.2.2): F and W alw
   assert.deepEqual(requiredSchema(flagSet(R8), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, T: 1, U: 1, J: 1 });
   // Wave 5's phase 3 (decision 3: usable early): T-2 ("הקבוצה צריכה אותך", NEEDS_ME) is section T's end (T at 2);
   // the museum and the boss need U's traps (U at 2).
-  assert.deepEqual(requiredSchema(flagSet(R12), ALL_ENDS), { F: 1, Q: 2, Z: 2, C: 2, K: 2, P: 2, W: 2, M: 2, N: 1, V: 1, T: 3, U: 2, J: 1, H: 2, G: 2, E: 1 });
+  // Its EXAMS flag: past exams (sources.md phase 2) need section S at 2.
+  assert.deepEqual(requiredSchema(flagSet(R12), ALL_ENDS), { F: 1, Q: 2, Z: 2, C: 2, K: 2, P: 2, W: 2, M: 2, N: 1, V: 1, T: 3, U: 2, J: 1, H: 2, G: 2, E: 1, S: 2 });
   assert.deepEqual(requiredSchema(flagSet([...R8, "MUSEUM"]), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, T: 1, U: 2, J: 1 });
   assert.deepEqual(requiredSchema(flagSet([...R8, "BOSS"]), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, T: 1, U: 2, J: 1, H: 2 });
   assert.deepEqual(requiredSchema(flagSet(["MUSEUM", "BOSS"]), ALL_ENDS), { F: 1, W: 1 }, "without the pulse the museum and the boss show nothing and need nothing");
@@ -586,6 +587,9 @@ test("the schema a build needs follows its flags (§2.11, §12.2.2): F and W alw
   assert.deepEqual(requiredSchema(flagSet(["CORRECTIONS"]), ALL_ENDS), { F: 1, W: 2, K: 2 }, "corrections: K's end and W2");
   assert.deepEqual(requiredSchema(flagSet(["CARDS", "BLANK_TABLE"]), ALL_ENDS), { F: 1, W: 1, C: 2 }, "a blank table needs practice");
   assert.deepEqual(requiredSchema(flagSet(["COURSES"]), ALL_ENDS), { F: 1, W: 1, S: 1 }, "courses: section S at 1 (sources.md B8)");
+  assert.deepEqual(requiredSchema(flagSet(["QUESTIONS", "EXAMS"]), ALL_ENDS), { F: 1, W: 1, Q: 2, S: 2 }, "past exams and their simulation: section S at 2 (sources.md B8)");
+  assert.deepEqual(requiredSchema(flagSet(["QUESTIONS", "EXAMS", "COURSES"]), ALL_ENDS), { F: 1, W: 1, Q: 2, S: 2 }, "S 2 has S 1 in it");
+  assert.deepEqual(requiredSchema(flagSet(["EXAMS"]), ALL_ENDS), { F: 1, W: 1 }, "past exams without questions show nothing and need nothing");
   for (const [release, names] of RELEASES) {
     assert.ok(!("B" in requiredSchema(flagSet(names), ALL_ENDS)), `release ${release}: never B (review F-5)`);
     assert.ok(!("B" in requiredSchema(flagSet(names))), `release ${release}: never B (review F-5)`);
@@ -616,8 +620,8 @@ test("releases 1 and 2 on this branch: with Q's and C's ends questions and pract
   const have = sqlRegistry();
   assert.deepEqual(
     have,
-    { F: 1, W: 2, Q: 3, Z: 4, C: 3, K: 2, P: 2, M: 3, N: 1, B: 1, V: 1, J: 1, U: 5, H: 4, G: 2, E: 1, T: 3, X: 2, S: 1 },
-    "section F at version 1, W at 2 (W1 with W2's hardening), Q at 3 (Q's end, practice 2.0 and the question types' columns), Z at 4 (section Z with its end, one-answer questions only, the opening called שאלות פתיחה), C at 3 (C's end, the question types' cards), K at 2 (K's end), P at 2 (A2: P's end), M at 3 (the day's meeting, no reader planned ahead, text-only guesses), N at 1 (the paragraph anchor), B at 1 (the points read ahead), V at 1 (disputes and VAR), J at 1 (the association wall), U at 5 (the anonymous counts, the pulse, and U-3's traps and museum, of text questions, a common mistake's card in plain words, old cards too), H at 4 (the boss battle, its heads and rounds unreadable from the table, one-answer questions, named אתגר קבוצתי), G at 2 (the group's marathon plan, its meter counting to the study day's start), E at 1 (a member's own trap, the blank table's tables), T at 3 (Today with T-2's end, one question shown once), X at 2 (the question types, the geometry's numbers checked) and S at 1 (courses, sources.md)",
+    { F: 1, W: 2, Q: 3, Z: 4, C: 3, K: 2, P: 2, M: 3, N: 1, B: 1, V: 1, J: 1, U: 5, H: 4, G: 2, E: 1, T: 3, X: 2, S: 2 },
+    "section F at version 1, W at 2 (W1 with W2's hardening), Q at 3 (Q's end, practice 2.0 and the question types' columns), Z at 4 (section Z with its end, one-answer questions only, the opening called שאלות פתיחה), C at 3 (C's end, the question types' cards), K at 2 (K's end), P at 2 (A2: P's end), M at 3 (the day's meeting, no reader planned ahead, text-only guesses), N at 1 (the paragraph anchor), B at 1 (the points read ahead), V at 1 (disputes and VAR), J at 1 (the association wall), U at 5 (the anonymous counts, the pulse, and U-3's traps and museum, of text questions, a common mistake's card in plain words, old cards too), H at 4 (the boss battle, its heads and rounds unreadable from the table, one-answer questions, named אתגר קבוצתי), G at 2 (the group's marathon plan, its meter counting to the study day's start), E at 1 (a member's own trap, the blank table's tables), T at 3 (Today with T-2's end, one question shown once), X at 2 (the question types, the geometry's numbers checked) and S at 2 (courses and past exams, sources.md)",
   );
   // Package U: the pulse needs section U at 1, which this SQL registers. Its flag
   // depends on PROGRESS (flags.ts: the pulse's "אצלך" sits with progress), whose

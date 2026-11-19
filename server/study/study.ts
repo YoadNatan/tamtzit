@@ -178,6 +178,9 @@ export const OP_SCHEMA: Readonly<Record<string, Readonly<Record<string, number>>
 export const VARIANT_SCHEMA: Readonly<Record<string, Readonly<Record<string, number>>>> = {
   ask_course: { K: 2, S: 1 },
   questions_plan: { Q: 2, S: 1 },
+  // Past exams (sources.md phase 2): op "exam_read" (its start and the
+  // phone's unit) and work.ts's {exam} branch read and save through S 2.
+  exams: { Q: 2, S: 2 },
 };
 
 /** What a call of `op` (or of a variant, VARIANT_SCHEMA) needs of the
@@ -229,6 +232,19 @@ export async function assertSchema(sb: SupabaseClient, op?: string): Promise<voi
   }
   if (!schemaOk(data, need)) throw new HttpError(503, "schema");
   schemaPassed.add(key);
+}
+
+/** Whether the database has these sections, without failing: for a
+ *  feature that reads a newer section when it is there and falls back
+ *  otherwise (courseStyle reads section S 2's exam items). A yes is
+ *  remembered per instance; a no or an error is asked again next time. */
+export async function schemaHas(sb: SupabaseClient, need: Readonly<Record<string, number>>): Promise<boolean> {
+  const key = JSON.stringify(Object.entries(need).sort(([a], [b]) => a.localeCompare(b)));
+  if (schemaPassed.has(key)) return true;
+  const { data, error } = await sb.rpc("study_schema");
+  if (error || !schemaOk(data, need)) return false;
+  schemaPassed.add(key);
+  return true;
 }
 
 export async function loadLecture(sb: SupabaseClient, id: string): Promise<Lecture> {

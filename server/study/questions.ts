@@ -613,20 +613,56 @@ export function casesFor(count: number): number {
   return count <= 1 ? 0 : Math.round(count * 0.4);
 }
 
-/* ── Past exams (Q-2: exams.ts reads and explains them with these) ── */
+/* ── Past exams (sources.md B6.2: server/study/exams.ts reads them with these) ──
+ * The API's grammar has no optional field, union or enum (schemaFaults): a
+ * missing value is -1, [] or a page of 0, and the kinds are strings checked
+ * by exams.ts. */
+export const ExamFigure = z.object({
+  page: z.number().int().describe("The page the picture, table or ECG is on, or 0 when the question needs none"),
+  x: z.number().int().describe("Left edge, in thousandths of the page's width"),
+  y: z.number().int().describe("Top edge, in thousandths of the page's height"),
+  w: z.number().int().describe("Width, in thousandths of the page's width"),
+  h: z.number().int().describe("Height, in thousandths of the page's height"),
+});
 export const ExamItem = z.object({
   no: z.number().int().describe("The question's number in the exam"),
-  case: z.boolean().describe("true when the question has a patient story"),
+  kind: z.string().describe('"case" when the question has a patient story, else "mcq"'),
+  form: z.string().describe('"one" (one answer), "tf" (each statement true or false) or "match" (prompts matched to the options)'),
   vignette: z.string().describe("The patient story as printed, or an empty string"),
   question: z.string().describe("The question as printed"),
-  options: z.array(z.string()).describe("Every option in order, as printed, without its letter or number"),
-  answer: z.number().int().describe("0-based index of the option the exam marks as correct, or -1 when the pages do not mark one"),
-  complete: z.boolean().describe("false when the question's options run past the pages given"),
-  lecture: z.number().int().describe("The number of the lecture in the given list that covers the question, or -1"),
-  topic: z.string().describe("The drug, organism, disease or process it is about, in English as printed"),
+  options: z.array(z.string()).describe("Every option (or statement) in order, as printed, without its letter or number"),
+  prompts: z.array(z.string()).describe('Form "match": the items to match, in order; otherwise empty'),
+  answer: z.number().int().describe('Form "one": the 0-based index of the option the pages mark as correct, or -1'),
+  seq: z.array(z.number().int()).describe('Forms "tf" (1 or 0 per statement) and "match" (the option of each prompt), when marked; otherwise empty'),
+  marked_by: z.string().describe('"circle", "bold", "key_page" or "none"'),
+  figure: ExamFigure.describe("The box of the picture the question needs, or page 0"),
+  parse_conf: z.number().int().describe("3: every word clear; 2: a few words unsure; 1: the question may be wrong or incomplete"),
+  page: z.number().int().describe("The page the question starts on"),
 });
-export const ExamItems = z.object({ questions: z.array(ExamItem) });
+export const ExamItems = z.object({
+  questions: z.array(ExamItem),
+  skipped_open: z.number().int().describe("How many open questions (no options) start on the pages copied"),
+});
 export type ExamItem = z.infer<typeof ExamItem>;
+
+/** A key sheet, by number (key unit). */
+export const ExamKey = z.object({
+  no: z.number().int().describe("The question's number"),
+  answer: z.number().int().describe("The 0-based index of the option the key gives (א/A/1 = 0), or -1"),
+  seq: z.array(z.number().int()).describe("A question keyed per statement or per prompt: its values in order; otherwise empty"),
+});
+export const ExamKeys = z.object({ keys: z.array(ExamKey) });
+export type ExamKey = z.infer<typeof ExamKey>;
+
+/** Solved keys of items that came without one (solve unit). */
+export const ExamSolvedItem = z.object({
+  no: z.number().int().describe("The question number given"),
+  answer: z.number().int().describe('Form "one": the 0-based index of the answer; otherwise -1'),
+  seq: z.array(z.number().int()).describe('Forms "tf" and "match": the values in order; otherwise empty'),
+  conf: z.number().int().describe("3: standard knowledge settles it; 2: likely; 1: unsure"),
+});
+export const ExamSolved = z.object({ answers: z.array(ExamSolvedItem) });
+export type ExamSolvedItem = z.infer<typeof ExamSolvedItem>;
 
 export const Explained = z.object({
   no: z.number().int().describe("The question number given"),

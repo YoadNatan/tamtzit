@@ -28,6 +28,8 @@ import {
   type Ctx,
   duplicateOf,
   ExamItems,
+  ExamKeys,
+  ExamSolved,
   ExplainedSet,
   type Known,
   placePara,
@@ -761,7 +763,7 @@ test("warns: a distractor's or the takeaway's missing tag, a slide number in an 
 });
 
 test("schema: the past-exam schemas follow the same rules", () => {
-  for (const set of [ExamItems, ExplainedSet]) {
+  for (const set of [ExamItems, ExamKeys, ExamSolved, ExplainedSet]) {
     const s = cleanSchema(zodOutputFormat(set).schema as Record<string, unknown>);
     const text = JSON.stringify(s);
     assert.deepEqual(schemaFaults(s), { optional: 0, unions: 0 });

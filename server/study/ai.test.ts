@@ -64,11 +64,12 @@ const post = (body: unknown) =>
   );
 const answer = async (res: Response) => ({ status: res.status, body: await res.json() });
 
-/** The ops of §12.2.4 F seeds, and Q's past exams (Q-2): 501 until their
- *  package (K-2 built fix_check, V built var, J built mnemonic and
- *  wall_check, and E built trap_check: they are no seeds any more; E's
- *  "whoami" is design only). */
-const SEEDED = ["plaque", "whoami", "exam_read", "exam_explain"];
+/** The ops of §12.2.4 F seeds, and Q's past exams' explanations: 501 until
+ *  their package (K-2 built fix_check, V built var, J built mnemonic and
+ *  wall_check, E built trap_check, and sources.md phase 2 built exam_read:
+ *  they are no seeds any more; E's "whoami" is design only; exam_explain is
+ *  sources.md phase 3). */
+const SEEDED = ["plaque", "whoami", "exam_explain"];
 /** Every section at the version any op needs. */
 const EVERYTHING = { F: 1, A: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, U: 1, J: 1, H: 1, B: 1, G: 1, E: 1, T: 1 };
 
@@ -100,6 +101,7 @@ test("health's schemaOk asks for the server's sections and what the app built wi
   assert.deepEqual(healthSchema(set(["CORRECTIONS"])), { F: 1, W: 2, Q: 1, C: 1, K: 2 }, "corrections: K's end and W2's hardening");
   assert.deepEqual(healthSchema(set(["ASK"])), { F: 1, W: 2, Q: 1, C: 1, K: 2 }, "לשאול: K's end (W 2 is the server's own)");
   assert.deepEqual(healthSchema(set(["COURSES"])), { F: 1, W: 2, Q: 1, C: 1, K: 1, S: 1 }, "courses: section S at 1");
+  assert.deepEqual(healthSchema(set(["QUESTIONS", "EXAMS"])), { F: 1, W: 2, Q: 2, C: 1, K: 1, S: 2 }, "past exams: section S at 2");
 });
 
 test("the per-op needs are §12.2.2's (questions at Q 2, cards at C 2 and ask at K 2 with their ends)", () => {

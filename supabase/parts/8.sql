@@ -1241,6 +1241,7 @@ begin
   select * into q from study_private.exam_queue x where x.exam_id = p_exam;
   return jsonb_build_object(
     'job', j.id, 'kind', j.kind, 'lease', v_lease, 'attempt', j.attempts + 1, 'last_error', j.error,
+    'reread', coalesce((j.range ->> 'reread')::boolean, false),
     'exam', jsonb_build_object('id', e.id, 'group_id', e.group_id, 'title', e.title, 'key_source', e.key_source),
     'pages', coalesce((select jsonb_agg(jsonb_build_object('n', p.n, 'path', p.path, 'w', p.w, 'h', p.h, 'lines', to_jsonb(p.lines),
                                                            'url', q.urls ->> p.path) order by p.n)

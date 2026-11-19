@@ -39,6 +39,7 @@ import {
   memberClient,
   MODEL,
   REQUIRED_SCHEMA,
+  schemaHas,
   schemaOk,
   serverClient,
   serverKey,
@@ -192,10 +193,25 @@ export function styleInput(course: string, exams: ExamRow[], items: ExamItemRow[
 }
 
 /** The course's past exams as a style input, or null: no course, or fewer
- *  than 5 items. Only items exam_read saved (source "exam", through the key). */
+ *  than 5 items. Only items exam_read saved (source "exam", through the key).
+ *  With section S at 2 (sources.md B5, phase 2) through
+ *  study_course_style_items: the course by its key (any spelling of it),
+ *  no deleted exam and none hidden from the profile ("לא לכלול בחישוב
+ *  הנושאים"), and an item counts as keyed only when its key came from the
+ *  exam, its key sheet or a member (a solved key is no example). Without
+ *  S 2, the exams of exactly this course text, as before. */
 export async function courseStyle(sb: SupabaseClient, lecture: Pick<Lecture, "group_id" | "course">): Promise<StyleInput | null> {
   const course = lecture.course.trim();
   if (!course) return null;
+  if (await schemaHas(sb, { S: 2 })) {
+    const { data, error } = await sb.rpc("study_course_style_items", { p_group: lecture.group_id, p_course: lecture.course });
+    if (error) throw new HttpError(500, error.message);
+    const rows = (data ?? []) as Array<ExamItemRow & { exam_created_at: string }>;
+    const exams = new Map<string, ExamRow>();
+    for (const r of rows) exams.set(r.exam_id, { id: r.exam_id, created_at: r.exam_created_at });
+    if (!exams.size) return null;
+    return styleInput(course, [...exams.values()], rows.map(({ exam_created_at: _, ...r }) => r));
+  }
   const exams = await sb.from("study_exams").select("id, created_at").eq("group_id", lecture.group_id).eq("course", lecture.course);
   if (exams.error) throw new HttpError(500, exams.error.message);
   const rows = (exams.data ?? []) as ExamRow[];
