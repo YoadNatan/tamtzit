@@ -102,8 +102,8 @@ const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_A
  *  "s1" (courses, docs/study/sources.md phase 1: "prod" with
  *  VITE_STUDY_COURSES, against this branch's SQL, which has section S at 1);
  *  "s2" (past exams, sources.md phase 2: "s1" with VITE_STUDY_EXAMS, which
- *  needs section S at 2; the server's part only so far, so the exams' tab
- *  still shows its "soon" screen);
+ *  needs section S at 2: the upload, the reading, the review, replaying an
+ *  exam and the simulation; e2e/study/exams.cjs and mocks/exams.cjs);
  *  E2E_ANCHOR=1 says a release's build has
  *  VITE_STUDY_ANCHOR too (package N: a paragraph's comments show in its chip
  *  row, not the dot). `any`: a package's flag is on, so the "תרגול" tab shows

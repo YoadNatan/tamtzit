@@ -108,7 +108,7 @@ module.exports = {
           C.rows
             .filter((r) => !r.deleted_at)
             .sort((a, b) => (a.name_key < b.name_key ? -1 : 1))
-            .map((r) => ({ id: r.id, name: r.name, name_key: r.name_key, exam_date: r.exam_date, exam_minutes: r.exam_minutes, exam_n: r.exam_n, lectures: lecturesOf(db, r).length, exams: 0 })),
+            .map((r) => ({ id: r.id, name: r.name, name_key: r.name_key, exam_date: r.exam_date, exam_minutes: r.exam_minutes, exam_n: r.exam_n, lectures: lecturesOf(db, r).length, exams: (db.examsMock?.examsOf(r.name_key) ?? []).length })),
         );
       case "study_course_overview": {
         const r = live(body.p_course);
@@ -117,7 +117,9 @@ module.exports = {
         const ids = new Set(ls.map((l) => l.id));
         const questions = (db.practice?.questions ?? []).filter((q) => ids.has(q.lecture_id) && !q.retired_at && !q.hidden_at && !q.stale_at && q.has_key !== false).length;
         const days = r.exam_date ? Math.round((Date.parse(r.exam_date) - Date.parse(israelToday())) / 86_400_000) : null;
-        return json({ id: r.id, name: r.name, exam_date: r.exam_date, days_left: days, exam_minutes: r.exam_minutes, exam_n: r.exam_n, lectures: ls.length, ready: ls.filter((l) => l.status === "ready").length, exams: [], questions });
+        // Past exams (mocks/exams.cjs, S 2): the course's exams as the overview lists them.
+        const exams = db.examsMock?.overviewRows(r.name_key) ?? [];
+        return json({ id: r.id, name: r.name, exam_date: r.exam_date, days_left: days, exam_minutes: r.exam_minutes, exam_n: r.exam_n, lectures: ls.length, ready: ls.filter((l) => l.status === "ready").length, exams, questions });
       }
       case "study_course_set": {
         const r = live(body.p_course);
