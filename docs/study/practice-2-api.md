@@ -264,7 +264,7 @@ in the round, and the answer adds `"round": { "planId": "…", "lectures": 3 }`.
 A round stays in one group, takes at most 5 lectures and at least 4
 questions of each. It needs section S at 1 (503 `schema`). Refusals, before
 any request is made: 400 `bad plan` (not an id, or the request is in another
-round), 400 `too few questions`, 409 `too many lectures`.
+round), 400 `too few questions`, 409 `round full`.
 
 Each batch writes at most 5 questions; a part with more has several batches
 (`seq`). Each batch carries the points it must cover and the style of each of
@@ -524,7 +524,7 @@ Every code below has Hebrew in `failText(code, "practice")` or is internal
 | `reword limit` | reword | השאלה הזו כבר נוסחה מחדש ארבע פעמים. אפשר להשאיר אותה או להוריד. |
 | `request not found` | keep all, progress | הבקשה הזו לא נמצאה. כדאי לרענן. |
 | `enough questions` | create, keep (also release 1's round) | להרצאה הזו יש כבר את מספר השאלות המרבי. |
-| `too many lectures` | create (a round) | בסבב אחד אפשר לבחור עד 5 הרצאות. |
+| `round full` | create (a round) | בסבב אחד אפשר לבחור עד 5 הרצאות. |
 | `too few questions` | create (a round) | בסבב על כמה הרצאות בוחרים לפחות 4 שאלות מכל הרצאה. |
 | `bad plan` | create (a round) | הסבב הזה לא נמצא. כדאי להתחיל אותו שוב. |
 

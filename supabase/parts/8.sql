@@ -100,13 +100,13 @@ end;
 $$;
 revoke all on function study_private.course_for(uuid) from public;
 
--- 'bad date', 'bad minutes', 'bad count': the settings' ranges.
+-- 'bad date', 'bad minutes', 'bad questions': the settings' ranges.
 create or replace function study_private.course_settings_ok(p_exam_date date, p_minutes int, p_n int)
 returns void language plpgsql immutable as $$
 begin
   if p_exam_date is not null and p_exam_date not between date '2000-01-01' and date '2100-12-31' then raise exception 'bad date'; end if;
   if p_minutes is not null and p_minutes not between 10 and 600 then raise exception 'bad minutes'; end if;
-  if p_n is not null and p_n not between 5 and 300 then raise exception 'bad count'; end if;
+  if p_n is not null and p_n not between 5 and 300 then raise exception 'bad questions'; end if;
 end;
 $$;
 revoke all on function study_private.course_settings_ok(date, int, int) from public;
@@ -294,7 +294,7 @@ begin
   if r.count < 4 then raise exception 'too few questions'; end if;
   select count(distinct x.lecture_id)::int into n from public.study_question_requests x
    where x.plan_id = p_plan and x.lecture_id <> r.lecture_id;
-  if n >= 5 then raise exception 'too many lectures'; end if;
+  if n >= 5 then raise exception 'round full'; end if;
   update public.study_question_requests x set plan_id = p_plan where x.id = r.id;
   return n + 1;
 end;

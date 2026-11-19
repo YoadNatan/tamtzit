@@ -321,7 +321,7 @@ const CREATE_STATUS: Record<string, number> = {
 
 /** study_request_plan's refusals, as HTTP statuses. */
 const ROUND_STATUS: Record<string, number> = {
-  "too many lectures": 409,
+  "round full": 409,
   "too few questions": 400,
   "bad plan": 400,
   "request not found": 404,
@@ -377,7 +377,7 @@ export const createAction: Op = async (req, body) => {
     const others = await sb.from("study_question_requests").select("lecture_id").eq("plan_id", planId);
     if (others.error) throw new HttpError(500, others.error.message);
     const lectures = new Set(((others.data ?? []) as Array<{ lecture_id: string }>).map((r) => r.lecture_id).filter((l) => l !== lectureId));
-    if (lectures.size >= ROUND_MAX_LECTURES) throw new HttpError(409, "too many lectures");
+    if (lectures.size >= ROUND_MAX_LECTURES) throw new HttpError(409, "round full");
   }
   const { data, error } = await sb.rpc(
     "study_request_create",

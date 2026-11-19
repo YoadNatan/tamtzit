@@ -32,7 +32,9 @@ export type Area =
   | "boss"
   | "bank"
   | "traps"
-  | "pulse";
+  | "pulse"
+  // Courses (docs/study/sources.md): the course page and its sheets.
+  | "course";
 
 /** The paid features beside the summary: Claude's own failures read the
  *  same in each (§6.3; the museum's plaque as the memory aids, fun §5.7;
@@ -137,6 +139,19 @@ const TEXT: Record<string, string> = {
   "ask:bad scope": "ההרצאה או הפסקה השתנו בינתיים. כדאי לרענן ולשאול שוב.",
   // A library question in a group (or a course) with no lectures.
   "ask:no lectures": "אין עדיין הרצאות לשאול עליהן. אפשר להעלות הרצאה בספרייה.",
+  // "לשאול על כל הקורס" (sources.md B6.9).
+  "ask:course not found": "הקורס הזה לא נמצא. אולי הוא אוחד עם קורס אחר. כדאי לרענן.",
+  "ask:no summaries": "עוד אין סיכום לאף הרצאה בקורס. אפשר לשאול כשיהיה סיכום ראשון.",
+  // Courses (sources.md B2): the course page's sheets.
+  "course:course not found": "הקורס הזה לא נמצא. אולי הוא אוחד עם קורס אחר. כדאי לרענן.",
+  "course:group not found": "הקבוצה לא נמצאה. כדאי לרענן.",
+  "course:bad name": "שם הקורס צריך להיות באורך של 1 עד 120 תווים.",
+  "course:exists": "כבר יש קורס בשם הזה. אפשר לאחד את שני הקורסים.",
+  "course:same course": "בוחרים קורס אחר לאחד איתו.",
+  "course:bad date": "התאריך לא תקין.",
+  "course:bad minutes": "משך המבחן הוא בין 10 ל-600 דקות.",
+  "course:bad questions": "מספר השאלות במבחן הוא בין 5 ל-300.",
+  "course:off": "עמודי הקורסים כבויים כרגע בשרת.",
 
   // memory aids (not in §6.3: the corrections' words name a correction)
   "mnemonic:part not found": "החלק הזה לא נמצא בסיכום. כדאי לרענן.",
@@ -180,6 +195,10 @@ const TEXT: Record<string, string> = {
   "practice:not for steps": "מקרה בשלבים לא מנסחים מחדש. אפשר להשאיר אותו או להוריד.",
   "practice:not a set question": "השאלה הזו לא נתמכת עדיין בגרסה שלך. כדאי לרענן.",
   "practice:bad choices": "צריך לענות על כל החלקים של השאלה.",
+  // A round over several lectures (sources.md B6.7).
+  "practice:round full": "בסבב אחד אפשר לבחור עד 5 הרצאות.",
+  "practice:too few questions": "בסבב על כמה הרצאות בוחרים לפחות 4 שאלות מכל הרצאה.",
+  "practice:bad plan": "הסבב הזה לא נמצא. כדאי להתחיל אותו שוב.",
   "practice:schema": "סוגי השאלות החדשים עוד לא הופעלו במסד הנתונים. אפשר לבחור שאלות אמריקאיות בינתיים.",
   "practice:bad geometry": "לא הצלחנו לקרוא את הסימונים מהקובץ. אפשר לנסות קובץ אחר.",
   "practice:request not found": "הבקשה הזו לא נמצאה. כדאי לרענן.",

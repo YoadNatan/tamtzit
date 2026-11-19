@@ -8375,7 +8375,7 @@ select stest.is_('S1f3. bad names and settings',
   || stest.err(format('select public.study_course_set(%L, %L, null, null)', :'scf', '1999-01-01')) || ' · '
   || stest.err(format('select public.study_course_set(%L, null, 5, null)', :'scf')) || ' · '
   || stest.err(format('select public.study_course_set(%L, null, null, 301)', :'scf')),
-  'bad name · bad date · bad minutes · bad count');
+  'bad name · bad date · bad minutes · bad questions');
 select public.study_course_set(:'scf', date '2027-02-12', 180, 100);
 select stest.is_('S1f4. study_course_set saves all three (null clears)',
   (select exam_date || ' ' || exam_minutes || ' ' || exam_n from public.study_courses where id = :'scf'), '2027-02-12 180 100');
@@ -8500,7 +8500,7 @@ select stest.is_('S1l6. at most 5 lectures in a round',
   || public.study_request_plan('e8500000-0000-4000-8000-000000000011', :'splan', :'skey')::text || ' '
   || public.study_request_plan('e8500000-0000-4000-8000-000000000012', :'splan', :'skey')::text || ' · '
   || stest.err(format('select public.study_request_plan(%L, %L, %L)', 'e8500000-0000-4000-8000-000000000013', :'splan', :'skey')),
-  '3 4 5 · too many lectures');
+  '3 4 5 · round full');
 select stest.is_('S1l7. linking again is the same round (idempotent)', public.study_request_plan(:'sround', :'splan', :'skey')::text, '5');
 select stest.is_('S1l8. members read the round''s requests by plan_id',
   (select count(*)::text from public.study_question_requests where plan_id = :'splan'), '5');

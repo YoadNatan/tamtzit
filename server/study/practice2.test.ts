@@ -847,7 +847,7 @@ test("create in a round: a sixth lecture, or fewer than 4 questions, is refused 
   schemaAnswer = { ...REQUIRED_SCHEMA, Q: 2, S: 1 };
   planRows = [1, 2, 3, 4, 5].map((k) => ({ lecture_id: OTHER(k) }));
   const sixth = await call({ action: "create", options: { level: "deep" }, planId: PLAN });
-  assert.deepEqual([sixth.status, sixth.json], [409, { error: "too many lectures" }]);
+  assert.deepEqual([sixth.status, sixth.json], [409, { error: "round full" }]);
   // This lecture already in the round counts once.
   planRows = [1, 2, 3, 4].map((k) => ({ lecture_id: OTHER(k) })).concat([{ lecture_id: LECTURE }]);
   assert.equal((await call({ action: "create", options: { level: "deep" }, planId: PLAN })).status, 200);
@@ -857,7 +857,7 @@ test("create in a round: a sixth lecture, or fewer than 4 questions, is refused 
   assert.deepEqual([few.status, few.json], [400, { error: "too few questions" }]);
   assert.equal(rpcs("study_request_create").length, 0, "nothing made");
   for (const [code, status] of [
-    ["too many lectures", 409],
+    ["round full", 409],
     ["bad plan", 400],
     ["request not found", 404],
   ] as const) {
