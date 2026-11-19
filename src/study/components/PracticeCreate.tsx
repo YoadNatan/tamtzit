@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { DIFFICULTIES, DIFFICULTY_HE, LEVEL_HE, REQUEST_MAX, STYLE_HE, STYLES, FOCUS_MAX, type Level, type Style } from "../../../shared/study/practice2";
-import { MCQ_STYLES } from "../../../shared/study/forms";
+import { addFacts, canStyle, emptyFacts, MCQ_STYLES, NEW_STYLES, type PartFacts } from "../../../shared/study/forms";
 import type { ScreenProps } from "../features/types";
 import { flags } from "../lib/flags";
 import { getLecture, type Lecture } from "../lib/api";
@@ -28,6 +28,36 @@ import { BackLink, Head, Loading, StickyActions } from "./Shell";
 
 /** The styles this build offers: the question types only with their flag. */
 const SHOWN_STYLES: readonly Style[] = flags.qtypes ? STYLES : STYLES.filter((s) => (MCQ_STYLES as readonly string[]).includes(s));
+const MCQ_CHIPS = STYLES.filter((s) => (MCQ_STYLES as readonly string[]).includes(s));
+const NEW_CHIPS = STYLES.filter((s) => (NEW_STYLES as readonly string[]).includes(s));
+const GeoBackfill = lazy(() => import("./GeoBackfill"));
+
+/** The types a member chose last for a lecture, on this device (they win over the plan's defaults). */
+const typesKey = (user: string, lectureId: string) => `study-qtypes:${user}:${lectureId}`;
+function rememberedTypes(user: string, lectureId: string): Style[] | null {
+  try {
+    const x = JSON.parse(localStorage.getItem(typesKey(user, lectureId)) ?? "null") as unknown;
+    return Array.isArray(x) && x.length && x.every((v) => (SHOWN_STYLES as readonly string[]).includes(v)) ? (x as Style[]) : null;
+  } catch {
+    return null;
+  }
+}
+function rememberTypes(user: string, lectureId: string, styles: readonly Style[]): void {
+  try {
+    localStorage.setItem(typesKey(user, lectureId), JSON.stringify(styles));
+  } catch {
+    // this device cannot keep it: the defaults next time
+  }
+}
+
+/** Why a type's chip is off for the chosen parts, or "". */
+function whyNot(style: Style, f: PartFacts): string {
+  if (canStyle(style, f)) return "";
+  if (style === "label") return f.figures > 0 || f.labelled === 0 ? "אין בהרצאה שרטוטים עם תוויות" : "";
+  if (style === "image") return "אין תמונות בסיכום של החלקים שנבחרו";
+  if (style === "steps" || style === "match" || style === "order") return "בחלקים שנבחרו אין מספיק נקודות";
+  return "";
+}
 
 /* ── Practice 2.0: מה ליצור and דוגמה ומיקוד (proposal/practice-2/mockups.html) ──
  *
@@ -183,9 +213,9 @@ function useLecture(lectureId: string): { lecture: Lecture | null; error: boolea
 }
 
 /** A toggle chip: "✓ אמבות · 6". */
-function Toggle({ on, onClick, disabled, children }: { on: boolean; onClick: () => void; disabled?: boolean; children: ReactNode }) {
+function Toggle({ on, onClick, disabled, describedBy, children }: { on: boolean; onClick: () => void; disabled?: boolean; describedBy?: string; children: ReactNode }) {
   return (
-    <button type="button" className={`a-chip${on ? " busy" : ""}`} aria-pressed={on} disabled={disabled} onClick={onClick}>
+    <button type="button" className={`a-chip${on ? " busy" : ""}`} aria-pressed={on} disabled={disabled} aria-describedby={describedBy} onClick={onClick}>
       {on ? "✓ " : ""}
       {children}
     </button>
@@ -209,6 +239,16 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
       return next;
     });
   const { plan, rows, error, refresh, applied, issued } = usePlan(lectureId, choices, true);
+  // Question types: the member's last choice for this lecture, else the plan's defaults, once.
+  const typed = useRef(false);
+  const [geoOpen, setGeoOpen] = useState(false);
+  useEffect(() => {
+    if (!flags.qtypes || typed.current || !plan?.defaults) return;
+    typed.current = true;
+    const mine = rememberedTypes(ctx.userId, lectureId);
+    const next = mine ?? plan.defaults.filter((s) => (SHOWN_STYLES as readonly string[]).includes(s));
+    if (next.length && next.join() !== choices.styles.join()) setChoices((c) => ({ ...c, styles: STYLES.filter((x) => next.includes(x)) }));
+  }, [plan?.defaults]);
   // The stale parts when this phone asked, while its stream is open.
   const [asked, setAsked] = useState<number[] | null>(null);
   const [readError, setReadError] = useState("");
@@ -469,21 +509,66 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
             })}
           </div>
 
-          <div className="a-sec">
-            <h2 id="styles-h">סגנונות</h2>
-            <span className="a-small a-muted">אפשר כמה</span>
-          </div>
-          <div className="a-wrap pc-styles" role="group" aria-labelledby="styles-h">
-            {SHOWN_STYLES.map((s: Style) => (
-              <Toggle
-                key={s}
-                on={choices.styles.includes(s)}
-                onClick={() => setChoices((c) => ({ ...c, styles: c.styles.includes(s) && c.styles.length === 1 ? c.styles : SHOWN_STYLES.filter((x) => (x === s ? !c.styles.includes(s) : c.styles.includes(x))) }))}
-              >
-                {STYLE_HE[s]}
-              </Toggle>
-            ))}
-          </div>
+          {(() => {
+            // The chosen parts' facts (a type a part cannot have is off, with why).
+            const facts: PartFacts = (choices.parts?.length ? choices.parts : plan.parts.map((x) => x.part_idx)).reduce(
+              (a, k) => addFacts(a, plan.facts?.[String(k)] ?? emptyFacts()),
+              emptyFacts(),
+            );
+            const toggle = (s: Style) => {
+              setChoices((c) => {
+                const styles = c.styles.includes(s) && c.styles.length === 1 ? c.styles : SHOWN_STYLES.filter((x) => (x === s ? !c.styles.includes(s) : c.styles.includes(x)));
+                if (flags.qtypes) rememberTypes(ctx.userId, lectureId, styles);
+                return { ...c, styles };
+              });
+            };
+            const chip = (s: Style) => {
+              const why = flags.qtypes && plan.facts ? whyNot(s, facts) : "";
+              return (
+                <Toggle key={s} on={choices.styles.includes(s) && !why} onClick={() => !why && toggle(s)} disabled={Boolean(why)} describedBy={why ? `why-${s}` : undefined}>
+                  {STYLE_HE[s]}
+                </Toggle>
+              );
+            };
+            const off = NEW_CHIPS.map((s) => [s, whyNot(s, facts)] as const).filter(([, w]) => w && plan.facts);
+            const geo = lecture && off.some(([s]) => s === "label") && lecture.slides.some((sl) => (sl.figures ?? []).length) && !lecture.slides.some((sl) => (sl.figures ?? []).some((f) => f.geo));
+            return (
+              <>
+                <div className="a-sec">
+                  <h2 id="styles-h">{flags.qtypes ? "שאלות אמריקאיות" : "סגנונות"}</h2>
+                  <span className="a-small a-muted">אפשר כמה</span>
+                </div>
+                <div className="a-wrap pc-styles" role="group" aria-labelledby="styles-h">
+                  {(flags.qtypes ? MCQ_CHIPS : SHOWN_STYLES).map(chip)}
+                </div>
+                {flags.qtypes ? (
+                  <>
+                    <div className="a-sec">
+                      <h2 id="types-h">סוגים נוספים</h2>
+                    </div>
+                    <div className="a-wrap pc-types" role="group" aria-labelledby="types-h">
+                      {NEW_CHIPS.map(chip)}
+                    </div>
+                    {off.map(([s, w]) => (
+                      <p key={s} id={`why-${s}`} className="a-small a-muted pc-why">
+                        {STYLE_HE[s]}: {w}
+                      </p>
+                    ))}
+                    {geo ? (
+                      <button type="button" className="a-btn pc-geo" onClick={() => setGeoOpen(true)}>
+                        לסמן תוויות בשרטוטים
+                      </button>
+                    ) : null}
+                    {geoOpen && lecture ? (
+                      <Suspense fallback={null}>
+                        <GeoBackfill lecture={lecture} onClose={() => setGeoOpen(false)} onDone={() => void refresh()} />
+                      </Suspense>
+                    ) : null}
+                  </>
+                ) : null}
+              </>
+            );
+          })()}
 
           <div className="a-sec">
             <h2 id="diff-h">רמה</h2>

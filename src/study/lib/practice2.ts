@@ -19,6 +19,7 @@ import {
 } from "../../../shared/study/practice2";
 import type { FlagReason } from "../../../shared/study/aspects";
 import { postStudy, readLines, sb } from "./api";
+import { flags } from "./flags";
 import type { PointPartRow } from "./pointsRead";
 import { startRound, type RoundResult } from "./rounds";
 
@@ -152,9 +153,11 @@ export type RequestBatch = { id: string; request_id: string; part_idx: number; s
 export type PartProgress = { part_idx: number; title: string; points: number; covered: number; wanted: number; made: number; kept: number; pending: number; checking: number; failed: number; open: boolean };
 
 const REQUEST_COLUMNS = "id, lecture_id, round, level, count, parts, styles, difficulty, focus, created_by, created_at";
-const DRAFT_COLUMNS =
+const QDRAFT_COLUMNS =
   "id, request_id, batch_id, lecture_id, part_idx, style, points, kind, difficulty, vignette, question, options, slides, topic, aspect, anchor, teaser, figure, option_tags, status, check_state, rewrites, replaces, question_id, lease_until, created_at, updated_at";
 const RBATCH_COLUMNS = "id, request_id, part_idx, seq, heading, wanted, made, status, error, attempts, updated_at";
+/** With the question types (section Q at 3): a draft's form, what it draws and its staged case. */
+const QDRAFT_TYPES_COLUMNS = `${QDRAFT_COLUMNS}, form, layout, series, step`;
 
 /** A lecture's requests, newest first. */
 export async function listRequests(lectureId: string): Promise<Request[]> {
@@ -165,9 +168,10 @@ export async function listRequests(lectureId: string): Promise<Request[]> {
 
 /** A request's drafts, every status, in part order. */
 export async function listDrafts(requestId: string): Promise<DraftRow[]> {
+  const columns = flags.qtypes ? QDRAFT_TYPES_COLUMNS : QDRAFT_COLUMNS;
   const { data, error } = await client()
     .from("study_question_drafts")
-    .select(DRAFT_COLUMNS)
+    .select(columns)
     .eq("request_id", requestId)
     .order("part_idx", { ascending: true })
     .order("created_at", { ascending: true });

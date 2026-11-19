@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { SOURCE_HE, STYLE_HE, STYLES, sessionCount, sourceCounts, type SessionCount, type Source, type Style } from "../../../shared/study/practice2";
+import { isNewStyle, TYPE_GROUPS } from "../../../shared/study/forms";
 import type { ScreenProps } from "../features/types";
+import { flags } from "../lib/flags";
 import { lectureTitles, partTitles } from "../lib/api";
 import { sessionCounts } from "../lib/practice2";
 import { requestStart, type SessionPick } from "../lib/practiceSession";
@@ -36,7 +38,8 @@ export default function PracticeRound({ route, ctx }: ScreenProps<"practice">) {
     Promise.all([sessionCounts([lectureId]), lectureTitles([lectureId]).catch(() => ({}) as Record<string, string>), partTitles([lectureId]).catch(() => [])])
       .then(([r, t, p]) => {
         if (!alive) return;
-        setRows(r.filter((x) => x.lecture_id === lectureId));
+        // A build without the question types never asks one: their counts are not offered.
+        setRows(r.filter((x) => x.lecture_id === lectureId && (flags.qtypes || !isNewStyle(x.style))));
         setTitle(t[lectureId] ?? "");
         setNames(Object.fromEntries(p.map((x) => [x.idx, x.title])));
       })
@@ -51,8 +54,14 @@ export default function PracticeRound({ route, ctx }: ScreenProps<"practice">) {
     const have = new Set((rows ?? []).map((r) => r.style));
     return [...STYLES.filter((s) => have.has(s)), ...(have.has("other") ? ["other" as const] : [])];
   }, [rows]);
+  // Question types: "סוג שאלה" groups the styles (הכול · אמריקאיות · שאלות על תמונה …), only groups with questions.
+  const groups = useMemo(() => {
+    const have = new Set((rows ?? []).map((r) => r.style as string));
+    return TYPE_GROUPS.filter((g) => g.styles === null || g.styles.some((x) => have.has(x)));
+  }, [rows]);
   const chosenParts = parts ?? present;
-  const pickStyles = style === "all" ? undefined : [style as Style | "other"];
+  const group = flags.qtypes ? groups.find((g) => g.key === style) : undefined;
+  const pickStyles = style === "all" ? undefined : flags.qtypes ? (group?.styles ? ([...group.styles] as Array<Style | "other">) : undefined) : [style as Style | "other"];
   const counts = rows ? sourceCounts(rows, { parts: chosenParts, styles: pickStyles }) : null;
   // The default: what was never answered and what was wrong, else everything.
   const from: Source[] = sources ?? (counts && counts.new + counts.wrong > 0 ? ["new", "wrong"] : ["all"]);
@@ -143,7 +152,26 @@ export default function PracticeRound({ route, ctx }: ScreenProps<"practice">) {
             </>
           ) : null}
 
-          {styles.length > 1 ? (
+          {flags.qtypes ? (
+            groups.length > 2 ? (
+              <>
+                <div className="a-sec">
+                  <h2 id="type-h">סוג שאלה</h2>
+                </div>
+                <div className="a-wrap pr-types" role="radiogroup" aria-labelledby="type-h">
+                  {groups.map((g) => {
+                    const on = style === g.key;
+                    return (
+                      <button key={g.key} type="button" role="radio" aria-checked={on} className={`a-chip${on ? " busy" : ""}`} onClick={() => setStyle(g.key)}>
+                        {on ? "✓ " : ""}
+                        {g.he}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null
+          ) : styles.length > 1 ? (
             <>
               <div className="a-sec">
                 <h2 id="style-h">סגנון</h2>

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isSetForm } from "../../../shared/study/forms";
 import { STYLE_HE, keepable, type Style } from "../../../shared/study/practice2";
 import type { ScreenProps } from "../features/types";
 import { failText } from "../lib/failText";
@@ -29,6 +30,58 @@ import { KEEP_SCREEN_ON, useRound } from "../lib/rounds";
 import { barLabel, richText } from "../lib/rich";
 import { LETTERS } from "../lib/questionText";
 import { backTarget, Head, Loading, RouteLink, Sheet, StickyActions } from "./Shell";
+
+/** A draft's picture (question types), read-only; loads with the first one. */
+const QuestionFigure = lazy(() => import("./QuestionTypes").then((m) => ({ default: m.QuestionFigure })));
+
+/** A draft's answer part as the bank shows it before anyone keeps it (never its key). */
+function DraftBody({ d, groupId }: { d: DraftRow; groupId: string }) {
+  const form = flags.qtypes ? (d.form ?? "one") : "one";
+  const lay = flags.qtypes ? d.layout : null;
+  if (isSetForm(form)) {
+    const prompts = lay?.kind === "match" ? lay.prompts : [];
+    return (
+      <details className="pb-options">
+        <summary className="a-small">{form === "tf" ? "המשפטים" : form === "match" ? "הפריטים והתשובות" : "השלבים (לא לפי הסדר)"}</summary>
+        {prompts.length ? (
+          <ul className="a-stack a-small pb-prompts">
+            {prompts.map((pr, i) => (
+              <li key={i} dir="rtl">
+                <b>{richText(pr, `p${d.id}${i}`)}</b>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <ol className="a-stack a-small">
+          {d.options.map((o, i) => (
+            <li key={i} dir="rtl">
+              {richText(o, `o${d.id}${i}`)}
+            </li>
+          ))}
+        </ol>
+      </details>
+    );
+  }
+  return (
+    <>
+      {lay && (lay.kind === "label" || lay.kind === "image") ? (
+        <Suspense fallback={null}>
+          <QuestionFigure groupId={groupId} lectureId={d.lecture_id} figure={d.figure} layout={lay} />
+        </Suspense>
+      ) : null}
+      <details className="pb-options">
+        <summary className="a-small">האפשרויות</summary>
+        <ol className="a-stack a-small">
+          {d.options.map((o, i) => (
+            <li key={i} dir="rtl">
+              {form === "tap" ? `מספר ${o}` : <>{LETTERS[i]}. {richText(o, `o${d.id}${i}`)}</>}
+            </li>
+          ))}
+        </ol>
+      </details>
+    </>
+  );
+}
 
 /* ── Practice 2.0: הבנק נבנה (proposal/practice-2/mockups.html) ──
  *
@@ -189,9 +242,14 @@ export default function PracticeBank({ route, ctx }: ScreenProps<"practice">) {
 
   const partTitle = (idx: number) => progress.find((p) => p.part_idx === idx)?.title || `חלק ${idx + 1}`;
   const draftCard = (d: DraftRow) => {
-    const v = verdict(d, now);
-    const working = busy.has(d.id) || leased(d, now);
+    // A staged case is one card: its step 1 with every later step under it, kept or removed whole.
+    const steps = flags.qtypes && d.series ? pending.filter((x) => x.series === d.series).sort((a, b) => (a.step ?? 1) - (b.step ?? 1)) : [d];
+    if (steps[0].id !== d.id) return null;
+    const v = steps.map((x) => verdict(x, now)).find((x) => x.tone === "bad") ?? verdict(d, now);
+    const working = steps.some((x) => busy.has(x.id) || leased(x, now));
     const rewriting = d.check_state === "failed" && openBatches.some((b) => b.id === d.batch_id);
+    const staged = steps.length > 1 || Boolean(d.series);
+    const keepOk = steps.every((x) => keepable(x));
     return (
       <li key={d.id} className="a-card flat pb-draft" data-draft={d.id}>
         <div className="a-row between">
@@ -205,24 +263,23 @@ export default function PracticeBank({ route, ctx }: ScreenProps<"practice">) {
             ) : null}
           </span>
         </div>
-        {d.vignette.trim() ? (
-          <p className="a-small pb-vignette" dir="rtl">
-            {richText(d.vignette, `v${d.id}`)}
-          </p>
-        ) : null}
-        <p className="a-small pb-question" dir="rtl">
-          <b>{richText(d.question, `q${d.id}`)}</b>
-        </p>
-        <details className="pb-options">
-          <summary className="a-small">האפשרויות</summary>
-          <ol className="a-stack a-small">
-            {d.options.map((o, i) => (
-              <li key={i} dir="rtl">
-                {LETTERS[i]}. {richText(o, `o${d.id}${i}`)}
-              </li>
-            ))}
-          </ol>
-        </details>
+        {steps.map((x, k) => {
+          const lead = k > 0 && x.layout?.kind === "steps" ? Math.min(x.layout.lead, x.vignette.length) : 0;
+          return (
+            <div key={x.id} className="pb-step" data-step={x.step ?? 1}>
+              {staged ? <span className="a-chip pb-stepno">{`שלב ${x.step ?? k + 1} מתוך ${steps.length}`}</span> : null}
+              {x.vignette.slice(lead).trim() ? (
+                <p className="a-small pb-vignette" dir="rtl">
+                  {richText(x.vignette.slice(lead).trim(), `v${x.id}`)}
+                </p>
+              ) : null}
+              <p className="a-small pb-question" dir="rtl">
+                <b>{richText(x.question, `q${x.id}`)}</b>
+              </p>
+              <DraftBody d={x} groupId={ctx.group.id} />
+            </div>
+          );
+        })}
         {d.check_state === "failed" ? (
           <p className="a-small a-muted">{rewriting ? "נכתבת מחדש אוטומטית." : "הפותר העיוור ענה אחרת מהמפתח. אפשר לנסח אותה מחדש או להוריד."}</p>
         ) : d.check_state === "unchecked" ? (
@@ -230,12 +287,14 @@ export default function PracticeBank({ route, ctx }: ScreenProps<"practice">) {
         ) : null}
         {rewriting ? null : (
           <div className="a-row pb-actions">
-            <button type="button" className="a-btn" disabled={working || !keepable(d)} onClick={() => void act(d.id, () => keepDraft(d.id), "נוספה לבנק.")}>
+            <button type="button" className="a-btn" disabled={working || !keepOk} onClick={() => void act(d.id, () => keepDraft(d.id), staged ? "המקרה נוסף לבנק." : "נוספה לבנק.")}>
               ✓ להשאיר
             </button>
-            <button type="button" className="a-btn" disabled={working || d.check_state === "checking"} onClick={() => setRewordFor(d)}>
-              ↻ לנסח מחדש
-            </button>
+            {staged ? null : (
+              <button type="button" className="a-btn" disabled={working || d.check_state === "checking"} onClick={() => setRewordFor(d)}>
+                ↻ לנסח מחדש
+              </button>
+            )}
             <button type="button" className="a-btn ghost icon" aria-label="להוריד את השאלה" disabled={working} onClick={() => void act(d.id, () => removeDraft(d.id), "השאלה הורדה.")}>
               ✕
             </button>

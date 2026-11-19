@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   addComment,
   deleteComment,
@@ -45,6 +45,14 @@ import { Icon } from "./Icon";
 import SlideSheet from "./SlideSheet";
 import SummaryView, { headingId, outline, type BlockNotes } from "./SummaryView";
 import { QuestionsSheet, RoomBar, type FollowState } from "./Together";
+
+/** Question types: an older lecture's picture labels, from its own file (loads only when opened). */
+const GeoBackfill = lazy(() => import("./GeoBackfill"));
+/** Its pictures have no label geometry yet (GeoBackfill's needsGeo, without loading it). */
+const needsGeo = (l: Pick<Lecture, "slides">) => {
+  const figures = l.slides.flatMap((s) => s.figures ?? []);
+  return figures.length > 0 && !figures.some((f) => f.geo);
+};
 
 /* ── One lecture ──
  * The summary part by part: finished parts render, the part being written
@@ -260,6 +268,7 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
   const [size, setSize] = useState(readSize);
   const [tocOpen, setTocOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [geoOpen, setGeoOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [slideOpen, setSlideOpen] = useState<number | null>(null);
 
@@ -1011,6 +1020,11 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
               </div>
             ) : (
               <div className="a-row">
+                {flags.qtypes && needsGeo(lecture) ? (
+                  <button className="a-btn ghost small geo-open" onClick={() => setGeoOpen(true)}>
+                    לסמן תוויות בשרטוטים
+                  </button>
+                ) : null}
                 <button className="a-btn ghost small" onClick={() => setConfirmDelete(true)}>
                   מחיקת ההרצאה
                 </button>
@@ -1045,6 +1059,11 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
       ) : null}
       {slideOpen !== null ? (
         <SlideSheet lecture={lecture} slide={slideOpen} onClose={() => setSlideOpen(null)} onParagraph={toSlide} figureUrl={figureByPath} />
+      ) : null}
+      {geoOpen ? (
+        <Suspense fallback={null}>
+          <GeoBackfill lecture={lecture} onClose={() => setGeoOpen(false)} />
+        </Suspense>
       ) : null}
       {ext.overlay}
     </main>

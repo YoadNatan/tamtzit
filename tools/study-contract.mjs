@@ -366,8 +366,10 @@ for (const file of files) {
         : name.startsWith("COMMENT")
           ? "study_comments"
           : name.startsWith("Q_")
-            ? "study_questions" // practice.ts: Q_COLUMNS and Q_TYPES_COLUMNS (qColumns() picks one at run time)
-            : null;
+            ? "study_questions" // questionColumns.ts: Q_COLUMNS and Q_TYPES_COLUMNS (qColumns() picks one at run time)
+            : name.startsWith("QDRAFT_")
+              ? "study_question_drafts" // practice2.ts: QDRAFT_COLUMNS and QDRAFT_TYPES_COLUMNS (the flag picks one)
+              : null;
     if (table) checkSelect(file, table, text);
   }
 }
