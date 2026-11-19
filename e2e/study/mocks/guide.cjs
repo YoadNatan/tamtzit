@@ -94,6 +94,9 @@ const READS = new Set([
   // The quiz setup's own reads ("לפתוח מבחן קבוצתי"'s walk passes through it).
   "study_quiz_pool",
   "study_quiz_record",
+  // The library's course links (VITE_STUDY_COURSES) and the course page's head.
+  "study_courses_of",
+  "study_course_overview",
 ]);
 
 /** Whether a request writes to the group's data. */
