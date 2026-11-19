@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   groupOpenQuestions,
   groupReadMarks,
@@ -31,8 +31,6 @@ import { timeAgo } from "./Together";
  * link to the lecture, with the packages' chips beside it as links of their
  * own (review UX-14). Deleted lectures wait 30 days under "נמחקו לאחרונה". */
 
-const PrivacySheet = lazy(() => import("./Help").then((m) => ({ default: m.PrivacySheet })));
-
 const STATUS: Record<LectureRow["status"], { label: string; cls: string }> = {
   new: { label: "ממתין לכתיבה", cls: "a-chip" },
   outlining: { label: "מתכנן את הסיכום", cls: "a-chip busy" },
@@ -47,14 +45,6 @@ function formatDate(d: string | null): string {
   return `${Number(day)}.${Number(m)}.${y}`;
 }
 
-function privacySeen(): boolean {
-  try {
-    return localStorage.getItem("study-privacy-v1") === "1";
-  } catch {
-    return false;
-  }
-}
-
 export default function Library({ ctx }: { ctx: Ctx }) {
   const { group } = ctx;
   const [lectures, setLectures] = useState<LectureRow[] | null>(null);
@@ -63,7 +53,6 @@ export default function Library({ ctx }: { ctx: Ctx }) {
   const [reads, setReads] = useState<ReadMark[]>([]);
   const [questions, setQuestions] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
-  const [privacy, setPrivacy] = useState(false);
   const [query, setQuery] = useState("");
   const [parts, setParts] = useState<Array<{ lecture_id: string; idx: number; title: string }>>([]);
   const asksLeft = useAsksLeft(ctx);
@@ -146,7 +135,7 @@ export default function Library({ ctx }: { ctx: Ctx }) {
 
   const nameOf = (id: string) => people.find((p) => p.user_id === id)?.name ?? "";
 
-  const upload = () => (privacySeen() ? ctx.go({ v: "upload" }) : setPrivacy(true));
+  const upload = () => ctx.go({ v: "upload" });
 
   const restore = async (l: LectureRow) => {
     try {
@@ -330,12 +319,6 @@ export default function Library({ ctx }: { ctx: Ctx }) {
         </section>
       ) : null}
 
-      {privacy ? (
-        <Suspense fallback={null}>
-          {/* The sheet closes itself first; then each button goes on from the library. */}
-          <PrivacySheet kind="upload" onClose={() => setPrivacy(false)} onOk={() => ctx.go({ v: "upload" })} onMore={() => ctx.go({ v: "help" })} />
-        </Suspense>
-      ) : null}
     </main>
   );
 }

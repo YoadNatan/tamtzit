@@ -2,19 +2,14 @@ import { PLAN } from "../../../shared/study/lane";
 import { FLAME_LIT, FLAME_WINDOW, masteryWords, MINUTES } from "../../../shared/study/today";
 import { ENDS, type Ends, type Flags } from "./flags";
 
-/* ── Help and the privacy note, as data (spec §6.2; §12.7.5) ──
- * The rows and lines F renders (components/Help.tsx), each shown with its
- * flag, so a test reads them under every release's set (F-15). The copy is
- * the spec's §6.2 with the approved proposal's rows and lines: the meeting
- * design's §8.2, the fun design's §5.8 and the server design's §9.2, as
- * §12.7.5 changes them. The spec's rows on the live quiz (now "מבחן
- * קבוצתי"), "תיקון בסיכום", "תרגול", "אסוציאציות" and "ההתקדמות שלי
- * ותוכנית" are replaced; "כרטיסיות" and "לשאול את החומר" gain the server
- * design's sentences.
- *
- * The privacy note's quiz sentence is the meeting design's with §12.7.5's
- * two sentences in place of the clauses they restate (below three answers;
- * the race's points), so nothing is said twice.
+/* ── Help, as data (spec §6.2; §12.7.5) ──
+ * The rows F renders (components/Help.tsx), each shown with its flag, so a
+ * test reads them under every release's set (F-15). The copy is the spec's
+ * §6.2 with the approved proposal's rows: the meeting design's §8.2, the fun
+ * design's §5.8 and the server design's §9.2, as §12.7.5 changes them. The
+ * spec's rows on the live quiz (now "מבחן קבוצתי"), "תיקון בסיכום", "תרגול",
+ * "אסוציאציות" and "ההתקדמות שלי ותוכנית" are replaced; "כרטיסיות" and
+ * "לשאול את החומר" gain the server design's sentences.
  *
  * Where a document's line would break §6.0 or §12.7.6, the closest correct
  * words are used and said here: "עד שמישהו בודק" → "עד שבודקים", "מי
@@ -24,32 +19,18 @@ import { ENDS, type Ends, type Flags } from "./flags";
  * sees why); "למי שעוקב" (anchor.html's help line) → "למי שעוקבים"; a private card and the review home wait for in-app review, and
  * "the queue" for Today (the gating rule: lists wait for release 8).
  *
- * Each row and line says only what the build has (`ends`, flags.ts): until
- * Q's end is merged "תרגול" is the spec's §6.2 row word for word (no bet, no
- * autopsy, no two-flag hiding), and the privacy note has no practice line;
- * until C's end, "כרטיסיות" is the spec's row (no deck of one's own, no
- * private cards) with no cards line; and until section B, nothing says that
+ * Each row says only what the build has (`ends`, flags.ts): until Q's end is
+ * merged "תרגול" is the spec's §6.2 row word for word (no bet, no autopsy, no
+ * two-flag hiding); until C's end, "כרטיסיות" is the spec's row (no deck of
+ * one's own, no private cards); and until section B, nothing says that
  * questions and cards are written ahead. Release 1 ships none of the three.
- * The group quiz (release 2) says what its own section does; its privacy
- * sentence names "שאלות פתיחה" only with the meeting (section M) and the round's
- * trap card only with C's end, neither of which release 2 has. */
+ *
+ * The privacy note ("לאן החומר הולך", help's "פרטיות: מי רואה מה") was
+ * removed on 19 Nov 2026 at Yoad's request, with every way to it. */
 
 export type HelpRow = {
   title: string;
-  /** The row's text; null for the privacy note, which renders itself. */
-  text: string | null;
-  id?: string;
-};
-
-export type PrivacyLine = {
-  key: string;
-  /** A proper name at the head (rendered in <bdi>, left to right when Latin). */
-  name?: string;
-  /** The head's words after the name ("…:"). */
-  head: string;
   text: string;
-  /** The recordings line, marked before the first recording. */
-  recording?: true;
 };
 
 /** What W has shipped: the server writes the summary; "שיתוף" opens W1's sheet. */
@@ -315,7 +296,6 @@ export function helpRows(f: Flags, w: WritingHelp, ends: Ends = ENDS): HelpRow[]
       text: "מוסיפים להרצאה תמליל או קובץ שמע (במחשב, או בטלפון כשיש ספק תמלול). ההערות מההקלטה מופיעות בתיבות ״מההקלטה״, עם הזמן בהקלטה. אפשר להסתיר אותן. רק מי שהוסיפו הקלטה יכולים למחוק אותה.",
     },
     { title: "PDF ושיתוף", on: true, text: shareRow(f, w.devicePrint) },
-    { title: "פרטיות: מי רואה מה", on: true, id: "privacy", text: null },
     {
       title: "התקציב החודשי",
       on: true,
@@ -329,217 +309,4 @@ export function helpRows(f: Flags, w: WritingHelp, ends: Ends = ENDS): HelpRow[]
     },
   ];
   return rows.filter((r) => r.on).map(({ on: _on, ...r }) => r);
-}
-
-/** The museum's plaque by Claude (op "plaque", §12.5.U) is deferred: U-3
- *  shows the exhibit's own text instead, and sends nothing to Anthropic for
- *  it. The privacy note names it once the op is built. */
-export const PLAQUE_BUILT = false;
-
-/** The privacy note's lines shown under these flags, in order. */
-export function privacyLines(f: Flags, emailProvider: string, ends: Ends = ENDS): PrivacyLine[] {
-  // What Anthropic receives grows with each feature that sends something.
-  const sent = [
-    // With "לשאול" (K's end) the questions go with the group's answered threads, without names.
-    f.ask ? "ואת השאלות ששולחים ב״לשאול״ עם שאלות שהקבוצה כבר ענתה עליהן, בלי שמות" : "ואת השאלות ששולחים ב״לשאול״",
-    f.corrections && "ואת התיקון והשקף שצוטט כשבודקים תיקון מול השקף",
-    f.var && "ואת המחלוקות ששולחים לבדיקה מול השקפים",
-    f.wall && "ואת האסוציאציה ואת הפסקה כשבודקים מנצחת",
-    // The museum's plaque by Claude (op "plaque") is not built yet (U-3 deferred it): nothing is sent for it.
-    f.museum && PLAQUE_BUILT && "ואת השאלה וההסברים כשמבקשים הסבר לטעות נפוצה",
-    f.traps && "ושאלות שכותבים ובודקים מול השקפים",
-  ].filter((x): x is string => Boolean(x));
-  // "שאלות פתיחה" is the meeting's opening (section M), and a trap card is made by
-  // C's end: each sentence only once the build has it (release 2 has neither).
-  const quiz = f.quiz
-    ? " במבחן קבוצתי ״כולנו נגד המבחן״ רואים כמה בחרו בכל תשובה, בלי שמות; מה שסימנת והניקוד שלך גלויים רק לך. כשעונים פחות משלושה רואים רק כמה ענו, ומבחן של פחות משלושה לא מציג ציון לקבוצה. ב״מירוץ״ הנקודות כוללות את מה שסימנת, וגלויות רק לשחקני המירוץ, בתוך המשחק." +
-      (f.meeting ? " בשאלות הפתיחה רואים רק אם רוב הקבוצה צדקה." : "") +
-      (ends.C ? " כרטיסיית ׳טעות נפוצה׳ נוצרת רק כשלפחות 3 בחרו באותה תשובה, ונפתחת למחרת." : "")
-    : "";
-  const lines: Array<PrivacyLine & { on: boolean }> = [
-    {
-      key: "phone",
-      on: true,
-      head: "בטלפון שלך:",
-      text: join(
-        "המצגת נקראת כאן, במכשיר. הקובץ המקורי לא עולה לשום מקום: נשמרים רק הטקסט של השקפים ותמונות מוקטנות.",
-        f.cards && "קובץ ה-Anki נבנה בטלפון עצמו ולא עובר בשום שרת.",
-        f.guide && "מה שהמדריך כבר הראה, והצעדים שסומנו כבוצעו, נשמרים רק במכשיר הזה.",
-      ),
-    },
-    {
-      key: "supabase",
-      on: true,
-      name: "Supabase",
-      head: " (מסד הנתונים והאחסון):",
-      text: "שומר את הטקסט, התמונות, הסיכומים והתיקונים, התגובות, התמלילים, שאלות התרגול, הכרטיסיות, דפי המבחנים הקודמים וסימוני הקריאה. רק חברי הקבוצה יכולים לקרוא אותם. הסיכומים נכתבים רק דרך השרת: אי אפשר לשנות או למחוק חלק בסיכום ישירות מהטלפון. תשובות, ציונים, טעויות, חזרות על כרטיסיות, התקדמות ותוכנית למידה גלויים רק לבעלים שלהם מבין חברי הקבוצה.",
-    },
-    {
-      key: "anthropic",
-      on: true,
-      name: "Anthropic (Claude)",
-      head: ":",
-      text: `מקבלת את הטקסט והתמונות של השקפים, את התיקונים של הקבוצה, את התמליל כשמוסיפים הקלטה, את דפי המבחנים הקודמים כשמעלים אותם, ${sent.join(", ")}, כדי לכתוב עבור הקבוצה סיכומים, שאלות, כרטיסיות, אסוציאציות ותשובות. תשובות, ציונים והתקדמות לא נשלחים ל-Claude. לפי התנאים של Anthropic ל-API, המידע לא משמש לאימון המודלים.`,
-    },
-    {
-      // package B (decision 2 of 17 Nov 2026): the summary goes to Anthropic once more, to read its points
-      key: "ahead",
-      on: f.practice && ends.B,
-      head: "קריאה מראש:",
-      text: "אחרי שהסיכום נכתב בשרת, הוא נשלח ל-Anthropic כדי לקרוא ממנו את הנקודות שצריך לדעת, פעם אחת לכל הקבוצה. שום דבר פרטי לא נשלח: לא תשובות, לא שמות ולא מי ביקש.",
-    },
-    {
-      key: "vercel",
-      on: true,
-      name: "Vercel",
-      head: " (השרת של האפליקציה):",
-      text: "מעביר את הבקשות בין האפליקציה, Supabase ו-Claude ומכין את קובצי ה-PDF. הוא לא שומר את החומר אצלו.",
-    },
-    { key: "fonts", on: true, name: "Google Fonts", head: ":", text: "הגופנים נטענים מגוגל. לא עובר שם שום חומר." },
-    {
-      key: "recordings",
-      on: f.recordings,
-      head: "הקלטות:",
-      text: "התמליל כולל כל מה שנשמע בהקלטה, גם שאלות והערות של אחרים בכיתה. במחשב, קובץ שמע מתומלל במכשיר: המודל יורד מ-Hugging Face, ואליו לא נשלח שום חומר.",
-      recording: true,
-    },
-    {
-      key: "email",
-      on: f.account,
-      name: emailProvider,
-      head: ":",
-      text: `כתובת המייל נשמרת רק ב-Supabase לצורך כניסה, ולא מוצגת לקבוצה. הקודים נשלחים דרך ${emailProvider}.`,
-    },
-    {
-      key: "group",
-      on: true,
-      head: "מי רואה מה בקבוצה:",
-      text:
-        "ההתקדמות, הציונים, הטעויות ותוכנית הלמידה גלויים רק לך מבין חברי הקבוצה." + quiz + (f.marathons ? " מפגשי למידה, ומי בפנים בכל אחד מהם, גלויים לכל הקבוצה." : ""),
-    },
-    {
-      // fun design §5.8, with §12.7.5's (pulse) sentences
-      key: "pulse",
-      on: f.pulse,
-      head: "ספירה בלי שמות:",
-      text: join(
-        "פעם בלילה סופרים תשובות, סימוני ׳על בטוח׳, שכחות של כרטיסיות וסימוני ׳לא ברור׳, רק עד תחילת היום, בלי שמות, ומציגים רק מה שלפחות 3 מכם תרמו: ״מה קשה לקבוצה״ במילים (קשה · בינוני · יושב טוב, בלי מספרים), שאלות שעולות לתרגול ולמבחן הקבוצתי, ׳דרושה אסוציאציה׳ ופסקאות שקשות לקבוצה.",
-        f.museum && "טעות נפוצה מופיעה רק למחרת ואומרת ׳כמה מכם׳, אף פעם לא כמה או מי.",
-        f.museum && "כשעוד אין טעות נפוצה חדשה, מוצג רק כמה תשובות שגויות ׳על בטוח׳ חסרות לבאה, בלי איזו שאלה ובלי מי.",
-        f.boss && "באתגר קבוצתי טעות מורידה נקודות לקבוצה, וסבב עם פחות משלושה עונים לא נספר.",
-        f.boss && "ליד הנושאים של האתגר מוצג כמה נושאים קשים יש וכמה תשובות בערך חסרות לנושא הבא, בלי מי.",
-        "כשעוד אין 3, מוצג רק כמה חסר (״עוד אדם אחד וזה נפתח״), וזה אומר שאחד או שניים כבר תרגלו, בלי מי.",
-        "בקבוצה קטנה עדיין אפשר לנחש. אפשר לצאת מהספירה ב׳שלי׳.",
-        // decision 1 (17 Nov 2026): no saved accounts, so a second phone is a second member
-        "נספרים רק מי שהצטרפו לקבוצה לפני שבוע לפחות. אין חשבונות: כל טלפון שהצטרף הוא חבר בקבוצה, ולכן מי שהצטרפו משני טלפונים נספרים פעמיים.",
-        `מי שיוצאים מהספירה לא רואים את ״מה קשה לקבוצה״${f.museum ? ", את הטעויות הנפוצות" : ""}${f.boss ? " ואת הנושאים של האתגר" : ""}, עד הספירה הבאה שסופרת אותם.`,
-      ),
-    },
-    {
-      // §12.7.5's (meeting) line, which replaces the meeting design's
-      key: "meeting",
-      on: f.meeting,
-      head: "בפגישה:",
-      // The pre-guess and catch-up are M-2's (VITE_STUDY_GUESS): their sentences only with it.
-      text: join(
-        "׳לא ברור׳ נשמר בלי שם, בלי טקסט, וגלוי רק לך; במסך ההקראה מופיעה רק ספירה של אחרים, מ-3 לחיצות, ורק בזמן הקראה חיה.",
-        f.guess && "ניחושים לפני ההקראה נשמרים רק אצלך; הקבוצה רואה רק ׳רוב הקבוצה׳, מ-3 מנחשים. השלמה מסמנת ׳קראו׳ רק למחרת, בשעת הפגישה.",
-        f.guess ? "מי השתתפו בפגישה לא מוצג לאף אחד: זה משמש רק כדי להציע לך השלמה." : "מי השתתפו בפגישה לא מוצג לאף אחד.",
-      ),
-    },
-    {
-      // meeting design §8.2, as §12.7.5 changes it
-      key: "var",
-      on: f.var,
-      head: "מחלוקות:",
-      text: "הטענות מופיעות עם השם; הגיבוי לצדדים בלי שמות, והספירה מוצגת אחרי שמבקשים בדיקה מול השקפים, מ-3 מגבים. הבדיקה שולחת ל-Claude את שתי הטענות (בלי השמות), את החלק בסיכום ואת השקפים שצוטטו. ׳עדכון׳ על תיקון, ומה שגיבית, גלויים רק לך.",
-    },
-    {
-      // fun design §5.8, with §12.7.5's (wall) sentence
-      key: "wall",
-      on: f.wall,
-      head: "קיר האסוציאציות:",
-      text: "מה שמעלים לקיר גלוי לכל הקבוצה, בשם או בלי שם. בלי שם, השם נשמר רק כדי שאפשר יהיה למחוק, ולניהול יש אליו גישה טכנית. מי הצביעו לא מוצג, רק הסכום. קרדיט בשם מופיע רק אחרי אישור של מי שמקבלים אותו. צילומים נשמרים ב-Supabase ולא נשלחים ל-Claude. תמונה בקיר מוחקים רק מי שהעלו אותה.",
-    },
-    {
-      // meeting design §8.2
-      key: "today",
-      on: f.today,
-      head: "היום:",
-      text: join(
-        "התור, ימי הלמידה וההשלמה גלויים רק לך.",
-        f.needsMe && "״הקבוצה צריכה אותך״ כבוי עד שמפעילים אותו; רק מי שנבחרו רואים שאלה, ואף אחד אחר לא רואה למה, מי הפעילו או מי נבחרו.",
-      ),
-    },
-    {
-      // server design §9.2
-      key: "practice",
-      on: f.practice && ends.Q,
-      head: "בתרגול:",
-      text: "התשובות, מה שסימנת והטעויות נשמרים רק אצלך. דגל על שאלה גלוי לקבוצה, עם השם.",
-    },
-    {
-      key: "cards",
-      on: f.cards && ends.C,
-      head: "בכרטיסיות:",
-      text: "החפיסה שלך, הכרטיסיות הפרטיות מהטעויות והזיכרון של כל כרטיסייה גלויים רק לך.",
-    },
-    {
-      // meeting design §5 (N): what the chips count is the group's; the states are hers
-      key: "anchor",
-      on: f.anchor,
-      head: "מתחת לפסקה:",
-      text: "כמה שאלות, כרטיסיות ותגובות יש על כל פסקה גלוי לכל הקבוצה, בלי שמות. ׳טעית כאן׳ והמצב שלך בכל שאלה וכרטיסייה בלשונית ״תרגול״ גלויים רק לך.",
-    },
-    {
-      key: "progress",
-      on: f.progress,
-      head: "בהתקדמות:",
-      text: join(
-        "המוכנות, הטעויות (גם ׳על בטוח׳) ומה שסימנת גלויים רק לך.",
-        // U's nightly count exists only with the pulse (§12.5.U)
-        f.pulse && "לקבוצה הם נספרים רק בספירה הלילית בלי שמות, מ-3 לפחות, ורק אם לא יצאת ממנה.",
-      ),
-    },
-    {
-      key: "traps",
-      on: f.traps,
-      head: "שאלה משלי:",
-      text: join(
-        "הטיוטה גלויה רק לך עד שהיא עוברת בדיקה; בבנק היא מופיעה בלי שם, והשם מופיע אחרי שנשאלה במבחן קבוצתי.",
-        "תרגול של השאלה לא חושף את השם, רק מבחן קבוצתי. המונה של השאלות שלך גלוי רק לך.",
-      ),
-    },
-    {
-      key: "blankTable",
-      on: f.blankTable,
-      head: "טבלה ריקה:",
-      text: "מה שממלאים והתאים שטעית בהם נשמרים רק אצלך, ככרטיסייה פרטית. הטבלה לא נשלחת ל-Claude.",
-    },
-    {
-      key: "plan",
-      on: f.groupPlan,
-      head: "תוכנית עד המבחן:",
-      text: `המסלול הקבוצתי ושינוייו גלויים לקבוצה עם שמות; המסלול שלך גלוי רק לך. כמה תרגלו כל הרצאה נספר בלי שמות, ומשפיע על התוכנית רק מ-${PLAN.FLOOR} מתרגלים; עד אז כתוב רק כמה חסר.`,
-    },
-    {
-      key: "invite",
-      on: true,
-      head: "ההזמנה:",
-      text: "כל מי שמקבלים את קישור ההזמנה יכולים להצטרף לקבוצה. מי שפתחו את הקבוצה יכולים להחליף את הקוד ולהסיר חברים, ב״שלי״.",
-    },
-    {
-      key: "admin",
-      on: true,
-      head: "ניהול האפליקציה:",
-      text: "יואד. לניהול יש גישה טכנית לכל המידע במסד הנתונים, ואין בה שימוש למידע אישי.",
-    },
-    {
-      key: "share",
-      on: true,
-      head: "כשמשתפים:",
-      text: "קישור לסיכום נפתח רק לחברי הקבוצה. קובץ PDF שנשלח בוואטסאפ יוצא מהאפליקציה: כל מי שמקבלים אותו יכולים לקרוא אותו.",
-    },
-  ];
-  return lines.filter((l) => l.on).map(({ on: _on, ...l }) => l);
 }

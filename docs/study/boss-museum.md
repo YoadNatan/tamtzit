@@ -159,8 +159,7 @@ is needed, from real counts:
 - **The plaque by Claude** (op `plaque`, `PLAQUE_SYSTEM`, about $0.01 an
   exhibit): not built. The museum shows the exhibit's own text instead (the
   trap option in quotes and "אמנים: כמה מכם. חומרים: ביטחון עצמי, שקף n."),
-  so nothing is sent to Anthropic for the museum; `helpCopy.ts`'s
-  `PLAQUE_BUILT` keeps the privacy note from saying it is. The SQL for its
+  so nothing is sent to Anthropic for the museum. The SQL for its
   hold and write is in (`study_trap_plaque_begin`, checked: server key only,
   `busy`, `checked`); the op's server seed still answers 501 "not built".
   Its prompt needs Yoad's live check before its flag, as every new prompt.

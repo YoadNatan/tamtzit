@@ -224,8 +224,7 @@ main.join {
   letter-spacing: 0.3em;
   text-align: center;
 }
-.join-signin,
-.join-privacy {
+.join-signin {
   justify-self: start;
 }
 
@@ -338,9 +337,6 @@ main.join {
   width: 1px;
   height: 1px;
   opacity: 0;
-}
-.privacy-line a {
-  font-weight: 600;
 }
 
 /* ═════════════ the reader ═════════════ */
@@ -826,7 +822,7 @@ main.join {
   background: var(--paper);
 }
 
-/* Sheets: the slide, the privacy note. */
+/* Sheets: the slide. */
 .slide-body {
   display: grid;
   gap: var(--sp-2);
@@ -843,21 +839,6 @@ main.join {
 }
 .sheet-actions {
   padding-top: var(--sp-2);
-}
-.privacy-note {
-  display: grid;
-  gap: var(--sp-3);
-}
-.privacy-note ul {
-  display: grid;
-  gap: var(--sp-4);
-  margin: 0;
-  padding-inline-start: 1.1em;
-}
-.privacy-note .is-highlight {
-  padding: var(--sp-2) var(--sp-4);
-  border-radius: var(--r-sm);
-  background: var(--warn-bg);
 }
 
 /* ═════════════ "יחד", "שלי", help ═════════════ */

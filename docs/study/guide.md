@@ -124,7 +124,7 @@
 - **Flags and routes:**
   - `shared/study/flags.ts`: `guide`. `requiredSchema` is unchanged.
   - `src/study/lib/route.ts`: `{ v: "try"; s?: "b" }`. It is immersive. Without the flag it becomes the library with no notice.
-- **Copy:** `helpCopy.ts` adds the row "המדריך" and one sentence on the privacy note's phone line, both only with the flag.
+- **Copy:** `helpCopy.ts` adds the row "המדריך", only with the flag. (Its sentence on the privacy note went with the note, 19 Nov 2026.)
 - **Tests:**
   - `src/study/lib/guide.test.ts`
   - Additions to `route.test.ts` and `helpCopy.test.ts`.

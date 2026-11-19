@@ -12,14 +12,6 @@ import { sessionCounts } from "./practice2";
 
 let cache: { group: string; at: number; facts: Promise<Facts> } | null = null;
 
-function privacySeen(): boolean {
-  try {
-    return localStorage.getItem("study-privacy-v1") === "1";
-  } catch {
-    return false;
-  }
-}
-
 export function guideFacts(ctx: Ctx, fresh = false): Promise<Facts> {
   if (!fresh && cache && cache.group === ctx.group.id && Date.now() - cache.at < 20_000) return cache.facts;
   const facts = (async (): Promise<Facts> => {
@@ -31,7 +23,7 @@ export function guideFacts(ctx: Ctx, fresh = false): Promise<Facts> {
       const counts = await sessionCounts(ready.slice(0, 20)).catch(() => []);
       practiceLecture = ready.find((id) => counts.some((c) => c.lecture_id === id && c.n > 0)) ?? null;
     }
-    return { lectures: lectures.length, ready, writing, members: people.length, practiceLecture, queue: null, serverWrites: writingHelp().serverWrites, privacySeen: privacySeen() };
+    return { lectures: lectures.length, ready, writing, members: people.length, practiceLecture, queue: null, serverWrites: writingHelp().serverWrites };
   })();
   cache = { group: ctx.group.id, at: Date.now(), facts };
   facts.catch(() => {

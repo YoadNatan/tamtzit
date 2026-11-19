@@ -35,11 +35,9 @@ export type Facts = {
   queue: number | null;
   /** The summary is written on the server (W's slot): the upload can be left. */
   serverWrites: boolean;
-  /** This device already saw the privacy note before an upload. */
-  privacySeen: boolean;
 };
 
-export const NO_FACTS: Facts = { lectures: 0, ready: [], writing: 0, members: 0, practiceLecture: null, queue: null, serverWrites: false, privacySeen: false };
+export const NO_FACTS: Facts = { lectures: 0, ready: [], writing: 0, members: 0, practiceLecture: null, queue: null, serverWrites: false };
 
 /* ─────────────────────────── the device's memory ─────────────────────────── */
 
@@ -465,14 +463,13 @@ export function walkOf(id: WalkId, f: Flags, x: Facts): Walk | null {
       return f.corrections
         ? { id, title: "לתקן טעות בסיכום", steps: readSteps(f, x, "״תיקון״ מחכה לאישור מהקבוצה, ואפשר לבטל אותו. שום דבר לא נשלח עד שלוחצים לשלוח.") }
         : null;
-    case "upload": {
-      const first = x.privacySeen ? "מכאן מעלים." : "מכאן מעלים. בפעם הראשונה תופיע הערה קצרה על פרטיות.";
+    case "upload":
       return {
         id,
         title: "להעלות הרצאה",
         steps: [
           toLibrary(f, "ההרצאות והעלאה בספרייה."),
-          { at: onLibrary, place: "הספרייה", go: { v: "library" }, target: sel(T.uploadButton), say: first, until: "route" },
+          { at: onLibrary, place: "הספרייה", go: { v: "library" }, target: sel(T.uploadButton), say: "מכאן מעלים.", until: "route" },
           { at: onUpload, place: "העלאה", go: { v: "upload" }, target: sel(T.drop), say: "בוחרים pptx או PDF.", until: "select", select: T.uploadForm },
           { at: onUpload, place: "העלאה", go: { v: "upload" }, target: sel(T.uploadForm), say: "השם, המרצה והקורס הם מה שהקבוצה תראה בספרייה.", until: "next" },
           {
@@ -486,7 +483,6 @@ export function walkOf(id: WalkId, f: Flags, x: Facts): Walk | null {
           },
         ],
       };
-    }
     case "practice": {
       if (!f.practice || !x.practiceLecture) return null;
       const l = x.practiceLecture;

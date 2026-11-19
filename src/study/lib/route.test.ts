@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ENDS, flagsFrom, requiredSchema, type Ends, type Flags } from "./flags";
-import { helpRows, privacyLines } from "./helpCopy";
+import { helpRows } from "./helpCopy";
 import { afterReading, allowed, BACK_LABEL, lectureChips, meLinks, NOTICE, parseRoute, practiceTab, routeUrl, screenKey, tabLinks, tabOf, type Route } from "./route";
 
 /* F-3: routes (spec §5.2; §12.2.1). Every URL in §1 of every design, in the
@@ -224,7 +224,7 @@ test("old forms, bad ids, dates, slides and values are dropped, and land somewhe
   assert.deepEqual(parseRoute(`?l=${ID}&slide=1000`), { v: "lecture", l: ID });
   assert.deepEqual(parseRoute("?v=nowhere"), { v: "library" }, "unknown v");
   assert.deepEqual(parseRoute(`?v=nowhere&l=${ID}`), { v: "library" });
-  assert.deepEqual(parseRoute("?v=help", "#privacy"), { v: "help" });
+  assert.deepEqual(parseRoute("?v=help", "#howto"), { v: "help" });
   assert.deepEqual(parseRoute(`?v=ask&first=${"א".repeat(501)}`), { v: "ask" }, "first is at most 500 characters");
   assert.deepEqual(parseRoute(`?v=practice&s=${"x".repeat(201)}`), { v: "practice" }, "s is at most 200 characters");
   assert.deepEqual(parseRoute(`?v=practice&n=15`), { v: "practice" });
@@ -687,8 +687,7 @@ test("F's words promise a return tomorrow only where something brings it back (d
   ]) {
     const f = flagSet([...names]);
     const words = [
-      ...helpRows(f, { serverWrites: true, devicePrint: true }, ends).flatMap((r) => [r.title, r.text ?? ""]),
-      ...privacyLines(f, "ספק המייל", ends).flatMap((l) => [l.head, l.text]),
+      ...helpRows(f, { serverWrites: true, devicePrint: true }, ends).flatMap((r) => [r.title, r.text]),
       ...tabLinks(f).map((t) => t.label),
       ...lectureChips(ID, f).map((c) => c.label),
       ...meLinks(f).map((m) => m.label),
@@ -702,7 +701,7 @@ test("F's words promise a return tomorrow only where something brings it back (d
   for (const names of [R8, [...R1, "PROGRESS"]]) {
     const f = flagSet(names);
     assert.ok(f.mistakes);
-    assert.ok(helpRows(f, { serverWrites: true, devicePrint: true }, ALL_ENDS).some((r) => PROMISE.test(r.text ?? "")), `${names.join(",")}: help promises the return`);
+    assert.ok(helpRows(f, { serverWrites: true, devicePrint: true }, ALL_ENDS).some((r) => PROMISE.test(r.text)), `${names.join(",")}: help promises the return`);
   }
   // The pattern is not empty.
   assert.ok(PROMISE.test("השאלה חוזרת אליך מחר.") && PROMISE.test("טעות · ׳נראה לי׳ חוזרת מחר בניסוח אחר"));

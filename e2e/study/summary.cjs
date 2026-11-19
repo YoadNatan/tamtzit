@@ -2,8 +2,8 @@
 // onto the shared mock (spec §8.3, F-1): join from an invite link, upload the
 // synthetic deck, the outline and three parts written (streamed), figures,
 // direction, the table of contents, back to the library. What the shell
-// changes is accounted for (review FE-18): the script marks the privacy
-// note as seen before the first upload, and finds "יציאה" under "שלי".
+// changes is accounted for (review FE-18): the script finds "יציאה" under
+// "שלי".
 //
 //   VITE_SUPABASE_URL=https://mock.supabase.test VITE_SUPABASE_ANON_KEY=mock-anon-key \
 //     npx vite build --outDir <dist>
@@ -57,8 +57,7 @@ const flags = flagSetOf();
     steps.urlAfterJoin = page.url().replace(mock.base, "");
     a11y.push(...(await snap(page, out, "summary-1-library-empty")));
 
-    // 2. upload the synthetic deck (the privacy note is marked seen first: F-1)
-    await page.evaluate(() => localStorage.setItem("study-privacy-v1", "1"));
+    // 2. upload the synthetic deck
     await page.getByRole("button", { name: "העלאת הרצאה ראשונה" }).click();
     await page.locator('input[type="file"]').setInputFiles(deck);
     await page.getByText(/20 שקפים/).waitFor({ timeout: 30000 });

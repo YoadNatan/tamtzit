@@ -60,7 +60,7 @@ const SETS: Array<[string, string[]]> = [
   ["quiz without the meeting", ["QUESTIONS", "QUIZ"]],
 ];
 const flagSet = (names: string[]): Flags => flagsFrom(Object.fromEntries([...names, "GUIDE"].map((n) => [`VITE_STUDY_${n}`, "1"])));
-const FULL: Facts = { lectures: 3, ready: [ID], writing: 1, members: 2, practiceLecture: ID, queue: 4, serverWrites: true, privacySeen: false };
+const FULL: Facts = { lectures: 3, ready: [ID], writing: 1, members: 2, practiceLecture: ID, queue: 4, serverWrites: true };
 const WALKS: WalkId[] = ["read", "upload", "practice", "invite", "today", "group", "cards", "correct", "readaloud", "quizopen", "meeting", "ask", "readmark"];
 const ROUTES: Route[] = [
   { v: "today" },

@@ -17,7 +17,7 @@ import "../styles/plan.css";
  * The list: the group's marathons that are not over, with who is in. One
  * marathon: its run-of-show (the time, the block, "עכשיו" on the step on
  * screen), "אני בפנים · אולי · לא הפעם", who is in by name (marathons and
- * who is in are the group's, help's privacy line), and "להתחיל" / "הבלוק
+ * who is in are the group's), and "להתחיל" / "הבלוק
  * הבא" while it is on (any member moves it; two taps at once move it once).
  * new / edit: a title, a day and an hour, how long, the lectures; the
  * run-of-show is built from them. A day of the group's plan (package G)

@@ -4,25 +4,20 @@ import { createLecture, type Group, type Lecture } from "../lib/api";
 import { BankAfterUpload } from "../features/bank";
 import { afterUpload, uploadNote } from "../features/writing";
 import type { Ctx } from "../features/types";
-import { PrivacyNoteSheet } from "./Help";
 import { BackLink, Head } from "./Shell";
 import { guideMark } from "../lib/guideMark";
 import { mimeFor, shrinkImage } from "../lib/images";
 import { readPdf, ReadError, type PdfDeck } from "../lib/pdf";
 import { readPptx, type Deck, type Slide } from "../lib/pptx";
-import { APP_PATH } from "../lib/route";
 
 /* ── Adding a lecture ──
  * The deck is read right here in the browser (nothing big leaves the phone
  * except shrunken pictures), then the slides and pictures are saved for the
- * group and the summary starts. A line under the picker says what is kept
- * and who sees it (spec §6.2); its link shows the whole note over the form,
- * so a deck already read and the fields already typed stay. W's slot can
- * replace the saving line and queue the server writer once the slides are
- * saved; then B's slot opens the lecture (§12.2.3). It asks nothing: Yoad's
- * decision 2 of 17 Nov 2026 removed "להכין גם שאלות וכרטיסיות?" (no question or
- * card is written automatically; the points to know are read after the
- * summary, on the server). */
+ * group and the summary starts. W's slot can replace the saving line and queue the
+ * server writer once the slides are saved; then B's slot opens the lecture
+ * (§12.2.3). It asks nothing: Yoad's decision 2 of 17 Nov 2026 removed
+ * "להכין גם שאלות וכרטיסיות?" (no question or card is written automatically;
+ * the points to know are read after the summary, on the server). */
 
 type Props = {
   group: Group;
@@ -57,7 +52,6 @@ export default function Upload({ group, courses, ctx }: Props) {
   const [error, setError] = useState("");
   /** Small print under a reading error: the build and where it failed, for a screenshot. */
   const [detail, setDetail] = useState("");
-  const [note, setNote] = useState(false);
   const [saved, setSaved] = useState<Lecture | null>(null);
 
   const pick = async (file: File | undefined) => {
@@ -178,26 +172,6 @@ export default function Upload({ group, courses, ctx }: Props) {
           </span>
         )}
       </label>
-      <p className="a-small a-muted privacy-line">
-        הקובץ נקרא בטלפון. נשמרים רק הטקסט ותמונות מוקטנות, והם נשלחים ל-Claude לכתיבת הסיכום.
-        {/* While the slides are saved, the screen only waits for them (no sheet over it). */}
-        {progress ? null : (
-          <>
-            {" "}
-            <a
-              href={`${APP_PATH}?v=help#privacy`}
-              onClick={(e) => {
-                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // a new tab stays a link
-                e.preventDefault();
-                setNote(true);
-              }}
-            >
-              מי רואה את הקבצים?
-            </a>
-          </>
-        )}
-      </p>
-      {note ? <PrivacyNoteSheet onClose={() => setNote(false)} /> : null}
       {saved ? (
         // The finished form is replaced in history: Back from the lecture goes where Upload came from.
         <BankAfterUpload ctx={ctx} lecture={saved} onDone={() => ctx.go({ v: "lecture", l: saved.id }, { replace: true })} />

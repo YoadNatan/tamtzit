@@ -17,7 +17,7 @@ was, so that new copy stays plain.
   medical**: lectures, questions, cards, summaries and the AI prompts' medical
   instructions are not copy and are untouched.
 - **One term per concept**, everywhere: screens, sheets, toasts, empty and
-  error states, help, the privacy note, the guide, server-made titles and the
+  error states, help, the guide, server-made titles and the
   route's Back words. The table below is the list.
 - **Short and friendly.** Plural, gender-neutral forms where the app already
   uses them ("מי שיוצאים מהספירה", "לא הצלחתם?").
@@ -106,7 +106,7 @@ updates old rows where only a title changes, and is still re-runnable:
 
 ## The spec's sentences, as said now
 
-The unit tests hold help, the privacy note, failText and Back's words to the
+The unit tests hold help, failText and Back's words to the
 spec's own sentences (and to `DECISIONS-2026-11-17.md` where a decision
 reworded one). Where this copy pass rewords such a sentence, the tests read
 the new wording from this table (`helpCopy.test.ts`, `failText.test.ts`,

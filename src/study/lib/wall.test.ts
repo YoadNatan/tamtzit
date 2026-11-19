@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
 import { withAssociations, type CardRow } from "./anki";
-import { helpRows, privacyLines } from "./helpCopy";
+import { helpRows } from "./helpCopy";
 import { flagsFrom, requiredSchema } from "./flags";
 import { failText } from "./failText";
 import { fitSize, MAX_BYTES, MAX_SIDE } from "./photo";
@@ -172,12 +172,10 @@ test("the flag: VITE_STUDY_WALL alone; it needs section J at 1; ?v=wall is יח�
   assert.deepEqual(allowed({ v: "wall", l: L, t: "needed" }, on).route, { v: "wall", l: L, t: "top" }, "דרושות needs the pulse");
 });
 
-test("help and privacy: the wall's rows show with the flag, and say what is the group's and what is not", () => {
+test("help: the wall's row shows with the flag", () => {
   const on = flagsFrom({ VITE_STUDY_WALL: "1" });
   const W = { serverWrites: true, devicePrint: true };
   const row = helpRows(on, W).find((r) => r.title === "קיר האסוציאציות");
-  assert.ok(row && row.text?.includes("נשארו היום") && row.text.includes("בלי עלות"), "the drafts' daily 5, and a saved paragraph's free");
+  assert.ok(row && row.text.includes("נשארו היום") && row.text.includes("בלי עלות"), "the drafts' daily 5, and a saved paragraph's free");
   assert.ok(!helpRows(flagsFrom({}), W).some((r) => r.title === "קיר האסוציאציות"));
-  const p = privacyLines(on, "ספק המייל").find((l) => l.key === "wall");
-  assert.ok(p && p.text.includes("בלי שם, השם נשמר רק כדי שאפשר יהיה למחוק") && p.text.includes("מי הצביעו לא מוצג"));
 });

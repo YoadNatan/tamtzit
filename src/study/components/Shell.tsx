@@ -2,7 +2,7 @@ import { Children, useEffect, useLayoutEffect, useRef, useState, type MouseEvent
 import { groupCode, groupLive, lectureTitles, schemaReady, type LiveReader } from "../lib/api";
 import { flags } from "../lib/flags";
 import { guideMark } from "../lib/guideMark";
-import { APP_PATH, BACK_LABEL, routeUrl, shareUrl, tabLinks, tabOf, type Route, type Tab } from "../lib/route";
+import { BACK_LABEL, routeUrl, shareUrl, tabLinks, tabOf, type Route, type Tab } from "../lib/route";
 import { GuideButton, GuideSlot } from "../features/guide";
 import { MarathonBannerLine } from "../features/progress";
 import { QuizBannerLine } from "../features/quiz";
@@ -176,18 +176,13 @@ export function placeNow(): Place {
   return { scrollY: window.scrollY, anchor: el?.dataset.anchor, top: el?.getBoundingClientRect().top };
 }
 
-/** An in-app push to a URL the router reads back (help's #privacy, which a
+/** An in-app push to a URL the router reads back (help's #howto, which a
  *  Route cannot carry): the screen being left keeps its place, as go() keeps
  *  it, and Back returns to it. */
 export function pushUrl(url: string, from: string): void {
   history.replaceState({ ...(history.state ?? {}), place: placeNow() }, "");
   history.pushState({ study: true, from }, "", url);
   window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
-}
-
-/** Opens help at the privacy note (Me, Join), as an in-app push. */
-export function openPrivacy(from: string): void {
-  pushUrl(`${APP_PATH}?v=help#privacy`, from);
 }
 
 /* ── Sheets (§5.1: sheets keep today's { studySheet: true } history entries) ──

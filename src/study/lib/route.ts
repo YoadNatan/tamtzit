@@ -27,7 +27,7 @@ export type Route =
   | { v: "today"; run?: true } // T: "/" once flags.today; ?v=today is its alias; run=1 the session
   | { v: "library" } // explicit from F1Δ on (?v=library)
   | { v: "upload" }
-  | { v: "help" } // #privacy scrolls to the note
+  | { v: "help" } // #howto scrolls to the guide's "איך עושים…?"
   | { v: "lecture"; l: string; at?: At; slide?: number; mk?: string; read?: true; follow?: true }
   | { v: "practice"; l?: string; s?: string; n?: "5" | "10" | "20" | "all"; x?: PracticeStep; r?: string }
   //   s: l.<lecture> · c.<course> · m (my mistakes) · m.<lecture> · t.<topic key> · e.<exam> · q.<quiz> (a live quiz's questions)

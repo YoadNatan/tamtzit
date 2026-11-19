@@ -19,9 +19,3 @@ export const REQUIRED_SCHEMA: Record<string, number> = requiredSchema(flags);
 
 /** "≈ ₪" beside spend figures, labelled "בערך"; Yoad updates it. */
 export const ILS_PER_USD = 3.65;
-
-/** The service that sends sign-in codes, as the privacy note names it (§6.2,
- *  its account line, shown with `account`). Yoad writes its name here when
- *  D18 is decided (for example "Resend"), before VITE_STUDY_ACCOUNT goes on;
- *  until then the note says "ספק המייל". */
-export const EMAIL_PROVIDER = "ספק המייל";

@@ -111,7 +111,7 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
   try {
     // ── A1: an upload with the server on ──
     db.uploadDelayMs = 600; // the saving line stays long enough to read
-    const { page } = await mock.open(browser, "שוהם", { storage: { "study-privacy-v1": "1", "study-server-on": "1" } });
+    const { page } = await mock.open(browser, "שוהם", { storage: { "study-server-on": "1" } });
     await page.clock.install();
     await page.goto(`${mock.base}/${flags.today ? "?v=library" : ""}`); // with Today's tabs the library is its own screen
     await page.getByRole("button", { name: /העלאת הרצאה/ }).first().click();

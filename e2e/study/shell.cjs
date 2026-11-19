@@ -3,8 +3,8 @@
 // restores / and the scroll, and its words name where it goes; ?at=
 // and ?slide= mark a paragraph; Noa's "להקריא לקבוצה" shows Shoham's banner
 // line (one line, "+1" when a quiz line is also there), and "לעקוב" opens the
-// lecture following; the privacy sheet before the first upload only; help's
-// #privacy; Join's "מה נשמר ואיפה" signed out; "נמחקו לאחרונה" and "שחזור";
+// lecture following; the upload screen at once, its form inside the screen;
+// help; Join from the invite link; "נמחקו לאחרונה" and "שחזור";
 // "יחד" and "שלי"; the slide sheet; the schema gate; light and dark, 390 and
 // 360 px (a11y.cjs at every step).
 //
@@ -16,10 +16,10 @@
 //
 // And what the F1 reviews found, so it stays fixed: a sheet closed by Back
 // leaves the screen where it is; "לפסקה בסיכום" marks in place, every time,
-// and leaves one entry for the reader; a route that is off never mounts; the
-// privacy sheet closes by ✕, the backdrop, Escape and Back, keeps focus and
-// covers the tab bar; the note over the upload form keeps the form; Join's
-// code survives help; the back arrows' words; the members' confirm.
+// and leaves one entry for the reader; a route that is off never mounts; a
+// sheet closes by ✕, the backdrop, Escape and Back and keeps focus; the back
+// arrows' words; the members' confirm. The privacy note ("לאן החומר הולך")
+// and every way to it were removed on 19 Nov 2026: nothing shows it.
 //
 //   NODE_PATH=$(npm root -g) node e2e/study/shell.cjs <dist> <out dir> [off|rel1|all|notoday]
 // The third argument (or E2E_FLAGS) says which flags the build was made with:
@@ -82,13 +82,6 @@ const COVERS = (spec, n) =>
   const check = (name, ok, detail) => {
     steps[name] = ok === true ? "ok" : `FAIL ${detail ?? ""}`;
   };
-  /** Whether a tap at the centre of an element lands on it. */
-  const hitsItself = (loc) =>
-    loc.evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return Boolean(h && (h === el || el.contains(h)));
-    });
   const path0 = (page) => {
     const u = new URL(page.url());
     return u.pathname + u.search;
@@ -143,88 +136,38 @@ const COVERS = (spec, n) =>
     await shoham.locator(".lecture-card", { hasText: "הרצאה שנמחקה" }).waitFor({ timeout: 10000 });
     check("restore", mock.calls.some((c) => c.includes("rpc/study_delete_lecture")) && db.lectures.find((l) => l.title === "הרצאה שנמחקה").deleted_at === null);
 
-    // D1: the privacy sheet before the first upload, and not again
-    const dialog = shoham.getByRole("dialog", { name: "לאן החומר הולך" });
-    const openSheet = async () => {
-      await shoham.getByRole("button", { name: "העלאת הרצאה" }).first().click();
-      await dialog.waitFor({ timeout: 5000 });
-    };
-    const consent = () => shoham.evaluate(() => localStorage.getItem("study-privacy-v1"));
-    await openSheet();
-    a11y.push(...(await snap(shoham, out, "shell-2-privacy-sheet")));
-    // Its last button, scrolled to, is not under the tab bar (390 and 360).
-    const lastHits = [];
-    for (const vp of [{ width: 390, height: 844 }, { width: 360, height: 640 }]) {
-      await shoham.setViewportSize(vp);
-      await dialog.evaluate((el) => (el.scrollTop = el.scrollHeight));
-      await shoham.waitForTimeout(100);
-      lastHits.push(await hitsItself(dialog.getByRole("button", { name: "עוד בעזרה" })));
-    }
-    await shoham.setViewportSize({ width: 390, height: 844 });
-    // Focus stays in the sheet: Tab from its last control goes round to its first.
-    await dialog.getByRole("button", { name: "עוד בעזרה" }).focus();
-    await shoham.keyboard.press("Tab");
-    const afterLast = await shoham.evaluate(() => ({ inSheet: Boolean(document.activeElement?.closest('[aria-modal="true"]')), label: document.activeElement?.getAttribute("aria-label") }));
-    await shoham.keyboard.press("Shift+Tab");
-    const backToLast = await shoham.evaluate(() => document.activeElement?.textContent);
-    check("D1 the privacy sheet covers the tab bar and keeps focus", lastHits.every(Boolean) && afterLast.inSheet && afterLast.label === "סגירה" && backToLast === "עוד בעזרה", JSON.stringify({ lastHits, afterLast, backToLast }));
-    // ✕, the backdrop, Escape and Back close it, with nothing recorded and the library still there.
-    const closes = {};
-    await dialog.getByRole("button", { name: "סגירה" }).click();
-    await dialog.waitFor({ state: "detached", timeout: 5000 });
-    closes.x = path0(shoham);
-    await openSheet();
-    await shoham.mouse.click(8, 8);
-    await dialog.waitFor({ state: "detached", timeout: 5000 });
-    closes.backdrop = path0(shoham);
-    await openSheet();
-    await shoham.keyboard.press("Escape");
-    await dialog.waitFor({ state: "detached", timeout: 5000 });
-    closes.escape = path0(shoham);
-    await openSheet();
-    await shoham.goBack();
-    await dialog.waitFor({ state: "detached", timeout: 5000 });
-    await shoham.waitForTimeout(300);
-    closes.back = path0(shoham);
-    closes.consent = await consent();
-    closes.library = await shoham.locator(".lecture-card").count();
-    check("D1 the privacy sheet closes without consent", ["x", "backdrop", "escape", "back"].every((k) => closes[k] === LIB) && closes.consent === null && closes.library > 0, JSON.stringify(closes));
-    // "עוד בעזרה": help, whose back arrow returns to the library in one tap (the sheet's entry went first).
-    await openSheet();
-    await shoham.getByRole("button", { name: "עוד בעזרה" }).click();
-    await shoham.locator(".help h1").waitFor({ timeout: 10000 });
-    const toHelp = { url: path0(shoham), back: await shoham.locator(".ph-head .back").innerText() };
-    await shoham.locator(".ph-head .back").click();
-    await shoham.waitForURL(isLib, { timeout: 5000 });
-    await shoham.locator(".lecture-card").first().waitFor({ timeout: 10000 });
-    check("D1 עוד בעזרה and back", toHelp.url === "/?v=help" && toHelp.back === "→ לספרייה" && (await dialog.count()) === 0 && (await consent()) === null, JSON.stringify(toHelp));
-    // "הבנתי, ממשיכים": upload, whose back arrow names the library.
-    await openSheet();
-    await shoham.getByRole("button", { name: "הבנתי, ממשיכים" }).click();
-    await shoham.waitForURL(/\?v=upload/);
-    const uploadBack = await shoham.locator(".ph-head .back").innerText();
-    a11y.push(...(await snap(shoham, out, "shell-3-upload")));
-    // "מי רואה את הקבצים?" shows the note over the form: the deck read and the fields typed stay.
-    await shoham.locator('input[type="file"]').setInputFiles(deck);
-    await shoham.getByText(/20 שקפים/).waitFor({ timeout: 30000 });
-    await shoham.locator("label:has-text('מרצה') input").fill("ד״ר בדיקה");
-    await shoham.getByRole("link", { name: "מי רואה את הקבצים?" }).click();
-    await dialog.waitFor({ timeout: 5000 });
-    const noteUrl = path0(shoham);
-    a11y.push(...(await snap(shoham, out, "shell-3b-upload-note")));
-    await shoham.goBack();
-    await dialog.waitFor({ state: "detached", timeout: 5000 });
-    await shoham.getByRole("link", { name: "מי רואה את הקבצים?" }).click();
-    await dialog.getByRole("button", { name: "סגירה", exact: true }).last().click();
-    await dialog.waitFor({ state: "detached", timeout: 5000 });
-    const form = { url: path0(shoham), drop: (await shoham.locator(".drop").innerText()).replace(/\n/g, " "), lecturer: await shoham.locator("label:has-text('מרצה') input").inputValue() };
-    check("D1 the note over the upload form keeps it", noteUrl === "/?v=upload" && form.url === "/?v=upload" && /deck\.pptx/.test(form.drop) && form.lecturer === "ד״ר בדיקה", JSON.stringify({ noteUrl, form }));
-    // One tap back to the library (the sheets left no entries behind), and no sheet before the next upload.
-    await shoham.locator(".ph-head .back").click();
-    await shoham.waitForURL(isLib);
+    // D1: "העלאת הרצאה" opens the upload screen at once (no sheet before it, since the
+    // privacy note was removed on 19 Nov 2026), with no note under the file box.
     await shoham.getByRole("button", { name: "העלאת הרצאה" }).first().click();
     await shoham.waitForURL(/\?v=upload/);
-    check("D1 privacy sheet once", (await dialog.count()) === 0 && uploadBack === "→ לספרייה" && (await consent()) === "1", uploadBack);
+    const uploadBack = await shoham.locator(".ph-head .back").innerText();
+    const uploadText = await shoham.locator("main.upload").innerText();
+    a11y.push(...(await snap(shoham, out, "shell-3-upload")));
+    check(
+      "D1 upload at once, without the privacy note",
+      (await shoham.locator('[aria-modal="true"]').count()) === 0 && uploadBack === "→ לספרייה" && !/הקובץ נקרא בטלפון|מי רואה את הקבצים|לאן החומר הולך/.test(uploadText),
+      JSON.stringify({ uploadBack, uploadText: uploadText.slice(0, 200) }),
+    );
+    // The form once a deck is read: every field, the date's included, stays inside the screen.
+    await shoham.locator('input[type="file"]').setInputFiles(deck);
+    await shoham.getByText(/20 שקפים/).waitFor({ timeout: 30000 });
+    const inside = [];
+    for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 640 }]) {
+      await shoham.setViewportSize(vp);
+      await shoham.waitForTimeout(100);
+      inside.push(
+        await shoham.evaluate(() => ({
+          w: innerWidth,
+          scroll: document.documentElement.scrollWidth - innerWidth,
+          out: [...document.querySelectorAll("main.upload input:not([type=file]), main.upload button, main.upload .drop")]
+            .map((el) => ({ el: el.getAttribute("type") || el.tagName.toLowerCase(), r: el.getBoundingClientRect() }))
+            .filter(({ r }) => r.width > 0 && (r.left < 0 || r.right > innerWidth))
+            .map(({ el, r }) => `${el} ${Math.round(r.left)}-${Math.round(r.right)}`),
+        })),
+      );
+    }
+    await shoham.setViewportSize({ width: 390, height: 844 });
+    check("D1 the upload form stays inside the screen (390, 320)", inside.every((x) => x.scroll <= 0 && x.out.length === 0), JSON.stringify(inside));
     await shoham.locator(".ph-head .back").click();
     await shoham.waitForURL(isLib);
 
@@ -286,6 +229,42 @@ const COVERS = (spec, n) =>
     await shoham.goBack();
     await shoham.locator(".slide-sheet").waitFor({ state: "detached", timeout: 5000 });
     check("slide sheet", /^שקף 17/.test(sheetTitle) && path0(shoham) === `/?l=${L}`, `${sheetTitle} ${path0(shoham)}`);
+    // The sheet itself (Shell's Sheet): focus stays in it, and ✕, the backdrop, Escape and
+    // Back each close it, leaving the reader where it was.
+    const slideSheet = shoham.locator(".slide-sheet");
+    const openSlide = async () => {
+      await shoham.locator('[data-part="6"] .src-link').first().click();
+      await slideSheet.waitFor({ timeout: 5000 });
+    };
+    await openSlide();
+    await slideSheet.evaluate((el) => {
+      const f = [...el.querySelectorAll('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+      f[f.length - 1].focus();
+    });
+    await shoham.keyboard.press("Tab");
+    const afterLast = await shoham.evaluate(() => ({ inSheet: Boolean(document.activeElement?.closest('[aria-modal="true"]')), label: document.activeElement?.getAttribute("aria-label") }));
+    const closes = {};
+    await slideSheet.getByRole("button", { name: "סגירה" }).first().click();
+    await slideSheet.waitFor({ state: "detached", timeout: 5000 });
+    closes.x = path0(shoham);
+    await openSlide();
+    await shoham.mouse.click(8, 8);
+    await slideSheet.waitFor({ state: "detached", timeout: 5000 });
+    closes.backdrop = path0(shoham);
+    await openSlide();
+    await shoham.keyboard.press("Escape");
+    await slideSheet.waitFor({ state: "detached", timeout: 5000 });
+    closes.escape = path0(shoham);
+    await openSlide();
+    await shoham.goBack();
+    await slideSheet.waitFor({ state: "detached", timeout: 5000 });
+    await shoham.waitForTimeout(300);
+    closes.back = path0(shoham);
+    check(
+      "a sheet keeps focus and closes by ✕, the backdrop, Escape and Back",
+      afterLast.inSheet && afterLast.label === "סגירה" && ["x", "backdrop", "escape", "back"].every((k) => closes[k] === `/?l=${L}`),
+      JSON.stringify({ afterLast, closes }),
+    );
     const jump = async (part) => {
       const tag = shoham.locator(`[data-part="${part}"] .src-link`).first();
       const n = Number(String(await tag.getAttribute("data-slides")).split(/[-,]/)[0]);
@@ -510,45 +489,62 @@ const COVERS = (spec, n) =>
     await shoham.getByRole("button", { name: "החלפה" }).click();
     await shoham.locator(".a-toast", { hasText: "קוד ההזמנה הוחלף." }).waitFor({ timeout: 5000 });
     check("me: creator controls", removeButtons === db.members.length - 1 && db.group.join_code === "XYZ789" && (await shoham.getByRole("button", { name: "יציאה מהמכשיר הזה" }).count()) === (flags.account ? 0 : 1), `${removeButtons}`);
-    // "פרטיות: מי רואה מה" opens help at the note; its back arrow says "→ שלי" and returns.
-    await shoham.getByRole("link", { name: "פרטיות: מי רואה מה" }).click();
-    await shoham.locator("details#privacy[open]").waitFor({ timeout: 10000 });
+    // "עזרה" opens help; its back arrow says "→ שלי" and returns. No privacy row any more.
+    const meLinksText = await shoham.locator(".links-card").last().innerText();
+    await shoham.locator(".links-card").last().getByRole("link", { name: "עזרה" }).click();
+    await shoham.locator(".help h1").waitFor({ timeout: 10000 });
     const fromMe = await shoham.locator(".ph-head .back").innerText();
     await shoham.locator(".ph-head .back").click();
     await shoham.waitForURL((u) => u.search === "?v=me");
-    check("help from שלי: → שלי", fromMe === "→ שלי", fromMe);
+    check("help from שלי: → שלי, and no privacy row", fromMe === "→ שלי" && !meLinksText.includes("פרטיות"), JSON.stringify({ fromMe, meLinksText }));
 
-    // D2, D4: help, the privacy note at #privacy, the spend footer; the rows show they open
-    await shoham.goto(`${mock.base}/?v=help#privacy`);
-    await shoham.locator("details#privacy[open]").waitFor({ timeout: 10000 });
-    const inView = await shoham.locator("details#privacy").evaluate((el) => el.getBoundingClientRect().top < innerHeight && el.getBoundingClientRect().bottom > 0);
+    // D2, D4: help, the spend footer; the rows show they open; no privacy row or note
+    await shoham.goto(`${mock.base}/?v=help`);
+    await shoham.locator(".help summary").first().waitFor({ timeout: 10000 });
     await shoham.getByText("השימוש של הקבוצה החודש: $12.40 מתוך $33").waitFor({ timeout: 10000 });
     const chevrons = await shoham.locator(".help summary").evaluateAll((els) => els.map((el) => getComputedStyle(el, "::after").borderBottomWidth));
-    check("D2 help #privacy, D4 spend line", inView && chevrons.length >= 9 && chevrons.every((w) => w === "2px"), JSON.stringify(chevrons));
-    // §6.2's lines that depend on what has shipped: the email line with accounts, and the
-    // upload row's second sentence, which W's slot turns to the server's once W1 writes there.
-    const note = await shoham.locator("details#privacy .privacy-note").innerText();
-    const emailLine = /ספק המייל:\s*כתובת המייל נשמרת רק ב-Supabase לצורך כניסה, ולא מוצגת לקבוצה\. הקודים נשלחים דרך ספק המייל\./.test(note);
-    const uploadRow = await shoham.locator("details", { has: shoham.locator("summary", { hasText: "העלאת הרצאה" }) }).evaluate((el) => el.querySelector("p").textContent);
+    const helpText = await shoham.locator("main.help").evaluate((el) => el.textContent);
     check(
-      "D2 the note's account line and the upload row",
-      emailLine === flags.account && uploadRow.includes("כדאי להשאיר את ההרצאה פתוחה עד שהסיכום נכתב.") && !uploadRow.includes("הסיכום נכתב בשרת"),
-      JSON.stringify({ emailLine, uploadRow }),
+      "D2 help without the privacy note, D4 spend line",
+      chevrons.length >= 8 && chevrons.every((w) => w === "2px") && !/פרטיות: מי רואה מה|לאן החומר הולך/.test(helpText) && (await shoham.locator(".privacy-note, #privacy").count()) === 0,
+      JSON.stringify(chevrons),
     );
+    // The upload row's second sentence, which W's slot turns to the server's once W1 writes there.
+    const uploadRow = await shoham.locator("details", { has: shoham.locator("summary", { hasText: "העלאת הרצאה" }) }).evaluate((el) => el.querySelector("p").textContent);
+    check("D2 the upload row", uploadRow.includes("כדאי להשאיר את ההרצאה פתוחה עד שהסיכום נכתב.") && !uploadRow.includes("הסיכום נכתב בשרת"), uploadRow);
     a11y.push(...(await snap(shoham, out, "shell-9-help")));
 
-    // D3: Join's "מה נשמר ואיפה" opens help signed out; help's back arrow returns to the
-    // invite link with its code, and the name typed before.
+    // D3: Join from the invite link: the code is filled in, there is no "מה נשמר ואיפה",
+    // and every field and button stays inside the screen at 390 and 320 px.
     const { page: guest } = await mock.open(browser, null, { path: "/?join=ABC123" });
-    await guest.getByPlaceholder("למשל: שוהם").fill("גל");
-    await guest.getByRole("link", { name: "מה נשמר ואיפה" }).click();
-    await guest.locator("details#privacy[open]").waitFor({ timeout: 10000 });
-    check("D3 help signed out", (await guest.locator(".ph-tabs").count()) === 0 && new URL(guest.url()).search === "?v=help");
-    a11y.push(...(await snap(guest, out, "shell-10-help-signed-out")));
-    await guest.locator(".ph-head .back").click();
-    await guest.locator(".code-input").waitFor({ timeout: 10000 });
-    const joinAgain = { url: path0(guest), code: await guest.locator(".code-input").inputValue(), name: await guest.getByPlaceholder("למשל: שוהם").inputValue() };
-    check("D3 back to the invite link", joinAgain.url === "/?join=ABC123" && joinAgain.code === "ABC123" && joinAgain.name === "גל", JSON.stringify(joinAgain));
+    await guest.locator(".code-input").waitFor({ timeout: 15000 });
+    const joinText = await guest.locator("main.join").innerText();
+    const joinFit = [];
+    for (const mode of ["יש לי קוד", "פתיחת קבוצה חדשה"]) {
+      await guest.getByRole("tab", { name: mode }).click();
+      for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 640 }]) {
+        await guest.setViewportSize(vp);
+        await guest.waitForTimeout(100);
+        joinFit.push(
+          await guest.evaluate(() => ({
+            w: innerWidth,
+            scroll: document.documentElement.scrollWidth - innerWidth,
+            out: [...document.querySelectorAll("main.join input, main.join button, main.join a")]
+              .map((el) => ({ t: (el.textContent || el.getAttribute("placeholder") || "").trim().slice(0, 16), r: el.getBoundingClientRect() }))
+              .filter(({ r }) => r.width > 0 && (r.left < 0 || r.right > innerWidth))
+              .map(({ t, r }) => `${t} ${Math.round(r.left)}-${Math.round(r.right)}`),
+          })),
+        );
+      }
+    }
+    await guest.setViewportSize({ width: 390, height: 844 });
+    await guest.getByRole("tab", { name: "יש לי קוד" }).click();
+    check(
+      "D3 Join: the code, no privacy link, everything inside the screen (390, 320)",
+      (await guest.locator(".code-input").inputValue()) === "ABC123" && !joinText.includes("מה נשמר ואיפה") && joinFit.every((x) => x.scroll <= 0 && x.out.length === 0),
+      JSON.stringify({ joinFit, joinText: joinText.slice(0, 200) }),
+    );
+    a11y.push(...(await snap(guest, out, "shell-10-join")));
 
     // The schema gate: a database older than the build shows one line only
     const schema0 = { ...db.schema };

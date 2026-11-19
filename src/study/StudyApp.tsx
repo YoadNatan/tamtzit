@@ -31,8 +31,7 @@ import Shell, { applySize, BackLink, Loading, placeNow, readSize, type Place } f
  * /?l=<id>     one lecture's summary, shareable on WhatsApp
  * /?v=…        every other screen (lib/route.ts, spec §5.2)
  *
- * Order of checks (spec §5.1): ?join= → Join; v=help → Help (allowed without
- * a session, so Join's "מה נשמר ואיפה" works); no session or no group → Join;
+ * Order of checks (spec §5.1): ?join= → Join; no session or no group → Join;
  * else the route, inside the shell. A route whose feature is off is replaced
  * by the nearest one that is on, with one line saying why. */
 
@@ -220,16 +219,6 @@ export default function StudyApp() {
     );
   }
 
-  // Help needs no session: Join's "מה נשמר ואיפה" opens it.
-  if (route.v === "help" && !joinCode && (!session || !ctx)) {
-    return (
-      <Suspense fallback={<Loading />}>
-        <HelpScreen back={<BackLink go={go} fallback={{ v: "library" }} label="→ חזרה" />} />
-        <AccountLayer session={session ?? null} />
-      </Suspense>
-    );
-  }
-
   if (session === undefined || (session && !groupsLoaded)) return <Loading />;
 
   if (!session || !group || joinCode || !ctx) {
@@ -240,10 +229,8 @@ export default function StudyApp() {
           onJoined={(g) => {
             rememberGroup(g.id);
             // Join keeps the route: a quiz or marathon link opened before joining lands where it pointed.
-            const target: Route = route.v === "help" ? { v: "today" } : route;
             // The entry before this one is wherever the link was opened from, not the app.
-            history.replaceState({ study: (history.state as { study?: boolean } | null)?.study }, "", routeUrl(target));
-            setRoute(target);
+            history.replaceState({ study: (history.state as { study?: boolean } | null)?.study }, "", routeUrl(route));
             void getSession().then((s) => {
               setSession(s);
               if (s) void loadGroups(s);

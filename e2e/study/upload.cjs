@@ -75,7 +75,6 @@ const IPHONE = `(() => { for (const [o, k] of [
         // With Today's set the invite lands on Today; the library is its own tab.
         if (flagSetOf().today) await page.locator(".ph-tabs .ph-tab", { hasText: "ספרייה" }).click();
         await page.getByRole("heading", { name: mock.GROUP.name }).waitFor({ timeout: 10000 });
-        await page.evaluate(() => localStorage.setItem("study-privacy-v1", "1"));
         await page.getByRole("button", { name: "העלאת הרצאה ראשונה" }).click();
         if (iphone) {
           const lacks = await page.evaluate(
@@ -125,7 +124,6 @@ const IPHONE = `(() => { for (const [o, k] of [
       await page.getByRole("button", { name: "הצטרפות" }).click();
       if (flagSetOf().today) await page.locator(".ph-tabs .ph-tab", { hasText: "ספרייה" }).click();
       await page.getByRole("heading", { name: mock.GROUP.name }).waitFor({ timeout: 10000 });
-      await page.evaluate(() => localStorage.setItem("study-privacy-v1", "1"));
       await page.getByRole("button", { name: "העלאת הרצאה ראשונה" }).click();
       await page.locator('input[type="file"]').setInputFiles(bad);
       await page.getByText(/לא הצלחנו לקרוא את הקובץ/).waitFor({ timeout: 30000 });

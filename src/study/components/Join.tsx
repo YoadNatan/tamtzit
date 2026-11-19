@@ -4,18 +4,12 @@ import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { markFresh } from "../lib/guideMark";
 import { openAccount } from "../features/account";
-import { openPrivacy } from "./Shell";
-import { APP_PATH } from "../lib/route";
 
 /* ── Getting in ──
  * One person opens a group and gets a code; everyone else joins with the code
- * (or straight from the invite link, which carries it). No email, no password.
- * "מה נשמר ואיפה" opens help in the app: what was typed waits on this
- * screen's history entry, and help's back arrow returns to it (the invite
- * link's code included). */
+ * (or straight from the invite link, which carries it). No email, no password. */
 
 type Props = { initialCode: string; onJoined: (g: Group) => void };
-type Draft = { mode: "join" | "create"; name: string; code: string; groupName: string };
 
 const NAME_KEY = "study-my-name";
 
@@ -27,24 +21,17 @@ function savedName(): string {
   }
 }
 
-/** What was typed before help was opened from here (this entry's state). */
-function draftHere(): Partial<Draft> {
-  const d = (history.state as { joinDraft?: Partial<Draft> } | null)?.joinDraft;
-  return d && typeof d === "object" ? d : {};
-}
-
 export default function Join({ initialCode, onJoined }: Props) {
-  const [draft] = useState(draftHere);
-  const [mode, setMode] = useState<"join" | "create">(draft.mode === "create" ? "create" : "join");
-  const [name, setName] = useState(() => (typeof draft.name === "string" ? draft.name : savedName()));
-  const [code, setCode] = useState(typeof draft.code === "string" ? draft.code : initialCode);
-  const [groupName, setGroupName] = useState(typeof draft.groupName === "string" ? draft.groupName : "");
+  const [mode, setMode] = useState<"join" | "create">("join");
+  const [name, setName] = useState(savedName);
+  const [code, setCode] = useState(initialCode);
+  const [groupName, setGroupName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [taken, setTaken] = useState(false);
   // The guide (VITE_STUDY_GUIDE): was a code ever here? Picking "פתיחת קבוצה
   // חדשה" without one is how a member ends up alone in a new group.
-  const [hadCode] = useState(() => Boolean(initialCode || draft.code));
+  const [hadCode] = useState(() => Boolean(initialCode));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,19 +134,6 @@ export default function Join({ initialCode, onJoined }: Props) {
             כבר שמרת חשבון? כניסה עם מייל
           </button>
         ) : null}
-        <a
-          className="a-link join-privacy"
-          href={`${APP_PATH}?v=help#privacy`}
-          onClick={(e) => {
-            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // a new tab stays a link
-            e.preventDefault();
-            const joinDraft: Draft = { mode, name, code, groupName };
-            history.replaceState({ ...(history.state ?? {}), joinDraft }, "");
-            openPrivacy("join");
-          }}
-        >
-          מה נשמר ואיפה
-        </a>
       </div>
     </main>
   );

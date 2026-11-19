@@ -11,7 +11,7 @@ import { MeRows } from "../features/progress";
 import { PulseSettingRow } from "../features/pulse";
 import { NeedsMeSetting } from "../features/today";
 import type { ScreenProps } from "../features/types";
-import { Head, openPrivacy, readSize, RouteLink, saveSize, shareInvite, SIZES } from "./Shell";
+import { Head, readSize, RouteLink, saveSize, shareInvite, SIZES } from "./Shell";
 
 /* ── "שלי" (spec §5.1; §12.2.3) ──
  * 1 the account (A1); 2 "ההתקדמות שלי" with the danger list (A2), "הטעויות
@@ -20,7 +20,7 @@ import { Head, openPrivacy, readSize, RouteLink, saveSize, shareInvite, SIZES } 
  * the pulse (U), "הקבוצה צריכה אותך" (T), the text size (the whole app's)
  * and, with recordings, their boxes (W); 4 the month's spend; 5 the group:
  * its members, the invite, and for the group's creator a new invite code
- * and removing a member (review M4); 6 help and privacy; 7 signing out of
+ * and removing a member (review M4); 6 help; 7 signing out of
  * this device (A1's card takes it once accounts ship). */
 
 const REC_KEY = "study-rec-notes";
@@ -272,9 +272,6 @@ export default function Me({ ctx }: ScreenProps<"me">) {
         <RouteLink to={{ v: "help" }} go={ctx.go} className="a-li row-link">
           עזרה
         </RouteLink>
-        <a href={`${APP_PATH}?v=help#privacy`} className="a-li row-link" onClick={(e) => (e.preventDefault(), openPrivacy("me"))}>
-          פרטיות: מי רואה מה
-        </a>
       </nav>
 
       {!flags.account ? (

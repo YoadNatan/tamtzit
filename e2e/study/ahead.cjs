@@ -8,8 +8,8 @@
 // then opens with the numbers, and no phone asked for the read; a part the read
 // ahead failed shows its reason and "לנסות שוב", which reads only that part;
 // a text is never read ahead twice; at the cap the read ahead skips quietly and
-// "לקרוא את הנקודות" stays; no question or card is written; help and the
-// privacy note say what B does. Screenshots at every step, each through
+// "לקרוא את הנקודות" stays; no question or card is written; help says what
+// B does. Screenshots at every step, each through
 // a11y.cjs in light and dark at 390×844 and 360×640.
 //
 //   VITE_SUPABASE_URL=https://mock.supabase.test VITE_SUPABASE_ANON_KEY=mock-anon-key \
@@ -85,7 +85,7 @@ const POINTS = [4, 4, 6, 6, 5, 4, 5, 4]; // mocks/practice.cjs's points per part
       await page.goto(`${mock.base}/?v=help`);
       await page.locator(".help h1").waitFor({ timeout: 10000 });
       const text = norm(await page.locator("main").textContent());
-      check("off: help and the privacy note say nothing of the points read ahead", !text.includes("הנקודות שצריך לדעת נקראות") && !text.includes("קריאה מראש:"), text.slice(0, 200));
+      check("off: help says nothing of the points read ahead", !text.includes("הנקודות שצריך לדעת נקראות"), text.slice(0, 200));
       check("off: no question or card question at upload (B's slot asks nothing)", !text.includes("להכין גם שאלות וכרטיסיות"));
       await shot(page, "ahead-off-help");
     } else {
@@ -219,17 +219,16 @@ const POINTS = [4, 4, 6, 6, 5, 4, 5, 4]; // mocks/practice.cjs's points per part
       );
       await shot(shoham, "ahead-05-skipped", { primary: PRIMARY });
 
-      /* ── 7. Help and the privacy note say what B does, and nothing of a bank ── */
+      /* ── 7. Help says what B does, and nothing of a bank ── */
       await shoham.goto(`${mock.base}/?v=help`);
       await shoham.locator(".help h1").waitFor({ timeout: 10000 });
-      // Its row, opened as a member opens it; the privacy note's line as written (the note itself stays closed).
+      // Its row, opened as a member opens it.
       await shoham.locator(".help-rows summary", { hasText: "הנקודות שצריך לדעת" }).click();
       const help = norm(await shoham.locator("main").textContent());
       check(
-        "7 help: the points read after the summary, the cap's skip, and questions and cards only on a tap; the privacy note's line",
+        "7 help: the points read after the summary, the cap's skip, and questions and cards only on a tap",
         help.includes("הנקודות שצריך לדעת נקראות ממנו מעצמן, פעם אחת לכל הקבוצה") &&
           help.includes("שאלות וכרטיסיות לא נכתבות מעצמן: רק כשבוחרים ליצור אותן.") &&
-          help.includes("קריאה מראש:") &&
           !help.includes("במצב החסכוני") &&
           !help.includes("להכין גם שאלות וכרטיסיות"),
         help.slice(0, 400),
