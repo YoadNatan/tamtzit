@@ -7,6 +7,7 @@ import { after, before, beforeEach, test } from "node:test";
 import ai from "../../api/study/ai.js";
 import work from "../../api/study/work.js";
 import { costUsd, POLICY } from "./budget.js";
+import { EXAM_PROMPT_CHARS, examPriceUsd as phonePriceUsd } from "../../shared/study/examPrice.js";
 import { examPriceUsd, readUnits, toSaveItems, toSheetKeys, toSolvedKeys, unitCall, type ExamClaim, type SaveItem } from "./exams.js";
 import { courseStyle } from "./practice.js";
 import { EXAM_KEY_SYSTEM, EXAM_READ_SYSTEM, EXAM_SOLVE_SYSTEM } from "./prompts/questions.js";
@@ -622,4 +623,11 @@ test("courseStyle with S 2: the course's items through study_course_style_items 
   assert.ok(style && style.examples.length === 3, "the keyed items only");
   assert.ok(calls.some((c) => c.startsWith('study_course_style_items {"p_group":"' + GROUP + '","p_course":" פרמקו "}')));
   assert.ok(!calls.includes("from study_exams"));
+});
+
+test("the phone's price before an upload is the server's (shared/study/examPrice.ts)", () => {
+  assert.deepEqual(EXAM_PROMPT_CHARS, { read: EXAM_READ_SYSTEM.length, key: EXAM_KEY_SYSTEM.length, solve: EXAM_SOLVE_SYSTEM.length }, "the prompts' lengths the phone counts with");
+  for (const o of [{ pages: 1 }, { pages: 12 }, { pages: 28 }, { pages: 120 }, { pages: 12, keyPages: 2, keySource: "separate" }, { pages: 30, keySource: "none" }]) {
+    assert.equal(phonePriceUsd(o), examPriceUsd(o), JSON.stringify(o));
+  }
 });

@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { examPriceUsd as sharedExamPriceUsd, readUnits as sharedReadUnits } from "../../shared/study/examPrice.js";
 import { estimateUsd, imageTokens, reserve } from "./budget.js";
 import { cleanSchema, JsonArrayItems, run, settleFor, type Effort, type Spend } from "./claude.js";
 import {
@@ -44,11 +45,6 @@ const KEY_TOKENS = 4_000;
 const SOLVE_TOKENS = 8_000;
 /** A unit stops at 200 s (B6.2), well inside the 330-second lease. */
 export const UNIT_STOP_MS = 200_000;
-/** What a typical unit writes (for the price shown before an upload). */
-const TYPICAL_READ_OUT = 6_000;
-const TYPICAL_SOLVE_OUT = 1_500;
-/** Questions an exam page holds, on average (the price of solving a keyless exam). */
-const ITEMS_PER_PAGE = 3.3;
 /** Exam pages are stored at most 1,500 px on the long side (the phone's pdf.ts and images.ts). */
 export const EXAM_PAGE_SIDE = 1500;
 
@@ -200,40 +196,17 @@ export function toSolvedKeys(asked: readonly SolveInput[], raw: readonly ExamSol
   return [...out.values()].sort((a, b) => a.no - b.no);
 }
 
-/** The read units of an exam's pages, as section S queues them (pure): 4
- *  pages each, the key sheet's pages apart, each unit with the page after
- *  it as context. */
-export function readUnits(pages: readonly number[]): Array<{ pages: number[]; next: number | null }> {
-  const sorted = [...pages].sort((a, b) => a - b);
-  const out: Array<{ pages: number[]; next: number | null }> = [];
-  for (let i = 0; i < sorted.length; i += READ_PAGES) out.push({ pages: sorted.slice(i, i + READ_PAGES), next: sorted[i + READ_PAGES] ?? null });
-  return out;
-}
+/** The read units of an exam's pages, as section S queues them (pure; shared/study/examPrice.ts). */
+export const readUnits = sharedReadUnits;
 
 const pageTokens = (p: Pick<ExamPage, "w" | "h">) => imageTokens(p.w, p.h);
-/** A full page at the stored size, for a price before any page exists. */
-const FULL_PAGE = { w: EXAM_PAGE_SIDE, h: Math.round(EXAM_PAGE_SIDE * 1.414), lines: [] as string[] };
 
 /** "להעלות ולהעתיק את השאלות · כ-$1.40": what reading an exam usually costs
- *  (pure): its read units at a typical output, the key sheet's unit, and,
- *  for an exam without answers, solving about 3.3 questions a page. Not a
- *  reservation: each unit reserves its own worst case when it runs. */
+ *  (pure): shared/study/examPrice.ts's sum, which the phone shows before the
+ *  upload, with these prompts' real lengths (exams.test.ts checks that the
+ *  phone's copy of them is the same). */
 export function examPriceUsd(o: { pages: number; keyPages?: number; keySource?: string }): number {
-  const pages = Math.max(0, Math.round(o.pages));
-  const keyPages = Math.max(0, Math.round(o.keyPages ?? 0));
-  if (!pages) return 0;
-  const units = readUnits(Array.from({ length: pages }, (_, i) => i + 1));
-  let usd = 0;
-  for (const u of units) {
-    const seen = u.pages.length + (u.next !== null ? 1 : 0);
-    usd += estimateUsd(MODEL, EXAM_READ_SYSTEM.length + 400, TYPICAL_READ_OUT, seen * pageTokens(FULL_PAGE));
-  }
-  if (keyPages) usd += estimateUsd(MODEL, EXAM_KEY_SYSTEM.length + 100, 600, keyPages * pageTokens(FULL_PAGE));
-  if (o.keySource === "none") {
-    const solve = Math.ceil((pages * ITEMS_PER_PAGE) / 20);
-    usd += solve * estimateUsd(MODEL, EXAM_SOLVE_SYSTEM.length + 20 * 450, TYPICAL_SOLVE_OUT);
-  }
-  return Math.round(usd * 100) / 100;
+  return sharedExamPriceUsd(o, { read: EXAM_READ_SYSTEM.length, key: EXAM_KEY_SYSTEM.length, solve: EXAM_SOLVE_SYSTEM.length });
 }
 
 type Call = {
