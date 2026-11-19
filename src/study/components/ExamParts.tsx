@@ -24,8 +24,10 @@ function pageUrl(path: string): Promise<string | null> {
 
 export const examPagePath = (groupId: string, examId: string, page: number) => `${groupId}/exams/${examId}/p${page}.jpg`;
 
-/** A page, or its box: the item's figure when it has one, else the whole page `page`. */
-export function PageCrop({ groupId, examId, figure, page, label }: { groupId: string; examId: string; figure?: string | null; page?: number | null; label?: string }) {
+/** A page, or its box: the item's figure when it has one, else the whole page
+ *  `page`. zoom: a tap opens the whole page (the review, where the text is
+ *  checked against it). */
+export function PageCrop({ groupId, examId, figure, page, label, zoom }: { groupId: string; examId: string; figure?: string | null; page?: number | null; label?: string; zoom?: boolean }) {
   const box = parsePageBox(figure);
   const n = box?.page ?? page ?? null;
   const [img, setImg] = useState<{ url: string; w: number; h: number } | null>(null);
@@ -63,18 +65,21 @@ export function PageCrop({ groupId, examId, figure, page, label }: { groupId: st
       </div>
     );
   }
-  if (!box) {
-    return (
-      <div className="x-crop" style={{ aspectRatio: `${img.w} / ${img.h}` }}>
-        <img src={img.url} alt={alt} style={{ width: "100%", left: 0, top: 0 }} />
-      </div>
-    );
-  }
-  const c = cropStyle(box, img);
-  return (
+  const c = box ? cropStyle(box, img) : null;
+  const shown = c ? (
     <div className="x-crop is-box" style={{ aspectRatio: c.ratio }}>
       <img src={img.url} alt={alt} style={{ width: c.width, left: c.left, top: c.top }} />
     </div>
+  ) : (
+    <div className="x-crop" style={{ aspectRatio: `${img.w} / ${img.h}` }}>
+      <img src={img.url} alt={alt} style={{ width: "100%", left: 0, top: 0 }} />
+    </div>
+  );
+  if (!zoom) return shown;
+  return (
+    <a className="x-zoom" href={img.url} target="_blank" rel="noopener noreferrer" aria-label={`${alt}: לפתוח את העמוד כולו`}>
+      {shown}
+    </a>
   );
 }
 

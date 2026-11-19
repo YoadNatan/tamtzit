@@ -57,6 +57,10 @@ export type ExamStatus = {
   suggested: number;
   unkeyed: number;
   unclear: number;
+  /** Numbers another page had already: not saved (an exam whose parts restart at 1, a misread number). */
+  repeats?: number;
+  /** Items the key sheet says were cancelled ("בוטלה"): left out. */
+  cancelled?: number;
 };
 export type KeyOrigin = "exam" | "sheet" | "solved" | "member";
 export type ReviewItem = {
@@ -78,12 +82,14 @@ export type ReviewItem = {
   conf: number | null;
   key_by: string | null;
   fixed: boolean;
+  /** Someone answered it: a page read again keeps its text, as a fix does. */
+  answered?: boolean;
 };
 export type ReviewPage = { n: number; path: string; w: number; h: number; key: boolean };
 export type KeyLog = { id: number; question_id: string; old: number | null; new: number | null; origin_old: string | null; origin_new: string | null; undo_of: number | null; by: string | null; at: string };
 export type ItemLog = { id: number; question_id: string; field: string; idx: number | null; old: string; new: string; by: string | null; at: string };
 export type Review = {
-  exam: { id: string; title: string; status: ExamState; key_source: string; hidden: boolean };
+  exam: { id: string; title: string; status: ExamState; key_source: string; hidden: boolean; by?: string | null };
   pages: ReviewPage[];
   items: ReviewItem[];
   key_log: KeyLog[];
@@ -101,6 +107,8 @@ export type CourseExam = {
   hidden?: boolean;
   created_at?: string;
   questions?: number;
+  /** All the exam printed as far as its reading knows (items, open questions skipped, numbers not saved): the clock's pace. */
+  printed?: number;
 };
 
 /* ── The upload ── */
@@ -175,6 +183,8 @@ export const examItemEdit = (questionId: string, field: "question" | "vignette" 
   rpc<null>("study_exam_item_edit", { p_question: questionId, p_field: field, p_idx: idx, p_text: text });
 /** "לאשר" (the suggested answer) or "לסמן תשובה אחרת": the stored index, logged. */
 export const setExamKey = (questionId: string, answer: number | null) => rpc<null>("study_set_exam_key", { p_question: questionId, p_answer: answer });
+/** "לאשר" a true/false or match item's suggested answer (set items are not keyed by hand). */
+export const examKeyConfirm = (questionId: string) => rpc<null>("study_exam_key_confirm", { p_question: questionId });
 export const examKeyUndo = (questionId: string) => rpc<{ answer: number | null; origin: string | null }>("study_exam_key_undo", { p_question: questionId });
 export const examHide = (examId: string, hide: boolean) => rpc<null>("study_exam_hide", { p_exam: examId, p_hide: hide });
 
@@ -300,13 +310,20 @@ export function unitLines(units: readonly UnitRow[]): UnitLine[] {
   return out;
 }
 
-/** "מעתיקים עמודים 9–12 מתוך 28…" while reading; "מציעים תשובות…" while solving; "" when nothing runs. */
+/** "מעתיקים עמודים 9–12 מתוך 28…" while a unit reads; "עמודים 1–4 בתור…" while
+ *  the first waits its turn; "מציעים תשובות…" while solving; "" when nothing runs. */
 export function readingLine(s: Pick<ExamStatus, "units" | "pages">): string {
   const reads = s.units.filter((u) => u.kind === "read");
-  const live = reads.find((u) => u.status === "running") ?? reads.find((u) => u.status === "pending");
+  const live = reads.find((u) => u.status === "running");
   if (live) return `מעתיקים ${pagesText(live.pages ?? [])} מתוך ${s.pages}…`;
-  if (s.units.some((u) => u.kind === "key" && (u.status === "running" || u.status === "pending"))) return "קוראים את דף התשובות…";
-  if (s.units.some((u) => u.kind === "solve" && (u.status === "running" || u.status === "pending"))) return "מציעים תשובות לשאלות בלי תשובה…";
+  const running = (kind: string) => s.units.some((u) => u.kind === kind && u.status === "running");
+  if (running("key")) return "קוראים את דף התשובות…";
+  if (running("solve")) return "מציעים תשובות לשאלות בלי תשובה…";
+  // Nothing runs yet: what waits its turn, not "copying".
+  const waiting = reads.find((u) => u.status === "pending");
+  if (waiting) return `${pagesText(waiting.pages ?? [])} בתור…`;
+  if (s.units.some((u) => u.kind === "key" && u.status === "pending")) return "דף התשובות בתור…";
+  if (s.units.some((u) => u.kind === "solve" && u.status === "pending")) return "מציעים תשובות לשאלות בלי תשובה…";
   return "";
 }
 
@@ -346,6 +363,17 @@ export function reviewCounts(items: ReadonlyArray<Pick<ReviewItem, "parse_conf" 
 export function foundLine(c: { found: number; withAnswer: number; toCheck: number }): string {
   const found = c.found === 1 ? "נמצאה שאלה אחת" : `נמצאו ${c.found} שאלות`;
   return [found, `${c.withAnswer} עם תשובה`, ...(c.toCheck ? [`${c.toCheck} לבדיקה`] : [])].join(" · ");
+}
+
+/** "3 שאלות לא נשמרו: המספר שלהן כבר הופיע בעמוד אחר." (one: "שאלה אחת לא נשמרה…"), or "". */
+export function repeatsLine(n: number | undefined): string {
+  if (!n) return "";
+  return n === 1 ? "שאלה אחת לא נשמרה: המספר שלה כבר הופיע בעמוד אחר." : `${n} שאלות לא נשמרו: המספר שלהן כבר הופיע בעמוד אחר.`;
+}
+/** "2 שאלות בוטלו לפי דף התשובות, ולא נכללות." (one: "שאלה אחת בוטלה…"), or "". */
+export function cancelledLine(n: number | undefined): string {
+  if (!n) return "";
+  return n === 1 ? "שאלה אחת בוטלה לפי דף התשובות, ולא נכללת." : `${n} שאלות בוטלו לפי דף התשובות, ולא נכללות.`;
 }
 
 /** "2 שאלות פתוחות דולגו." (one: "שאלה פתוחה אחת דולגה."), or "". */
@@ -401,14 +429,16 @@ export function minutesFor(n: number, pace: { minutes?: number | null; questions
 
 /** The lengths offered, short first (decision 4): קצר 20, חצי 50, מלא (the
  *  whole exam, at most 150). A length the exam cannot fill is left out. */
-export function lengthsFor(exam: { questions: number; minutes: number | null }, course?: { exam_minutes: number | null; exam_n: number | null }): Length[] {
+export function lengthsFor(exam: { questions: number; minutes: number | null; printed?: number }, course?: { exam_minutes: number | null; exam_n: number | null }): Length[] {
   const pool = Math.min(150, Math.max(0, exam.questions));
   if (pool < 5) return [];
-  const pace = { minutes: exam.minutes, questions: exam.questions };
+  // The exam's minutes were for everything it printed (open questions and items not saved too): study_mock_create's pace.
+  const printed = Math.max(exam.questions, exam.printed ?? 0);
+  const pace = { minutes: exam.minutes, questions: printed };
   const out: Length[] = [];
   if (pool > 20) out.push({ key: "short", label: "קצר", n: 20, minutes: minutesFor(20, pace, course) });
   if (pool > 50) out.push({ key: "half", label: "חצי", n: 50, minutes: minutesFor(50, pace, course) });
-  out.push({ key: "full", label: "מלא", n: pool, minutes: exam.minutes && pool === exam.questions ? exam.minutes : minutesFor(pool, pace, course) });
+  out.push({ key: "full", label: "מלא", n: pool, minutes: exam.minutes && pool === printed ? exam.minutes : minutesFor(pool, pace, course) });
   return out;
 }
 
@@ -490,12 +520,15 @@ export function wrongLine(it: Pick<MockScoreItem, "form" | "choice" | "choices" 
   return `בחרת ${letter(it.choice)}, הנכונה ${letter(it.answer)}`;
 }
 
-/** "זמן: 2:41 מתוך 3 שעות". */
+/** "זמן: 12 דקות מתוך 36 דקות", "זמן: שעתיים ו-41 דקות מתוך 3 שעות", "זמן: פחות מדקה מתוך 30 דקות" (words, not h:mm beside "דקות"). */
 export function usedLine(startedAt: string, finishedAt: string | null, minutes: number): string {
   if (!finishedAt) return "";
   const used = Math.max(0, Math.min(minutes * 60_000, Date.parse(finishedAt) - Date.parse(startedAt)));
   const m = Math.round(used / 60_000);
-  return `זמן: ${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} מתוך ${minutesText(minutes)}`;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  const words = m < 1 ? "פחות מדקה" : h === 0 ? minutesText(m) : [minutesText(h * 60), r ? (r === 1 ? "דקה" : `${r} דקות`) : ""].filter(Boolean).join(" ו-");
+  return `זמן: ${words} מתוך ${minutesText(minutes)}`;
 }
 
 /* ── The open simulation on this phone (a reload or a locked phone comes back to it) ── */

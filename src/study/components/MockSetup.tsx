@@ -12,8 +12,9 @@ import "../styles/exams.css";
  * קודם · בדיוק כמו שהיה"): the course's ready exams, the latest uploaded
  * first and chosen. The lengths follow that exam, short first: "קצר · 20
  * שאלות · 36 דקות", "חצי · 50 שאלות · 90 דקות", "מלא · 100 שאלות · 3 שעות"
- * (its own minutes, else the course's pace, else 1.8 a question). "רק שאלות
- * שעוד לא ראיתי" is on. "להתחיל" makes the simulation (study_mock_create, $0)
+ * (its own minutes for all it printed, else the course's pace, else 1.8 a
+ * question). "קודם שאלות שעוד לא ראיתי" is on (not offered for the whole
+ * exam). "להתחיל" makes the simulation (study_mock_create, $0)
  * and starts its one clock (study_mock_start) on the server. A simulation
  * still open on this phone is offered first ("להמשיך"). The mixed and
  * exam-style sources are phase 4's and are not shown. */
@@ -43,7 +44,7 @@ export default function MockSetup({ route, ctx }: ScreenProps<"mock">) {
 
   const exams = useMemo(() => ((course?.exams ?? []) as CourseExam[]).filter((e) => e.status === "ready" && (e.questions ?? 0) >= 5).sort(byNewest), [course]);
   const exam = exams.find((e) => e.id === examId) ?? exams[0] ?? null;
-  const lengths = useMemo(() => (exam ? lengthsFor({ questions: exam.questions ?? 0, minutes: exam.minutes ?? null }, course ?? undefined) : []), [exam, course]);
+  const lengths = useMemo(() => (exam ? lengthsFor({ questions: exam.questions ?? 0, minutes: exam.minutes ?? null, printed: exam.printed }, course ?? undefined) : []), [exam, course]);
   const chosen = lengths.find((l) => l.key === len) ?? lengths[0] ?? null;
 
   const back = <BackLink go={ctx.go} fallback={{ v: "course", c: route.c }} />;
@@ -137,10 +138,13 @@ export default function MockSetup({ route, ctx }: ScreenProps<"mock">) {
               </button>
             ))}
           </div>
-          <label className="a-li setting-row s-unseen">
-            <span>רק שאלות שעוד לא ראיתי</span>
-            <input type="checkbox" checked={unseen} onChange={(e) => setUnseen(e.target.checked)} />
-          </label>
+          {/* A part of the exam takes the questions not seen yet first, then fills with seen ones; the whole exam has them all. */}
+          {chosen && chosen.key !== "full" ? (
+            <label className="a-li setting-row s-unseen">
+              <span>קודם שאלות שעוד לא ראיתי</span>
+              <input type="checkbox" checked={unseen} onChange={(e) => setUnseen(e.target.checked)} />
+            </label>
+          ) : null}
           <p className="a-small a-muted">שעון אחד לכל הסימולציה. התשובות נבדקות רק בסוף.</p>
         </>
       ) : (

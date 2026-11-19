@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  cancelledLine,
   examHide,
   examItemEdit,
+  examKeyConfirm,
   examKeyUndo,
   examLengthLine,
   examRetry,
@@ -16,6 +18,7 @@ import {
   LETTERS,
   readingLine,
   readingPercent,
+  repeatsLine,
   reviewCounts,
   setExamKey,
   skippedLine,
@@ -162,6 +165,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
     }
   };
 
+  const by = review?.exam.by;
   const sub = (
     <p className="ph-sub">
       {examLengthLine(status) ? <span>{examLengthLine(status)}</span> : null}
@@ -169,6 +173,14 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
         <>
           {examLengthLine(status) ? <span aria-hidden="true">·</span> : null}
           <span>{status.pages === 1 ? "דף אחד" : `${status.pages} דפים`}</span>
+        </>
+      ) : null}
+      {by ? (
+        <>
+          {examLengthLine(status) || status.pages ? <span aria-hidden="true">·</span> : null}
+          <span>
+            הועלה ע״י <bdi>{by}</bdi>
+          </span>
         </>
       ) : null}
     </p>
@@ -288,14 +300,32 @@ function ExamReviewBody(p: {
   const [filter, setFilter] = useState<Filter>(() => (counts.toCheck ? "look" : "all"));
   const [open, setOpen] = useState<string | null>(null);
   const [hidden, setHidden] = useState(review.exam.hidden);
+  const closed = useRef<string | null>(null);
   const live = review.items.filter((q) => !q.retired);
+  // The open item stays in the list until it is closed, even when "לאשר" moved it out of the filter (its "לבטל" with it).
   const shown = live.filter((q) => {
+    if (q.id === open) return true;
     const st = itemState(q);
     if (filter === "look") return st !== "ok";
     if (filter === "suggested") return st === "suggested";
     if (filter === "nokey") return st === "nokey";
     return true;
   });
+  // Focus follows the item: into the opened card (scrolled into view), back to its row when it closes.
+  useEffect(() => {
+    if (open) {
+      const h = document.getElementById(`ri-${open}`);
+      h?.focus({ preventScroll: true });
+      h?.closest("article")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } else if (closed.current) {
+      document.getElementById(`rh-${closed.current}`)?.focus();
+      closed.current = null;
+    }
+  }, [open]);
+  const close = (id: string) => {
+    closed.current = id;
+    setOpen(null);
+  };
   const refresh = async () => {
     const r = await examReview(p.examId);
     p.setReview(r);
@@ -328,6 +358,8 @@ function ExamReviewBody(p: {
         </div>
         <p className="sr-only">{foundLine(counts)}</p>
         {skippedLine(status.skipped_open) ? <p className="a-small a-muted">{skippedLine(status.skipped_open)}</p> : null}
+        {repeatsLine(status.repeats) ? <p className="a-small a-muted">{repeatsLine(status.repeats)}</p> : null}
+        {cancelledLine(status.cancelled) ? <p className="a-small a-muted">{cancelledLine(status.cancelled)}</p> : null}
         {counts.found ? (
           <RouteLink to={{ v: "practice", s: `e.${p.examId}`, n: "all" }} go={ctx.go} className="a-btn primary wide">
             לתרגל את המבחן
@@ -355,9 +387,9 @@ function ExamReviewBody(p: {
         {shown.map((q) => (
           <li key={q.id} className="r-row">
             {open === q.id ? (
-              <ItemCard {...p} q={q} log={review.key_log} onClose={() => setOpen(null)} refresh={refresh} />
+              <ItemCard {...p} q={q} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} />
             ) : (
-              <button type="button" className="a-li r-head" aria-expanded={false} onClick={() => setOpen(q.id)}>
+              <button type="button" id={`rh-${q.id}`} className="a-li r-head" aria-expanded={false} onClick={() => setOpen(q.id)}>
                 <div>
                   <b>שאלה {q.no}</b>
                   <span className="m" dir="rtl">
@@ -376,7 +408,7 @@ function ExamReviewBody(p: {
       <label className="a-card flat r-hide">
         <span className="a-stack">
           <span>לא לכלול בחישוב הנושאים</span>
-          <span className="a-small a-muted">המבחן נשאר לתרגול, רק לא ישמש כדוגמה לסגנון של שאלות חדשות.</span>
+          <span className="a-small a-muted">המבחן נשאר לתרגול. הוא לא ייכנס לחישוב הנושאים של הקורס, ולא ישמש כדוגמה לסגנון של שאלות חדשות.</span>
         </span>
         <input
           type="checkbox"
@@ -430,6 +462,8 @@ function ItemCard(p: {
       await p.refresh();
       if (done) ctx.say(done);
       setMode("view");
+      // The button pressed may be gone now ("לאשר" once confirmed): the card's heading keeps the place.
+      requestAnimationFrame(() => document.getElementById(`ri-${q.id}`)?.focus({ preventScroll: true }));
     } catch (e) {
       ctx.say(failText(codeOf(e), "exam") || "השינוי לא נשמר. כדאי לנסות שוב.");
     } finally {
@@ -437,6 +471,8 @@ function ItemCard(p: {
     }
   };
   const mark = (i: number) => void run(() => setExamKey(q.id, i), `סומנה תשובה ${letter(i)}.`);
+  const confirm = () =>
+    one && q.answer !== null ? void run(() => setExamKey(q.id, q.answer), `התשובה ${letter(q.answer)} אושרה.`) : void run(() => examKeyConfirm(q.id), "התשובה המוצעת אושרה.");
   const saveEdit = () =>
     void run(async () => {
       if (draft.question.trim() !== q.question) await examItemEdit(q.id, "question", null, draft.question);
@@ -447,7 +483,9 @@ function ItemCard(p: {
   return (
     <article className="a-card r-item" aria-labelledby={`ri-${q.id}`}>
       <div className="a-row between">
-        <b id={`ri-${q.id}`}>שאלה {q.no}</b>
+        <b id={`ri-${q.id}`} tabIndex={-1}>
+          שאלה {q.no}
+        </b>
         <span className="a-row">
           {st !== "ok" ? <span className={STATE_CHIP[st].cls}>{STATE_CHIP[st].label}</span> : null}
           <button type="button" className="a-btn ghost small" aria-label={`לסגור את שאלה ${q.no}`} onClick={p.onClose}>
@@ -486,7 +524,7 @@ function ItemCard(p: {
         <>
           <div className="r-split">
             <div className="r-crop">
-              <PageCrop groupId={p.groupId} examId={p.examId} figure={q.figure} page={q.page} />
+              <PageCrop groupId={p.groupId} examId={p.examId} figure={q.figure} page={q.page} zoom />
               {q.page ? <span className="a-small a-muted">עמוד {q.page}</span> : null}
             </div>
             <div className="a-stack r-text">
@@ -542,8 +580,8 @@ function ItemCard(p: {
       )}
       {mode === "view" ? (
         <div className="a-row r-acts">
-          {one && st === "suggested" && q.answer !== null ? (
-            <button type="button" className="a-btn primary small" disabled={sending} onClick={() => mark(q.answer!)}>
+          {st === "suggested" ? (
+            <button type="button" className="a-btn primary small" disabled={sending} onClick={confirm}>
               לאשר
             </button>
           ) : null}
@@ -555,7 +593,8 @@ function ItemCard(p: {
           <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("edit")}>
             {st === "unclear" ? "לא נקראה טוב · לתקן טקסט" : "לתקן טקסט"}
           </button>
-          {q.page && st === "unclear" ? (
+          {/* A page read again would not change an item someone fixed or answered: "לתקן טקסט" does. */}
+          {q.page && st === "unclear" && !q.fixed && !q.answered ? (
             <button type="button" className="a-btn small" disabled={sending || p.busy} onClick={() => void p.retry([q.page!])}>
               לקרוא שוב את עמוד {q.page}
             </button>
@@ -566,6 +605,7 @@ function ItemCard(p: {
           ביטול
         </button>
       ) : null}
+      {mode === "view" && !one && st === "nokey" ? <p className="a-small a-muted">בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד.</p> : null}
       {keyByLine(q) || undo ? (
         <p className="r-who a-small">
           {keyByLine(q) ? <span>{keyByLine(q)}</span> : null}
@@ -595,8 +635,10 @@ function ItemCard(p: {
 /** A change of an item's answer, in the log's words: "נועה: ג׳ במקום א׳" · "נועה: אישור של ב׳" · "נועה: ביטול". */
 function logLine(l: KeyLog): string {
   const who = l.by || "מישהו מהקבוצה";
-  if (l.undo_of !== null) return `${who}: ביטול (${l.new === null ? "בלי תשובה" : `חזרה ל-${letter(l.new)}`})`;
+  if (l.undo_of !== null)
+    return `${who}: ביטול (${l.origin_new === "solved" && l.new === null ? "חזרה לתשובה המוצעת" : l.new === null ? "בלי תשובה" : `חזרה ל-${letter(l.new)}`})`;
+  // A confirmation: the same key, now a member's (a true/false or match item's has no letter).
+  if (l.old === l.new && l.origin_old === "solved") return l.new === null ? `${who}: אישור התשובה המוצעת` : `${who}: אישור של ${letter(l.new)}`;
   if (l.new === null) return `${who}: מחיקת התשובה`;
-  if (l.old === l.new && l.origin_old === "solved") return `${who}: אישור של ${letter(l.new)}`;
   return l.old !== null ? `${who}: ${letter(l.new)} במקום ${letter(l.old)}` : `${who}: סימון ${letter(l.new)}`;
 }

@@ -76,6 +76,10 @@ test("the reading: a row per 4 pages in page order, the key sheet, the suggested
   assert.equal(X.readingLine({ units, pages: 12 }), "מעתיקים עמודים \u20665–8\u2069 מתוך 12…", "the range isolated left to right");
   assert.equal(X.readingLine({ units: [unit([1, 2, 3, 4], "done"), unit(null, "running", "solve", 3)], pages: 4 }), "מציעים תשובות לשאלות בלי תשובה…");
   assert.equal(X.readingLine({ units: [unit([1], "done")], pages: 1 }), "");
+  assert.equal(X.readingLine({ units: [unit([1, 2, 3, 4], "pending"), unit([5, 6, 7, 8], "pending")], pages: 8 }), "עמודים \u20661–4\u2069 בתור…", "nothing reads yet: waiting, not copying");
+  assert.equal(X.repeatsLine(3), "3 שאלות לא נשמרו: המספר שלהן כבר הופיע בעמוד אחר.");
+  assert.equal(X.repeatsLine(0), "");
+  assert.equal(X.cancelledLine(1), "שאלה אחת בוטלה לפי דף התשובות, ולא נכללת.");
   assert.equal(X.pagesText([7]), "עמוד 7");
 });
 
@@ -160,6 +164,15 @@ test("the simulation's lengths follow the exam, short first; minutes at the exam
   );
   assert.deepEqual(X.lengthsFor({ questions: 4, minutes: 10 }), [], "under 5: no simulation");
   assert.equal(X.lengthsFor({ questions: 200, minutes: 300 }).at(-1)?.n, 150, "at most 150");
+  assert.deepEqual(
+    X.lengthsFor({ questions: 90, minutes: 180, printed: 100 }).map((l) => [l.key, l.n, l.minutes]),
+    [
+      ["short", 20, 36],
+      ["half", 50, 90],
+      ["full", 90, 162],
+    ],
+    "10 open questions skipped: the whole exam's 180 minutes were for 100",
+  );
 });
 
 test("one clock: counted from the server's now, so a phone whose clock is off, or that was locked, keeps the same deadline", () => {
@@ -192,7 +205,9 @@ test("the grid and the submit line; the result's words", () => {
   assert.equal(X.scoreLines({ right: 5, counted: 5, suggested: 0, not_counted: 0 }).note, "");
   assert.equal(X.wrongLine({ form: "one", choice: 0, choices: null, answer: 2 }), "בחרת א׳, הנכונה ג׳");
   assert.equal(X.wrongLine({ form: "one", choice: null, choices: null, answer: 2 }), "לא ענית. הנכונה ג׳");
-  assert.equal(X.usedLine("2026-11-19T10:00:00Z", "2026-11-19T12:41:00Z", 180), "זמן: 2:41 מתוך 3 שעות");
+  assert.equal(X.usedLine("2026-11-19T10:00:00Z", "2026-11-19T12:41:00Z", 180), "זמן: שעתיים ו-41 דקות מתוך 3 שעות");
+  assert.equal(X.usedLine("2026-11-19T10:00:00Z", "2026-11-19T10:12:00Z", 36), "זמן: 12 דקות מתוך 36 דקות");
+  assert.equal(X.usedLine("2026-11-19T10:00:00Z", "2026-11-19T10:00:20Z", 30), "זמן: פחות מדקה מתוך 30 דקות");
   const item = (topic: string | null, correct: boolean, counted = true) => ({ id: "", pos: 1, no: 1, form: "one", answer: 0, seq: null, choice: 0, choices: null, correct, counted, origin: null, ref_lecture: null, topic });
   assert.deepEqual(X.byTopic([item("לב", true), item("לב", false), item("כליה", true), item(null, false), item("כליה", false, false)]), [
     { topic: "לב", right: 1, of: 2 },

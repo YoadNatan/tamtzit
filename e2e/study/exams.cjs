@@ -21,8 +21,8 @@
 //   5. "לתרגל את המבחן" (s=e.): the exam's order, its options as printed
 //      ("א+ב נכונות" stays third) on two showings; the answer's mode is 'exam'.
 //   6. The simulation: the setup (the newest ready exam chosen; the lengths
-//      short first: "קצר · 20 שאלות · 36 דקות", "חצי", "מלא"; "רק שאלות שעוד לא
-//      ראיתי" on), running against one clock with the page's fake clock: a
+//      short first: "קצר · 20 שאלות · 36 דקות", "חצי", "מלא"; "קודם שאלות שעוד
+//      לא ראיתי" on, not offered for the whole exam), running against one clock with the page's fake clock: a
 //      pick, "לסמן לחזרה", the grid; the phone "locked" for 5 minutes (the
 //      clock moved, the tab reloaded) comes back to the same deadline, the
 //      same question, its pick and its flag; at zero it submits by itself;
@@ -187,7 +187,8 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       /* ── 3. the reading; the phone closes; a failed unit and "לנסות שוב" ── */
       await page.locator(".x-prog .x-big").waitFor({ timeout: 15000 });
       const line = norm(await page.locator(".x-prog .x-big").innerText());
-      expect(/^מעתיקים עמודים \d+–\d+ מתוך 12…$/.test(line), `the reading's line: ${line}`);
+      // A unit reading pages, the key sheet read first, or the first pages waiting their turn (never "copying" a unit that waits).
+      expect(/^(מעתיקים עמודים \d+–\d+ מתוך 12…|קוראים את דף התשובות…|עמודים \d+–\d+ בתור…)$/.test(line), `the reading's line: ${line}`);
       expect(norm(await page.locator(".x-prog").innerText()).includes("אפשר לסגור את הטלפון"), "אפשר לסגור את הטלפון");
       await shot("exams-reading");
       await noSideScroll("exams-reading");
@@ -301,10 +302,14 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       const lens = (await page.locator(".s-len > button").allInnerTexts()).map(norm);
       expect(JSON.stringify(lens) === JSON.stringify(["קצר 20 שאלות 36 דקות", "חצי 50 שאלות 90 דקות", "מלא 60 שאלות 108 דקות"]), `the lengths, short first: ${lens.join(" | ")}`);
       expect((await page.locator(".s-len > button").first().getAttribute("aria-checked")) === "true", "short is chosen first");
-      expect(await page.getByRole("checkbox", { name: "רק שאלות שעוד לא ראיתי" }).isChecked(), "רק שאלות שעוד לא ראיתי is on");
+      expect(await page.getByRole("checkbox", { name: "קודם שאלות שעוד לא ראיתי" }).isChecked(), "קודם שאלות שעוד לא ראיתי is on");
+      // The whole exam has every question: the choice is not offered for it.
+      await page.locator(".s-len > button").last().click();
+      expect((await page.getByRole("checkbox", { name: "קודם שאלות שעוד לא ראיתי" }).count()) === 0, "no 'not seen first' for the whole exam");
+      await page.locator(".s-len > button").first().click();
       await shot("exams-sim-setup", { primary: ".ph-foot .a-btn.primary" });
       await noSideScroll("exams-sim-setup");
-      // The uploaded exam, whole (12 questions, 30 minutes), against the page's fake clock.
+      // The uploaded exam, whole (12 questions of the 14 it printed, 30 minutes), against the page's fake clock.
       await open("שוהם", `/?v=mock&c=${CID}&e=${EID}`, { clock: true });
       await page.getByRole("heading", { level: 1, name: "סימולציה" }).waitFor({ timeout: 15000 });
       await page.locator(".ph-foot .a-btn.primary").click();
@@ -314,7 +319,8 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       const deadline = att().deadline;
       await page.locator(".m-pos", { hasText: `שאלה 1 מתוך ${items.length}` }).waitFor({ timeout: 15000 });
       const clock = async () => norm(await page.locator(".m-time").innerText());
-      expect(/^0:(29|30):\d\d$/.test(await clock()), `one clock for the whole simulation: ${await clock()}`);
+      // 30 minutes were for the 14 questions it printed (2 open ones skipped): 26 for the 12 copied.
+      expect(/^0:(25|26):\d\d$/.test(await clock()), `one clock for the whole simulation: ${await clock()}`);
       // A pick, no feedback; the next question, flagged.
       await page.locator(".pq-options .a-opt").nth(2).click();
       await until(() => Boolean(att().picks[items.find((q) => q.exam_no === 1).id]), "the pick on the server");

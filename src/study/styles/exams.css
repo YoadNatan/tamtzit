@@ -63,6 +63,22 @@
   font: 700 var(--text-chip) / 1.6 var(--font-body);
   text-align: center;
 }
+.x-keystrip {
+  display: flex;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+}
+.x-keystrip .x-page {
+  flex: none;
+  width: 56px;
+}
+.x-keypicked {
+  align-items: center;
+  gap: var(--sp-3);
+}
 .x-tools {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -159,6 +175,18 @@
 .pq .x-crop.is-box {
   max-width: 420px;
 }
+a.x-zoom {
+  display: block;
+  width: 100%;
+  border-radius: var(--r-sm);
+}
+/* A white page glares on a dark screen: a little dimmer. */
+@media screen and (prefers-color-scheme: dark) {
+  .x-crop img,
+  .x-page img {
+    filter: brightness(0.86);
+  }
+}
 
 /* ── the review ── */
 .r-sum {
@@ -237,6 +265,17 @@
   grid-template-columns: 104px minmax(0, 1fr);
   gap: var(--sp-6);
   align-items: start;
+}
+/* On a phone the page beside the text is too small to check it against:
+   the page goes above the text, as wide as the card (a tap opens it whole). */
+@media (max-width: 479px) {
+  .r-split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-4);
+  }
+  .r-crop {
+    justify-self: stretch;
+  }
 }
 .r-crop {
   display: grid;
@@ -592,4 +631,13 @@ button.a-card.s-src[aria-checked="true"] {
 }
 .e-item p {
   margin: 0;
+}
+/* A bottom bar's buttons keep their words on one line, at 320 px too. */
+.sim-run .ph-foot .a-btn {
+  white-space: nowrap;
+}
+@media (max-width: 359px) {
+  .sim-run .ph-foot .a-btn:not(.icon) {
+    padding-inline: var(--sp-4);
+  }
 }

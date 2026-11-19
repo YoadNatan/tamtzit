@@ -12,8 +12,9 @@ import "../styles/exams.css";
 /* ── "העלאת מבחן קודם" (sources.md B6.1, mockup exam-upload.html) ──
  *
  * ?v=exams&new=1&c=<course>: a PDF ("קובץ PDF") or photographed pages ("לצלם
- * דפים": a strip of thumbnails, each moved up or down, turned or removed),
- * the year and the מועד, where the answers are ("מסומנות במבחן", "בקובץ
+ * דפים": taken now or chosen from the phone's photos, a strip of thumbnails,
+ * each moved earlier or later, turned or removed), the year (needed: two
+ * exams of one מועד must be told apart) and the מועד, where the answers are ("מסומנות במבחן", "בקובץ
  * נפרד" with its own file, "אין תשובות") and, if known, the exam's minutes
  * (the simulation's clock). The button carries the usual price before
  * anything is sent ("להעלות ולהעתיק את השאלות · כ-$1.40"); no sentence about
@@ -54,6 +55,12 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
   const made = useRef<{ exam_id: string; prefix: string } | null>(null);
   const pdfInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
+  const progRef = useRef<HTMLElement>(null);
+  // The progress goes at the top while pages are drawn and sent: below, the sticky button would cover it on a small phone.
+  const sendingNow = Boolean(busy);
+  useEffect(() => {
+    if (sendingNow) progRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [sendingNow]);
 
   useEffect(() => {
     courseOverview(courseId)
@@ -99,7 +106,11 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
     if (!more.length) return;
     setFieldError(null);
     if (forKey) {
-      setKeyFile((k) => ({ kind: "photos", photos: [...(k?.kind === "photos" ? k.photos : []), ...more].slice(0, MAX_PHOTOS) }));
+      // Choosing the key's photos again replaces them (several can be chosen at once).
+      setKeyFile((k) => {
+        if (k?.kind === "photos") k.photos.forEach((ph) => URL.revokeObjectURL(ph.url));
+        return { kind: "photos", photos: more.slice(0, MAX_PHOTOS) };
+      });
       return;
     }
     setPhotos((ps) => {
@@ -158,11 +169,11 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
       return;
     }
     if (keySource === "separate" && !keyPages) {
-      setFieldError({ field: "key", text: "צריך לבחור את קובץ התשובות, או לסמן ׳אין תשובות׳." });
+      setFieldError({ field: "key", text: "צריך לבחור את דף התשובות, או לסמן ׳אין תשובות׳." });
       return;
     }
-    if (year.trim() && !/^\d{4}$/.test(year.trim())) {
-      setFieldError({ field: "year", text: "שנה בארבע ספרות, למשל 2025." });
+    if (!/^\d{4}$/.test(year.trim())) {
+      setFieldError({ field: "year", text: year.trim() ? "שנה בארבע ספרות, למשל 2025." : "צריך לכתוב את השנה של המבחן, למשל 2025." });
       return;
     }
     if (minutes.trim() && !(Number(minutes) >= 10 && Number(minutes) <= 600)) {
@@ -221,6 +232,12 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
           <bdi>{course.name}</bdi>
         </span>
       </p>
+      {busy ? (
+        <section ref={progRef} className="a-card x-prog" aria-live="polite">
+          <b>{busy}</b>
+          <p className="a-small a-muted">כדאי להשאיר את המסך פתוח עד שכל הדפים עולים.</p>
+        </section>
+      ) : null}
 
       <div className="a-seg" role="radiogroup" aria-label="איך מעלים">
         <button type="button" className="a-btn" role="radio" aria-checked={mode === "pdf"} disabled={sending} onClick={() => setMode("pdf")}>
@@ -268,7 +285,6 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
             ref={photoInput}
             type="file"
             accept="image/*"
-            capture="environment"
             multiple
             className="sr-only"
             id="x-photos"
@@ -280,7 +296,7 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
           <div className="a-row between">
             <b>{photos.length === 1 ? "דף אחד" : `${photos.length} דפים`}</b>
             <button type="button" className="a-btn small" disabled={sending || photos.length >= MAX_PHOTOS} onClick={() => photoInput.current?.click()}>
-              {photos.length ? "+ לצלם עוד" : "+ לצלם דף"}
+              {photos.length ? "+ להוסיף עוד" : "+ להוסיף דפים"}
             </button>
           </div>
           {photos.length ? (
@@ -294,11 +310,12 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
                     </span>
                   </div>
                   <div className="x-tools">
+                    {/* The strip runs right to left: earlier is to the right. */}
                     <button type="button" className="a-btn" aria-label={`להקדים את דף ${i + 1}`} disabled={sending || i === 0} onClick={() => movePhoto(i, -1)}>
-                      ↑
+                      →
                     </button>
                     <button type="button" className="a-btn" aria-label={`לאחר את דף ${i + 1}`} disabled={sending || i === photos.length - 1} onClick={() => movePhoto(i, 1)}>
-                      ↓
+                      ←
                     </button>
                     <button type="button" className="a-btn" aria-label={`לסובב את דף ${i + 1}`} disabled={sending} onClick={() => turnPhoto(i)}>
                       ⟳
@@ -311,7 +328,7 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
               ))}
             </ol>
           ) : null}
-          <p className="a-small a-muted">צילום ישר, באור טוב, עמוד אחד בכל תמונה.</p>
+          <p className="a-small a-muted">אפשר לצלם עכשיו או לבחור תמונות שכבר בטלפון. צילום ישר, באור טוב, עמוד אחד בכל תמונה.</p>
           {err("file")}
         </div>
       )}
@@ -324,7 +341,6 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
             value={year}
             inputMode="numeric"
             maxLength={4}
-            placeholder={String(new Date().getFullYear())}
             disabled={sending}
             aria-invalid={Boolean(fieldErr("year")) || undefined}
             aria-describedby={fieldErr("year") ? "x-err-year" : undefined}
@@ -371,12 +387,36 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
               }}
             />
             <label htmlFor="x-keyfile" className="a-btn small x-keypick">
-              {keyFile ? "קובץ תשובות אחר" : "לבחור את קובץ התשובות"}
+              {!keyFile ? "לבחור את דף התשובות" : keyFile.kind === "pdf" ? "קובץ אחר" : "תמונות אחרות"}
             </label>
             {keyFile ? (
-              <span className="a-small a-muted">
-                {keyFile.kind === "pdf" ? `${keyFile.pdf.name} · ${keyFile.pdf.count === 1 ? "דף אחד" : `${keyFile.pdf.count} דפים`}` : keyFile.photos.length === 1 ? "תמונה אחת" : `${keyFile.photos.length} תמונות`}
+              <span className="a-row x-keypicked">
+                <span className="a-small a-muted">
+                  {keyFile.kind === "pdf" ? `${keyFile.pdf.name} · ${keyFile.pdf.count === 1 ? "דף אחד" : `${keyFile.pdf.count} דפים`}` : keyFile.photos.length === 1 ? "תמונה אחת" : `${keyFile.photos.length} תמונות`}
+                </span>
+                <button
+                  type="button"
+                  className="a-btn ghost small"
+                  disabled={sending}
+                  onClick={() =>
+                    setKeyFile((k) => {
+                      if (k?.kind === "photos") k.photos.forEach((ph) => URL.revokeObjectURL(ph.url));
+                      return null;
+                    })
+                  }
+                >
+                  להסיר
+                </button>
               </span>
+            ) : null}
+            {keyFile?.kind === "photos" ? (
+              <ol className="x-keystrip" aria-label="דף התשובות, לפי הסדר">
+                {keyFile.photos.map((ph, i) => (
+                  <li key={ph.id} className="x-page">
+                    <img src={ph.url} alt={`דף תשובות ${i + 1}`} />
+                  </li>
+                ))}
+              </ol>
             ) : null}
             {err("key")}
           </div>
@@ -406,13 +446,6 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
           {error}
         </p>
       ) : null}
-      {busy ? (
-        <section className="a-card x-prog" aria-live="polite">
-          <b>{busy}</b>
-          <p className="a-small a-muted">כדאי להשאיר את המסך פתוח עד שכל הדפים עולים.</p>
-        </section>
-      ) : null}
-
       <StickyActions>
         <button type="button" className="a-btn primary wide" disabled={sending || reading} onClick={() => void upload()}>
           {sending ? (

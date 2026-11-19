@@ -263,7 +263,7 @@ export default function MockRun({ ctx, attemptId }: { ctx: ScreenProps<"practice
           </button>
         ) : null}
         {pos < total - 1 ? (
-          <button type="button" className="a-btn primary wide" onClick={() => goTo(pos + 1)}>
+          <button type="button" className="a-btn primary wide m-next" onClick={() => goTo(pos + 1)}>
             לשאלה הבאה
           </button>
         ) : (
@@ -405,8 +405,9 @@ function MockResult({ ctx, a, score, qs, title }: { ctx: ScreenProps<"practice">
       <li key={it.id} className="e-row">
         <button type="button" className="a-li" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : it.id)}>
           <div>
-            <b>שאלה {it.no ?? it.pos}</b>
-            <span className="m">{line}</span>
+            {/* Its place in this simulation, as the running screen said it ("שאלה 5 מתוך 20"); the exam's own number beside. */}
+            <b>שאלה {it.pos}</b>
+            <span className="m">{it.no && it.no !== it.pos ? `${line} · שאלה ${it.no} במבחן` : line}</span>
           </div>
         </button>
         {expanded && q ? (
@@ -440,9 +441,17 @@ function MockResult({ ctx, a, score, qs, title }: { ctx: ScreenProps<"practice">
   };
   return (
     <main className="practice-session is-end sim-result">
-      <Head back={back} title={title ? <>סימולציה · <bdi>{title}</bdi></> : "סימולציה"}>
+      <Head back={back} title="סימולציה">
         <span className="a-chip">רק לך</span>
       </Head>
+      {/* The exam's name on a line of its own: beside the title it wraps on a 320 px phone. */}
+      {title ? (
+        <p className="ph-sub">
+          <span>
+            <bdi>{title}</bdi>
+          </span>
+        </p>
+      ) : null}
       <section className="e-score" aria-labelledby="e-score-h">
         <div className="big" id="e-score-h">
           <b>{lines.big}</b>

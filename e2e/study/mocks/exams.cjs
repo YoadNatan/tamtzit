@@ -18,8 +18,9 @@
 //     reply; confidence under 3 counts in no score). `fail(unit)` fails a
 //     unit once ("unreadable"), and "לנסות שוב" (study_exam_retry) runs it again.
 //   - rpc/study_exam_status, study_exam_review, study_exam_item_edit (logged),
-//     study_set_exam_key (logged, origin member), study_exam_key_undo,
-//     study_exam_retry, study_exam_hide
+//     study_set_exam_key (logged, origin member), study_exam_key_confirm (a
+//     true/false or match item's suggested key, logged), study_exam_key_undo
+//     ('changed' when the key moved since), study_exam_retry, study_exam_hide
 //   - GET /rest/v1/study_exams (members read their group's)
 //   - simulations: study_mock_create (kind 'exam'), study_mock_start (an open
 //     attempt comes back), study_mock_get (past the deadline: submitted first),
@@ -70,7 +71,7 @@ module.exports = {
     M.overviewRows = (nameKey) =>
       M.examsOf(nameKey)
         .sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || (a.created_at < b.created_at ? 1 : -1))
-        .map((e) => ({ id: e.id, title: e.title, year: e.year, status: e.status, moed: e.moed, minutes: e.minutes, key_source: e.key_source, hidden: e.hide_from_profile, created_at: e.created_at, questions: itemsOf(e).length }));
+        .map((e) => ({ id: e.id, title: e.title, year: e.year, status: e.status, moed: e.moed, minutes: e.minutes, key_source: e.key_source, hidden: e.hide_from_profile, created_at: e.created_at, questions: itemsOf(e).length, printed: itemsOf(e).length + (e.skipped_open ?? 0) }));
     const keyRow = (q) => P().keys.get(q.id) ?? null;
     const hasKey = (q) => {
       const k = keyRow(q);
@@ -96,9 +97,11 @@ module.exports = {
         Q.keys.set(q.id, { answer: null, seq: null, explanations: it.options.map(() => ""), takeaway: "", origin: null, conf: null, by: null });
       }
       const k = keyRow(q);
-      if (k.origin !== "sheet" && k.origin !== "member") {
-        if (it.form === "one" && it.answer >= 0) Object.assign(k, { answer: it.answer, origin: "exam" });
-        if (it.form !== "one" && it.seq?.length) Object.assign(k, { seq: it.seq, origin: "exam" });
+      // As section S: marks only when the uploader said the answers are marked in the exam; a handwritten one is a suggested answer.
+      if (e.key_source === "marked" && (k.origin === null || k.origin === "exam")) {
+        const origin = it.marked_by === "handwritten" ? { origin: "solved", conf: 2 } : { origin: "exam" };
+        if (it.form === "one" && it.answer >= 0) Object.assign(k, { answer: it.answer, ...origin });
+        if (it.form !== "one" && it.seq?.length) Object.assign(k, { seq: it.seq, ...origin });
       }
       const sheet = e.sheet?.get(it.no);
       if (sheet !== undefined) Object.assign(k, { answer: sheet, origin: "sheet" });
@@ -259,13 +262,15 @@ module.exports = {
           suggested: its.filter((q) => k(q).origin === "solved").length,
           unkeyed: its.filter((q) => !M.hasKey(q)).length,
           unclear: its.filter((q) => q.parse_conf === 1).length,
+          repeats: 0,
+          cancelled: 0,
         });
       }
       case "study_exam_review": {
         const e = examOf(body.p_exam);
         if (!e) return refuse("exam not found");
         return json({
-          exam: { id: e.id, title: e.title, status: e.status, key_source: e.key_source, hidden: e.hide_from_profile },
+          exam: { id: e.id, title: e.title, status: e.status, key_source: e.key_source, hidden: e.hide_from_profile, by: nameOf(e.created_by) },
           pages: (e.pageRows ?? []).map((x) => ({ n: x.n, path: x.path, w: x.w, h: x.h, key: x.key })),
           items: P.questions
             .filter((q) => q.exam_id === e.id)
@@ -276,6 +281,7 @@ module.exports = {
                 id: q.id, no: q.exam_no, kind: q.kind, form: q.form, vignette: q.vignette, question: q.question, options: q.options, prompts: q.layout?.prompts ?? [], figure: q.figure,
                 page: q.page, parse_conf: q.parse_conf, retired: Boolean(q.retired_at), answer: k.answer ?? null, seq: k.seq ?? null, origin: k.origin ?? null, conf: k.conf ?? null,
                 key_by: k.by ? nameOf(k.by) : null, fixed: M.itemLog.some((l) => l.question_id === q.id),
+                answered: (P.answers ?? []).some((a) => a.question_id === q.id),
               };
             }),
           key_log: M.keyLog.filter((l) => l.exam_id === e.id).map((l) => ({ ...l, by: nameOf(l.member_id) })),
@@ -316,6 +322,15 @@ module.exports = {
         q.has_key = a !== null;
         return json(null);
       }
+      case "study_exam_key_confirm": {
+        const q = qOf(body.p_question);
+        if (!q || !member) return refuse("question not found");
+        const k = P.keys.get(q.id);
+        if (k.origin !== "solved" || !M.hasKey(q)) return refuse("nothing to confirm");
+        M.keyLog.push({ id: M.keyLog.length + 1, question_id: q.id, exam_id: q.exam_id, old: k.answer ?? null, new: k.answer ?? null, origin_old: "solved", origin_new: "member", conf_old: k.conf ?? null, by_old: k.by ?? null, undo_of: null, member_id: me, at: iso(now) });
+        Object.assign(k, { origin: "member", conf: null, by: me });
+        return json(null);
+      }
       case "study_exam_key_undo": {
         const q = qOf(body.p_question);
         if (!q || !member) return refuse("question not found");
@@ -323,6 +338,7 @@ module.exports = {
         const l = [...M.keyLog].reverse().find((x) => x.question_id === q.id && x.undo_of === null && !undone.has(x.id));
         if (!l) return refuse("nothing to undo");
         const k = P.keys.get(q.id);
+        if ((k.answer ?? null) !== l.new || (k.origin ?? null) !== l.origin_new) return refuse("changed");
         M.keyLog.push({ id: M.keyLog.length + 1, question_id: q.id, exam_id: q.exam_id, old: k.answer ?? null, new: l.old, origin_old: k.origin, origin_new: l.origin_old, conf_old: k.conf, by_old: k.by, undo_of: l.id, member_id: me, at: iso(now) });
         Object.assign(k, { answer: l.old, origin: l.origin_old, conf: l.conf_old, by: l.by_old });
         q.has_key = M.hasKey(q);
@@ -374,7 +390,8 @@ module.exports = {
         const seen = (q) => P.answers.some((a) => a.question_id === q.id && a.user_id === me);
         const unseen = body.p_unseen_only !== false;
         const chosen = [...pool].sort((a, b) => (unseen ? Number(seen(a)) - Number(seen(b)) : 0) || a.exam_no - b.exam_no).slice(0, n).sort((a, b) => a.exam_no - b.exam_no);
-        const minutes = body.p_minutes ?? (e.minutes ? Math.ceil((e.minutes * n) / pool.length) : Math.ceil(n * 1.8));
+        // The exam's minutes were for all it printed (open questions skipped too), as study_mock_create.
+        const minutes = body.p_minutes ?? (e.minutes ? Math.ceil((e.minutes * n) / Math.max(pool.length, items(e).length + (e.skipped_open ?? 0))) : Math.ceil(n * 1.8));
         const mk = { id: hex("e3e00000", ++M.seq), group_id: db.group.id, course_id: c.id, kind: "exam", exam_id: e.id, question_ids: chosen.map((q) => q.id), minutes, spec: { n, pool: pool.length, unseen_only: unseen }, created_by: me };
         M.mocks.push(mk);
         return json({ mock: mk.id, questions: n, minutes, pool: pool.length, missing: [] });
@@ -399,7 +416,7 @@ module.exports = {
         const a = M.attempts.find((x) => x.id === body.p_attempt && x.member_id === me);
         if (!a) return refuse("attempt not found");
         if (a.finished_at) return json(false);
-        if (now >= Date.parse(a.deadline)) {
+        if (now >= Date.parse(a.deadline) + 10_000) {
           finish(a);
           return json(false);
         }
