@@ -257,6 +257,12 @@ const level = (l, parts) =>
       await shot(shoham, "practice-04-setup", { primary: PRIMARY });
 
       /* ── 3. The choices: a part out, a style in; the plan follows ── */
+      // With the question types (VITE_STUDY_QTYPES, the prod build) "סוגים נוספים" starts with the
+      // plan's defaults on; this script follows the multiple-choice path, so it turns them off first
+      // (qtypes.cjs covers the other types). Without the flag there is no such group.
+      const typesOn = (await shoham.locator(".pc-types").count()) > 0;
+      for (let i = 0; typesOn && i < 8 && (await shoham.locator(".pc-types button[aria-pressed=true]").count()) > 0; i++)
+        await shoham.locator(".pc-types button[aria-pressed=true]").first().click();
       const plansBefore = P.p2calls.filter((c) => c.action === "plan").length;
       await shoham.locator(".pc-parts button").first().click();
       await shoham.locator(".pc-styles button", { hasText: "השוואה" }).click();
@@ -475,17 +481,28 @@ const level = (l, parts) =>
           norm(await shoham.locator(".pr-size [role=radio]").last().innerText()) === `${bankSize} · הכול` &&
           (await shoham.locator(".pr-mode [aria-checked=true] b").innerText()) === "תרגול" &&
           (await shoham.locator(".pr-parts button").count()) === 7 &&
-          (await shoham.locator(".pr-styles [role=radio]", { hasText: "רק מקרים קליניים" }).count()) === 1 &&
+          // With the question types a round picks a type group ("סוג שאלה"), shown only when the bank
+          // has more than one; this bank is all multiple-choice, so neither picker is there.
+          (typesOn
+            ? (await shoham.locator(".pr-types, .pr-styles").count()) === 0
+            : (await shoham.locator(".pr-styles [role=radio]", { hasText: "רק מקרים קליניים" }).count()) === 1) &&
           startText === "להתחיל · 10 שאלות",
         JSON.stringify({ sources, startText }),
       );
       await shot(shoham, "practice-12-round", { primary: PRIMARY });
-      // "רק מקרים קליניים" counts only the cases; back to הכול; then 5.
-      await shoham.locator(".pr-styles [role=radio]", { hasText: "רק מקרים קליניים" }).click();
-      const caseCount = norm(await shoham.locator(".pr-sources button").last().innerText());
-      await shoham.locator(".pr-styles [role=radio]", { hasText: "הכול" }).click();
-      await shoham.locator(".pr-size [role=radio]", { hasText: /^5$/ }).click();
-      check("9 a style narrows the counts (cases only)", caseCount === `הכול · ${cases}`, caseCount);
+      // "רק מקרים קליניים" counts only the cases; back to הכול; then 5. With the question types there is
+      // no style filter (the type groups replace it): the count stays the whole bank.
+      if (typesOn) {
+        const allCount = norm(await shoham.locator(".pr-sources button").last().innerText());
+        await shoham.locator(".pr-size [role=radio]", { hasText: /^5$/ }).click();
+        check("9 a style narrows the counts (cases only)", allCount === `הכול · ${bankSize}`, allCount);
+      } else {
+        await shoham.locator(".pr-styles [role=radio]", { hasText: "רק מקרים קליניים" }).click();
+        const caseCount = norm(await shoham.locator(".pr-sources button").last().innerText());
+        await shoham.locator(".pr-styles [role=radio]", { hasText: "הכול" }).click();
+        await shoham.locator(".pr-size [role=radio]", { hasText: /^5$/ }).click();
+        check("9 a style narrows the counts (cases only)", caseCount === `הכול · ${cases}`, caseCount);
+      }
       await shoham.locator(PRIMARY).click();
 
       /* ── 10. A question as approved: pick, bet, לבדוק; the autopsy ── */
