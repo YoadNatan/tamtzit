@@ -67,6 +67,8 @@ const RELEASES: Array<[string, string[]]> = [
   ["1 with the guide", G1],
   ["12 with the guide", [...R12, "GUIDE"]],
   ["production with the question types", [...R9, "GUIDE", "QTYPES"]],
+  ["production with the courses (sources.md, phase 1)", [...R9, "GUIDE", "QTYPES", "COURSES"]],
+  ["the courses alone", ["COURSES"]],
 ];
 const flagSet = (names: string[]): Flags => flagsFrom(Object.fromEntries(names.map((n) => [`VITE_STUDY_${n}`, "1"])));
 const W = { serverWrites: false, devicePrint: false };
@@ -79,6 +81,7 @@ const HELP: Array<[string, (f: Flags) => boolean]> = [
   ["מה זה תמצית", () => true],
   ["מדריך לאפליקציה", (f) => f.guide], // the guide (docs/study/guide.md)
   ["העלאת הרצאה", () => true],
+  ["קורסים", (f) => f.courses], // courses (docs/study/sources.md, phase 1)
   ["הנקודות שצריך לדעת", (f) => f.practice], // package B, decision 2 of 17 Nov 2026
   ["קריאה יחד", () => true],
   ["הפגישה היומית", (f) => f.meeting],
@@ -322,4 +325,14 @@ test("question types: help says which types there are and where to choose and fi
     "יש כמה סוגים: אמריקאית, שאלה על תמונה, סימון על תמונה (מה מסומן במספר, או באיזה מספר מסומן מבנה), התאמה, סידור, מקרה קליני בשלבים ונכון / לא נכון. בוחרים סוגים ב״שאלות חדשות״, ובתרגול אפשר לסנן לפי סוג.",
   );
   assert.ok(!helpRows(flagSet(R9), W, ALL_ENDS).some((r) => r.title === "סוגי שאלות"), "not without the flag");
+});
+
+test("courses (sources.md, phase 1): help says what the course page does, with each sentence's own flag", () => {
+  const row = (names: string[]) => helpRows(flagSet(names), W, ALL_ENDS).find((r) => r.title === "קורסים")?.text ?? "";
+  assert.equal(row([...R9]), "", "no row without VITE_STUDY_COURSES");
+  const all = row([...R9, "COURSES"]);
+  for (const words of ["עמוד הקורס", "״לתרגל מה שכבר יש״", "״לשאול על כל הקורס״", "״נבחרו 12 מתוך 340 פסקאות״", "״העלאה של כמה קבצים״", "מחכים לחודש הבא", "בוחרים שוב את אותם קבצים"])
+    assert.ok(all.includes(words), words);
+  const alone = row(["COURSES"]);
+  assert.ok(!alone.includes("לתרגל") && !alone.includes("לשאול"), "without practice and ask, neither is promised");
 });
