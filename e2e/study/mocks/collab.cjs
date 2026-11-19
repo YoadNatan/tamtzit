@@ -262,6 +262,7 @@ module.exports = {
   async api(req, res, db, b) {
     const p = new URL(req.url, "http://x").pathname;
     if (p !== "/api/study/ai" || !b || (b.op !== "ask" && b.op !== "fix_check")) return undefined;
+    if (b.scope === "course") return undefined; // "לשאול על כל הקורס": mocks/courses.cjs
     db.kCalls.push({ fn: `api ${b.op}${b.share ? " share" : ""}`, body: b, at: Date.now() });
     const send = (status, body) => {
       res.writeHead(status, { "content-type": "application/json" });

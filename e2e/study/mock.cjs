@@ -34,7 +34,7 @@ const now = () => new Date().toISOString();
 const uuid = (n) => `${String(n).padStart(8, "0")}-0000-4000-8000-${String(n).padStart(12, "0")}`;
 /** A database with every section loaded, at the versions the approved features
  *  need (spec §2.11, §12.2.2): the SQL always runs before a release's flags. */
-const SCHEMA_ALL = { F: 1, A: 1, W: 2, Q: 3, Z: 3, C: 3, K: 2, P: 2, M: 3, N: 1, V: 1, U: 3, J: 1, H: 3, B: 1, G: 2, E: 1, T: 3, X: 1 };
+const SCHEMA_ALL = { F: 1, A: 1, W: 2, Q: 3, Z: 3, C: 3, K: 2, P: 2, M: 3, N: 1, V: 1, U: 3, J: 1, H: 3, B: 1, G: 2, E: 1, T: 3, X: 1, S: 1 };
 /** The registry this branch's SQL writes (each section's last statement in
  *  supabase/study-schema.sql): what production's study_schema() answers once
  *  the release's SQL has run. Builds with every flag off and release 1's
@@ -53,7 +53,7 @@ const SCHEMA_SQL = sqlSchema();
  *  "j" (wave 4's J: the SQL's J 1), "m" (wave 4's M: the SQL's M 1) and "w4"
  *  (all of wave 4), every section for the sets that turn on what is not
  *  built yet. */
-const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod"];
+const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1"];
 const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_ALL) });
 /** The flag set a build was made with, as the e2e scripts name it: "off", "rel1"
  *  (release 1: VITE_STUDY_QUESTIONS, VITE_STUDY_PRACTICE and VITE_STUDY_CARDS;
@@ -99,15 +99,18 @@ const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_A
  *  (production's set: every VITE_STUDY_* flag but ACCOUNT, QUIZ_ROUNDS,
  *  EXAMS, PDF, RECORDINGS and FAKE_ASR, i.e. "guide" without QUIZ_ROUNDS,
  *  which no script tells apart), against this branch's SQL;
+ *  "s1" (courses, docs/study/sources.md phase 1: "prod" with
+ *  VITE_STUDY_COURSES, against this branch's SQL, which has section S at 1);
  *  E2E_ANCHOR=1 says a release's build has
  *  VITE_STUDY_ANCHOR too (package N: a paragraph's comments show in its chip
  *  row, not the dot). `any`: a package's flag is on, so the "תרגול" tab shows
  *  (questions or cards); the others name the features the scripts look for. */
 function flagSetOf(name) {
   const set = name || process.env.E2E_FLAGS || "off";
-  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod"].includes(set))
-    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1 or prod`);
+  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1"].includes(set))
+    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1, prod or s1`);
   if (set === "guide1") return { ...flagSetOf("rel1"), set, guide: true };
+  if (set === "s1") return { ...flagSetOf("prod"), set, courses: true };
   const every = set === "all" || set === "notoday";
   const w5x = set === "w5x" || set === "guide" || set === "prod";
   const h5 = set === "h5" || w5x;
@@ -122,7 +125,7 @@ function flagSetOf(name) {
   const k = every || set === "k" || set === "v" || set === "j" || m;
   // anchor: package N's flag (every flag on, M's and wave 4's sets, or E2E_ANCHOR=1 on a release's set built with VITE_STUDY_ANCHOR too).
   const anchor = every || m || (set !== "off" && process.env.E2E_ANCHOR === "1");
-  return { set, any: set !== "off", today: set === "all" || t, cardsReview: every || t, questions: set !== "off", cards: set !== "off", ask: k, corrections: k, var: every || set === "v" || w4, wall: every || set === "j" || w4, meeting: every || m, guess: every || m, account: every, quiz: every || set === "rel2" || k, anchor, progress: every || a5, mistakes: every || a5, pulse: every || u, museum: every || h5, boss: every || h5, marathons: every || g, groupPlan: every || g, needsMe: set === "all" || g, eve: every || g, traps: every || e5, blankTable: every || e5, guide: set === "guide" || set === "prod", qtypes: set === "prod" };
+  return { set, any: set !== "off", today: set === "all" || t, cardsReview: every || t, questions: set !== "off", cards: set !== "off", ask: k, corrections: k, var: every || set === "v" || w4, wall: every || set === "j" || w4, meeting: every || m, guess: every || m, account: every, quiz: every || set === "rel2" || k, anchor, progress: every || a5, mistakes: every || a5, pulse: every || u, museum: every || h5, boss: every || h5, marathons: every || g, groupPlan: every || g, needsMe: set === "all" || g, eve: every || g, traps: every || e5, blankTable: every || e5, guide: set === "guide" || set === "prod", qtypes: set === "prod", courses: every };
 }
 
 /** Slide 3's picture as the upload stores it with question types: the generated
