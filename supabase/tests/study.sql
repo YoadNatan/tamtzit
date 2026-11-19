@@ -387,7 +387,9 @@ select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, 
                          -- section B (decision 2 of 17 Nov 2026: the points read ahead; no bank is written ahead):
                          -- the worker's claim and release, and the two of section Q it saves and fails through,
                          -- each refusing without the key
-                         'study_points_ahead_claim', 'study_points_ahead_release', 'study_points_save', 'study_points_fail');
+                         'study_points_ahead_claim', 'study_points_ahead_release', 'study_points_save', 'study_points_fail',
+                         -- section S 2 (past exams): the worker's claim, saves and finish of an exam's unit, each refusing without the key
+                         'study_claim_exam', 'study_exam_save_items', 'study_exam_save_keys', 'study_finish_exam_job');
 
 -- F28 (review of F0, SEC-1): the slide pictures stay with their lecture. The
 -- app of before F0 deletes a lecture's files first and then its row, which
@@ -8256,8 +8258,9 @@ select 'X-end. the fixtures are gone: ' || case when not exists (select 1 from p
 -- ════════════════════════════════════════════════════════════════════════
 --  SECTION S checks. S 1: courses (the backfill, the trigger, the RPCs,
 --  rename and merge through lectures, exams and plans, members only), and a
---  round's plan_id. On fixtures of their own, removed at the end. Every line
---  says ok or FAIL.
+--  round's plan_id. S 2: past exams (the upload, the queue shared with the
+--  summaries, items and keys, the key log, simulations and their clock). On
+--  fixtures of their own, removed at the end. Every line says ok or FAIL.
 -- ════════════════════════════════════════════════════════════════════════
 reset role;
 select id as sg from public.study_groups order by created_at limit 1 \gset
@@ -8298,8 +8301,8 @@ insert into public.study_members (group_id, user_id, name) values (:'sg', :'sa',
 insert into public.study_groups (id, name, join_code, created_by) values (:'sog', 'קבוצה אחרת', 'SSSSSS', :'ss');
 insert into public.study_members (group_id, user_id, name) values (:'sog', :'ss', 'זרה');
 
-select stest.is_('S1-reg. the registry has S 1 and the switch courses is on',
-  (public.study_schema() ->> 'S') || ' ' || study_private.feature_on('courses')::text, '1 true');
+select stest.is_('S1-reg. the registry has S at 1 or later and the switch courses is on',
+  ((public.study_schema() ->> 'S')::int >= 1)::text || ' ' || study_private.feature_on('courses')::text, 'true true');
 select stest.is_('S1a. every course text of the lectures and exams has its row (one per course_key, the unique key)',
   (select count(*)::text from (select distinct group_id, study_private.course_key(course) k from public.study_lectures where study_private.course_key(course) <> ''
                                union select distinct group_id, study_private.course_key(course) from public.study_exams where study_private.course_key(course) <> '') x
@@ -8560,6 +8563,416 @@ reset role;
 select stest.is_('S1m4. anon reaches neither round RPC',
   (has_function_privilege('anon', 'public.study_request_create_in_plan(uuid, jsonb, jsonb, uuid, text)', 'execute'))::text, 'false');
 set role authenticated;
+
+-- ═════════ S 2 · past exams: upload, the queue shared with summaries, items, keys, simulations ═════════
+reset role;
+select stest.is_('S2-reg. the registry has S 2; the switch exams starts off',
+  (public.study_schema() ->> 'S') || ' ' || study_private.feature_on('exams')::text, '2 false');
+update study_private.features set enabled = false where name = 'exams';
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+select public.study_course_upsert(:'sg', 'מבחנים (synthetic)') as scx \gset
+select stest.is_('S2a. with the switch off: no exam, and nothing goes to an exams folder',
+  stest.err(format('select public.study_exam_create(%L, %L)', :'scx', '{"year":2025,"moed":"א׳"}'))
+  || ' · ' || stest.err(format('insert into storage.objects (bucket_id, name) values (%L, %L)', 'study', :'sg' || '/exams/' || gen_random_uuid() || '/p1.jpg')),
+  'off · new row violates row-level security policy for table "objects"');
+reset role;
+update study_private.features set enabled = true where name = 'exams';
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+select (x ->> 'exam_id') as sx2, (x ->> 'prefix') as spfx from public.study_exam_create(:'scx', '{"year":2025,"moed":"א׳","key_source":"marked","minutes":180}') x \gset
+select stest.is_('S2b. the exam: its title from the moed and year, uploading, in the course; its folder',
+  (select title || ' · ' || status || ' · ' || course || ' · ' || minutes from public.study_exams where id = :'sx2') || ' · ' || (:'spfx' = :'sg' || '/exams/' || :'sx2' || '/')::text,
+  'מועד א׳ 2025 · uploading · מבחנים (synthetic) · 180 · true');
+select stest.is_('S2b2. bad meta; another group''s course',
+  stest.err(format('select public.study_exam_create(%L, %L)', :'scx', '{"year":1900}')) || ' · '
+  || stest.err(format('select public.study_exam_create(%L, %L)', :'scx', '{"key_source":"maybe"}')) || ' · '
+  || stest.err(format('select public.study_exam_create(%L, %L)', :'sof', '{}')),
+  'bad exam · bad exam · course not found');
+-- Twelve pages of a text PDF (synthetic lines), uploaded by the exam's uploader.
+insert into storage.objects (bucket_id, name) select 'study', :'spfx' || 'p' || n || '.jpg' from generate_series(1, 12) n;
+select stest.is_('S2c. only the uploader adds pages, only p<n>.jpg, only while it uploads; lecture pictures as before',
+  stest.err(format('insert into storage.objects (bucket_id, name) values (%L, %L)', 'study', :'spfx' || 'notes.pdf')) || ' · '
+  || stest.err(format('insert into storage.objects (bucket_id, name) values (%L, %L)', 'study', :'sg' || '/' || :'sl1' || '/s9-1.jpg')),
+  'new row violates row-level security policy for table "objects" · none');
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000002';
+select stest.is_('S2c2. another member does not add to her exam',
+  stest.err(format('insert into storage.objects (bucket_id, name) values (%L, %L)', 'study', :'spfx' || 'p13.jpg')),
+  'new row violates row-level security policy for table "objects"');
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+select jsonb_agg(jsonb_build_object('n', n, 'path', :'spfx' || 'p' || n || '.jpg', 'w', 1500, 'h', 2121,
+                                    'lines', jsonb_build_array('שאלה ' || (n * 2 - 1) || ' (synthetic)', 'Examplomycin 5 mg'), 'key', false) order by n) as spages,
+       jsonb_object_agg(:'spfx' || 'p' || n || '.jpg', 'https://proj.supabase.co/storage/v1/object/sign/study/' || :'spfx' || 'p' || n || '.jpg?token=aaa.bbb.ccc') as surls
+  from generate_series(1, 12) n \gset
+reset role;
+delete from net.calls;
+insert into vault.decrypted_secrets (name, decrypted_secret) select 'study_site_url', 'https://tamtzit.vercel.app'
+ where not exists (select 1 from vault.decrypted_secrets where name = 'study_site_url');
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+select stest.is_('S2d. pages_done: the key; pages that were not uploaded; 121 pages; links of another path',
+  stest.err(format('select public.study_exam_pages_done(%L, %L, %L)', :'sx2', :'spages', :'surls')) || ' · '
+  || stest.err(format('select public.study_exam_pages_done(%L, %L, %L, null, %L)', :'sx2',
+       (select jsonb_agg(x) from jsonb_array_elements(:'spages'::jsonb) x) || jsonb_build_array(jsonb_build_object('n', 13, 'path', :'spfx' || 'p13.jpg', 'w', 10, 'h', 10)),
+       :'surls', :'skey')) || ' · '
+  || stest.err(format('select public.study_exam_pages_done(%L, %L, %L, null, %L)', :'sx2',
+       (select jsonb_agg(jsonb_build_object('n', n, 'path', :'spfx' || 'p' || n || '.jpg', 'w', 10, 'h', 10)) from generate_series(1, 121) n), :'surls', :'skey')) || ' · '
+  || stest.err(format('select public.study_exam_pages_done(%L, %L, %L, null, %L)', :'sx2', :'spages',
+       jsonb_set(:'surls'::jsonb, array[:'spfx' || 'p3.jpg'], to_jsonb('https://proj.supabase.co/storage/v1/object/sign/study/' || :'spfx' || 'p4.jpg?token=a.b.c')), :'skey')),
+  'forbidden · missing pages · too many pages · bad urls');
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000002';
+select stest.is_('S2d2. only its uploader hands the pages over', stest.err(format('select public.study_exam_pages_done(%L, %L, %L, null, %L)', :'sx2', :'spages', :'surls', :'skey')), 'exam not found');
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+select (x ->> 'units') as sunits from public.study_exam_pages_done(:'sx2', :'spages', :'surls', null, :'skey') x \gset
+select stest.is_('S2d3. 12 pages: 3 read units of 4 pages, each with the next page as context; reading; the worker kicked; once only',
+  :'sunits' || ' · '
+  || (select status || ' ' || jsonb_array_length(pages) from public.study_exams where id = :'sx2') || ' · '
+  || (select string_agg((u ->> 'kind') || (u -> 'pages')::text, ' ' order by o) from jsonb_array_elements(public.study_exam_status(:'sx2') -> 'units') with ordinality t(u, o))
+  || ' · ' || stest.err(format('select public.study_exam_pages_done(%L, %L, %L, null, %L)', :'sx2', :'spages', :'surls', :'skey')),
+  '3 · reading 0 · read[1, 2, 3, 4] read[5, 6, 7, 8] read[9, 10, 11, 12] · already started');
+reset role;
+select stest.is_('S2d4. the pages are rows (study_exams.pages stays empty), lines kept; kicks {exam}; the next page of each unit',
+  (select count(*) || ' ' || max(lines[1]) filter (where n = 3) from public.study_exam_pages where exam_id = :'sx2') || ' · '
+  || (select (count(*) between 1 and 3)::text from net.calls where body ->> 'exam' = :'sx2') || ' · '
+  || (select string_agg(coalesce(range ->> 'next', 'null'), ',' order by created_at, range ->> 'next') from study_private.exam_jobs where exam_id = :'sx2'),
+  '12 שאלה 5 (synthetic) · true · 5,9,null');
+select stest.is_('S2d5. the sweeper is scheduled', (select count(*)::text from cron.job where jobname = 'study-exam-dispatch'), '1');
+
+-- The limit of 3 a group, summaries and exams together. The worker calls with no member.
+-- Earlier sections' writers that still hold a lease in this group let it go first.
+reset request.jwt.claim.sub;
+update public.study_lectures set lease_until = now() - interval '1 second' where group_id = :'sg' and status = 'outlining';
+update public.study_sections s set lease_until = now() - interval '1 second', updated_at = now() - interval '7 minutes'
+  from public.study_lectures l where l.id = s.lecture_id and l.group_id = :'sg' and s.status = 'writing';
+update public.study_recording_notes n set lease_until = now() - interval '1 second'
+  from public.study_lectures l where l.id = n.lecture_id and l.group_id = :'sg' and n.status = 'writing';
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by)
+select ('e8200000-0000-4000-8000-00000000002' || k)::uuid, :'sg', 'מבחנים (synthetic)', 'Live ' || k || ' (synthetic)', 'pptx', '[]', 'writing', :'sa'
+  from generate_series(0, 3) k;
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, lease_until, attempts)
+select ('e8200000-0000-4000-8000-00000000002' || k)::uuid, 0, 'חלק', 1, 2, 'writing', now() + interval '5 minutes', 1 from generate_series(0, 2) k;
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status) values
+ ('e8200000-0000-4000-8000-000000000023', 0, 'חלק', 1, 2, 'ready'), ('e8200000-0000-4000-8000-000000000023', 1, 'חלק ב', 3, 4, 'pending');
+select stest.is_('S2e. three summaries writing: no exam unit; the worker''s claim with the key alone',
+  coalesce(public.study_claim_exam(:'sx2', :'skey')::text, 'null') || ' · ' || stest.err(format('select public.study_claim_exam(%L)', :'sx2')),
+  'null · forbidden');
+update public.study_sections set status = 'ready', lease_until = null where lecture_id = 'e8200000-0000-4000-8000-000000000020';
+insert into study_private.jobs (lecture_id) values ('e8200000-0000-4000-8000-000000000023');
+select stest.is_('S2e2. two writing and a lecture waiting: the summaries keep the third',
+  coalesce(public.study_claim_exam(:'sx2', :'skey')::text, 'null'), 'null');
+delete from study_private.jobs where lecture_id = 'e8200000-0000-4000-8000-000000000023';
+select public.study_claim_exam(:'sx2', :'skey') as sc1 \gset
+select stest.is_('S2e3. two writing, nothing waiting: the first read unit, its pages with links and lines, the next page, a lease',
+  (select (c ->> 'kind') || ' ' || (select string_agg(p ->> 'n', ',') from jsonb_array_elements(c -> 'pages') p) || ' next ' || (c -> 'next' ->> 'n')
+          || ' · ' || (c -> 'pages' -> 0 ->> 'url' like 'https://proj.supabase.co/storage/v1/object/sign/study/%p1.jpg?token=aaa.bbb.ccc')::text
+          || ' · ' || (c -> 'pages' -> 0 -> 'lines' ->> 0) || ' · ' || jsonb_array_length(c -> 'seen')
+     from (select :'sc1'::jsonb c) x),
+  'read 1,2,3,4 next 5 · true · שאלה 1 (synthetic) · 0');
+select ((:'sc1'::jsonb ->> 'job')::uuid) as sj1, ((:'sc1'::jsonb ->> 'lease')::uuid) as sl_1 \gset
+select stest.is_('S2e4. three now (two summaries, one exam unit): no fourth, and the writer''s plan waits too',
+  study_private.group_live(:'sg') || ' · ' || coalesce(public.study_claim_exam(:'sx2', :'skey')::text, 'null')
+  || ' · ' || (select count(*) from study_private.plan('e8200000-0000-4000-8000-000000000023', true)),
+  '3 · null · 0');
+
+-- The first unit's items: one-answer (marked), a true/false, a match, "א+ב נכונות" in its place, a page crop.
+\set sitems '[{"no":1,"kind":"mcq","form":"one","vignette":"","question":"מה מנגנון הפעולה של Examplomycin? (synthetic)","options":["מעכבת 30S","מעכבת 50S","א+ב נכונות","אף תשובה"],"answer":2,"seq":[],"figure":"","parse_conf":3,"page":1},{"no":2,"kind":"case","form":"one","vignette":"מטופל בן 40 עם חום (synthetic).","question":"מה הטיפול המתאים?","options":["Placebozole","Mockacillin","Stubamide"],"answer":-1,"seq":[],"figure":"pg:2:100,200,800,300","parse_conf":2,"page":2},{"no":3,"kind":"mcq","form":"tf","vignette":"","question":"סמנו נכון או לא נכון (synthetic)","options":["Examplase הוא אנזים","Fictomab הוא נוגדן","Mockase נמצא בכבד"],"answer":-1,"seq":[1,0,1],"figure":"","parse_conf":3,"page":3},{"no":4,"kind":"mcq","form":"match","vignette":"","question":"התאימו תרופה למנגנון (synthetic)","options":["30S","50S","DNA gyrase"],"prompts":["Examplomycin","Fictomycin","Mockafloxacin"],"answer":-1,"seq":[],"figure":"","parse_conf":1,"page":4},{"no":0,"question":"bad"}]'
+select stest.is_('S2f. save: four items and one that does not fit; the wrong lease is refused',
+  (select (r ->> 'saved') || ' ' || (r ->> 'updated') || ' ' || (r ->> 'skipped') from public.study_exam_save_items(:'sj1', :'sl_1', :'sitems', 1, :'skey') r)
+  || ' · ' || stest.err(format('select public.study_exam_save_items(%L, %L, %L, 0, %L)', :'sj1', gen_random_uuid(), '[]', :'skey'))
+  || ' · ' || stest.err(format('select public.study_exam_save_items(%L, %L, %L, 0)', :'sj1', :'sl_1', '[]')),
+  '4 0 1 · lease lost · forbidden');
+select stest.is_('S2f2. the same items again (a unit read twice, a question split over a page): one row each, no new row',
+  (select (r ->> 'saved') || ' ' || (r ->> 'updated') from public.study_exam_save_items(:'sj1', :'sl_1', :'sitems', 1, :'skey') r)
+  || ' · ' || (select count(*) from public.study_questions where exam_id = :'sx2'),
+  '0 4 · 4');
+select stest.is_('S2f3. as stored: forms, the option order, the crop, parse_conf and page; keys from the marks, origin exam',
+  (select string_agg(q.exam_no || ':' || q.form || ':' || coalesce(k.answer::text, '-') || ':' || coalesce(array_to_string(k.seq, ''), '-') || ':'
+                     || coalesce(k.key_origin, '-') || ':' || q.has_key || ':' || q.parse_conf || ':' || q.page, ' ' order by q.exam_no)
+     from public.study_questions q join public.study_question_keys k on k.question_id = q.id where q.exam_id = :'sx2')
+  || ' · ' || (select options[3] from public.study_questions where exam_id = :'sx2' and exam_no = 1)
+  || ' | ' || (select figure from public.study_questions where exam_id = :'sx2' and exam_no = 2)
+  || ' | ' || (select layout -> 'prompts' ->> 1 from public.study_questions where exam_id = :'sx2' and exam_no = 4),
+  '1:one:2:-:exam:true:3:1 2:one:-:-:-:false:2:2 3:tf:-:101:exam:true:3:3 4:match:-:-:-:false:1:4 · א+ב נכונות | pg:2:100,200,800,300 | Fictomycin');
+select public.study_finish_exam_job(:'sj1', :'sl_1', 'done', null, 0.12, :'skey')::text as sfin \gset
+select stest.is_('S2f4. done: the exam still reads (two units to go); the open questions counted',
+  :'sfin' || ' · '
+  || (select status || ' ' || skipped_open || ' ' || n_questions from public.study_exams where id = :'sx2'),
+  'true · reading 1 4');
+
+-- A unit that times out gets one retry; a second timeout fails it for good.
+update public.study_sections set status = 'ready', lease_until = null where lecture_id in ('e8200000-0000-4000-8000-000000000021', 'e8200000-0000-4000-8000-000000000022');
+select public.study_claim_exam(:'sx2', :'skey') as sc2 \gset
+select ((:'sc2'::jsonb ->> 'job')::uuid) as sj2, ((:'sc2'::jsonb ->> 'lease')::uuid) as sl_2 \gset
+select public.study_finish_exam_job(:'sj2', :'sl_2', 'failed', 'timeout', 0.05, :'skey');
+select stest.is_('S2g. a timeout: the server retries it in a minute, not before',
+  (select (retry_at > now())::text || ' ' || attempts from study_private.exam_jobs where id = :'sj2'), 'true 1');
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000002';
+select public.study_claim_exam(:'sx2', :'skey') as sc3 \gset
+reset role;
+reset request.jwt.claim.sub;
+select stest.is_('S2g2. the phone''s path (a member''s token and the key) takes the failed unit at once',
+  ((:'sc3'::jsonb ->> 'job')::uuid = :'sj2')::text || ' ' || (:'sc3'::jsonb ->> 'attempt'), 'true 2');
+select public.study_finish_exam_job(:'sj2', (:'sc3'::jsonb ->> 'lease')::uuid, 'failed', 'timeout', 0, :'skey');
+select stest.is_('S2g3. the second timeout: no retry time; the unit shows failed',
+  (select coalesce(retry_at::text, 'null') || ' ' || status from study_private.exam_jobs where id = :'sj2') || ' · '
+  || (select string_agg(case when j.status = 'failed' and study_private.exam_job_active(j) then 'pending' else j.status end, ','
+                        order by (j.range -> 'pages' ->> 0)::int) from study_private.exam_jobs j where j.exam_id = :'sx2'),
+  'null failed · done,failed,pending');
+-- The third unit: one question was already saved by the first (its no is in seen); item 2 again is the same row.
+select public.study_claim_exam(:'sx2', :'skey') as sc4 \gset
+select stest.is_('S2g4. the next unit knows the numbers saved', (:'sc4'::jsonb -> 'seen')::text, '[1, 2, 3, 4]');
+select public.study_exam_save_items((:'sc4'::jsonb ->> 'job')::uuid, (:'sc4'::jsonb ->> 'lease')::uuid,
+  '[{"no":5,"kind":"mcq","form":"one","vignette":"","question":"איזו תרופה פועלת על DNA gyrase? (synthetic)","options":["Mockafloxacin","Examplomycin","Placebozole","Stubamide"],"answer":0,"seq":[],"figure":"","parse_conf":3,"page":9},{"no":6,"kind":"mcq","form":"one","vignette":"","question":"מהי תופעת הלוואי של Stubamide? (synthetic)","options":["בחילה","חום","פריחה","אף אחת"],"answer":-1,"seq":[],"figure":"","parse_conf":3,"page":10}]',
+  2, :'skey');
+select public.study_finish_exam_job((:'sc4'::jsonb ->> 'job')::uuid, (:'sc4'::jsonb ->> 'lease')::uuid, 'done', null, 0.1, :'skey')::text as sfin \gset
+select stest.is_('S2g5. no read unit left: the unkeyed items are queued to be solved (one unit); still reading',
+  :'sfin' || ' · '
+  || (select count(*) || ' ' || max(jsonb_array_length(range -> 'items')) from study_private.exam_jobs where exam_id = :'sx2' and kind = 'solve') || ' · '
+  || (select status || ' ' || skipped_open from public.study_exams where id = :'sx2'),
+  'true · 1 3 · reading 3');
+select public.study_claim_exam(:'sx2', :'skey') as sc5 \gset
+select stest.is_('S2h. the solve unit: its items (numbers 2, 4, 6) with their text, no key',
+  (select string_agg(i ->> 'no', ',' order by (i ->> 'no')::int) from jsonb_array_elements(:'sc5'::jsonb -> 'items') i)
+  || ' ' || (:'sc5'::jsonb ->> 'kind') || ' ' || (not (:'sc5'::jsonb::text like '%"answer"%'))::text,
+  '2,4,6 solve true');
+select public.study_exam_save_keys((:'sc5'::jsonb ->> 'job')::uuid, (:'sc5'::jsonb ->> 'lease')::uuid,
+    '[{"no":2,"answer":1,"seq":[],"conf":3},{"no":6,"answer":2,"seq":[],"conf":1},{"no":1,"answer":0,"seq":[],"conf":3},{"no":4,"answer":-1,"seq":[2,0,1],"conf":2}]', :'skey')::text as sfin \gset
+select stest.is_('S2h2. solved keys go only onto items without one, with their confidence; a sure one and an unsure one',
+  :'sfin'
+  || ' · ' || (select string_agg(q.exam_no || ':' || coalesce(k.answer::text, array_to_string(k.seq, '')) || ':' || k.key_origin || ':' || coalesce(k.key_conf::text, '-'), ' ' order by q.exam_no)
+                 from public.study_questions q join public.study_question_keys k on k.question_id = q.id where q.exam_id = :'sx2'),
+  '3 · 1:2:exam:- 2:1:solved:3 3:101:exam:- 4:201:solved:2 5:0:exam:- 6:2:solved:1');
+select public.study_finish_exam_job((:'sc5'::jsonb ->> 'job')::uuid, (:'sc5'::jsonb ->> 'lease')::uuid, 'done', null, 0.02, :'skey')::text as sfin \gset
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+select stest.is_('S2h3. nothing left to run: ready (one unit failed for good); the counts',
+  :'sfin' || ' · '
+  || (select status || ' ' || n_questions from public.study_exams where id = :'sx2') || ' · '
+  || (select (s ->> 'found') || ' ' || (s ->> 'keyed') || ' ' || (s ->> 'suggested') || ' ' || (s ->> 'unkeyed') || ' ' || (s ->> 'unclear')
+        from public.study_exam_status(:'sx2') s),
+  'true · ready 6 · 6 3 3 0 1');
+
+-- "לנסות שוב": the failed unit again, with fresh links; three a day.
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000002';
+select public.study_exam_retry(:'sx2', null, :'surls')::text || ' ' || public.study_exam_retry(:'sx2', array[7], :'surls')::text as sfin \gset
+select stest.is_('S2i. retry: the failed unit starts over; a page read again; bad links; the fourth of the day',
+  :'sfin' || ' · '
+  || stest.err(format('select public.study_exam_retry(%L, null, %L)', :'sx2', '{}')) || ' · '
+  || (select status from public.study_exams where id = :'sx2') || ' · '
+  || stest.err(format('select public.study_exam_retry(%L, %L, %L)', :'sx2', '{12}', :'surls')) || ' · '
+  || stest.err(format('select public.study_exam_retry(%L, %L, %L)', :'sx2', '{8}', :'surls')),
+  '1 1 · bad urls · reading · none · retry limit');
+reset role;
+reset request.jwt.claim.sub;
+select stest.is_('S2i2. the page read again: its own unit with the next page, not counted twice for the open questions',
+  (select string_agg((range -> 'pages')::text || '>' || coalesce(range ->> 'next', 'null'), ' ' order by (range -> 'pages' ->> 0)::int) from study_private.exam_jobs
+    where exam_id = :'sx2' and (range ->> 'reread')::boolean), '[7]>8 [12]>null');
+update study_private.exam_jobs set status = 'done', lease_id = null where exam_id = :'sx2' and status <> 'done';
+select study_private.exam_advance(:'sx2');
+
+-- A separate key sheet, merged by number, whichever unit ends first.
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000002';
+select (x ->> 'exam_id') as sx3, (x ->> 'prefix') as spfx3 from public.study_exam_create(:'scx', '{"year":2024,"key_source":"separate"}') x \gset
+insert into storage.objects (bucket_id, name) select 'study', :'spfx3' || 'p' || n || '.jpg' from generate_series(1, 5) n;
+select jsonb_agg(jsonb_build_object('n', n, 'path', :'spfx3' || 'p' || n || '.jpg', 'w', 1500, 'h', 2000, 'key', n = 5) order by n) as spages3,
+       jsonb_object_agg(:'spfx3' || 'p' || n || '.jpg', 'https://proj.supabase.co/storage/v1/object/sign/study/' || :'spfx3' || 'p' || n || '.jpg?token=a.b.c') as surls3
+  from generate_series(1, 5) n \gset
+select stest.err(format('select public.study_exam_pages_done(%L, %L, %L, null, %L)', :'sx3',
+                   (select jsonb_agg(x - 'key') from jsonb_array_elements(:'spages3'::jsonb) x), :'surls3', :'skey')) || ' · '
+  || (select (x ->> 'units') from public.study_exam_pages_done(:'sx3', :'spages3', :'surls3', null, :'skey') x) as sfin \gset
+select stest.is_('S2j. a separate key: its pages apart (a scan: no lines); without a key page it is refused',
+  :'sfin' || ' · '
+  || (select title || ' ' || array_to_string(key_pages, ',') from public.study_exams where id = :'sx3'),
+  'bad pages · 2 · מבחן 2024 5');
+reset role;
+reset request.jwt.claim.sub;
+select public.study_claim_exam(:'sx3', :'skey') as sk1 \gset
+select stest.is_('S2j2. the key unit first; its sheet comes before the items are read',
+  (:'sk1'::jsonb ->> 'kind') || ' ' || (:'sk1'::jsonb -> 'pages' -> 0 ->> 'n') || ' · '
+  || public.study_exam_save_keys((:'sk1'::jsonb ->> 'job')::uuid, (:'sk1'::jsonb ->> 'lease')::uuid, '[{"no":1,"answer":2,"seq":[]},{"no":2,"answer":0,"seq":[]},{"no":3,"answer":-1,"seq":[0,1]}]', :'skey')::text
+  || ' · ' || public.study_finish_exam_job((:'sk1'::jsonb ->> 'job')::uuid, (:'sk1'::jsonb ->> 'lease')::uuid, 'done', null, 0.03, :'skey')::text,
+  'key 5 · 0 · true');
+select public.study_claim_exam(:'sx3', :'skey') as sk2 \gset
+select public.study_exam_save_items((:'sk2'::jsonb ->> 'job')::uuid, (:'sk2'::jsonb ->> 'lease')::uuid,
+  '[{"no":1,"kind":"mcq","form":"one","vignette":"","question":"שאלה ראשונה של 2024 (synthetic)","options":["א","ב","ג","ד"],"answer":1,"seq":[],"figure":"","parse_conf":3,"page":1},{"no":2,"kind":"mcq","form":"one","vignette":"","question":"שאלה שנייה של 2024 (synthetic)","options":["א","ב","ג"],"answer":-1,"seq":[],"figure":"","parse_conf":3,"page":2},{"no":3,"kind":"mcq","form":"tf","vignette":"","question":"נכון או לא נכון (synthetic)","options":["משפט א","משפט ב"],"answer":-1,"seq":[],"figure":"","parse_conf":3,"page":3},{"no":7,"kind":"mcq","form":"one","vignette":"","question":"שאלה שאין לה מפתח (synthetic)","options":["א","ב"],"answer":-1,"seq":[],"figure":"","parse_conf":3,"page":4}]',
+  0, :'skey');
+select stest.is_('S2j3. the sheet''s answers by number win over the exam''s mark; the item it lacks stays unkeyed',
+  (select string_agg(q.exam_no || ':' || coalesce(k.answer::text, array_to_string(k.seq, ''), '-') || ':' || coalesce(k.key_origin, '-'), ' ' order by q.exam_no)
+     from public.study_questions q join public.study_question_keys k on k.question_id = q.id where q.exam_id = :'sx3'),
+  '1:2:sheet 2:0:sheet 3:01:sheet 7:-:-');
+select public.study_finish_exam_job((:'sk2'::jsonb ->> 'job')::uuid, (:'sk2'::jsonb ->> 'lease')::uuid, 'done', null, 0.1, :'skey');
+select stest.is_('S2j4. one item left without a key: one solve unit', (select count(*)::text from study_private.exam_jobs where exam_id = :'sx3' and kind = 'solve'), '1');
+update study_private.exam_jobs set status = 'done' where exam_id = :'sx3' and kind = 'solve';
+select study_private.exam_advance(:'sx3');
+
+-- The key log: a member's key, its undo.
+select id as sq1 from public.study_questions where exam_id = :'sx2' and exam_no = 6 \gset
+select id as sq3 from public.study_questions where exam_id = :'sx2' and exam_no = 3 \gset
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000002';
+select public.study_set_exam_key(:'sq1', 3);
+select stest.is_('S2k. a member keys a solved item: origin member, logged with what it replaced; a true/false item is not keyed by hand',
+  (select coalesce(n.name, '?') || ' ' || l.old || '>' || l.new || ' ' || l.origin_old || '>' || l.origin_new || ' ' || l.conf_old
+     from public.study_exam_key_log l left join public.study_members n on n.user_id = l.member_id and n.group_id = :'sg' where l.question_id = :'sq1')
+  || ' · ' || stest.err(format('select public.study_set_exam_key(%L, 0)', :'sq3')),
+  'בר 2>3 solved>member 1 · set question');
+select stest.is_('S2k2. the review shows the key, its origin and who', (select string_agg((i ->> 'answer') || ' ' || (i ->> 'origin') || ' ' || (i ->> 'key_by'), '')
+    from jsonb_array_elements(public.study_exam_review(:'sx2') -> 'items') i where i ->> 'id' = :'sq1'), '3 member בר');
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+select (u ->> 'answer') || ' ' || (u ->> 'origin') as sfin from public.study_exam_key_undo(:'sq1') u \gset
+select stest.is_('S2k3. undo: the solved key and its confidence come back, logged; nothing more to undo',
+  :'sfin' || ' · '
+  || (select count(*) || ' ' || max((undo_of is not null)::int)::text from public.study_exam_key_log where question_id = :'sq1') || ' · '
+  || stest.err(format('select public.study_exam_key_undo(%L)', :'sq1')),
+  '2 solved · 2 1 · nothing to undo');
+reset role;
+select stest.is_('S2k4. after the undo: solved at confidence 1, no member', (select answer || ' ' || key_origin || ' ' || key_conf || ' ' || coalesce(key_by::text, 'none')
+  from public.study_question_keys where question_id = :'sq1'), '2 solved 1 none');
+update public.study_question_keys set held_until = now() + interval '1 minute' where question_id = :'sq1';
+set role authenticated;
+select stest.is_('S2k5. a key a live quiz holds: still in quiz', stest.err(format('select public.study_set_exam_key(%L, 1)', :'sq1')), 'in quiz');
+reset role;
+update public.study_question_keys set held_until = null where question_id = :'sq1';
+
+-- A fix of a badly read item is logged and kept when the unit is read again.
+set role authenticated;
+select public.study_exam_item_edit(:'sq1', 'option', 0, 'בחילה קשה');
+select stest.is_('S2l. a fixed option, logged; bad fields',
+  (select options[1] from public.study_questions where id = :'sq1') || ' · '
+  || (select field || ' ' || idx || ' ' || old || '>' || new from public.study_exam_item_log where question_id = :'sq1') || ' · '
+  || stest.err(format('select public.study_exam_item_edit(%L, %L, 9, %L)', :'sq1', 'option', 'x')) || ' · '
+  || stest.err(format('select public.study_exam_item_edit(%L, %L, 0, %L)', :'sq1', 'prompt', 'x')) || ' · '
+  || stest.err(format('select public.study_exam_item_edit(%L, %L, null, %L)', :'sq1', 'question', 'קצר')),
+  'בחילה קשה · option 0 בחילה>בחילה קשה · bad field · bad field · bad text');
+
+-- A simulation of the exam: picks kept until it is submitted, keys never sent before.
+reset role;
+update public.study_exams set status = 'reading' where id = :'sx3';
+set role authenticated;
+select stest.is_('S2m. not ready, a bad length, another kind',
+  stest.err(format('select public.study_mock_create(%L, %L, %L, 5)', :'scx', 'exam', :'sx3')) || ' · '
+  || stest.err(format('select public.study_mock_create(%L, %L, %L, 4)', :'scx', 'exam', :'sx2')) || ' · '
+  || stest.err(format('select public.study_mock_create(%L, %L, %L, 5)', :'scx', 'mixed', :'sx2')),
+  'exam not ready · bad questions · bad kind');
+reset role;
+update public.study_exams set status = 'ready' where id = :'sx3';
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+select stest.is_('S2m1. an exam of four items is too short', stest.err(format('select public.study_mock_create(%L, %L, %L)', :'scx', 'exam', :'sx3')), 'too few questions');
+select (public.study_mock_create(:'scx', 'exam', :'sx2', null, null, true)) ->> 'mock' as smock \gset
+select stest.is_('S2m2. the whole exam in its order; minutes from the exam''s 180 for 6 of 6',
+  (select array_length(question_ids, 1) || ' ' || minutes || ' ' || kind from public.study_mocks where id = :'smock') || ' · '
+  || (select string_agg(q.exam_no::text, ',' order by o) from public.study_mocks m, unnest(m.question_ids) with ordinality t(x, o)
+        join public.study_questions q on q.id = t.x where m.id = :'smock'),
+  '6 180 exam · 1,2,3,4,5,6');
+select public.study_mock_start(:'smock') as satt \gset
+select (:'satt'::jsonb ->> 'attempt') as sa1 \gset
+select stest.is_('S2m3. started: the deadline from the server''s clock; a second start is the same attempt',
+  (abs(extract(epoch from ((:'satt'::jsonb ->> 'deadline')::timestamptz - (:'satt'::jsonb ->> 'now')::timestamptz)) - 180 * 60) < 2)::text || ' · '
+  || ((public.study_mock_start(:'smock') ->> 'attempt') = :'sa1')::text,
+  'true · true');
+select id as sm1 from public.study_questions where exam_id = :'sx2' and exam_no = 1 \gset
+select id as sm2 from public.study_questions where exam_id = :'sx2' and exam_no = 2 \gset
+select id as sm4 from public.study_questions where exam_id = :'sx2' and exam_no = 4 \gset
+select id as sm5 from public.study_questions where exam_id = :'sx2' and exam_no = 5 \gset
+select stest.is_('S2m4. picks: nothing comes back but true; a changed pick replaces the first; bad picks',
+  public.study_mock_answer(:'sa1', :'sm1', 0, null, 4000)::text || ' ' || public.study_mock_answer(:'sa1', :'sm1', 2, null, 9000)::text || ' '
+  || public.study_mock_answer(:'sa1', :'sq3', null, array[1, 0, 1])::text || ' ' || public.study_mock_answer(:'sa1', :'sm4', null, array[2, 0, 1])::text || ' '
+  || public.study_mock_answer(:'sa1', :'sm5', 1, null)::text || ' ' || public.study_mock_answer(:'sa1', :'sq1', 0, null)::text || ' · '
+  || stest.err(format('select public.study_mock_answer(%L, %L, 7, null)', :'sa1', :'sm2')) || ' · '
+  || stest.err(format('select public.study_mock_answer(%L, %L, null, %L)', :'sa1', :'sm4', '{0,0,1}')),
+  'true true true true true true · bad choice · bad choices');
+select stest.is_('S2m5. no answer row before it is submitted; the picks and the place are kept (resume)',
+  (select count(*) from public.study_answers where attempt_id = :'sa1') || ' · '
+  || public.study_mock_progress(:'sa1', 4, array[1, 3, 3])::text || ' · '
+  || (select (g -> 'picks' -> :'sm1' ->> 'c') || ' ' || (g ->> 'position') || ' ' || (g -> 'flagged')::text || ' ' || coalesce(g ->> 'score', 'null')
+        from public.study_mock_get(:'sa1') g),
+  '0 · true · 2 4 [1, 3] null');
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000002';
+select stest.is_('S2m6. RLS: another member sees neither the attempt nor its picks; she reads the shared mock',
+  stest.err(format('select public.study_mock_get(%L)', :'sa1')) || ' · '
+  || (select count(*) from public.study_mock_attempts where id = :'sa1') || ' · ' || (select count(*) from public.study_mocks where id = :'smock'),
+  'attempt not found · 0 · 1');
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000003';
+select stest.is_('S2m7. a stranger: no mock, no pages, no logs, no exam RPCs',
+  (select count(*) from public.study_mocks where id = :'smock') || ' ' || (select count(*) from public.study_exam_pages where exam_id = :'sx2')
+  || ' ' || (select count(*) from public.study_exam_key_log where exam_id = :'sx2') || ' ' || (select count(*) from public.study_exam_item_log where exam_id = :'sx2')
+  || ' · ' || stest.err(format('select public.study_exam_status(%L)', :'sx2')) || ' · ' || stest.err(format('select public.study_mock_start(%L)', :'smock'))
+  || ' · ' || stest.err(format('select public.study_exam_review(%L)', :'sx2')),
+  '0 0 0 0 · exam not found · mock not found · exam not found');
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+select public.study_mock_finish(:'sa1') as sscore \gset
+select stest.is_('S2m8. submitted: counted items only (no key, or solved under 3: not counted); a blank counts wrong; the score',
+  (select (s ->> 'right') || '/' || (s ->> 'counted') || ' of ' || (s ->> 'total') || ', answered ' || (s ->> 'answered')
+          || ', suggested ' || (s ->> 'suggested') || ', not counted ' || (s ->> 'not_counted')
+     from (select :'sscore'::jsonb s) x)
+  || ' · ' || (select string_agg((i ->> 'no') || (case when (i ->> 'counted')::boolean then case when (i ->> 'correct')::boolean then '+' else '-' end else '~' end), ' ' order by (i ->> 'pos')::int)
+                 from jsonb_array_elements(:'sscore'::jsonb -> 'items') i),
+  '2/4 of 6, answered 5, suggested 1, not counted 2 · 1+ 2- 3+ 4~ 5- 6~');
+select stest.is_('S2m9. the answers: mode exam with the attempt, one per counted pick, the choices of a set item, the time',
+  (select string_agg(q.exam_no || ':' || a.mode || ':' || a.correct || ':' || coalesce(a.choice::text, array_to_string(a.choices, '')) || ':' || coalesce(a.ms::text, '-'), ' ' order by q.exam_no)
+     from public.study_answers a join public.study_questions q on q.id = a.question_id where a.attempt_id = :'sa1'),
+  '1:exam:true:2:9000 3:exam:true:101:- 5:exam:false:1:-');
+select stest.is_('S2m10. a second submit returns the same score; picks after it are not kept',
+  (public.study_mock_finish(:'sa1') = :'sscore'::jsonb)::text || ' · ' || public.study_mock_answer(:'sa1', :'sm2', 0, null)::text
+  || ' · ' || (select count(*) from public.study_answers where attempt_id = :'sa1'),
+  'true · false · 3');
+-- The clock: a phone locked past the deadline finds its attempt submitted on its next load or pick.
+select public.study_mock_start(:'smock') ->> 'attempt' as sa2 \gset
+select public.study_mock_answer(:'sa2', :'sm5', 0, null);
+reset role;
+update public.study_mock_attempts set deadline = now() - interval '11 seconds', started_at = now() - interval '3 hours' where id = :'sa2';
+set role authenticated;
+select stest.is_('S2m11. past the deadline: a pick is not kept and the attempt is submitted by the clock',
+  public.study_mock_answer(:'sa2', :'sm1', 2, null)::text || ' · '
+  || (select (g ->> 'finished_at' is not null)::text || ' ' || (g -> 'score' ->> 'auto') || ' ' || (g -> 'score' ->> 'right') || '/' || (g -> 'score' ->> 'counted')
+        from public.study_mock_get(:'sa2') g),
+  'false · true true 1/4');
+select public.study_mock_start(:'smock') ->> 'attempt' as sa3 \gset
+reset role;
+update public.study_mock_attempts set deadline = now() - interval '1 second' where id = :'sa3';
+set role authenticated;
+select stest.is_('S2m12. a load after the deadline submits it (nothing picked: 0 right, no answer row); a new start is a new attempt',
+  (select (g ->> 'finished_at' is not null)::text || ' ' || (g -> 'score' ->> 'right') || ' ' || (g -> 'score' ->> 'answered') from public.study_mock_get(:'sa3') g)
+  || ' · ' || (select count(*) from public.study_answers where attempt_id = :'sa3')
+  || ' · ' || ((public.study_mock_start(:'smock') ->> 'attempt') <> :'sa3')::text,
+  'true 0 0 · 0 · true');
+
+-- Hidden exams and the question writer's style; anon.
+select public.study_exam_hide(:'sx3', true);
+select stest.is_('S2n. the style items: a hidden exam left out; has_key only for the exam''s, the sheet''s or a member''s key',
+  (select string_agg(exam_no || ':' || has_key, ' ' order by exam_no) from public.study_course_style_items(:'sg', ' מבחנים (synthetic)')),
+  '1:true 2:false 3:true 4:false 5:true 6:false');
+select stest.is_('S2n2. the course page lists both exams with their items; a stranger gets no style items',
+  (select string_agg((e ->> 'title') || ' ' || (e ->> 'questions') || ' ' || (e ->> 'hidden'), ', ' order by e ->> 'title')
+     from jsonb_array_elements(public.study_course_overview(:'scx') -> 'exams') e),
+  'מבחן 2024 4 true, מועד א׳ 2025 6 false');
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000003';
+select stest.is_('S2n3. a stranger: style items forbidden', stest.err(format('select * from public.study_course_style_items(%L, %L)', :'sg', 'מבחנים (synthetic)')), 'forbidden');
+reset role;
+reset request.jwt.claim.sub;
+select stest.is_('S2o. anon reaches none of the members'' exam or simulation RPCs; the worker''s refuse without the key',
+  (has_function_privilege('anon', 'public.study_exam_create(uuid, jsonb)', 'execute') or has_function_privilege('anon', 'public.study_mock_answer(uuid, uuid, int, int[], int)', 'execute')
+   or has_function_privilege('anon', 'public.study_exam_pages_done(uuid, jsonb, jsonb, timestamptz, text)', 'execute')
+   or has_function_privilege('anon', 'public.study_set_exam_key(uuid, int)', 'execute'))::text || ' · '
+  || stest.err(format('select public.study_finish_exam_job(%L, %L, %L)', :'sj1', :'sl_1', 'done')),
+  'false · forbidden');
+select stest.is_('S2o2. members cannot move an exam''s state by hand any more', (has_column_privilege('authenticated', 'public.study_exams', 'status', 'update')
+  or has_column_privilege('authenticated', 'public.study_exams', 'key_source', 'update'))::text, 'false');
+select stest.is_('S2o3. nothing holds a lease now: the group''s three are free',
+  study_private.group_live(:'sg')::text, '0');
+-- The switch off again: the exams wait, nothing is kicked or claimed.
+update study_private.features set enabled = false where name = 'exams';
+select stest.is_('S2p. switched off: no claim, no kick',
+  coalesce(public.study_claim_exam(:'sx2', :'skey')::text, 'null') || ' ' || study_private.exam_dispatch(), 'null 0');
+delete from public.study_lectures where id in (select ('e8200000-0000-4000-8000-00000000002' || k)::uuid from generate_series(0, 3) k);
+delete from public.study_mocks where course_id = :'scx';
+delete from public.study_exams where id in (:'sx2', :'sx3');
+delete from public.study_courses where id = :'scx';
+delete from storage.objects where name like :'sg' || '/exams/%' or name = :'sg' || '/' || :'sl1' || '/s9-1.jpg';
 
 -- The fixtures go.
 reset role;

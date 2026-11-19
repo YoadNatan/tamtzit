@@ -111,7 +111,8 @@ const TEXT: Record<string, string> = {
   ...each(["mnemonic", "museum"], "timeout", "לא הצלחנו ליצור עכשיו. אפשר לנסות שוב."),
   ...each(["mnemonic", "museum"], "network", "לא הצלחנו ליצור עכשיו. אפשר לנסות שוב."),
   "ask:daily_limit": "אפשר לשאול עד 20 שאלות ביום. השאלות מתחדשות בחצות.",
-  "exam:daily_limit": "אפשר לקרוא עד 60 עמודי מבחן ביום.",
+  // Past exams (sources.md B8): 3 exams started a day per member (POLICY.exam).
+  "exam:daily_limit": "אפשר להתחיל עד 3 מבחנים ביום. מתחדש בחצות.",
   // J's drafts: 5 paid requests a day (POLICY, review F-19); the line says the number POLICY sets.
   "mnemonic:daily_limit": "אפשר ליצור אסוציאציות עד 5 פעמים ביום. מתחדש בחצות.",
   "practice:refusal": "המודל סירב לכתוב שאלות על החלק הזה.",
@@ -173,7 +174,32 @@ const TEXT: Record<string, string> = {
   "practice:enough questions": "להרצאה הזו יש כבר את מספר השאלות המרבי.",
   ...each(["practice", "exam"], "no key", "עוד אין תשובה לשאלה הזו."),
   "practice:in quiz": "השאלה הזו נמצאת עכשיו במבחן קבוצתי. אפשר לחזור אליה אחרי החשיפה.",
-  "exam:too many pages": "אפשר להעלות מבחן של עד 60 עמודים.",
+  "exam:too many pages": "אפשר להעלות מבחן של עד 120 עמודים.",
+  // Past exams, phase 2 (sources.md B2, B7): the upload, its units, the review and the simulation.
+  "exam:bad exam": "כדאי לבדוק את השנה, המועד ומשך המבחן.",
+  "exam:course not found": "הקורס הזה לא נמצא. כדאי לרענן.",
+  "exam:already started": "המבחן הזה כבר נשלח להעתקה.",
+  "exam:bad pages": "משהו השתבש בעמודים שהועלו. כדאי להעלות את המבחן שוב.",
+  "exam:missing pages": "חלק מהעמודים לא עלו. כדאי לנסות שוב.",
+  "exam:bad urls": "הקישורים לעמודים לא תקינים. כדאי לרענן ולנסות שוב.",
+  "exam:pages_expired": "הקישורים לעמודים פגו. ״לנסות שוב״ ירענן אותם.",
+  "exam:unreadable": "לא הצלחנו לקרוא את העמודים האלה. אפשר לנסות שוב.",
+  "exam:truncated": "ההעתקה נקטעה באמצע. אפשר לנסות שוב.",
+  "exam:lost": "ההעתקה נקטעה כמה פעמים. אפשר לנסות שוב.",
+  "exam:retry limit": "אפשר לנסות שוב עד 3 פעמים ביום בכל מבחן. אפשר לחזור לזה מחר.",
+  "exam:nothing to retry": "אין עמודים שצריך לנסות שוב.",
+  "exam:question not found": "השאלה לא נמצאה. כדאי לרענן.",
+  "exam:in quiz": "השאלה הזו נמצאת עכשיו במבחן קבוצתי. אפשר לחזור אליה אחרי החשיפה.",
+  "exam:bad text": "שאלה היא באורך 5 עד 600 תווים, ותשובה עד 400.",
+  "exam:set question": "בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד.",
+  "exam:nothing to undo": "אין שינוי לבטל.",
+  "exam:exam not ready": "המבחן עוד מועתק. אפשר להתחיל סימולציה כשההעתקה תסתיים.",
+  "exam:too few questions": "במבחן הזה יש פחות מ-5 שאלות, אז אי אפשר לבנות ממנו סימולציה.",
+  "exam:bad questions": "אורך הסימולציה הוא בין 5 ל-150 שאלות.",
+  "exam:bad minutes": "הזמן הוא בין דקה אחת ל-600 דקות.",
+  "exam:attempt not found": "הסימולציה הזו לא נמצאה. כדאי לרענן.",
+  "exam:mock not found": "הסימולציה הזו לא נמצאה. כדאי לרענן.",
+  "exam:bad choices": "צריך לענות על כל החלקים של השאלה.",
 
   // practice 2.0 (docs/study/practice-2-api.md): the points to know, a request's
   // options, the example read back, the drafts reviewed before the bank
@@ -423,6 +449,12 @@ export const INTERNAL_CODES: readonly string[] = [
   "bad courses",
   "too many lectures",
   "bad step",
+  // past exams (S 2): the worker's saves (server key only) and what the screens bound
+  "bad unit",
+  "bad items",
+  "bad keys",
+  "bad field",
+  "bad progress",
   // §12: a direct edit (the app proposes), a side, a decision, a tap by the reader,
   // a remix, a draft, a vote or a flag the composer bounds (meeting §8.1, fun §4.8, §12.7.4)
   "needs approval",

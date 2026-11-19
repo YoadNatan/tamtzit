@@ -16020,9 +16020,16 @@ begin
                   where l.group_id = c.group_id and l.deleted_at is null and study_private.course_key(l.course) = c.name_key),
     'ready', (select count(*) from public.study_lectures l
                where l.group_id = c.group_id and l.deleted_at is null and l.status = 'ready' and study_private.course_key(l.course) = c.name_key),
-    'exams', (select coalesce(jsonb_agg(jsonb_build_object('id', e.id, 'title', e.title, 'year', e.year, 'status', e.status)
+    -- S 2: an exam's moed, length and items; a deleted exam is left out
+    -- (plpgsql binds the S 2 columns when it runs, after S 2 made them).
+    'exams', (select coalesce(jsonb_agg(jsonb_build_object('id', e.id, 'title', e.title, 'year', e.year, 'status', e.status,
+                                                           'moed', e.moed, 'minutes', e.minutes, 'key_source', e.key_source,
+                                                           'hidden', e.hide_from_profile, 'created_at', e.created_at,
+                                                           'questions', (select count(*) from public.study_questions q
+                                                                          where q.exam_id = e.id and q.retired_at is null))
                                         order by e.year desc nulls last, e.created_at desc), '[]'::jsonb)
-                from public.study_exams e where e.group_id = c.group_id and study_private.course_key(e.course) = c.name_key),
+                from public.study_exams e where e.group_id = c.group_id and study_private.course_key(e.course) = c.name_key
+                 and e.deleted_at is null),
     'questions', (select count(*) from public.study_questions q join public.study_lectures l on l.id = q.lecture_id
                    where l.group_id = c.group_id and l.deleted_at is null and study_private.course_key(l.course) = c.name_key
                      and q.retired_at is null and q.hidden_at is null and q.stale_at is null and q.has_key));
@@ -16042,7 +16049,8 @@ begin
   select c.id, c.name, c.name_key, c.exam_date, c.exam_minutes, c.exam_n,
          (select count(*)::int from public.study_lectures l
            where l.group_id = c.group_id and l.deleted_at is null and study_private.course_key(l.course) = c.name_key),
-         (select count(*)::int from public.study_exams e where e.group_id = c.group_id and study_private.course_key(e.course) = c.name_key)
+         (select count(*)::int from public.study_exams e where e.group_id = c.group_id and study_private.course_key(e.course) = c.name_key
+           and e.deleted_at is null)   -- S 2's column, bound when it runs
     from public.study_courses c
    where c.group_id = p_group and c.deleted_at is null
    order by c.name_key;
@@ -16130,5 +16138,1402 @@ grant execute on function public.study_request_plan(uuid, uuid, text),
   public.study_request_create_in_plan(uuid, jsonb, jsonb, uuid, text) to authenticated;
 
 insert into study_private.schema_sections (section, version) values ('S', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ── S 2 · past exams (sources.md B1 S 2, B2, B6.2, B7, B9) ──
+-- An exam is uploaded as page pictures (a PDF's pages or photos, 1500 px)
+-- with the text lines a PDF had, read on the server in units of 4 pages
+-- (study_private.exam_jobs, the worker's /api/study/work {exam}), its key
+-- sheet merged by number, and the items left without a key solved and
+-- marked "תשובה מוצעת · לא נבדקה". A simulation (study_mocks) replays an
+-- exam against one clock. Everything is behind the switch 'exams' (off
+-- until Yoad turns it on) and VITE_STUDY_EXAMS (S 2).
+--
+-- The pages are rows of study_exam_pages, not study_exams.pages: section Q
+-- adds its 60-page check to that column again on every run of the file, and
+-- an exam may now have 120 pages. New exams leave pages '[]'.
+
+-- study_exams: the moed, the length, the key pages, the open questions
+-- skipped, "לא לכלול בחישוב הנושאים", the soft delete, "לנסות שוב" a day.
+alter table public.study_exams
+  add column if not exists moed              text,
+  add column if not exists minutes           int,
+  add column if not exists n_questions       int,
+  add column if not exists key_pages         int[]       not null default '{}',
+  add column if not exists skipped_open      int         not null default 0,
+  add column if not exists hide_from_profile boolean     not null default false,
+  add column if not exists deleted_at        timestamptz,
+  add column if not exists retries           int         not null default 0,
+  add column if not exists retry_day         date;
+do $$
+declare c record;
+begin
+  if not exists (select 1 from pg_constraint where conname = 'study_exams_s2_x') then
+    alter table public.study_exams add constraint study_exams_s2_x check (
+      (moed is null or char_length(moed) <= 20) and (minutes is null or minutes between 10 and 600)
+      and (n_questions is null or n_questions between 0 and 500) and skipped_open between 0 and 500
+      and cardinality(key_pages) <= 120 and retries between 0 and 100);
+  end if;
+  -- Q's status list gains 'uploading' and 'linking' (the inline check is found by its definition).
+  for c in select x.conname from pg_constraint x
+            where x.conrelid = 'public.study_exams'::regclass and x.contype = 'c' and x.conname <> 'study_exams_status_x'
+              and pg_get_constraintdef(x.oid) like '%reading%' loop
+    execute format('alter table public.study_exams drop constraint %I', c.conname);
+  end loop;
+  if not exists (select 1 from pg_constraint where conname = 'study_exams_status_x') then
+    alter table public.study_exams add constraint study_exams_status_x
+      check (status in ('new', 'uploading', 'reading', 'linking', 'ready', 'failed'));
+  end if;
+end $$;
+-- Members no longer move an exam's state or key mode by hand (Q granted it; nothing used it).
+revoke update (key_source, status, error) on public.study_exams from authenticated;
+
+-- One row per page: { n, path "<group>/exams/<exam>/p<n>.jpg", w, h, the
+-- PDF's text lines (none for a scan), is_key: a page of the separate key }.
+create table if not exists public.study_exam_pages (
+  exam_id uuid     not null references public.study_exams (id) on delete cascade,
+  n       smallint not null check (n between 1 and 120),
+  path    text     not null check (char_length(path) <= 200),
+  w       int      not null check (w between 1 and 6000),
+  h       int      not null check (h between 1 and 6000),
+  lines   text[]   not null default '{}' check (cardinality(lines) <= 400),
+  is_key  boolean  not null default false,
+  primary key (exam_id, n)
+);
+
+-- study_questions: an exam item's reading (parse_conf 1-3, the page it
+-- starts on) and phase 3's links, repeats and twins.
+alter table public.study_questions
+  add column if not exists parse_conf smallint,
+  add column if not exists page       smallint,
+  add column if not exists covered    boolean,
+  add column if not exists linked_at  timestamptz,
+  add column if not exists repeat_of  uuid references public.study_questions (id) on delete set null,
+  add column if not exists twin_of    uuid references public.study_questions (id) on delete set null;
+do $$
+declare c record;
+begin
+  if not exists (select 1 from pg_constraint where conname = 'study_questions_s2_x') then
+    alter table public.study_questions add constraint study_questions_s2_x
+      check ((parse_conf is null or parse_conf between 1 and 3) and (page is null or page between 1 and 120));
+  end if;
+  -- The figure: a slide's picture (fig:N-K) or, now, a box of an exam page,
+  -- pg:<page>:<x>,<y>,<w>,<h> in thousandths of the page.
+  for c in select x.conname from pg_constraint x
+            where x.conrelid = 'public.study_questions'::regclass and x.contype = 'c' and x.conname <> 'study_questions_figure_x'
+              and pg_get_constraintdef(x.oid) like '%fig:%' loop
+    execute format('alter table public.study_questions drop constraint %I', c.conname);
+  end loop;
+  if not exists (select 1 from pg_constraint where conname = 'study_questions_figure_x') then
+    alter table public.study_questions add constraint study_questions_figure_x check (
+      figure = '' or figure ~ '^fig:[0-9]{1,4}-[0-9]{1,3}$'
+      or figure ~ '^pg:[0-9]{1,3}:[0-9]{1,4},[0-9]{1,4},[0-9]{1,4},[0-9]{1,4}$');
+  end if;
+end $$;
+-- One item per number of an exam: the worker's save is an upsert by it.
+create unique index if not exists study_questions_exam_no on public.study_questions (exam_id, exam_no)
+  where exam_id is not null and exam_no is not null;
+
+-- Where an exam item's key came from (hidden with the key: a solved key
+-- must not show before an answer): the exam's marks, the key sheet, solved
+-- by the model (key_conf 1-3), or a member. Only a member confirms.
+alter table public.study_question_keys
+  add column if not exists key_origin text,
+  add column if not exists key_conf   smallint;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'study_question_keys_origin_x') then
+    alter table public.study_question_keys add constraint study_question_keys_origin_x
+      check ((key_origin is null or key_origin in ('exam', 'sheet', 'solved', 'member')) and (key_conf is null or key_conf between 1 and 3));
+  end if;
+end $$;
+-- Keys of exam items made before S 2: a member's, or the exam's.
+update public.study_question_keys k
+   set key_origin = case when k.key_by is not null then 'member' else 'exam' end
+  from public.study_questions q
+ where q.id = k.question_id and q.source = 'exam' and k.key_origin is null and (k.answer is not null or k.seq is not null);
+
+-- The key log: every member change of an exam item's key and its undo
+-- (written only by study_set_exam_key and study_exam_key_undo).
+create table if not exists public.study_exam_key_log (
+  id          bigint      generated always as identity primary key,
+  question_id uuid        not null references public.study_questions (id) on delete cascade,
+  exam_id     uuid        not null references public.study_exams (id) on delete cascade,
+  old         smallint,
+  new         smallint,
+  origin_old  text,
+  origin_new  text,
+  conf_old    smallint,                                                     -- a solved key's confidence before (restored by an undo)
+  by_old      uuid        references auth.users (id) on delete set null,   -- who had keyed it before (restored by an undo)
+  undo_of     bigint      references public.study_exam_key_log (id) on delete set null,
+  member_id   uuid        references auth.users (id) on delete set null default auth.uid(),
+  at          timestamptz not null default now()
+);
+create index if not exists study_exam_key_log_q on public.study_exam_key_log (question_id, id);
+-- Fixes of a badly read item: its question, case text, an option or a prompt.
+create table if not exists public.study_exam_item_log (
+  id          bigint      generated always as identity primary key,
+  question_id uuid        not null references public.study_questions (id) on delete cascade,
+  exam_id     uuid        not null references public.study_exams (id) on delete cascade,
+  field       text        not null check (field in ('question', 'vignette', 'option', 'prompt')),
+  idx         smallint,
+  old         text        not null,
+  new         text        not null,
+  member_id   uuid        references auth.users (id) on delete set null default auth.uid(),
+  at          timestamptz not null default now()
+);
+create index if not exists study_exam_item_log_q on public.study_exam_item_log (question_id, id);
+
+-- Simulations: a shared definition (the questions in their order, the
+-- minutes) and each member's own attempt and clock. The picks stay on the
+-- attempt until it is submitted (an answer can change, as on paper); then
+-- each counted pick becomes a study_answers row, mode 'exam', attempt_id.
+create table if not exists public.study_mocks (
+  id           uuid        primary key default gen_random_uuid(),
+  group_id     uuid        not null references public.study_groups (id) on delete cascade,
+  course_id    uuid        references public.study_courses (id) on delete set null,
+  kind         text        not null check (kind in ('exam', 'mixed', 'new')),
+  exam_id      uuid        references public.study_exams (id) on delete cascade,
+  question_ids uuid[]      not null check (cardinality(question_ids) between 1 and 150),
+  minutes      int         not null check (minutes between 1 and 600),
+  spec         jsonb       not null default '{}'::jsonb,
+  created_by   uuid        default auth.uid() references auth.users (id) on delete set null,
+  created_at   timestamptz not null default now()
+);
+create table if not exists public.study_mock_attempts (
+  id          uuid        primary key default gen_random_uuid(),
+  mock_id     uuid        not null references public.study_mocks (id) on delete cascade,
+  member_id   uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  started_at  timestamptz not null default now(),
+  deadline    timestamptz not null,
+  finished_at timestamptz,
+  auto        boolean     not null default false,                  -- submitted by the clock
+  position    int         not null default 0 check (position between 0 and 149),
+  flagged     int[]       not null default '{}' check (cardinality(flagged) <= 150),
+  picks       jsonb       not null default '{}'::jsonb,              -- question id → {c, cs, ms}
+  score       jsonb
+);
+create index if not exists study_mock_attempts_mine on public.study_mock_attempts (member_id, mock_id, started_at desc);
+alter table public.study_answers add column if not exists attempt_id uuid references public.study_mock_attempts (id) on delete set null;
+create index if not exists study_answers_attempt on public.study_answers (attempt_id) where attempt_id is not null;
+
+-- ── The exam queue (private: no grants, the schema is not exposed) ──
+-- One row per unit: 'read' (up to 4 pages and the next one as context),
+-- 'key' (the key sheet's pages), 'solve' (up to 20 items left without a
+-- key; not in B1's list: the solve is its own unit until phase 3's link
+-- units solve with the slides); 'link', 'topics', 'explain_all' and
+-- 'output' are later phases'. range: {pages:[n], next:n|null, reread} or
+-- {items:[question ids]}.
+create table if not exists study_private.exam_jobs (
+  id          uuid          primary key default gen_random_uuid(),
+  group_id    uuid          not null references public.study_groups (id) on delete cascade,
+  course_id   uuid          references public.study_courses (id) on delete set null,
+  exam_id     uuid          references public.study_exams (id) on delete cascade,
+  kind        text          not null check (kind in ('read', 'key', 'solve', 'link', 'topics', 'explain_all', 'output')),
+  range       jsonb         not null default '{}'::jsonb,
+  status      text          not null default 'pending' check (status in ('pending', 'running', 'done', 'failed')),
+  lease_id    uuid,
+  lease_until timestamptz,
+  attempts    int           not null default 0,
+  retry_at    timestamptz,
+  error       text,
+  skipped     int           not null default 0,                     -- a read unit's open questions
+  cost_usd    numeric(10,5) not null default 0,
+  created_at  timestamptz   not null default now(),
+  updated_at  timestamptz   not null default now()
+);
+create index if not exists exam_jobs_exam on study_private.exam_jobs (exam_id, status);
+create index if not exists exam_jobs_live on study_private.exam_jobs (group_id) where status = 'running';
+-- Per exam: the pages' signed links (48 h, signed by the member who
+-- uploaded or retried: the worker has no Storage access of its own) and the
+-- kicks, as study_private.jobs keeps them for lectures.
+create table if not exists study_private.exam_queue (
+  exam_id           uuid        primary key references public.study_exams (id) on delete cascade,
+  group_id          uuid        not null references public.study_groups (id) on delete cascade,
+  urls              jsonb       not null default '{}'::jsonb,
+  urls_until        timestamptz,
+  queued_by         uuid        references auth.users (id) on delete set null,
+  queued_at         timestamptz not null default now(),
+  last_kick_at      timestamptz,
+  kicks_since_claim int         not null default 0
+);
+-- A key sheet's answers by number, kept until the item is read (the key
+-- unit may finish before the read units) and applied by every save.
+create table if not exists study_private.exam_sheet_keys (
+  exam_id uuid       not null references public.study_exams (id) on delete cascade,
+  exam_no int        not null check (exam_no between 1 and 500),
+  answer  smallint   check (answer between 0 and 5),
+  seq     smallint[] check (seq is null or cardinality(seq) between 2 and 6),
+  primary key (exam_id, exam_no)
+);
+
+-- Writers and exam units holding a live lease in a group: the writer's
+-- (section W's, unchanged) plus the exam units', so summaries and exams
+-- share the three of a group (B1: study_claim_exam counts both queues).
+create or replace function study_private.group_live(p_group uuid)
+returns int language sql stable security definer set search_path = public as $$
+  select ((select count(*) from public.study_sections s join public.study_lectures l on l.id = s.lecture_id
+            where l.group_id = p_group and s.status = 'writing'
+              and coalesce(s.lease_until, s.updated_at + interval '6 minutes') > now())
+        + (select count(*) from public.study_recording_notes n join public.study_lectures l on l.id = n.lecture_id
+            where l.group_id = p_group and n.status = 'writing' and n.lease_until > now())
+        + (select count(*) from public.study_lectures l
+            where l.group_id = p_group and l.status = 'outlining'
+              and coalesce(l.lease_until, l.updated_at + interval '3 minutes') > now())
+        + (select count(*) from study_private.exam_jobs j
+            where j.group_id = p_group and j.status = 'running' and j.lease_until > now()))::int
+$$;
+
+-- A unit that will still run: pending, holding a lease, or failed with a retry time.
+create or replace function study_private.exam_job_active(j study_private.exam_jobs)
+returns boolean language sql stable as $$
+  select j.status in ('pending', 'running') or (j.status = 'failed' and j.attempts < 4 and j.retry_at is not null)
+$$;
+
+-- An exam item without a key: a one-answer item's answer, a set item's seq.
+create or replace function study_private.exam_unkeyed(p_question uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select not exists (select 1 from public.study_question_keys k where k.question_id = p_question
+                       and (k.answer is not null or k.seq is not null))
+$$;
+
+
+-- After each unit: when no read or key unit will run any more, the items
+-- left without a key are queued to be solved (20 a unit, each item once);
+-- when nothing will run, the exam is ready (or failed: no item at all).
+create or replace function study_private.exam_advance(p_exam uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  e public.study_exams;
+  ids uuid[];
+  k int := 0;
+begin
+  select * into e from public.study_exams x where x.id = p_exam for update;
+  if not found or e.status not in ('reading', 'linking', 'ready', 'failed') then return; end if;
+  update public.study_exams x
+     set skipped_open = least(500, coalesce((select sum(j.skipped) from study_private.exam_jobs j
+                                              where j.exam_id = p_exam and j.kind = 'read' and j.status = 'done'
+                                                and not coalesce((j.range ->> 'reread')::boolean, false)), 0)),
+         n_questions = (select count(*) from public.study_questions q where q.exam_id = p_exam and q.retired_at is null)
+   where x.id = p_exam;
+  if not exists (select 1 from study_private.exam_jobs j
+                  where j.exam_id = p_exam and j.kind in ('read', 'key') and study_private.exam_job_active(j)) then
+    select array_agg(q.id order by q.exam_no) into ids
+      from public.study_questions q
+     where q.exam_id = p_exam and q.retired_at is null and study_private.exam_unkeyed(q.id)
+       and not exists (select 1 from study_private.exam_jobs j
+                        where j.exam_id = p_exam and j.kind = 'solve' and j.range -> 'items' ? q.id::text);
+    while ids is not null and k < cardinality(ids) loop
+      insert into study_private.exam_jobs (group_id, course_id, exam_id, kind, range)
+      select e.group_id, (select c.id from public.study_courses c
+                           where c.group_id = e.group_id and c.name_key = study_private.course_key(e.course)),
+             p_exam, 'solve', jsonb_build_object('items', to_jsonb(ids[k + 1 : k + 20]));
+      k := k + 20;
+    end loop;
+  end if;
+  if exists (select 1 from study_private.exam_jobs j where j.exam_id = p_exam and study_private.exam_job_active(j)) then
+    update public.study_exams set status = 'reading', updated_at = now() where id = p_exam and status <> 'reading';
+  else
+    update public.study_exams x
+       set status = case when x.n_questions > 0 then 'ready' else 'failed' end,
+           error = case when x.n_questions > 0 then null else 'no questions' end, updated_at = now()
+     where x.id = p_exam;
+  end if;
+end;
+$$;
+
+-- A unit that died after its claim gets 4 attempts, then fails as 'lost'
+-- (and the exam moves on without it).
+create or replace function study_private.exam_give_up(p_exam uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  update study_private.exam_jobs j
+     set status = 'failed', error = 'lost', retry_at = null, lease_id = null, lease_until = null, updated_at = now()
+   where j.exam_id = p_exam and j.status = 'running' and j.attempts >= 4 and j.lease_until <= now();
+  if found then perform study_private.exam_advance(p_exam); end if;
+end;
+$$;
+
+-- Kick the worker for each exam with units the caps allow now, as
+-- study_private.dispatch does for lectures (2 minutes between the sweeper's
+-- kicks of one exam, none after 15 kicks nobody claimed).
+create or replace function study_private.exam_dispatch(p_exam uuid default null, p_now boolean default false)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  q record; v_url text; v_key text; v_n int; v_total int := 0;
+begin
+  if not study_private.server_on() or not study_private.feature_on('exams') then return 0; end if;
+  v_url := rtrim(study_private.secret('study_site_url'), '/') || '/api/study/work';
+  v_key := study_private.secret('study_worker_key');
+  for q in select x.exam_id, x.group_id, x.last_kick_at, x.kicks_since_claim from study_private.exam_queue x
+            where p_exam is null or x.exam_id = p_exam order by x.queued_at loop
+    perform study_private.exam_give_up(q.exam_id);
+    select count(*) into v_n from study_private.exam_jobs j
+     where j.exam_id = q.exam_id
+       and (j.status = 'pending' or (j.status = 'running' and j.lease_until <= now() and j.attempts < 4)
+            or (j.status = 'failed' and j.attempts < 4 and j.retry_at <= now()));
+    v_n := least(v_n, 3 - study_private.group_live(q.group_id));
+    if v_n <= 0 or (not p_now and q.last_kick_at > now() - interval '2 minutes') or q.kicks_since_claim >= 15 then
+      continue;
+    end if;
+    for i in 1..v_n loop
+      perform net.http_post(
+        url := v_url,
+        body := jsonb_build_object('exam', q.exam_id),
+        headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || v_key),
+        timeout_milliseconds := 10000);
+    end loop;
+    update study_private.exam_queue set last_kick_at = now(), kicks_since_claim = kicks_since_claim + v_n where exam_id = q.exam_id;
+    v_total := v_total + v_n;
+  end loop;
+  return v_total;
+end;
+$$;
+
+-- The pages' signed links, as study_queue checks a lecture's pictures: each
+-- one this project's Storage link signed for exactly that page.
+create or replace function study_private.exam_urls_ok(p_exam uuid, p_urls jsonb)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare p record; v text;
+begin
+  if p_urls is null or jsonb_typeof(p_urls) <> 'object' or length(p_urls::text) > 400000 then return false; end if;
+  for p in select x.path from public.study_exam_pages x where x.exam_id = p_exam loop
+    v := p_urls ->> p.path;
+    if v is null or v !~ '^https://[^/?#@]+/storage/v1/object/sign/study/[^?#]+\?token=[A-Za-z0-9._-]+$'
+       or right(split_part(v, '?', 1), char_length('/storage/v1/object/sign/study/' || p.path)) <> '/storage/v1/object/sign/study/' || p.path then
+      return false;
+    end if;
+  end loop;
+  return true;
+end;
+$$;
+revoke all on function study_private.exam_job_active(study_private.exam_jobs), study_private.exam_unkeyed(uuid),
+  study_private.exam_give_up(uuid), study_private.exam_advance(uuid), study_private.exam_dispatch(uuid, boolean),
+  study_private.exam_urls_ok(uuid, jsonb) from public;
+
+-- The exam a member may act on: hers to see, not deleted ('exam not found'),
+-- while the switch is on ('off'); locked.
+create or replace function study_private.exam_for(p_exam uuid)
+returns public.study_exams language plpgsql volatile security definer set search_path = public as $$
+declare e public.study_exams;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into e from public.study_exams x where x.id = p_exam for update;
+  if not found or e.deleted_at is not null or not coalesce(public.study_is_member(e.group_id), false) then
+    raise exception 'exam not found';
+  end if;
+  if not study_private.feature_on('exams') then raise exception 'off'; end if;
+  return e;
+end;
+$$;
+revoke all on function study_private.exam_for(uuid) from public;
+
+-- ── The member's RPCs ──
+
+-- "העלאת מבחן קודם": the exam's row in its course, before its pages are
+-- uploaded. p_meta: {year, moed, key_source (marked | separate | none),
+-- minutes}. Returns {exam_id, prefix}: the pages go to <prefix>p<n>.jpg.
+-- 'not signed in', 'course not found', 'off', 'bad exam'.
+create or replace function public.study_exam_create(p_course uuid, p_meta jsonb)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  c   public.study_courses;
+  v   uuid := gen_random_uuid();
+  yr  int;
+  md  text := nullif(btrim(coalesce(p_meta ->> 'moed', '')), '');
+  ks  text := coalesce(p_meta ->> 'key_source', 'marked');
+  mn  int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into c from public.study_courses x where x.id = p_course;
+  if not found or c.deleted_at is not null or not coalesce(public.study_is_member(c.group_id), false) then
+    raise exception 'course not found';
+  end if;
+  if not study_private.feature_on('exams') then raise exception 'off'; end if;
+  if jsonb_typeof(coalesce(p_meta, '{}'::jsonb)) <> 'object'
+     or coalesce(p_meta ->> 'year', '') !~ '^([0-9]{4})?$' or coalesce(p_meta ->> 'minutes', '') !~ '^([0-9]{1,3})?$'
+     or ks not in ('marked', 'separate', 'none') or char_length(coalesce(md, '')) > 20 then
+    raise exception 'bad exam';
+  end if;
+  yr := nullif(p_meta ->> 'year', '')::int;
+  mn := nullif(p_meta ->> 'minutes', '')::int;
+  if (yr is not null and yr not between 1990 and 2100) or (mn is not null and mn not between 10 and 600) then raise exception 'bad exam'; end if;
+  insert into public.study_exams (id, group_id, course, title, year, moed, minutes, key_source, status, created_by)
+  values (v, c.group_id, c.name,
+          left(btrim(case when md is not null then 'מועד ' || md || coalesce(' ' || yr, '')
+                          when yr is not null then 'מבחן ' || yr else 'מבחן קודם' end), 200),
+          yr, md, mn, ks, 'uploading', auth.uid());
+  return jsonb_build_object('exam_id', v, 'prefix', c.group_id || '/exams/' || v || '/');
+end;
+$$;
+
+-- After the pages are uploaded (the op exam_read, with the server key and
+-- the member's token, once its reservation passed the budget and the 3
+-- exams a day): the pages are saved, the units queued (4 pages each, the
+-- key sheet's pages in a unit of their own) and the worker kicked.
+-- p_pages: [{n, path, w, h, lines[], key}] (n 1..120 once each; path the
+-- exam's own p<n>.jpg, uploaded); p_urls: path → signed link.
+-- Returns {units, server}: server false = the phone drives the units.
+-- 'forbidden', 'exam not found', 'off', 'already started', 'too many pages',
+-- 'bad pages', 'missing pages', 'bad urls'.
+create or replace function public.study_exam_pages_done(p_exam uuid, p_pages jsonb, p_urls jsonb, p_until timestamptz default null,
+  p_key text default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  e      public.study_exams;
+  p      jsonb;
+  reads  int[];
+  keys   int[];
+  units  int := 0;
+  cid    uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  e := study_private.exam_for(p_exam);
+  if e.created_by is distinct from auth.uid() then raise exception 'exam not found'; end if;
+  if e.status <> 'uploading' then raise exception 'already started'; end if;
+  if jsonb_typeof(p_pages) is distinct from 'array' or jsonb_array_length(p_pages) = 0 then raise exception 'bad pages'; end if;
+  if jsonb_array_length(p_pages) > 120 then raise exception 'too many pages'; end if;
+  for p in select x from jsonb_array_elements(p_pages) x loop
+    if jsonb_typeof(p) <> 'object' or coalesce(p ->> 'n', '') !~ '^[0-9]{1,3}$' or (p ->> 'n')::int not between 1 and 120
+       or p ->> 'path' is distinct from e.group_id || '/exams/' || e.id || '/p' || (p ->> 'n') || '.jpg'
+       or coalesce(p ->> 'w', '') !~ '^[0-9]{1,4}$' or coalesce(p ->> 'h', '') !~ '^[0-9]{1,4}$'
+       or (p ->> 'w')::int not between 1 and 6000 or (p ->> 'h')::int not between 1 and 6000
+       or (p -> 'lines' is not null and (jsonb_typeof(p -> 'lines') <> 'array' or jsonb_array_length(p -> 'lines') > 400
+                                         or length((p -> 'lines')::text) > 40000
+                                         or exists (select 1 from jsonb_array_elements(p -> 'lines') l where jsonb_typeof(l) <> 'string')))
+       or (p -> 'key' is not null and jsonb_typeof(p -> 'key') <> 'boolean') then
+      raise exception 'bad pages';
+    end if;
+  end loop;
+  if (select count(distinct (x ->> 'n')::int) from jsonb_array_elements(p_pages) x) <> jsonb_array_length(p_pages) then
+    raise exception 'bad pages';
+  end if;
+  if exists (select 1 from jsonb_array_elements(p_pages) x
+              where not exists (select 1 from storage.objects o where o.bucket_id = 'study' and o.name = x ->> 'path')) then
+    raise exception 'missing pages';
+  end if;
+  select array_agg((x ->> 'n')::int order by (x ->> 'n')::int) filter (where not coalesce((x ->> 'key')::boolean, false)),
+         array_agg((x ->> 'n')::int order by (x ->> 'n')::int) filter (where coalesce((x ->> 'key')::boolean, false))
+    into reads, keys from jsonb_array_elements(p_pages) x;
+  if reads is null or (e.key_source = 'separate') <> (keys is not null) then raise exception 'bad pages'; end if;
+
+  delete from public.study_exam_pages where exam_id = e.id;
+  insert into public.study_exam_pages (exam_id, n, path, w, h, lines, is_key)
+  select e.id, (x ->> 'n')::int, x ->> 'path', (x ->> 'w')::int, (x ->> 'h')::int,
+         coalesce((select array_agg(left(l, 500) order by o) from jsonb_array_elements_text(x -> 'lines') with ordinality t(l, o)), '{}'),
+         coalesce((x ->> 'key')::boolean, false)
+    from jsonb_array_elements(p_pages) x;
+  if not study_private.exam_urls_ok(e.id, p_urls) then raise exception 'bad urls'; end if;
+
+  select c.id into cid from public.study_courses c where c.group_id = e.group_id and c.name_key = study_private.course_key(e.course);
+  for i in 0 .. (cardinality(reads) - 1) / 4 loop
+    insert into study_private.exam_jobs (group_id, course_id, exam_id, kind, range)
+    values (e.group_id, cid, e.id, 'read',
+            jsonb_build_object('pages', to_jsonb(reads[i * 4 + 1 : i * 4 + 4]), 'next', reads[i * 4 + 5]));
+    units := units + 1;
+  end loop;
+  if keys is not null then
+    insert into study_private.exam_jobs (group_id, course_id, exam_id, kind, range)
+    values (e.group_id, cid, e.id, 'key', jsonb_build_object('pages', to_jsonb(keys)));
+    units := units + 1;
+  end if;
+  update public.study_exams x set status = 'reading', key_pages = coalesce(keys, '{}'), error = null, updated_at = now() where x.id = e.id;
+  insert into study_private.exam_queue (exam_id, group_id, urls, urls_until, queued_by)
+  values (e.id, e.group_id, p_urls, p_until, auth.uid())
+  on conflict (exam_id) do update set urls = excluded.urls, urls_until = excluded.urls_until, queued_by = excluded.queued_by,
+                                      queued_at = now(), kicks_since_claim = 0;
+  perform study_private.exam_dispatch(e.id, true);
+  return jsonb_build_object('units', units, 'server', study_private.server_on());
+end;
+$$;
+
+-- "מעתיקים עמודים 9–12 מתוך 28…": the exam's state, its units and counts.
+-- found: items; keyed: a key from the exam, its sheet or a member;
+-- suggested: solved ("תשובה מוצעת"); unkeyed; unclear: parse_conf 1.
+create or replace function public.study_exam_status(p_exam uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare e public.study_exams;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into e from public.study_exams x where x.id = p_exam;
+  if not found or e.deleted_at is not null or not coalesce(public.study_is_member(e.group_id), false) then
+    raise exception 'exam not found';
+  end if;
+  return jsonb_build_object(
+    'id', e.id, 'title', e.title, 'year', e.year, 'moed', e.moed, 'minutes', e.minutes, 'key_source', e.key_source,
+    'status', e.status, 'error', e.error, 'skipped_open', e.skipped_open, 'hidden', e.hide_from_profile,
+    'pages', (select count(*) from public.study_exam_pages x where x.exam_id = e.id and not x.is_key),
+    'key_pages', cardinality(e.key_pages),
+    'units', coalesce((select jsonb_agg(jsonb_build_object('kind', j.kind, 'pages', j.range -> 'pages',
+                                                           'items', jsonb_array_length(coalesce(j.range -> 'items', '[]'::jsonb)),
+                                                           'status', case when j.status = 'failed' and study_private.exam_job_active(j) then 'pending' else j.status end,
+                                                           'error', j.error, 'reread', coalesce((j.range ->> 'reread')::boolean, false))
+                                        order by j.created_at, (j.range -> 'pages' ->> 0)::int, j.id)
+                         from study_private.exam_jobs j where j.exam_id = e.id), '[]'::jsonb),
+    'found', (select count(*) from public.study_questions q where q.exam_id = e.id and q.retired_at is null),
+    'keyed', (select count(*) from public.study_questions q join public.study_question_keys k on k.question_id = q.id
+               where q.exam_id = e.id and q.retired_at is null and k.key_origin in ('exam', 'sheet', 'member')
+                 and (k.answer is not null or k.seq is not null)),
+    'suggested', (select count(*) from public.study_questions q join public.study_question_keys k on k.question_id = q.id
+                   where q.exam_id = e.id and q.retired_at is null and k.key_origin = 'solved'),
+    'unkeyed', (select count(*) from public.study_questions q where q.exam_id = e.id and q.retired_at is null and study_private.exam_unkeyed(q.id)),
+    'unclear', (select count(*) from public.study_questions q where q.exam_id = e.id and q.retired_at is null and q.parse_conf = 1));
+end;
+$$;
+
+-- The review screen (E4): every item with its reading and its key, where
+-- the key came from and who keyed it (B3: a member may see an exam item's
+-- key here; a key a live quiz holds is not shown), whether it was fixed,
+-- and both logs.
+create or replace function public.study_exam_review(p_exam uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare e public.study_exams;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into e from public.study_exams x where x.id = p_exam;
+  if not found or e.deleted_at is not null or not coalesce(public.study_is_member(e.group_id), false) then
+    raise exception 'exam not found';
+  end if;
+  return jsonb_build_object(
+    'exam', jsonb_build_object('id', e.id, 'title', e.title, 'status', e.status, 'key_source', e.key_source, 'hidden', e.hide_from_profile),
+    'pages', coalesce((select jsonb_agg(jsonb_build_object('n', x.n, 'path', x.path, 'w', x.w, 'h', x.h, 'key', x.is_key) order by x.n)
+                         from public.study_exam_pages x where x.exam_id = e.id), '[]'::jsonb),
+    'items', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', q.id, 'no', q.exam_no, 'kind', q.kind, 'form', q.form, 'vignette', q.vignette, 'question', q.question,
+        'options', q.options, 'prompts', coalesce(q.layout -> 'prompts', '[]'::jsonb), 'figure', q.figure, 'page', q.page,
+        'parse_conf', q.parse_conf, 'retired', q.retired_at is not null,
+        'answer', case when k.held_until > now() then null else k.answer end,
+        'seq', case when k.held_until > now() then null else k.seq end,
+        'origin', k.key_origin, 'conf', k.key_conf,
+        'key_by', (select m.name from public.study_members m where m.group_id = e.group_id and m.user_id = k.key_by),
+        'fixed', exists (select 1 from public.study_exam_item_log l where l.question_id = q.id)) order by q.exam_no)
+      from public.study_questions q left join public.study_question_keys k on k.question_id = q.id
+      where q.exam_id = e.id), '[]'::jsonb),
+    'key_log', coalesce((select jsonb_agg(jsonb_build_object('id', l.id, 'question_id', l.question_id, 'old', l.old, 'new', l.new,
+                                                             'origin_old', l.origin_old, 'origin_new', l.origin_new, 'undo_of', l.undo_of,
+                                                             'by', (select m.name from public.study_members m where m.group_id = e.group_id and m.user_id = l.member_id),
+                                                             'at', l.at) order by l.id)
+                           from public.study_exam_key_log l where l.exam_id = e.id), '[]'::jsonb),
+    'item_log', coalesce((select jsonb_agg(jsonb_build_object('id', l.id, 'question_id', l.question_id, 'field', l.field, 'idx', l.idx,
+                                                              'old', l.old, 'new', l.new,
+                                                              'by', (select m.name from public.study_members m where m.group_id = e.group_id and m.user_id = l.member_id),
+                                                              'at', l.at) order by l.id)
+                            from public.study_exam_item_log l where l.exam_id = e.id), '[]'::jsonb));
+end;
+$$;
+
+-- "לא נקראה טוב · לתקן טקסט": a member fixes the question, the case text,
+-- an option (p_idx) or a match prompt (p_idx), logged. 'question not found',
+-- 'off', 'bad field', 'bad text'.
+create or replace function public.study_exam_item_edit(p_question uuid, p_field text, p_idx int, p_text text)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  q   public.study_questions;
+  t   text := btrim(coalesce(p_text, ''));
+  old text;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into q from public.study_questions x where x.id = p_question for update;
+  if not found or q.source <> 'exam' or not coalesce(public.study_is_member(q.group_id), false)
+     or exists (select 1 from public.study_exams e where e.id = q.exam_id and e.deleted_at is not null) then
+    raise exception 'question not found';
+  end if;
+  if not study_private.feature_on('exams') then raise exception 'off'; end if;
+  if p_field = 'question' then
+    if char_length(t) not between 5 and 600 then raise exception 'bad text'; end if;
+    old := q.question;
+    update public.study_questions set question = t where id = q.id;
+  elsif p_field = 'vignette' then
+    if char_length(t) > 2500 then raise exception 'bad text'; end if;
+    old := q.vignette;
+    update public.study_questions set vignette = t where id = q.id;
+  elsif p_field = 'option' then
+    if p_idx is null or p_idx not between 0 and cardinality(q.options) - 1 then raise exception 'bad field'; end if;
+    if char_length(t) not between 1 and 400 then raise exception 'bad text'; end if;
+    old := q.options[p_idx + 1];
+    update public.study_questions set options[p_idx + 1] = t where id = q.id;
+  elsif p_field = 'prompt' then
+    if q.form <> 'match' or p_idx is null or p_idx not between 0 and jsonb_array_length(coalesce(q.layout -> 'prompts', '[]'::jsonb)) - 1 then
+      raise exception 'bad field';
+    end if;
+    if char_length(t) not between 1 and 300 then raise exception 'bad text'; end if;
+    old := q.layout -> 'prompts' ->> p_idx;
+    update public.study_questions set layout = jsonb_set(layout, array['prompts', p_idx::text], to_jsonb(t)) where id = q.id;
+  else
+    raise exception 'bad field';
+  end if;
+  if old is distinct from t then
+    insert into public.study_exam_item_log (question_id, exam_id, field, idx, old, new)
+    values (q.id, q.exam_id, p_field, case when p_field in ('option', 'prompt') then p_idx end, coalesce(old, ''), t);
+  end if;
+end;
+$$;
+
+-- "לסמן תשובה": section Q's function, redefined. A member marks (or clears)
+-- the answer of a one-answer exam item; the change is logged with the key
+-- it replaced (study_exam_key_log) and its origin becomes 'member'.
+-- Explanations depend on the key, so they are cleared. A set item (tf,
+-- match) is not keyed by hand in phase 2 ('set question').
+create or replace function public.study_set_exam_key(p_question uuid, p_answer int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  q public.study_questions;
+  k public.study_question_keys;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into q from public.study_questions x where x.id = p_question for update;
+  if not found or not public.study_is_member(q.group_id) or q.source <> 'exam'
+     or exists (select 1 from public.study_exams e where e.id = q.exam_id and e.deleted_at is not null) then
+    raise exception 'question not found';
+  end if;
+  if q.form <> 'one' then raise exception 'set question'; end if;
+  if p_answer is not null and (p_answer < 0 or p_answer >= cardinality(q.options)) then raise exception 'bad answer'; end if;
+  select * into k from public.study_question_keys x where x.question_id = p_question for update;
+  if k.held_until > now() then raise exception 'in quiz'; end if;                   -- quiz: added
+  insert into public.study_exam_key_log (question_id, exam_id, old, new, origin_old, origin_new, conf_old, by_old)
+  values (q.id, q.exam_id, k.answer, p_answer, k.key_origin, case when p_answer is not null then 'member' end, k.key_conf, k.key_by);
+  update public.study_question_keys x
+     set answer = p_answer, key_by = auth.uid(), key_at = now(), explanations = '{}', takeaway = '',
+         key_origin = case when p_answer is not null then 'member' end, key_conf = null
+   where x.question_id = p_question;
+  update public.study_questions x set has_key = p_answer is not null where x.id = p_question;
+end;
+$$;
+
+-- "לבטל": the item's last change in the log that is not undone goes back
+-- (the key, its origin and confidence, and who had keyed it), logged as its undo. Returns
+-- the key now. 'question not found', 'nothing to undo', 'in quiz'.
+create or replace function public.study_exam_key_undo(p_question uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  q public.study_questions;
+  k public.study_question_keys;
+  l public.study_exam_key_log;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into q from public.study_questions x where x.id = p_question for update;
+  if not found or not public.study_is_member(q.group_id) or q.source <> 'exam' then raise exception 'question not found'; end if;
+  select * into k from public.study_question_keys x where x.question_id = p_question for update;
+  if k.held_until > now() then raise exception 'in quiz'; end if;
+  select * into l from public.study_exam_key_log x
+   where x.question_id = p_question and x.undo_of is null
+     and not exists (select 1 from public.study_exam_key_log u where u.undo_of = x.id)
+   order by x.id desc limit 1;
+  if not found then raise exception 'nothing to undo'; end if;
+  insert into public.study_exam_key_log (question_id, exam_id, old, new, origin_old, origin_new, conf_old, by_old, undo_of)
+  values (q.id, q.exam_id, k.answer, l.old, k.key_origin, l.origin_old, k.key_conf, k.key_by, l.id);
+  update public.study_question_keys x
+     set answer = l.old, key_origin = l.origin_old, key_conf = l.conf_old, key_by = l.by_old, key_at = now(),
+         explanations = '{}', takeaway = ''
+   where x.question_id = p_question;
+  update public.study_questions x set has_key = l.old is not null or k.seq is not null where x.id = p_question;
+  return jsonb_build_object('answer', l.old, 'origin', l.origin_old);
+end;
+$$;
+
+-- "לנסות שוב" (p_pages null: every unit that failed starts over) or "לקרוא
+-- שוב את עמוד 7" (p_pages {7}: one unit for that page, the next one as
+-- context). Fresh links from the phone (the queue's last 48 hours). Three
+-- a study day per exam. Returns the units queued. 'exam not found', 'off',
+-- 'retry limit', 'nothing to retry', 'bad pages', 'bad urls'.
+create or replace function public.study_exam_retry(p_exam uuid, p_pages int[], p_urls jsonb, p_until timestamptz default null)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  e     public.study_exams;
+  v_day date := ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date;
+  n     int := 0;
+  pg    int;
+  nx    int;
+begin
+  e := study_private.exam_for(p_exam);
+  if e.status in ('new', 'uploading') then raise exception 'nothing to retry'; end if;
+  if not study_private.exam_urls_ok(e.id, p_urls) then raise exception 'bad urls'; end if;
+  if e.retry_day is distinct from v_day then e.retries := 0; end if;
+  if e.retries >= 3 then raise exception 'retry limit'; end if;
+  if cardinality(coalesce(p_pages, '{}')) = 0 then
+    update study_private.exam_jobs j
+       set status = 'pending', attempts = 0, error = null, retry_at = null, lease_id = null, lease_until = null, updated_at = now()
+     where j.exam_id = e.id and j.status = 'failed';
+    get diagnostics n = row_count;
+    if n = 0 then raise exception 'nothing to retry'; end if;
+  else
+    if cardinality(p_pages) > 4 then raise exception 'bad pages'; end if;
+    foreach pg in array p_pages loop
+      if not exists (select 1 from public.study_exam_pages x where x.exam_id = e.id and x.n = pg and not x.is_key) then
+        raise exception 'bad pages';
+      end if;
+      select min(x.n) into nx from public.study_exam_pages x where x.exam_id = e.id and x.n > pg and not x.is_key;
+      insert into study_private.exam_jobs (group_id, course_id, exam_id, kind, range)
+      select e.group_id, (select c.id from public.study_courses c where c.group_id = e.group_id and c.name_key = study_private.course_key(e.course)),
+             e.id, 'read', jsonb_build_object('pages', jsonb_build_array(pg), 'next', nx, 'reread', true);
+      n := n + 1;
+    end loop;
+  end if;
+  update public.study_exams x set retries = e.retries + 1, retry_day = v_day, status = 'reading', error = null, updated_at = now()
+   where x.id = e.id;
+  update study_private.exam_queue x set urls = p_urls, urls_until = p_until, queued_by = auth.uid(), kicks_since_claim = 0
+   where x.exam_id = e.id;
+  perform study_private.exam_dispatch(e.id, true);
+  return n;
+end;
+$$;
+
+-- "לא לכלול בחישוב הנושאים": the exam still practises; the profile and the
+-- course's style leave it out.
+create or replace function public.study_exam_hide(p_exam uuid, p_hide boolean)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  perform study_private.exam_for(p_exam);
+  update public.study_exams set hide_from_profile = coalesce(p_hide, false), updated_at = now() where id = p_exam;
+end;
+$$;
+
+-- The course's past-exam items for the question writer's style
+-- (courseStyle in server/study/practice.ts): exams of the course (by its
+-- key), not deleted or hidden; has_key only for a key from the exam, its
+-- sheet or a member (a solved key is no example). The key itself never
+-- comes out.
+create or replace function public.study_course_style_items(p_group uuid, p_course text)
+returns table (id uuid, exam_id uuid, exam_no int, kind text, vignette text, question text, options text[], has_key boolean,
+               exam_created_at timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  return query
+  select q.id, q.exam_id, q.exam_no, q.kind, q.vignette, q.question, q.options,
+         coalesce(k.key_origin in ('exam', 'sheet', 'member') and (k.answer is not null or k.seq is not null), false), e.created_at
+    from public.study_exams e
+    join public.study_questions q on q.exam_id = e.id and q.source = 'exam' and q.retired_at is null
+    left join public.study_question_keys k on k.question_id = q.id
+   where e.group_id = p_group and e.deleted_at is null and not e.hide_from_profile
+     and study_private.course_key(e.course) = study_private.course_key(p_course) and study_private.course_key(p_course) <> '';
+end;
+$$;
+
+-- ── The worker's RPCs (the server key; the worker alone, or the phone's
+--    op with the member's token when server writing is off) ──
+
+-- Takes the exam's next unit under a 330-second lease: at most 4 attempts,
+-- at most three units of a group at once counting the summaries' (two
+-- while a lecture of the group waits to be written: summaries keep
+-- priority). Returns everything the unit needs (its pages with their links
+-- and lines, the next page, the numbers already saved, or its items), or
+-- null: nothing to take now.
+create or replace function public.study_claim_exam(p_exam uuid, p_key text default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  e        public.study_exams;
+  j        study_private.exam_jobs;
+  q        study_private.exam_queue;
+  v_lease  uuid := gen_random_uuid();
+  v_server boolean := auth.uid() is null;
+  v_cap    int;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  select * into e from public.study_exams x where x.id = p_exam;
+  if not found then return null; end if;
+  if not v_server and not coalesce(public.study_is_member(e.group_id), false) then raise exception 'forbidden'; end if;
+  perform 1 from public.study_groups g where g.id = e.group_id for update;   -- study_claim takes the same lock
+  perform study_private.exam_give_up(p_exam);
+  if e.deleted_at is not null or not study_private.feature_on('exams') then return null; end if;
+  v_cap := case when exists (select 1 from study_private.jobs jb join public.study_lectures l on l.id = jb.lecture_id
+                              where l.group_id = e.group_id and study_private.waiting(jb.lecture_id)) then 2 else 3 end;
+  if study_private.group_live(e.group_id) >= v_cap then return null; end if;
+  select * into j from study_private.exam_jobs x
+   where x.exam_id = p_exam
+     and (x.status = 'pending'
+          or (x.status = 'running' and x.lease_until <= now() and x.attempts < 4)
+          or (x.status = 'failed' and x.attempts < 4 and x.retry_at is not null and (not v_server or x.retry_at <= now())))
+   order by case x.kind when 'key' then 0 when 'read' then 1 else 2 end, x.created_at, (x.range -> 'pages' ->> 0)::int, x.id
+   limit 1 for update;
+  if not found then return null; end if;
+  update study_private.exam_jobs x
+     set status = 'running', lease_id = v_lease, lease_until = now() + interval '330 seconds', attempts = x.attempts + 1,
+         retry_at = null, updated_at = now()
+   where x.id = j.id;
+  if v_server then update study_private.exam_queue set kicks_since_claim = 0 where exam_id = p_exam; end if;
+  select * into q from study_private.exam_queue x where x.exam_id = p_exam;
+  return jsonb_build_object(
+    'job', j.id, 'kind', j.kind, 'lease', v_lease, 'attempt', j.attempts + 1, 'last_error', j.error,
+    'exam', jsonb_build_object('id', e.id, 'group_id', e.group_id, 'title', e.title, 'key_source', e.key_source),
+    'pages', coalesce((select jsonb_agg(jsonb_build_object('n', p.n, 'path', p.path, 'w', p.w, 'h', p.h, 'lines', to_jsonb(p.lines),
+                                                           'url', q.urls ->> p.path) order by p.n)
+                         from public.study_exam_pages p
+                        where p.exam_id = e.id and p.n in (select v::int from jsonb_array_elements_text(coalesce(j.range -> 'pages', '[]'::jsonb)) v)),
+                      '[]'::jsonb),
+    'next', (select jsonb_build_object('n', p.n, 'path', p.path, 'w', p.w, 'h', p.h, 'url', q.urls ->> p.path)
+               from public.study_exam_pages p where p.exam_id = e.id and p.n = (j.range ->> 'next')::int),
+    'seen', coalesce((select jsonb_agg(x.exam_no order by x.exam_no) from public.study_questions x where x.exam_id = e.id), '[]'::jsonb),
+    'items', case when j.kind = 'solve' then
+               coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'no', x.exam_no, 'form', x.form, 'vignette', x.vignette,
+                                                            'question', x.question, 'options', x.options,
+                                                            'prompts', coalesce(x.layout -> 'prompts', '[]'::jsonb)) order by x.exam_no)
+                           from public.study_questions x
+                          where x.exam_id = e.id and j.range -> 'items' ? x.id::text and x.retired_at is null
+                            and study_private.exam_unkeyed(x.id)), '[]'::jsonb) end);
+end;
+$$;
+
+-- The holder of a unit's lease, or 'lease lost' (another writer took it).
+create or replace function study_private.exam_job_held(p_job uuid, p_lease uuid)
+returns study_private.exam_jobs language plpgsql volatile security definer set search_path = public as $$
+declare j study_private.exam_jobs;
+begin
+  select * into j from study_private.exam_jobs x where x.id = p_job for update;
+  if not found or j.lease_id is distinct from p_lease or j.status <> 'running' then raise exception 'lease lost'; end if;
+  if auth.uid() is not null and not coalesce(public.study_is_member(j.group_id), false) then raise exception 'forbidden'; end if;
+  return j;
+end;
+$$;
+revoke all on function study_private.exam_job_held(uuid, uuid) from public;
+
+-- One item's key as checked against it: a one-answer item's answer in
+-- range, a set item's seq (tf: 1/0 per statement; match: a distinct
+-- option per prompt). Null when it does not fit.
+create or replace function study_private.exam_key_fit(q public.study_questions, p_answer int, p_seq int[])
+returns jsonb language sql immutable as $$
+  select case
+    when q.form = 'one' and p_answer between 0 and cardinality(q.options) - 1 then jsonb_build_object('answer', p_answer)
+    when q.form = 'tf' and cardinality(p_seq) = cardinality(q.options) and 0 <= all (p_seq) and 1 >= all (p_seq)
+      then jsonb_build_object('seq', to_jsonb(p_seq))
+    when q.form = 'match' and cardinality(p_seq) = jsonb_array_length(coalesce(q.layout -> 'prompts', '[]'::jsonb))
+         and 0 <= all (p_seq) and cardinality(q.options) - 1 >= all (p_seq)
+         and (select count(distinct v) from unnest(p_seq) v) = cardinality(p_seq)
+      then jsonb_build_object('seq', to_jsonb(p_seq))
+  end
+$$;
+revoke all on function study_private.exam_key_fit(public.study_questions, int, int[]) from public;
+
+-- Writes a key onto an item unless a member's key is there (or a live quiz
+-- holds it); with p_only_empty, only onto an item with no key yet.
+create or replace function study_private.exam_key_put(p_question uuid, p_answer int, p_seq int[], p_origin text, p_conf int,
+  p_only_empty boolean default false)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare
+  q   public.study_questions;
+  fit jsonb;
+begin
+  select * into q from public.study_questions x where x.id = p_question;
+  fit := study_private.exam_key_fit(q, p_answer, p_seq);
+  if fit is null then return false; end if;
+  update public.study_question_keys k
+     set answer = (fit ->> 'answer')::smallint,
+         seq = (select array_agg(v::smallint order by o) from jsonb_array_elements_text(fit -> 'seq') with ordinality t(v, o)),
+         key_origin = p_origin, key_conf = case when p_origin = 'solved' then p_conf end, key_by = null, key_at = now(),
+         explanations = '{}', takeaway = ''
+   where k.question_id = p_question and coalesce(k.key_origin, '') <> 'member' and (k.held_until is null or k.held_until <= now())
+     and (not p_only_empty or (k.answer is null and k.seq is null));
+  if not found then return false; end if;
+  update public.study_questions set has_key = true where id = p_question;
+  return true;
+end;
+$$;
+revoke all on function study_private.exam_key_put(uuid, int, int[], text, int, boolean) from public;
+
+-- A read unit's items, saved by number (an upsert: a unit read again, or a
+-- page read again, changes the same rows). p_items: [{no, kind, form,
+-- vignette, question, options[], prompts[], answer (-1: not marked), seq[],
+-- figure 'pg:…' or '', parse_conf, page}]; p_skipped: the open questions
+-- skipped. An item a member fixed, or anyone answered, keeps its text; a
+-- member's or the sheet's key stays. Returns {saved, updated, skipped}
+-- (items that do not fit the table are skipped). 'forbidden', 'lease lost'.
+create or replace function public.study_exam_save_items(p_job uuid, p_lease uuid, p_items jsonb, p_skipped int default 0,
+  p_key text default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  j       study_private.exam_jobs;
+  e       public.study_exams;
+  it      jsonb;
+  qid     uuid;
+  q       public.study_questions;
+  n_new   int := 0;
+  n_upd   int := 0;
+  n_bad   int := 0;
+  v_no    int;
+  v_form  text;
+  v_opts  text[];
+  v_pr    jsonb;
+  v_fig   text;
+  v_lay   jsonb;
+  v_ans   int;
+  v_seq   int[];
+  sk      study_private.exam_sheet_keys;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  j := study_private.exam_job_held(p_job, p_lease);
+  if j.kind <> 'read' then raise exception 'bad unit'; end if;
+  select * into e from public.study_exams x where x.id = j.exam_id;
+  if jsonb_typeof(p_items) is distinct from 'array' or jsonb_array_length(p_items) > 120 then raise exception 'bad items'; end if;
+  for it in select x from jsonb_array_elements(p_items) x loop
+    begin
+      v_no := (it ->> 'no')::int;
+      v_form := coalesce(it ->> 'form', 'one');
+      select array_agg(btrim(o) order by k) into v_opts from jsonb_array_elements_text(it -> 'options') with ordinality t(o, k);
+      v_pr := case when v_form = 'match' then coalesce(it -> 'prompts', '[]'::jsonb) else '[]'::jsonb end;
+      v_fig := coalesce(it ->> 'figure', '');
+      v_ans := nullif((it ->> 'answer')::int, -1);
+      select array_agg(v::int order by k) into v_seq from jsonb_array_elements_text(coalesce(it -> 'seq', '[]'::jsonb)) with ordinality t(v, k);
+      if v_no is null or v_no not between 1 and 500 or v_form not in ('one', 'tf', 'match')
+         or coalesce(it ->> 'kind', 'mcq') not in ('mcq', 'case')
+         or char_length(btrim(coalesce(it ->> 'question', ''))) not between 5 and 600
+         or char_length(coalesce(it ->> 'vignette', '')) > 2500
+         or coalesce(cardinality(v_opts), 0) not between 2 and 6
+         or exists (select 1 from unnest(v_opts) o where char_length(o) not between 1 and 400)
+         or (v_form = 'match' and (jsonb_array_length(v_pr) not between 2 and 6
+                                   or exists (select 1 from jsonb_array_elements(v_pr) p
+                                               where jsonb_typeof(p) <> 'string' or char_length(btrim(p #>> '{}')) not between 1 and 300)))
+         or (v_fig <> '' and v_fig !~ '^pg:[0-9]{1,3}:[0-9]{1,4},[0-9]{1,4},[0-9]{1,4},[0-9]{1,4}$')
+         or coalesce((it ->> 'parse_conf')::int, 2) not between 1 and 3
+         or (it ->> 'page' is not null and (it ->> 'page')::int not between 1 and 120) then
+        n_bad := n_bad + 1;
+        continue;
+      end if;
+    exception when others then
+      n_bad := n_bad + 1;
+      continue;
+    end;
+    v_lay := case when v_form = 'match'
+                  then jsonb_build_object('kind', 'match', 'prompts', (select jsonb_agg(btrim(p #>> '{}')) from jsonb_array_elements(v_pr) p)) end;
+    select x.id into qid from public.study_questions x where x.exam_id = e.id and x.exam_no = v_no;
+    if qid is null then
+      insert into public.study_questions (group_id, exam_id, exam_no, source, kind, vignette, question, options, form, layout,
+                                          figure, parse_conf, page, has_key, created_by)
+      values (e.group_id, e.id, v_no, 'exam', coalesce(it ->> 'kind', 'mcq'), btrim(coalesce(it ->> 'vignette', '')),
+              btrim(it ->> 'question'), v_opts, v_form, v_lay, v_fig, coalesce((it ->> 'parse_conf')::int, 2),
+              (it ->> 'page')::int, false, e.created_by)
+      returning id into qid;
+      insert into public.study_question_keys (question_id, answer) values (qid, null);
+      n_new := n_new + 1;
+    else
+      if not exists (select 1 from public.study_exam_item_log l where l.question_id = qid)
+         and not exists (select 1 from public.study_answers a where a.question_id = qid) then
+        update public.study_questions x
+           set kind = coalesce(it ->> 'kind', 'mcq'), vignette = btrim(coalesce(it ->> 'vignette', '')), question = btrim(it ->> 'question'),
+               options = v_opts, form = v_form, layout = v_lay, figure = v_fig,
+               parse_conf = coalesce((it ->> 'parse_conf')::int, 2), page = (it ->> 'page')::int
+         where x.id = qid;
+        -- a different shape: a key from the earlier reading may not fit it any more
+        update public.study_question_keys k set answer = null, seq = null, key_origin = null, key_conf = null
+         where k.question_id = qid and coalesce(k.key_origin, '') not in ('member', 'sheet')
+           and study_private.exam_key_fit((select x from public.study_questions x where x.id = qid), k.answer, k.seq::int[]) is null;
+      end if;
+      n_upd := n_upd + 1;
+    end if;
+    -- The exam's own mark; then the key sheet's answer, which wins.
+    if v_ans is not null or v_seq is not null then
+      perform study_private.exam_key_put(qid, v_ans, v_seq, 'exam', null)
+        where not exists (select 1 from public.study_question_keys k where k.question_id = qid and k.key_origin = 'sheet');
+    end if;
+    select * into sk from study_private.exam_sheet_keys s where s.exam_id = e.id and s.exam_no = v_no;
+    if found then perform study_private.exam_key_put(qid, sk.answer, sk.seq::int[], 'sheet', null); end if;
+    update public.study_questions x set has_key = not study_private.exam_unkeyed(qid) where x.id = qid;
+  end loop;
+  update study_private.exam_jobs x set skipped = least(500, greatest(0, coalesce(p_skipped, 0))), updated_at = now() where x.id = j.id;
+  return jsonb_build_object('saved', n_new, 'updated', n_upd, 'skipped', n_bad);
+end;
+$$;
+
+-- A key unit's sheet ({no, answer, seq}: merged by number, origin 'sheet',
+-- over the exam's marks and solved keys, never over a member's), or a
+-- solve unit's answers ({no, answer, seq, conf}: only onto items still
+-- without a key, origin 'solved'). Returns how many items took a key.
+create or replace function public.study_exam_save_keys(p_job uuid, p_lease uuid, p_keys jsonb, p_key text default null)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  j   study_private.exam_jobs;
+  it  jsonb;
+  v_no int;
+  v_ans int;
+  v_seq int[];
+  v_conf int;
+  qid uuid;
+  n   int := 0;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  j := study_private.exam_job_held(p_job, p_lease);
+  if j.kind not in ('key', 'solve') then raise exception 'bad unit'; end if;
+  if jsonb_typeof(p_keys) is distinct from 'array' or jsonb_array_length(p_keys) > 500 then raise exception 'bad keys'; end if;
+  for it in select x from jsonb_array_elements(p_keys) x loop
+    begin
+      v_no := (it ->> 'no')::int;
+      v_ans := nullif((it ->> 'answer')::int, -1);
+      select array_agg(v::int order by k) into v_seq from jsonb_array_elements_text(coalesce(it -> 'seq', '[]'::jsonb)) with ordinality t(v, k);
+      v_conf := (it ->> 'conf')::int;
+    exception when others then
+      continue;
+    end;
+    if v_no is null or v_no not between 1 and 500 or (v_ans is null and v_seq is null)
+       or (v_ans is not null and v_ans not between 0 and 5) or (v_seq is not null and (cardinality(v_seq) not between 2 and 6
+                                                                                      or not (0 <= all (v_seq) and 5 >= all (v_seq)))) then
+      continue;
+    end if;
+    select x.id into qid from public.study_questions x where x.exam_id = j.exam_id and x.exam_no = v_no;
+    if j.kind = 'key' then
+      insert into study_private.exam_sheet_keys (exam_id, exam_no, answer, seq) values (j.exam_id, v_no, v_ans, v_seq::smallint[])
+      on conflict (exam_id, exam_no) do update set answer = excluded.answer, seq = excluded.seq;
+      if qid is not null and study_private.exam_key_put(qid, v_ans, v_seq, 'sheet', null) then n := n + 1; end if;
+    elsif qid is not null and j.range -> 'items' ? qid::text and coalesce(v_conf, 0) between 1 and 3
+          and study_private.exam_key_put(qid, v_ans, v_seq, 'solved', v_conf, true) then
+      n := n + 1;
+    end if;
+  end loop;
+  return n;
+end;
+$$;
+
+-- A unit is done or failed. A model's own failure (timeout, refusal,
+-- unreadable, truncated) gets one retry; a passing API error is retried
+-- as a part's (backoff, 4 attempts); others wait for "לנסות שוב". The
+-- unit's cost is kept for the status screen (the ledger is settled by
+-- the caller). Then the exam moves on and the worker is kicked again.
+create or replace function public.study_finish_exam_job(p_job uuid, p_lease uuid, p_status text, p_error text default null,
+  p_cost numeric default 0, p_key text default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare
+  j  study_private.exam_jobs;
+  ok boolean;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if p_status not in ('done', 'failed') then raise exception 'bad finish'; end if;
+  select * into j from study_private.exam_jobs x where x.id = p_job;
+  if not found then return false; end if;
+  if auth.uid() is not null and not coalesce(public.study_is_member(j.group_id), false) then raise exception 'forbidden'; end if;
+  update study_private.exam_jobs x
+     set status = p_status, error = case when p_status = 'failed' then left(coalesce(p_error, 'failed'), 200) end,
+         cost_usd = least(99999, x.cost_usd + round(least(greatest(coalesce(p_cost, 0), 0), 99.99999), 5)),
+         retry_at = case when p_status = 'done' then null
+                         when p_error in ('timeout', 'refusal', 'unreadable', 'truncated', 'empty')
+                           then case when x.attempts < 2 then now() + interval '1 minute' end
+                         else study_private.retry_at('failed', p_error, x.attempts) end,
+         lease_id = null, lease_until = null, updated_at = now()
+   where x.id = p_job and x.lease_id = p_lease and x.status = 'running';
+  ok := found;
+  perform study_private.exam_advance(j.exam_id);
+  if ok then perform study_private.exam_dispatch(j.exam_id, true); end if;
+  return ok;
+end;
+$$;
+
+-- ── Simulations (kind 'exam' in phase 2; 'mixed' and 'new' are phase 4's) ──
+
+-- "סימולציה": a past exam's items, all (p_n null, at most 150) or p_n of
+-- them (5..150; "רק שאלות שעוד לא ראיתי" takes the ones the caller never
+-- answered first), in the exam's order, and the minutes (given, else the
+-- exam's scaled to the length, else the course's, else 1.8 a question).
+-- Returns {mock, questions, minutes, pool, missing: []}. 'course not
+-- found', 'off', 'bad kind', 'exam not found', 'exam not ready', 'bad
+-- questions', 'bad minutes', 'too few questions'.
+create or replace function public.study_mock_create(p_course uuid, p_kind text, p_exam uuid, p_n int default null,
+  p_minutes int default null, p_unseen_only boolean default true)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  c    public.study_courses;
+  e    public.study_exams;
+  pool int;
+  n    int;
+  ids  uuid[];
+  mins int;
+  v    uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into c from public.study_courses x where x.id = p_course;
+  if not found or c.deleted_at is not null or not coalesce(public.study_is_member(c.group_id), false) then raise exception 'course not found'; end if;
+  if not study_private.feature_on('exams') then raise exception 'off'; end if;
+  if p_kind is distinct from 'exam' then raise exception 'bad kind'; end if;
+  select * into e from public.study_exams x where x.id = p_exam;
+  if not found or e.group_id <> c.group_id or e.deleted_at is not null or study_private.course_key(e.course) <> c.name_key then
+    raise exception 'exam not found';
+  end if;
+  if e.status <> 'ready' then raise exception 'exam not ready'; end if;
+  if p_n is not null and p_n not between 5 and 150 then raise exception 'bad questions'; end if;
+  if p_minutes is not null and p_minutes not between 1 and 600 then raise exception 'bad minutes'; end if;
+  select count(*) into pool from public.study_questions q where q.exam_id = e.id and q.retired_at is null and q.hidden_at is null;
+  if pool < 5 then raise exception 'too few questions'; end if;
+  n := least(coalesce(p_n, 150), pool, 150);
+  select array_agg(x.id order by x.exam_no) into ids from (
+    select q.id, q.exam_no from public.study_questions q
+     where q.exam_id = e.id and q.retired_at is null and q.hidden_at is null
+     order by case when coalesce(p_unseen_only, true)
+                    and exists (select 1 from public.study_answers a where a.question_id = q.id and a.user_id = auth.uid()) then 1 else 0 end,
+              case when n < pool then random() else 0 end, q.exam_no
+     limit n) x;
+  mins := least(600, greatest(1, coalesce(p_minutes,
+            case when e.minutes is not null then ceil(e.minutes::numeric * n / greatest(pool, 1))::int end,
+            case when c.exam_minutes is not null and c.exam_n is not null then ceil(c.exam_minutes::numeric * n / c.exam_n)::int end,
+            ceil(n * 1.8)::int)));
+  insert into public.study_mocks (group_id, course_id, kind, exam_id, question_ids, minutes, spec, created_by)
+  values (c.group_id, c.id, 'exam', e.id, ids, mins,
+          jsonb_build_object('n', n, 'pool', pool, 'unseen_only', coalesce(p_unseen_only, true)), auth.uid())
+  returning id into v;
+  return jsonb_build_object('mock', v, 'questions', n, 'minutes', mins, 'pool', pool, 'missing', '[]'::jsonb);
+end;
+$$;
+
+-- The caller's attempt, locked: 'attempt not found' unless it is hers.
+create or replace function study_private.attempt_for(p_attempt uuid)
+returns public.study_mock_attempts language plpgsql volatile security definer set search_path = public as $$
+declare a public.study_mock_attempts;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into a from public.study_mock_attempts x where x.id = p_attempt for update;
+  if not found or a.member_id <> auth.uid() then raise exception 'attempt not found'; end if;
+  return a;
+end;
+$$;
+revoke all on function study_private.attempt_for(uuid) from public;
+
+-- Submits an attempt ("להגיש", or the clock): each pick of a counted item
+-- becomes the caller's study_answers row (mode 'exam', attempt_id), and the
+-- score is kept. Counted: a key, and not a solved key under confidence 3
+-- (B7: those are "לא נספרה"); a solved key at 3 counts and is named. An
+-- item left blank counts as wrong and writes no row. Returns the score:
+-- {right, counted, total, answered, suggested, not_counted, auto, items:
+-- [{id, no, form, answer, seq, choice, choices, correct, counted, origin,
+-- ref_lecture, topic}]}. A second call returns the same score.
+create or replace function public.study_mock_finish(p_attempt uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  a      public.study_mock_attempts;
+  m      public.study_mocks;
+  qid    uuid;
+  pos    int;
+  q      public.study_questions;
+  k      public.study_question_keys;
+  pick   jsonb;
+  counted boolean;
+  ok     boolean;
+  items  jsonb := '[]'::jsonb;
+  r int := 0; nc int := 0; na int := 0; ns int := 0;
+  v_auto boolean;
+  v_c    int;
+  v_cs   int[];
+begin
+  a := study_private.attempt_for(p_attempt);
+  if a.finished_at is not null then return a.score; end if;
+  select * into m from public.study_mocks x where x.id = a.mock_id;
+  v_auto := now() >= a.deadline;
+  for qid, pos in select x, o from unnest(m.question_ids) with ordinality t(x, o) loop
+    select * into q from public.study_questions x where x.id = qid;
+    if not found then continue; end if;
+    select * into k from public.study_question_keys x where x.question_id = qid;
+    pick := a.picks -> qid::text;
+    v_c := (pick ->> 'c')::int;
+    select array_agg(v::int order by o2) into v_cs from jsonb_array_elements_text(coalesce(pick -> 'cs', '[]'::jsonb)) with ordinality t(v, o2);
+    counted := q.retired_at is null and (k.held_until is null or k.held_until <= now())
+               and ((q.form = 'one' and k.answer is not null) or (q.form <> 'one' and k.seq is not null))
+               and not (k.key_origin = 'solved' and coalesce(k.key_conf, 0) < 3);
+    ok := counted and case when q.form = 'one' then v_c is not null and v_c = k.answer
+                           else v_cs is not null and v_cs = k.seq::int[] end;
+    if counted then
+      nc := nc + 1;
+      if ok then r := r + 1; end if;
+      if k.key_origin = 'solved' then ns := ns + 1; end if;
+      if pick is not null then
+        insert into public.study_answers (user_id, question_id, choice, choices, correct, mode, ms, attempt_id)
+        values (a.member_id, qid, case when q.form = 'one' then v_c end, case when q.form <> 'one' then v_cs::smallint[] end,
+                ok, 'exam', case when (pick ->> 'ms')::int between 0 and 3600000 then (pick ->> 'ms')::int end, a.id);
+      end if;
+    end if;
+    if pick is not null then na := na + 1; end if;
+    items := items || jsonb_build_object(
+      'id', qid, 'pos', pos, 'no', q.exam_no, 'form', q.form,
+      'answer', case when k.held_until > now() then null else k.answer end,
+      'seq', case when k.held_until > now() then null else k.seq end,
+      'choice', v_c, 'choices', to_jsonb(v_cs), 'correct', ok, 'counted', counted, 'origin', k.key_origin,
+      'ref_lecture', q.ref_lecture, 'topic', q.topic);
+  end loop;
+  update public.study_mock_attempts x
+     set finished_at = now(), auto = v_auto,
+         score = jsonb_build_object('right', r, 'counted', nc, 'total', cardinality(m.question_ids), 'answered', na,
+                                    'suggested', ns, 'not_counted', cardinality(m.question_ids) - nc, 'auto', v_auto, 'items', items)
+   where x.id = a.id
+  returning score into items;
+  return items;
+end;
+$$;
+
+-- The attempt to show or resume: its deadline and the server's now (the
+-- phone's clock may be off), the questions in order, the caller's picks
+-- and flags, and the score once submitted. Past the deadline it is
+-- submitted first (the clock auto-submits on the next load).
+create or replace function public.study_mock_get(p_attempt uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  a public.study_mock_attempts;
+  m public.study_mocks;
+begin
+  a := study_private.attempt_for(p_attempt);
+  if a.finished_at is null and now() >= a.deadline then
+    perform public.study_mock_finish(a.id);
+    select * into a from public.study_mock_attempts x where x.id = p_attempt;
+  end if;
+  select * into m from public.study_mocks x where x.id = a.mock_id;
+  return jsonb_build_object(
+    'attempt', a.id, 'mock', m.id, 'kind', m.kind, 'exam_id', m.exam_id, 'course_id', m.course_id, 'minutes', m.minutes,
+    'started_at', a.started_at, 'deadline', a.deadline, 'now', now(), 'finished_at', a.finished_at,
+    'position', a.position, 'flagged', to_jsonb(a.flagged), 'question_ids', to_jsonb(m.question_ids),
+    'picks', a.picks, 'score', a.score);
+end;
+$$;
+
+-- Starts the clock: the caller's open attempt of this mock comes back (a
+-- second phone, a reload); an expired one is submitted and a new one starts.
+-- 'mock not found', 'off'.
+create or replace function public.study_mock_start(p_mock uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  m public.study_mocks;
+  a public.study_mock_attempts;
+  v uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_mocks x where x.id = p_mock;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) then raise exception 'mock not found'; end if;
+  if not study_private.feature_on('exams') then raise exception 'off'; end if;
+  perform pg_advisory_xact_lock(hashtext('study_mock:' || p_mock::text || ':' || auth.uid()::text));
+  select * into a from public.study_mock_attempts x
+   where x.mock_id = p_mock and x.member_id = auth.uid() and x.finished_at is null order by x.started_at desc limit 1;
+  if found and a.deadline > now() then return public.study_mock_get(a.id); end if;
+  if found then perform public.study_mock_finish(a.id); end if;
+  insert into public.study_mock_attempts (mock_id, member_id, deadline) values (p_mock, auth.uid(), now() + make_interval(mins => m.minutes))
+  returning id into v;
+  return public.study_mock_get(v);
+end;
+$$;
+
+-- Where the caller is ("שאלה 37 מתוך 100") and "לסמן לחזרה", saved on
+-- every move. False once submitted (the clock ran out: the screen reloads).
+create or replace function public.study_mock_progress(p_attempt uuid, p_position int, p_flagged int[])
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare
+  a public.study_mock_attempts;
+  m public.study_mocks;
+begin
+  a := study_private.attempt_for(p_attempt);
+  if a.finished_at is not null then return false; end if;
+  if now() >= a.deadline then perform public.study_mock_finish(a.id); return false; end if;
+  select * into m from public.study_mocks x where x.id = a.mock_id;
+  if p_position is null or p_position not between 0 and cardinality(m.question_ids) - 1
+     or cardinality(coalesce(p_flagged, '{}')) > 150
+     or exists (select 1 from unnest(coalesce(p_flagged, '{}')) f where f is null or f not between 0 and cardinality(m.question_ids) - 1) then
+    raise exception 'bad progress';
+  end if;
+  update public.study_mock_attempts x
+     set position = p_position, flagged = (select coalesce(array_agg(distinct f order by f), '{}') from unnest(coalesce(p_flagged, '{}')) f)
+   where x.id = a.id;
+  return true;
+end;
+$$;
+
+-- One pick ("לא יודעים" or a cleared pick: both null), kept on the attempt
+-- until it is submitted; it may change until then. Nothing comes back but
+-- whether it was kept: false once the time is up (the attempt is submitted
+-- now, 10 seconds' grace for a pick sent on the last second). 'attempt not
+-- found', 'question not found', 'bad choice', 'bad choices'.
+create or replace function public.study_mock_answer(p_attempt uuid, p_question uuid, p_choice int, p_choices int[], p_ms int default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare
+  a public.study_mock_attempts;
+  m public.study_mocks;
+  q public.study_questions;
+  np int;
+begin
+  a := study_private.attempt_for(p_attempt);
+  if a.finished_at is not null then return false; end if;
+  if now() >= a.deadline + interval '10 seconds' then perform public.study_mock_finish(a.id); return false; end if;
+  select * into m from public.study_mocks x where x.id = a.mock_id;
+  if not (p_question = any (m.question_ids)) then raise exception 'question not found'; end if;
+  select * into q from public.study_questions x where x.id = p_question;
+  if p_choice is null and p_choices is null then
+    update public.study_mock_attempts x set picks = x.picks - p_question::text where x.id = a.id;
+    return true;
+  end if;
+  if q.form = 'one' then
+    if p_choices is not null or p_choice not between 0 and cardinality(q.options) - 1 then raise exception 'bad choice'; end if;
+  else
+    np := case when q.form = 'match' then jsonb_array_length(coalesce(q.layout -> 'prompts', '[]'::jsonb)) else cardinality(q.options) end;
+    if p_choice is not null or cardinality(p_choices) <> np
+       or exists (select 1 from unnest(p_choices) c where c is null or c < 0 or c >= cardinality(q.options))
+       or (q.form = 'tf' and exists (select 1 from unnest(p_choices) c where c not in (0, 1)))
+       or (q.form = 'match' and (select count(distinct c) from unnest(p_choices) c) <> np) then
+      raise exception 'bad choices';
+    end if;
+  end if;
+  update public.study_mock_attempts x
+     set picks = x.picks || jsonb_build_object(p_question::text,
+                   jsonb_strip_nulls(jsonb_build_object('c', p_choice, 'cs', to_jsonb(p_choices),
+                                                        'ms', case when p_ms between 0 and 3600000 then p_ms end)))
+   where x.id = a.id;
+  return true;
+end;
+$$;
+
+-- ── RLS, grants ──
+alter table public.study_exam_pages    enable row level security;
+alter table public.study_exam_key_log  enable row level security;
+alter table public.study_exam_item_log enable row level security;
+alter table public.study_mocks         enable row level security;
+alter table public.study_mock_attempts enable row level security;
+drop policy if exists "study exam pages read" on public.study_exam_pages;
+drop policy if exists "study exam key log read" on public.study_exam_key_log;
+drop policy if exists "study exam item log read" on public.study_exam_item_log;
+drop policy if exists "study mocks read" on public.study_mocks;
+drop policy if exists "study mock attempts own" on public.study_mock_attempts;
+create policy "study exam pages read" on public.study_exam_pages for select using (public.study_is_member(public.study_exam_group(exam_id)));
+create policy "study exam key log read" on public.study_exam_key_log for select using (public.study_is_member(public.study_exam_group(exam_id)));
+create policy "study exam item log read" on public.study_exam_item_log for select using (public.study_is_member(public.study_exam_group(exam_id)));
+create policy "study mocks read" on public.study_mocks for select using (public.study_is_member(group_id));
+create policy "study mock attempts own" on public.study_mock_attempts for select using (member_id = auth.uid());
+revoke all on public.study_exam_pages, public.study_exam_key_log, public.study_exam_item_log, public.study_mocks,
+  public.study_mock_attempts from anon, authenticated;
+grant select on public.study_exam_pages, public.study_exam_key_log, public.study_exam_item_log, public.study_mocks,
+  public.study_mock_attempts to authenticated;
+
+-- Exam pages go only to an exam its member is uploading, while the switch
+-- is on (B1 S 2); everything else in the bucket as before.
+drop policy if exists "study files add" on storage.objects;
+create policy "study files add" on storage.objects
+  for insert with check (
+    bucket_id = 'study' and public.study_is_member_path(name)
+    and (split_part(name, '/', 2) <> 'exams'
+         or (public.study_feature_on('exams')
+             and split_part(name, '/', 4) ~ '^p[0-9]{1,3}\.jpg$'
+             and exists (select 1 from public.study_exams e
+                          where e.id::text = split_part(name, '/', 3) and e.group_id::text = split_part(name, '/', 1)
+                            and e.status = 'uploading' and e.created_by = auth.uid()))));
+
+revoke all on function public.study_exam_create(uuid, jsonb), public.study_exam_pages_done(uuid, jsonb, jsonb, timestamptz, text),
+  public.study_exam_status(uuid), public.study_exam_review(uuid), public.study_exam_item_edit(uuid, text, int, text),
+  public.study_set_exam_key(uuid, int), public.study_exam_key_undo(uuid), public.study_exam_retry(uuid, int[], jsonb, timestamptz),
+  public.study_exam_hide(uuid, boolean), public.study_course_style_items(uuid, text), public.study_claim_exam(uuid, text),
+  public.study_exam_save_items(uuid, uuid, jsonb, int, text), public.study_exam_save_keys(uuid, uuid, jsonb, text),
+  public.study_finish_exam_job(uuid, uuid, text, text, numeric, text), public.study_mock_create(uuid, text, uuid, int, int, boolean),
+  public.study_mock_finish(uuid), public.study_mock_get(uuid), public.study_mock_start(uuid), public.study_mock_progress(uuid, int, int[]),
+  public.study_mock_answer(uuid, uuid, int, int[], int)
+  from public, anon;
+grant execute on function public.study_exam_create(uuid, jsonb), public.study_exam_status(uuid), public.study_exam_review(uuid),
+  public.study_exam_item_edit(uuid, text, int, text), public.study_set_exam_key(uuid, int), public.study_exam_key_undo(uuid),
+  public.study_exam_retry(uuid, int[], jsonb, timestamptz), public.study_exam_hide(uuid, boolean), public.study_course_style_items(uuid, text),
+  public.study_mock_create(uuid, text, uuid, int, int, boolean), public.study_mock_finish(uuid), public.study_mock_get(uuid),
+  public.study_mock_start(uuid), public.study_mock_progress(uuid, int, int[]), public.study_mock_answer(uuid, uuid, int, int[], int)
+  to authenticated;
+-- The worker's: the key inside; the worker calls as anon, the phone's op with the member's token.
+grant execute on function public.study_exam_pages_done(uuid, jsonb, jsonb, timestamptz, text) to authenticated;
+grant execute on function public.study_claim_exam(uuid, text), public.study_exam_save_items(uuid, uuid, jsonb, int, text),
+  public.study_exam_save_keys(uuid, uuid, jsonb, text), public.study_finish_exam_job(uuid, uuid, text, text, numeric, text)
+  to anon, authenticated;
+
+-- The exams' sweeper: every minute, beside section W's (only with pg_cron).
+do $$
+begin
+  if to_regnamespace('cron') is not null then
+    perform cron.schedule('study-exam-dispatch', '* * * * *', 'select study_private.exam_dispatch()');
+  end if;
+end $$;
+
+-- The switch 'exams' is section F's row, off; S 2 leaves it off (Yoad turns it on).
+insert into study_private.features (name) values ('exams') on conflict (name) do nothing;
+
+insert into study_private.schema_sections (section, version) values ('S', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION S ════
