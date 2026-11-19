@@ -23,7 +23,7 @@ test("supabase/parts is study-schema.sql as it is now, in 8 parts", () => {
 // as made now and as written in supabase/parts, is at most 170 KB.
 test("every part is at most 170 KB", async () => {
   const { PART_MAX_BYTES, sqlParts } = await tool();
-  assert.equal(PART_MAX_BYTES, 170 * 1024);
+  assert.equal(PART_MAX_BYTES, 170_000, "the smaller reading of 170 KB");
   const parts = sqlParts(readFileSync(join(process.cwd(), "supabase", "study-schema.sql"), "utf8"));
   assert.equal(parts.length, 8);
   parts.forEach((p, k) => {

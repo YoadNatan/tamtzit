@@ -12,16 +12,31 @@
 
 -- ── S 1 · courses ──
 -- A course is the existing course text of lectures and exams, matched by
--- lower(btrim(course)). The row gives it an id (for addresses and settings:
--- the exam date, its length) and nothing moves: no lecture or exam gets a
+-- study_private.course_key(course) (below). The row gives it an id (for
+-- addresses and settings: the exam date, its length) and nothing moves: no lecture or exam gets a
 -- course_id, and the lecture's text stays the truth (courseStyle, s=c.<text>,
 -- QuizSetup and study_plans.courses[] keep reading it). Renaming or merging
 -- rewrites the text everywhere at once (study_course_rename / _merge).
+--
+-- The key: study_private.course_key(text), the one normaliser every match
+-- of S uses, the same as shared/study/courseKey.ts: direction and
+-- zero-width marks pasted from PDFs (U+200B–U+200F, U+202A–U+202E, U+2060,
+-- U+2066–U+2069) removed, every run of white space (the characters
+-- JavaScript's \s matches: NBSP, tabs, U+2000–U+200A, U+3000…) one space,
+-- trimmed, in lower case.
+create or replace function study_private.course_key(p_name text)
+returns text language sql immutable parallel safe as $$
+  select lower(btrim(regexp_replace(
+           regexp_replace(coalesce(p_name, ''), '[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069]', '', 'g'),
+           '[\t\n\u000B\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+', ' ', 'g')))
+$$;
+revoke all on function study_private.course_key(text) from public;
+
 create table if not exists public.study_courses (
   id           uuid        primary key default gen_random_uuid(),
   group_id     uuid        not null references public.study_groups (id) on delete cascade,
   name         text        not null check (char_length(btrim(name)) between 1 and 120),
-  name_key     text        generated always as (lower(btrim(name))) stored,
+  name_key     text        generated always as (study_private.course_key(name)) stored,
   exam_date    date        check (exam_date between date '2000-01-01' and date '2100-12-31'),
   exam_minutes int         check (exam_minutes between 10 and 600),
   exam_n       int         check (exam_n between 5 and 300),
@@ -30,6 +45,22 @@ create table if not exists public.study_courses (
   deleted_at   timestamptz,
   unique (group_id, name_key)
 );
+
+-- A table made by an earlier S 1 (its key was lower(btrim(name))): the rows
+-- the new key makes one keep the first made, and the key is made again.
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'study_courses' and column_name = 'name_key'
+                and generation_expression not like '%course_key%') then
+    delete from public.study_courses a using public.study_courses b
+     where a.group_id = b.group_id and study_private.course_key(a.name) = study_private.course_key(b.name)
+       and (b.created_at, b.id) < (a.created_at, a.id);
+    alter table public.study_courses drop column name_key;
+    alter table public.study_courses add column name_key text generated always as (study_private.course_key(name)) stored;
+    alter table public.study_courses add constraint study_courses_group_id_name_key_key unique (group_id, name_key);
+  end if;
+end $$;
 
 alter table public.study_courses enable row level security;
 drop policy if exists "study courses read" on public.study_courses;
@@ -40,7 +71,7 @@ grant select on public.study_courses to authenticated;
 -- The switch (on: phase 1 spends nothing new; VITE_STUDY_COURSES shows it).
 insert into study_private.features (name, enabled) values ('courses', true) on conflict (name) do nothing;
 
--- Backfill: one row per distinct lower(btrim(course)) of the lectures and
+-- Backfill: one row per distinct study_private.course_key(course) of the lectures and
 -- exams, named as it was first written. Deleted lectures count too (a
 -- restored one finds its course). Returns how many rows it made (0 on a
 -- second run).
@@ -49,11 +80,11 @@ returns int language plpgsql volatile security definer set search_path = public 
 declare n int;
 begin
   insert into public.study_courses (group_id, name, created_by, created_at)
-  select distinct on (x.group_id, lower(btrim(x.course))) x.group_id, btrim(x.course), x.created_by, x.created_at
-    from (select l.group_id, l.course, l.created_by, l.created_at from public.study_lectures l where btrim(l.course) <> ''
+  select distinct on (x.group_id, study_private.course_key(x.course)) x.group_id, btrim(x.course), x.created_by, x.created_at
+    from (select l.group_id, l.course, l.created_by, l.created_at from public.study_lectures l where study_private.course_key(l.course) <> ''
           union all
-          select e.group_id, e.course, e.created_by, e.created_at from public.study_exams e where btrim(e.course) <> '') x
-   order by x.group_id, lower(btrim(x.course)), x.created_at
+          select e.group_id, e.course, e.created_by, e.created_at from public.study_exams e where study_private.course_key(e.course) <> '') x
+   order by x.group_id, study_private.course_key(x.course), x.created_at
   on conflict (group_id, name_key) do nothing;
   get diagnostics n = row_count;
   return n;
@@ -62,15 +93,41 @@ $$;
 revoke all on function study_private.course_backfill() from public;
 do $$ begin perform study_private.course_backfill(); end $$;
 
+-- One change to a group's courses at a time: the trigger, upsert, rename and
+-- merge take this lock first (before any course row), so a rename racing an
+-- upsert of the same name waits instead of failing on the unique key, and
+-- two opposite merges run one after the other instead of deadlocking.
+create or replace function study_private.course_lock(p_group uuid)
+returns void language sql volatile as $$
+  select pg_advisory_xact_lock(hashtext('study_course:' || p_group::text))
+$$;
+revoke all on function study_private.course_lock(uuid) from public;
+
 -- A lecture or exam whose course has no row yet makes it (a course merged
--- away and then typed again comes back as a new row).
+-- away and then typed again comes back as a new row). A lecture or exam
+-- moved to another course leaves its old course; when nothing of the group
+-- has that course's text any more (deleted lectures count: a restored one
+-- finds its course) and the course has no settings, its row goes, so the
+-- lists do not keep an empty course.
 create or replace function study_private.course_ensure()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  k_new text := study_private.course_key(new.course);
+  k_old text := case when tg_op = 'UPDATE' then study_private.course_key(old.course) else '' end;
 begin
-  if btrim(coalesce(new.course, '')) <> '' then
+  if k_new = '' and (k_old = '' or k_old = k_new) then return null; end if;
+  perform study_private.course_lock(new.group_id);
+  if k_new <> '' then
     insert into public.study_courses (group_id, name, created_by)
     values (new.group_id, btrim(new.course), auth.uid())
     on conflict (group_id, name_key) do update set deleted_at = null where public.study_courses.deleted_at is not null;
+  end if;
+  if k_old <> '' and k_old <> k_new then
+    delete from public.study_courses c
+     where c.group_id = old.group_id and c.name_key = k_old
+       and c.exam_date is null and c.exam_minutes is null and c.exam_n is null
+       and not exists (select 1 from public.study_lectures l where l.group_id = old.group_id and study_private.course_key(l.course) = k_old)
+       and not exists (select 1 from public.study_exams e where e.group_id = old.group_id and study_private.course_key(e.course) = k_old);
   end if;
   return null;
 end;
@@ -118,14 +175,14 @@ create or replace function study_private.course_retext(p_group uuid, p_from_key 
 returns void language plpgsql volatile security definer set search_path = public as $$
 begin
   update public.study_lectures l set course = p_to
-   where l.group_id = p_group and lower(btrim(l.course)) = p_from_key and l.course is distinct from p_to;
+   where l.group_id = p_group and study_private.course_key(l.course) = p_from_key and l.course is distinct from p_to;
   update public.study_exams e set course = p_to
-   where e.group_id = p_group and lower(btrim(e.course)) = p_from_key and e.course is distinct from p_to;
+   where e.group_id = p_group and study_private.course_key(e.course) = p_from_key and e.course is distinct from p_to;
   update public.study_plans p
      set courses = (select coalesce(array_agg(distinct x order by x), '{}')
-                      from (select case when lower(btrim(c)) = p_from_key then p_to else btrim(c) end x from unnest(p.courses) c) y),
+                      from (select case when study_private.course_key(c) = p_from_key then p_to else btrim(c) end x from unnest(p.courses) c) y),
          updated_at = now()
-   where p.group_id = p_group and exists (select 1 from unnest(p.courses) c where lower(btrim(c)) = p_from_key);
+   where p.group_id = p_group and exists (select 1 from unnest(p.courses) c where study_private.course_key(c) = p_from_key);
 end;
 $$;
 revoke all on function study_private.course_retext(uuid, text, text) from public;
@@ -144,8 +201,9 @@ begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   if not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
   if not study_private.feature_on('courses') then raise exception 'off'; end if;
-  if char_length(nm) not between 1 and 120 then raise exception 'bad name'; end if;
+  if char_length(nm) not between 1 and 120 or study_private.course_key(nm) = '' then raise exception 'bad name'; end if;
   perform study_private.course_settings_ok(p_exam_date, p_minutes, p_n);
+  perform study_private.course_lock(p_group);
   insert into public.study_courses as c (group_id, name, exam_date, exam_minutes, exam_n, created_by)
   values (p_group, nm, p_exam_date, p_minutes, p_n, auth.uid())
   on conflict (group_id, name_key) do update
@@ -175,12 +233,17 @@ $$;
 create or replace function public.study_course_rename(p_course uuid, p_name text)
 returns void language plpgsql volatile security definer set search_path = public as $$
 declare
-  c  public.study_courses := study_private.course_for(p_course);
+  c  public.study_courses;
+  g  uuid;
   nm text := btrim(coalesce(p_name, ''));
 begin
-  if char_length(nm) not between 1 and 120 then raise exception 'bad name'; end if;
-  perform pg_advisory_xact_lock(hashtext('study_course:' || c.group_id::text));
-  if exists (select 1 from public.study_courses x where x.group_id = c.group_id and x.name_key = lower(nm) and x.id <> c.id) then
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  -- The group's lock before the row's (course_lock), then the row, read again.
+  select x.group_id into g from public.study_courses x where x.id = p_course;
+  if g is not null then perform study_private.course_lock(g); end if;
+  c := study_private.course_for(p_course);
+  if char_length(nm) not between 1 and 120 or study_private.course_key(nm) = '' then raise exception 'bad name'; end if;
+  if exists (select 1 from public.study_courses x where x.group_id = c.group_id and x.name_key = study_private.course_key(nm) and x.id <> c.id) then
     raise exception 'exists';
   end if;
   update public.study_courses x set name = nm where x.id = c.id;
@@ -194,12 +257,19 @@ $$;
 create or replace function public.study_course_merge(p_from uuid, p_into uuid)
 returns void language plpgsql volatile security definer set search_path = public as $$
 declare
-  f public.study_courses := study_private.course_for(p_from);
-  t public.study_courses := study_private.course_for(p_into);
+  f public.study_courses;
+  t public.study_courses;
+  g uuid;
 begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  -- The group's lock first (course_lock): two opposite merges wait for each
+  -- other, and the second finds its course gone ('course not found').
+  select x.group_id into g from public.study_courses x where x.id = p_into;
+  if g is not null then perform study_private.course_lock(g); end if;
+  f := study_private.course_for(p_from);
+  t := study_private.course_for(p_into);
   if f.id = t.id then raise exception 'same course'; end if;
   if f.group_id <> t.group_id then raise exception 'course not found'; end if;
-  perform pg_advisory_xact_lock(hashtext('study_course:' || t.group_id::text));
   update public.study_courses x
      set exam_date = coalesce(x.exam_date, f.exam_date), exam_minutes = coalesce(x.exam_minutes, f.exam_minutes),
          exam_n = coalesce(x.exam_n, f.exam_n)
@@ -211,8 +281,11 @@ $$;
 
 -- The course page: its settings, days left (Israel time), its lectures
 -- (count, ready), its past exams with their states (none until phase 2),
--- and how many of its questions can be practised now ("(184)": active
--- questions of its lectures). 'course not found', 'off'.
+-- and how many of its questions can be practised now ("(184)": the
+-- questions of its lectures a session may ask, study_session_counts' rule:
+-- active, keyed, not hidden by two flags, not marked by a correction). A
+-- build without VITE_STUDY_QTYPES also leaves out the new question types,
+-- so its session can ask fewer. 'course not found', 'off'.
 create or replace function public.study_course_overview(p_course uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
@@ -230,15 +303,15 @@ begin
     'days_left', case when c.exam_date is not null then c.exam_date - today end,
     'exam_minutes', c.exam_minutes, 'exam_n', c.exam_n,
     'lectures', (select count(*) from public.study_lectures l
-                  where l.group_id = c.group_id and l.deleted_at is null and lower(btrim(l.course)) = c.name_key),
+                  where l.group_id = c.group_id and l.deleted_at is null and study_private.course_key(l.course) = c.name_key),
     'ready', (select count(*) from public.study_lectures l
-               where l.group_id = c.group_id and l.deleted_at is null and l.status = 'ready' and lower(btrim(l.course)) = c.name_key),
+               where l.group_id = c.group_id and l.deleted_at is null and l.status = 'ready' and study_private.course_key(l.course) = c.name_key),
     'exams', (select coalesce(jsonb_agg(jsonb_build_object('id', e.id, 'title', e.title, 'year', e.year, 'status', e.status)
                                         order by e.year desc nulls last, e.created_at desc), '[]'::jsonb)
-                from public.study_exams e where e.group_id = c.group_id and lower(btrim(e.course)) = c.name_key),
+                from public.study_exams e where e.group_id = c.group_id and study_private.course_key(e.course) = c.name_key),
     'questions', (select count(*) from public.study_questions q join public.study_lectures l on l.id = q.lecture_id
-                   where l.group_id = c.group_id and l.deleted_at is null and lower(btrim(l.course)) = c.name_key
-                     and q.retired_at is null and q.hidden_at is null));
+                   where l.group_id = c.group_id and l.deleted_at is null and study_private.course_key(l.course) = c.name_key
+                     and q.retired_at is null and q.hidden_at is null and q.stale_at is null and q.has_key));
 end;
 $$;
 
@@ -254,8 +327,8 @@ begin
   return query
   select c.id, c.name, c.name_key, c.exam_date, c.exam_minutes, c.exam_n,
          (select count(*)::int from public.study_lectures l
-           where l.group_id = c.group_id and l.deleted_at is null and lower(btrim(l.course)) = c.name_key),
-         (select count(*)::int from public.study_exams e where e.group_id = c.group_id and lower(btrim(e.course)) = c.name_key)
+           where l.group_id = c.group_id and l.deleted_at is null and study_private.course_key(l.course) = c.name_key),
+         (select count(*)::int from public.study_exams e where e.group_id = c.group_id and study_private.course_key(e.course) = c.name_key)
     from public.study_courses c
    where c.group_id = p_group and c.deleted_at is null
    order by c.name_key;
@@ -272,7 +345,7 @@ create index if not exists study_question_requests_plan on public.study_question
 -- puts the caller's request in the round p_plan. A round stays in one group,
 -- touches at most 5 lectures, and asks at least 4 questions of each.
 -- 'forbidden', 'not signed in', 'request not found', 'bad plan' (another
--- group's, or the request is in another round), 'too many lectures', 'too few questions'.
+-- group's, or the request is in another round), 'round full', 'too few questions'.
 create or replace function public.study_request_plan(p_request uuid, p_plan uuid, p_key text default null)
 returns int language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -300,16 +373,47 @@ begin
 end;
 $$;
 
+-- The op's call for a lecture of a round: study_request_create and then
+-- study_request_plan, in one transaction, so a refused link ('round full',
+-- 'bad plan', 'too few questions') leaves no request and no batches behind
+-- (no round number of the lecture used up). The round's lock is taken
+-- before the request is made: two phones adding the 5th and the 6th
+-- lecture at once run one after the other, and the second is refused.
+-- Each row as study_request_create's, with the round's lectures so far.
+create or replace function public.study_request_create_in_plan(p_lecture uuid, p_request jsonb, p_batches jsonb, p_plan uuid,
+  p_key text default null)
+returns table (request_id uuid, round int, batch_id uuid, part_idx int, seq int, wanted int, lectures int)
+language plpgsql volatile security definer set search_path = public as $$
+declare
+  made jsonb;
+  n    int;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if p_plan is null then raise exception 'bad plan'; end if;
+  perform pg_advisory_xact_lock(hashtext('study_plan_round:' || p_plan::text));
+  select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) into made
+    from public.study_request_create(p_lecture, p_request, p_batches, p_key) x;
+  if jsonb_array_length(made) = 0 then return; end if;
+  n := public.study_request_plan((made->0->>'request_id')::uuid, p_plan, p_key);
+  return query
+  select (e->>'request_id')::uuid, (e->>'round')::int, (e->>'batch_id')::uuid, (e->>'part_idx')::int,
+         (e->>'seq')::int, (e->>'wanted')::int, n
+    from jsonb_array_elements(made) e;
+end;
+$$;
+
 revoke all on function public.study_course_upsert(uuid, text, date, int, int), public.study_course_set(uuid, date, int, int),
   public.study_course_rename(uuid, text), public.study_course_merge(uuid, uuid), public.study_course_overview(uuid),
-  public.study_courses_of(uuid), public.study_request_plan(uuid, uuid, text)
+  public.study_courses_of(uuid), public.study_request_plan(uuid, uuid, text),
+  public.study_request_create_in_plan(uuid, jsonb, jsonb, uuid, text)
   from public, anon;
 grant execute on function public.study_course_upsert(uuid, text, date, int, int), public.study_course_set(uuid, date, int, int),
   public.study_course_rename(uuid, text), public.study_course_merge(uuid, uuid), public.study_course_overview(uuid),
   public.study_courses_of(uuid)
   to authenticated;
--- study_request_plan needs the key inside; the grant only lets the op's call reach it.
-grant execute on function public.study_request_plan(uuid, uuid, text) to authenticated;
+-- Both need the key inside; the grant only lets the op's call reach them.
+grant execute on function public.study_request_plan(uuid, uuid, text),
+  public.study_request_create_in_plan(uuid, jsonb, jsonb, uuid, text) to authenticated;
 
 insert into study_private.schema_sections (section, version) values ('S', 1)
 on conflict (section) do update set version = excluded.version, loaded_at = now();

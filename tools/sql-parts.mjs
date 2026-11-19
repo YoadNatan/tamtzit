@@ -25,7 +25,9 @@ const DIR = join(root, "supabase", "parts");
  *  under PART_MAX_BYTES (server/study/sqlParts.test.ts checks it). */
 const STARTS = ["Q", "Z", "C", "P", "V", "H", "S"];
 
-export const PART_MAX_BYTES = 170 * 1024;
+/** 170,000 bytes, not 170 × 1024: whichever way the editor counts "170 KB",
+ *  a part under this runs. */
+export const PART_MAX_BYTES = 170_000;
 
 export function sqlParts(text) {
   const lines = text.split("\n");

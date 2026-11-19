@@ -8300,10 +8300,21 @@ insert into public.study_members (group_id, user_id, name) values (:'sog', :'ss'
 
 select stest.is_('S1-reg. the registry has S 1 and the switch courses is on',
   (public.study_schema() ->> 'S') || ' ' || study_private.feature_on('courses')::text, '1 true');
-select stest.is_('S1a. every course text of the lectures and exams has its row (one per lower(btrim), the unique key)',
-  (select count(*)::text from (select distinct group_id, lower(btrim(course)) k from public.study_lectures where btrim(course) <> ''
-                               union select distinct group_id, lower(btrim(course)) from public.study_exams where btrim(course) <> '') x
+select stest.is_('S1a. every course text of the lectures and exams has its row (one per course_key, the unique key)',
+  (select count(*)::text from (select distinct group_id, study_private.course_key(course) k from public.study_lectures where study_private.course_key(course) <> ''
+                               union select distinct group_id, study_private.course_key(course) from public.study_exams where study_private.course_key(course) <> '') x
     where not exists (select 1 from public.study_courses c where c.group_id = x.group_id and c.name_key = x.k)), '0');
+
+-- The key (shared/study/courseKey.test.ts checks the same cases in TypeScript).
+select stest.is_('S1a2. course_key: spaces of every kind, direction marks, capitals',
+  (select string_agg('[' || study_private.course_key(x) || ']', ' ' order by o) from unnest(array[
+     'פרמקו' || chr(160), chr(9) || 'פרמקו', 'פרמקו  ב', chr(8207) || 'פרמקו' || chr(8206), 'ÉCOLE', 'Pharma' || chr(8239) || 'B' || chr(12288),
+     chr(8203) || chr(8288) || chr(8294) || 'x' || chr(8297), '  ', null]) with ordinality t(x, o)),
+  '[פרמקו] [פרמקו] [פרמקו ב] [פרמקו] [école] [pharma b] [x] [] []');
+select stest.is_('S1a3. the key is the table''s generated column and is immutable',
+  (select (generation_expression like '%course_key%')::text from information_schema.columns
+    where table_schema = 'public' and table_name = 'study_courses' and column_name = 'name_key')
+  || ' ' || (select provolatile::text from pg_proc where oid = 'study_private.course_key(text)'::regprocedure), 'true i');
 
 -- The backfill: lectures written before section S (the trigger off, as on
 -- an older database), with spaces and capitals, and an exam.
@@ -8338,6 +8349,18 @@ insert into public.study_lectures (group_id, course, title, source_kind, slides)
 update public.study_lectures set course = 'נוירו' where title = 'Immuno 2 (synthetic)';
 select stest.is_('S1c2. the same course again makes nothing; a changed course makes its own',
   (select count(*)::text from public.study_courses where group_id = :'sg' and name_key in ('אימונו', 'נוירו')), '2');
+insert into public.study_lectures (group_id, course, title, source_kind, slides) values (:'sg', 'בודד', 'Lonely (synthetic)', 'pptx', '[]');
+update public.study_lectures set course = 'אימונו' where title = 'Lonely (synthetic)';
+select stest.is_('S1c2b. a course its last lecture left, with no settings, goes; one with lectures stays',
+  (select count(*)::text from public.study_courses where group_id = :'sg' and name_key = 'בודד') || ' · '
+  || (select count(*)::text from public.study_courses where group_id = :'sg' and name_key = 'אימונו'), '0 · 1');
+insert into public.study_lectures (group_id, course, title, source_kind, slides) values (:'sg', 'פרמקו' || chr(160), 'NBSP (synthetic)', 'pptx', '[]');
+select stest.is_('S1c2c. a course text with a no-break space or a direction mark is the same course',
+  (select count(*)::text from public.study_courses where group_id = :'sg' and name_key = 'פרמקו') || ' · '
+  || (select count(*)::text from public.study_courses where group_id = :'sg' and name like 'פרמקו%'), '1 · 1');
+reset role;
+delete from public.study_lectures where title = 'NBSP (synthetic)';
+set role authenticated;
 select stest.is_('S1c3. a lecture with no course makes none',
   stest.err(format('insert into public.study_lectures (group_id, title, source_kind, slides) values (%L, %L, %L, %L)', :'sg', 'No course (synthetic)', 'pptx', '[]'))
   || ' · ' || (select count(*)::text from public.study_courses where group_id = :'sg' and name_key = ''), 'none · 0');
@@ -8372,10 +8395,11 @@ select stest.is_('S1f2. a new name makes a course with no lectures; it is listed
   (select lectures || ' ' || exams from public.study_courses_of(:'sg') where id = :'sgen'), '0 0');
 select stest.is_('S1f3. bad names and settings',
   stest.err(format('select public.study_course_upsert(%L, %L)', :'sg', '   ')) || ' · '
+  || stest.err(format('select public.study_course_upsert(%L, %L)', :'sg', chr(8207) || chr(8206))) || ' · '
   || stest.err(format('select public.study_course_set(%L, %L, null, null)', :'scf', '1999-01-01')) || ' · '
   || stest.err(format('select public.study_course_set(%L, null, 5, null)', :'scf')) || ' · '
   || stest.err(format('select public.study_course_set(%L, null, null, 301)', :'scf')),
-  'bad name · bad date · bad minutes · bad questions');
+  'bad name · bad name · bad date · bad minutes · bad questions');
 select public.study_course_set(:'scf', date '2027-02-12', 180, 100);
 select stest.is_('S1f4. study_course_set saves all three (null clears)',
   (select exam_date || ' ' || exam_minutes || ' ' || exam_n from public.study_courses where id = :'scf'), '2027-02-12 180 100');
@@ -8388,9 +8412,13 @@ insert into public.study_questions (group_id, lecture_id, source, kind, question
  (:'sg', :'sl2', 'ai', 'mcq', 'Q2 (synthetic)?', array['a','b','c','d'], array[1], 'T'),
  (:'sg', :'sl2', 'ai', 'mcq', 'Q3 retired (synthetic)?', array['a','b','c','d'], array[1], 'T');
 update public.study_questions set retired_at = now() where question = 'Q3 retired (synthetic)?';
+-- Two a session may not ask: one marked by a correction, one with no key.
+insert into public.study_questions (group_id, lecture_id, source, kind, question, options, slides, topic, has_key, stale_at) values
+ (:'sg', :'sl1', 'ai', 'mcq', 'Q4 stale (synthetic)?', array['a','b','c','d'], array[1], 'T', true, now()),
+ (:'sg', :'sl1', 'ai', 'mcq', 'Q5 no key (synthetic)?', array['a','b','c','d'], array[1], 'T', false, null);
 set role authenticated;
 set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
-select stest.is_('S1g. the overview: lectures (ready), the exam, the questions to practise, days left',
+select stest.is_('S1g. the overview: lectures (ready), the exam, the questions a session may ask (not stale, keyed), days left',
   (select (o ->> 'name') || ' · ' || (o ->> 'lectures') || ' (' || (o ->> 'ready') || ') · ' || jsonb_array_length(o -> 'exams') || ' ' || (o -> 'exams' -> 0 ->> 'status')
           || ' · ' || (o ->> 'questions') || ' · ' || ((o ->> 'days_left')::int = date '2027-02-12' - (now() at time zone 'Asia/Jerusalem')::date)::text
           || ' · ' || (o ->> 'exam_n') || ' ' || (o ->> 'exam_minutes')
@@ -8406,8 +8434,8 @@ set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000002';
 select public.study_plan_save(null, :'sg', 'בחינה (synthetic)', current_date + 30, array['פרמקו ', 'Pharma B', 'גנטיקה'], '{}', '{}', 120, '{}') as splanid \gset
 select stest.is_('S1h. a plan''s courses are kept as typed (trimmed, sorted)',
   (select array_to_string(courses, '|') from public.study_plans where id = :'splanid'), 'Pharma B|גנטיקה|פרמקו');
-select stest.is_('S1h2. the practice overview still counts by lecture (the retired one left out)',
-  (select string_agg(questions::text, ',' order by questions) from public.study_practice_overview(:'sg') where lecture_id in (:'sl1', :'sl2')), '1,1');
+select stest.is_('S1h2. the practice overview still counts by lecture (the retired and the unkeyed left out, as before)',
+  (select string_agg(questions::text, ',' order by questions) from public.study_practice_overview(:'sg') where lecture_id in (:'sl1', :'sl2')), '1,2');
 
 -- Rename: lectures, exams and plans move together.
 select stest.is_('S1i. a name that is another course: exists',
@@ -8425,7 +8453,7 @@ select stest.is_('S1i3. rename moves the lectures, the exam and the plan; no new
   || (select count(*)::text from public.study_courses where group_id = :'sg' and name_key in ('פרמקו', 'פרמקולוגיה')),
   'פרמקולוגיה · פרמקולוגיה · PHARMA b|גנטיקה|פרמקולוגיה · 1');
 select stest.is_('S1i4. the practice overview is unchanged, the other group''s course untouched',
-  (select string_agg(questions::text, ',' order by questions) from public.study_practice_overview(:'sg') where lecture_id in (:'sl1', :'sl2')), '1,1');
+  (select string_agg(questions::text, ',' order by questions) from public.study_practice_overview(:'sg') where lecture_id in (:'sl1', :'sl2')), '1,2');
 reset role;
 select stest.is_('S1i5. the other group''s course of the old name is untouched', (select name from public.study_courses where id = :'sof'), 'פרמקו');
 set role authenticated;
@@ -8506,6 +8534,32 @@ select stest.is_('S1l8. members read the round''s requests by plan_id',
   (select count(*)::text from public.study_question_requests where plan_id = :'splan'), '5');
 set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000003';
 select stest.is_('S1l9. a stranger reads none', (select count(*)::text from public.study_question_requests where plan_id = :'splan'), '0');
+
+-- The op's call for a round: the request and its link in one transaction.
+reset role;
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown)
+values ('e8200000-0000-4000-8000-000000000013', 0, 'חלק', 1, 2, 'ready', 'x');
+delete from public.study_question_requests where id = 'e8500000-0000-4000-8000-000000000013';   -- refused by S1l6, not in the round
+set role authenticated;
+set request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000001';
+\set sreq '{"level":"focused","count":4,"parts":[0],"styles":["case"],"difficulty":"exam"}'
+\set sbat '[{"part_idx":0,"seq":0,"wanted":4,"points":[],"styles":["case","case","case","case"]}]'
+select stest.is_('S1m. a sixth lecture: round full, and no request or batch is left of it',
+  stest.err(format('select * from public.study_request_create_in_plan(%L, %L, %L, %L, %L)', 'e8200000-0000-4000-8000-000000000013', :'sreq', :'sbat', :'splan', :'skey'))
+  || ' · ' || (select count(*)::text from public.study_question_requests where lecture_id = 'e8200000-0000-4000-8000-000000000013')
+  || ' · ' || (select count(*)::text from public.study_question_batches where lecture_id = 'e8200000-0000-4000-8000-000000000013'),
+  'round full · 0 · 0');
+select stest.is_('S1m2. without the key',
+  stest.err(format('select * from public.study_request_create_in_plan(%L, %L, %L, %L)', 'e8200000-0000-4000-8000-000000000013', :'sreq', :'sbat', gen_random_uuid())), 'forbidden');
+select gen_random_uuid() as splan2 \gset
+select string_agg(x.wanted || ' ' || x.lectures, ',') as smade
+  from public.study_request_create_in_plan('e8200000-0000-4000-8000-000000000013', :'sreq', :'sbat', :'splan2', :'skey') x \gset
+select stest.is_('S1m3. a new round: the request, its batch and the round''s count, linked',
+  :'smade' || ' · ' || (select count(*)::text from public.study_question_requests where plan_id = :'splan2'), '4 1 · 1');
+reset role;
+select stest.is_('S1m4. anon reaches neither round RPC',
+  (has_function_privilege('anon', 'public.study_request_create_in_plan(uuid, jsonb, jsonb, uuid, text)', 'execute'))::text, 'false');
+set role authenticated;
 
 -- The fixtures go.
 reset role;
