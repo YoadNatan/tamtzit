@@ -23,7 +23,8 @@
 //   calls     every RPC (fn, who)
 const now = () => new Date().toISOString();
 const hex = (prefix, n) => `${prefix}-0000-4000-8000-${String(n).padStart(12, "0")}`;
-const keyOf = (s) => String(s ?? "").trim().toLowerCase();
+// shared/study/courseKey.ts (the SQL's study_private.course_key).
+const keyOf = (s) => String(s ?? "").replace(/[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 const userOfToken = (token) => {
   const m = /^tok-(\d+)$/.exec(token || "");
   return m ? `${m[1].padStart(8, "0")}-0000-4000-8000-${m[1].padStart(12, "0")}` : null;
@@ -114,7 +115,7 @@ module.exports = {
         if (!r) return refuse("course not found");
         const ls = lecturesOf(db, r);
         const ids = new Set(ls.map((l) => l.id));
-        const questions = (db.practice?.questions ?? []).filter((q) => ids.has(q.lecture_id) && !q.retired_at && !q.hidden_at).length;
+        const questions = (db.practice?.questions ?? []).filter((q) => ids.has(q.lecture_id) && !q.retired_at && !q.hidden_at && !q.stale_at && q.has_key !== false).length;
         const days = r.exam_date ? Math.round((Date.parse(r.exam_date) - Date.parse(israelToday())) / 86_400_000) : null;
         return json({ id: r.id, name: r.name, exam_date: r.exam_date, days_left: days, exam_minutes: r.exam_minutes, exam_n: r.exam_n, lectures: ls.length, ready: ls.filter((l) => l.status === "ready").length, exams: [], questions });
       }
@@ -196,6 +197,8 @@ module.exports = {
     if (!paras.length) return send(409, { error: "no summaries" });
     const words = b.question.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
     const score = (t) => words.filter((w) => t.toLowerCase().includes(w)).length;
+    // No paragraph has any word of the question: refused before anything is paid (ask.ts).
+    if (words.length && !paras.some((x) => score(x.text) > 0)) return send(409, { error: "no match" });
     const chosen = [...paras].filter((x) => x.slides.length).sort((x, y) => score(y.text) - score(x.text)).slice(0, 3);
     const lectures = all.filter((l) => chosen.some((c) => c.lecture === l.n));
     C.asks.push({ who: me, courseId: row.id, question: b.question, history: b.history ?? [], at: Date.now() });

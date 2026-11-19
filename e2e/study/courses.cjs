@@ -9,17 +9,26 @@
 //      shows the course's questions ($0: no call to /api/study/ai).
 //   4. "לשאול על כל הקורס": "נבחרו 3 מתוך N פסקאות · מהרצאה אחת", the
 //      answer, and its sources as links to the paragraph (?l=…&at=p.a).
-//   5. "העלאה של כמה קבצים" with 12 generated .pptx files: a row each, the
-//      price card with the month's money ("יחכו לחודש הבא" when little is
-//      left); the upload holds the 4th lecture's insert on its way and the
-//      tab reloads: "הועלו 4. נשארו 8 קבצים · לבחור אותם שוב" (the 4th got
-//      there: its id was in the resume list), the library says so too, and
-//      the 12 files picked again upload only the 8 left: 14 lectures, none
-//      twice, the list cleared.
+//   5. "העלאה של כמה קבצים" with 12 generated .pptx files picked out of
+//      order: listed by name with numbers in order (שיעור 2 before שיעור 10),
+//      5 rows and "ועוד 7 קבצים · להראות", the price card with the month's
+//      money ($1.50 left: every summary waits, "הסיכום יחכה לחודש הבא"); the
+//      upload holds the 4th lecture's insert on its way and the tab reloads:
+//      "הועלו 4. נשארו 8 קבצים" (the 4th got there: its id was in the resume
+//      list), the library says so too, and the 12 files picked again upload
+//      only the 8 left: 14 lectures, none twice, uploaded in name order, none
+//      handed to the writer (study_queue), all 12 kept for next month
+//      (study.later.<group>), the list cleared.
 //   6. The course's sheet: "לשנות שם" moves every lecture's text; "לאחד
-//      קורסים" moves them to the other course and opens its page.
+//      קורסים" ("לאחד עם ״מיקרו״") moves them to the other course and opens its page.
 //   7. 320 and 390 px, light and dark: no horizontal scroll on the course
-//      page, the batch and the course question; the a11y check at 390/360.
+//      page, the batch and the course question, and on the course page and
+//      the library with a lecture named like a file with no spaces; the a11y
+//      check at 390/360.
+//   8. A course with no summary yet: "לשאול על כל הקורס" is off and says
+//      why. A question no paragraph matches: its words, and the question
+//      stays in the field. The batch from the library with no course: the
+//      tap marks the field and says why under it.
 // Without VITE_STUDY_COURSES (every set but "s1" and "all") it checks that
 // nothing of it shows: no course link, ?v=course → the library, the batch →
 // one lecture's upload, ?v=ask&c= → the library's question, no call of
@@ -137,7 +146,7 @@ const israelDay = (plus) => {
       await go("/?v=upload&many=1");
       await page.waitForURL((u) => !u.search.includes("many="), { timeout: 15000 });
       await page.getByRole("heading", { name: "הרצאה חדשה" }).waitFor({ timeout: 15000 });
-      expect((await page.getByText("להעלות כמה קבצים יחד").count()) === 0, "the batch → one lecture's upload, with no link to the batch");
+      expect((await page.getByText("העלאה של כמה קבצים").count()) === 0, "the batch → one lecture's upload, with no link to the batch");
       await go(`/?v=ask&c=${"c0000000-0000-4000-8000-000000000001"}`);
       await page.waitForURL((u) => !u.search.includes("c="), { timeout: 15000 });
       expect(true, "?v=ask&c= → the library's question");
@@ -152,6 +161,14 @@ const israelDay = (plus) => {
       const hrefs = await page.locator(".lib-course", { hasText: COURSE }).evaluateAll((as) => [...new Set(as.map((a) => a.getAttribute("href")))]);
       expect(hrefs.length === 1, `one course for its two spellings (${hrefs.join(", ")})`);
       await shot("courses-library");
+      // A course with no summary yet: its question is off, with the reason.
+      await page.locator(".lib-course", { hasText: "מיקרו" }).first().click();
+      await page.getByRole("heading", { level: 1, name: "מיקרו" }).waitFor({ timeout: 15000 });
+      const askOff = page.getByRole("button", { name: "לשאול על כל הקורס" });
+      await askOff.waitFor({ timeout: 15000 });
+      expect((await askOff.isDisabled()) && (await page.locator("#c-ask-why").innerText()).includes("אפשר לשאול כשיהיה סיכום ראשון"), "no summary yet: the course question is off and says why");
+      await go("/?v=library");
+      await link.first().waitFor({ timeout: 15000 });
       await link.first().click();
       await page.waitForURL(/v=course&c=c0000000-/, { timeout: 15000 });
       const courseUrl = new URL(page.url());
@@ -212,17 +229,26 @@ const israelDay = (plus) => {
       await src.first().click();
       await page.waitForURL(new RegExp(`[?&]l=${L}&at=\\d+\\.\\d+`), { timeout: 15000 });
       expect(true, "a source opens its paragraph in the lecture");
+      // A question no paragraph matches: refused with words, the question kept in the field.
+      await go(`/?v=ask&c=${CID}`);
+      await page.getByLabel("השאלה").fill("zzzz qqqq");
+      await page.getByRole("button", { name: "לשאול" }).click();
+      await page.locator(".a-error", { hasText: "לא מצאנו בסיכומים של הקורס" }).waitFor({ timeout: 15000 });
+      expect((await page.getByLabel("השאלה").inputValue()) === "zzzz qqqq", "a question that was not answered stays in the field");
 
       /* ── 5. העלאה של כמה קבצים: 12 files, the price, a stop half way, the resume ── */
       const deck = path.join(out, "deck.pptx");
       await makePptx(deck);
       // Handed over as buffers: the files keep their Hebrew names (a path with them is not read here).
       const bytes = fs.readFileSync(deck);
-      const files = Array.from({ length: 12 }, (_, i) => ({
-        name: `שיעור ${i + 1} - משתנים.pptx`,
+      // Picked out of order (10 before 2, 1 last): the list goes by name, numbers in order.
+      const order = [10, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 1];
+      const files = order.map((n) => ({
+        name: `שיעור ${n} - משתנים.pptx`,
         mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         buffer: bytes,
       }));
+      const queues = () => mock.calls.filter((c) => /rpc\/study_queue/.test(String(c))).length;
       db.spent = 31.5; // $1.50 left this month: some summaries wait
       await go(`/?v=course&c=${CID}`);
       await page.getByRole("link", { name: "העלאה של כמה קבצים" }).click();
@@ -231,12 +257,18 @@ const israelDay = (plus) => {
       await page.locator('input[type="file"]').setInputFiles(files);
       const go12 = page.getByRole("button", { name: "העלאה (12 קבצים)" });
       await go12.waitFor({ timeout: 90000 });
+      expect((await page.locator(".u-row").count()) === 5, "5 rows, the rest folded");
+      await page.getByRole("button", { name: "ועוד 7 קבצים · להראות" }).click();
       expect((await page.locator(".u-row").count()) === 12, "a row for each of the 12 files");
+      const names = await page.locator(".u-row .u-name").allInnerTexts();
+      expect(names.map((n) => Number(/\d+/.exec(n)[0])).join(",") === "1,2,3,4,5,6,7,8,9,10,11,12", `by name, numbers in order: ${names.map(norm).join(" | ")}`);
       expect(norm(await page.locator(".a-sec h2", { hasText: "נבחרו" }).innerText()) === "נבחרו 12 קבצים", "נבחרו 12 קבצים");
       const costText = norm(await page.locator(".u-cost").innerText());
       expect(costText.includes("סיכומים ל-12 הרצאות") && costText.includes("נשארו החודש $1.50"), `the price card: ${costText}`);
-      expect(/\d+ סיכומים יחכו לחודש הבא\. ההרצאות עצמן עולות עכשיו\./.test(costText), "the summaries past the month's money wait for the next");
-      expect((await page.locator(".u-row", { hasText: "יחכה לחודש הבא" }).count()) >= 1, "their rows say so");
+      expect(costText.includes("12 סיכומים יחכו לחודש הבא. ההרצאות עצמן עולות עכשיו."), "$1.50 is under what 3 parts reserve: every summary waits for next month");
+      expect((await page.locator(".u-row", { hasText: "הסיכום יחכה לחודש הבא" }).count()) === 12, "their rows say so");
+      expect(!norm(await page.locator(".u-row").first().innerText()).includes("PowerPoint"), "a row says its slides, not its format (PDF only)");
+      const queued0 = queues();
       await shot("courses-batch", { primary: ".ph-foot .a-btn.primary" });
       await noSideScroll("courses-batch");
       const before4 = db.coursesMock.inserts;
@@ -250,7 +282,7 @@ const israelDay = (plus) => {
       await page.reload();
       await page.locator(".u-resume").waitFor({ timeout: 15000 });
       const resume = norm(await page.locator(".u-resume").innerText());
-      expect(resume.startsWith("הועלו 4. נשארו 8 קבצים · לבחור אותם שוב"), `back after the tab closed: ${resume.slice(0, 60)}`);
+      expect(resume.startsWith("הועלו 4. נשארו 8 קבצים") && resume.includes("נשארו:") && resume.includes("לא להמשיך"), `back after the tab closed: ${resume.slice(0, 80)}`);
       await shot("courses-resume");
       // The library says so too, with a way back.
       await go("/?v=library");
@@ -270,6 +302,12 @@ const israelDay = (plus) => {
       expect(inCourse.length === 14 && new Set(titles).size === 14, `14 lectures in the course, none twice (${inCourse.length})`);
       const left = await page.evaluate((k) => localStorage.getItem(k), `study.batch.${db.group.id}`);
       expect(left === null, "the resume list is cleared");
+      const ups = db.lectures.filter((l) => /^שיעור \d+/.test(l.title)).map((l) => Number(/\d+/.exec(l.title)[0]));
+      expect(ups.join(",") === "1,2,3,4,5,6,7,8,9,10,11,12", `uploaded in name order, so the course numbers them so (${ups.join(",")})`);
+      expect(queues() === queued0, `no summary past the month's money went to the writer (${queues() - queued0} queued)`);
+      const waiting = JSON.parse((await page.evaluate((k) => localStorage.getItem(k), `study.later.${db.group.id}`)) || "[]");
+      expect(waiting.length === 12 && waiting.every((x) => inCourse.some((l) => l.id === x.id)), `all 12 kept for next month (${waiting.length})`);
+      expect(norm(await page.locator(".x-prog").innerText()).includes("הסיכומים של 8 הרצאות יחכו לחודש הבא"), "the done card says the 8 summaries of this run wait");
       await shot("courses-batch-done");
       await page.getByRole("link", { name: "לעמוד הקורס" }).click();
       await page.waitForURL(new RegExp(`v=course&c=${CID}`), { timeout: 15000 });
@@ -287,10 +325,34 @@ const israelDay = (plus) => {
       await sheet.waitFor({ timeout: 10000 });
       const micro = db.coursesMock.rows.find((r) => r.name === "מיקרו");
       await sheet.getByLabel("זה אותו קורס כמו").selectOption(micro.id);
-      await sheet.getByRole("button", { name: "לאחד" }).click();
+      await sheet.getByRole("button", { name: "לאחד עם ״מיקרו״" }).click();
       await page.waitForURL(new RegExp(`v=course&c=${micro.id}`), { timeout: 15000 });
       await page.locator(".ph-sub", { hasText: "15 הרצאות" }).waitFor({ timeout: 15000 });
       expect(!db.coursesMock.rows.some((r) => r.id === CID) && db.lectures.filter((l) => l.course === "מיקרו").length === 15, "merged: 15 lectures in מיקרו, the other course gone");
+
+      /* ── 7. a lecture named like a file, with no spaces: no horizontal scroll ── */
+      db.lectures.push(lecture("eeeeeeee-0000-4000-8000-000000000099", "Lecture_07_Pharmacokinetics_final_v2_with_a_very_long_name", "מיקרו"));
+      await go(`/?v=course&c=${micro.id}`);
+      await page.locator(".a-li.c-row", { hasText: "Lecture_07" }).waitFor({ timeout: 15000 });
+      await noSideScroll("courses-page-long-title");
+      await go("/?v=library");
+      await page.locator(".lc-title", { hasText: "Lecture_07" }).first().waitFor({ timeout: 15000 });
+      await noSideScroll("courses-library-long-title");
+
+      /* ── 8. the batch from the library, with no course: the tap says why by the field ── */
+      await go("/?v=upload&many=1");
+      await page.getByRole("heading", { level: 1, name: "העלאה של כמה קבצים" }).waitFor({ timeout: 15000 });
+      await page.locator('input[type="file"]').setInputFiles(files.slice(0, 2));
+      const go2 = page.getByRole("button", { name: "העלאה (2 קבצים)" });
+      await go2.waitFor({ timeout: 90000 });
+      const field = page.getByLabel("קורס או בלוק");
+      expect((await page.locator("#u-course-why").innerText()).includes("צריך לכתוב לאיזה קורס"), "the reason sits under the course field");
+      const nLectures = db.lectures.length;
+      await go2.click();
+      await page.waitForTimeout(300);
+      expect((await field.getAttribute("aria-invalid")) === "true" && (await field.evaluate((el) => el === document.activeElement)), "the tap marks the field and moves to it");
+      expect(db.lectures.length === nLectures, "nothing uploaded without a course");
+      await shot("courses-batch-no-course", { primary: ".ph-foot .a-btn.primary" });
     }
   } catch (e) {
     ok.push(`FAIL: ${e.message}`);

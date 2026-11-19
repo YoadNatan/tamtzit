@@ -2338,6 +2338,18 @@
     "required": 3
    }
   ],
+  "study_request_create_in_plan": [
+   {
+    "args": [
+     "p_lecture",
+     "p_request",
+     "p_batches",
+     "p_plan",
+     "p_key"
+    ],
+    "required": 4
+   }
+  ],
   "study_request_plan": [
    {
     "args": [
