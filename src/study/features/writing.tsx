@@ -4,6 +4,7 @@ import { isStuck, startedOver, type Lecture, type Section } from "../lib/api";
 import { failShort, failText, hasText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { generate } from "../lib/generate";
+import { isLater } from "../lib/later";
 import { richText } from "../lib/rich";
 import { Icon } from "../components/Icon";
 import {
@@ -140,7 +141,9 @@ export function useWriting(lc: LectureCtx): Writing {
   // refusal never loops.
   useEffect(() => {
     if (started.current || busy.current || gone) return;
-    const fresh = !server && lecture.status === "new" && lecture.created_by === userId;
+    // A batch's lecture whose summary waits for next month (lib/later.ts) is
+    // not started by opening it; "התחלת הסיכום" still starts it by hand.
+    const fresh = !server && lecture.status === "new" && lecture.created_by === userId && !(flags.courses && isLater(lecture.group_id, lecture.id));
     const stalled =
       !server && sections.length > 0 && sections.some((s) => s.status === "pending" || isStuck(s)) && !sections.some((s) => s.status === "writing" && !isStuck(s));
     const silent = server && serverSilent(lecture, sections, now);

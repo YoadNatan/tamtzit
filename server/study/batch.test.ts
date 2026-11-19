@@ -1,8 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { batchCost, cardUsd, LOW_LEFT_USD, SUMMARY_PRICES, summaryUsd, type DeckSize } from "../../shared/study/batch.js";
-import { costUsd, POLICY } from "./budget.js";
+import {
+  batchCost,
+  cardUsd,
+  LOW_LEFT_USD,
+  PART_RESERVE_TOKENS,
+  partReserveUsd,
+  POINTS_AHEAD_USD,
+  SUMMARY_PRICES,
+  summaryUsd,
+  WRITERS_AT_ONCE,
+  type DeckSize,
+} from "../../shared/study/batch.js";
+import { costUsd, estimateUsd, POLICY } from "./budget.js";
 import { MODEL } from "./study.js";
+import { PART_TOKENS } from "./writer.js";
 
 /* The batch upload's price card (sources.md B8, B9): the usual cost of a
  * lecture's summary, and which summaries wait for next month, from the
@@ -39,9 +51,10 @@ test("the card: what is left from the ledger, and the last summaries that do not
   assert.equal(all.perFile.length, 8);
   assert.ok(Math.abs(all.summariesUsd - 8 * each) < 1e-9);
   assert.equal(all.low, false);
-  // $2.10 left: two fit, six wait; little is left.
+  // $2.10 left: less than the writers' reservations hold at once, so all wait; little is left.
   const tight = batchCost(files, { spentUsd: 30.9, capUsd: 33 });
-  assert.equal(tight.waiting, 8 - Math.floor(2.1 / each));
+  assert.ok(tight.headroomUsd > 2.1, String(tight.headroomUsd));
+  assert.equal(tight.waiting, 8);
   assert.equal(tight.low, true);
   // Over the cap already: nothing fits, never a negative "left".
   assert.deepEqual([batchCost(files, { spentUsd: 40, capUsd: 33 }).leftUsd, batchCost(files, { spentUsd: 40, capUsd: 33 }).waiting], [0, 8]);
@@ -51,6 +64,30 @@ test("the card: what is left from the ledger, and the last summaries that do not
   assert.equal(batchCost(files, { spentUsd: 26.4, capUsd: 33 }).leftUsd.toFixed(2), "6.60");
   assert.equal(batchCost(files, { spentUsd: 0, capUsd: 33, share: 0.8 }).leftUsd.toFixed(2), "26.40");
   assert.equal(LOW_LEFT_USD, 10);
+});
+
+test("the card counts against the writers' worst-case reservations, not the usual cost alone; and the points read ahead", () => {
+  const d = deck(40, 30_000, 20);
+  const each = summaryUsd(d);
+  // A part reserves what the writer reserves: estimateUsd with PART_TOKENS of output.
+  assert.equal(PART_RESERVE_TOKENS, PART_TOKENS);
+  const reserve = partReserveUsd(d);
+  const writerWay = estimateUsd(MODEL, 30_000 + 3_000 * 2.5, PART_TOKENS, (20 * 1_600) / 5);
+  assert.ok(Math.abs(reserve - writerWay) < 0.02, `${reserve} vs ${writerWay}`);
+  assert.ok(reserve > 0.9 && reserve < 1.3, String(reserve));
+  // $13 left and 12 lectures (about $10 by the usual cost): one waits, for the 3 parts' room.
+  const files = Array.from({ length: 12 }, () => d);
+  const c = batchCost(files, { spentUsd: 20, capUsd: 33 });
+  assert.ok(12 * each < 13, "the usual cost alone would fit them all");
+  assert.equal(c.headroomUsd.toFixed(4), (WRITERS_AT_ONCE * reserve).toFixed(4));
+  assert.equal(c.waiting, 12 - Math.floor((13 - c.headroomUsd) / each));
+  assert.ok(c.waiting >= 1);
+  // With the points read ahead, each lecture costs POINTS_AHEAD_USD more.
+  const ahead = batchCost(files, { spentUsd: 20, capUsd: 33, ahead: true });
+  assert.equal(ahead.waiting, 12 - Math.floor((13 - c.headroomUsd) / (each + POINTS_AHEAD_USD)));
+  assert.ok(ahead.waiting >= c.waiting);
+  assert.equal(POLICY.points.share, 0.8, "the points stop at the 80% line, so they never take the cap's last fifth");
+  assert.equal(batchCost([], { spentUsd: 0, capUsd: 33 }).headroomUsd, 0);
 });
 
 test("dollars on the card: whole from $5, else up to the next 10 cents", () => {

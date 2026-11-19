@@ -8,7 +8,7 @@
  * while the insert was on its way finds out, on its return, whether the
  * lecture got there (study_lectures has the id) instead of uploading it twice.
  *
- * On return the screen says "הועלו 3. נשארו 11 קבצים · לבחור אותם שוב". The
+ * On return the screen says "הועלו 3. נשארו 11 קבצים" and which. The
  * phone cannot keep the files themselves, so they are picked again; a file
  * matches an entry by name and size, and the ones already up are skipped.
  *
@@ -23,6 +23,8 @@ export type BatchFile = {
   done: boolean;
   /** The lecture's id, written just before its insert. */
   id?: string;
+  /** Its summary waits for next month (the price card's; lib/later.ts). */
+  later?: boolean;
 };
 export type Batch = { v: 1; course: string; courseId: string | null; at: number; files: BatchFile[] };
 /** What the picker gives (a File has these). */
@@ -88,7 +90,7 @@ export const remaining = (b: Batch) => b.files.filter((f) => !f.done);
 export const uploaded = (b: Batch) => b.files.filter((f) => f.done);
 
 /** A copy with one entry changed (the entry that matches the file). */
-export function markFile(b: Batch, f: FileLike, patch: Partial<Pick<BatchFile, "done" | "id">>): Batch {
+export function markFile(b: Batch, f: FileLike, patch: Partial<Pick<BatchFile, "done" | "id" | "later">>): Batch {
   return { ...b, files: b.files.map((e) => (sameFile(e, f) ? { ...e, ...patch } : e)) };
 }
 
@@ -122,3 +124,11 @@ export function resumeLine(b: Batch): string {
   const leftWords = left === 1 ? "נשאר קובץ אחד" : `נשארו ${left} קבצים`;
   return done ? `${done === 1 ? "הועלה קובץ אחד" : `הועלו ${done}`}. ${leftWords}` : leftWords;
 }
+
+/* A batch running in this tab (the screen was left with Back while it
+ * uploads: the uploads go on), so the library does not call it stopped. */
+let running = false;
+export const setBatchRunning = (on: boolean) => {
+  running = on;
+};
+export const batchRunning = () => running;

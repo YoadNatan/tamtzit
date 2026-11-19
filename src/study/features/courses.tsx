@@ -1,5 +1,9 @@
 import { lazy, useCallback, useEffect, useState, type ReactNode } from "react";
+import { courseKey } from "../../../shared/study/courseKey";
+import { getLecture } from "../lib/api";
 import { flags } from "../lib/flags";
+import { releaseLater } from "../lib/later";
+import { queueWriting } from "../lib/writing";
 import { RouteLink } from "../components/Shell";
 import type { Ctx, ScreenProps } from "./types";
 
@@ -24,7 +28,7 @@ export function UploadManyScreen(p: { ctx: Ctx; courses: string[]; courseId: str
 }
 
 /** The library's course headings as links to their pages: the course's id
- *  by its text (lower(btrim()), as the SQL matches it), or none while the
+ *  by its key (shared/study/courseKey.ts, as the SQL matches it), or none while the
  *  flag is off or the list has not come. `stamp` reloads it (the library's
  *  lectures changed: a new course gets its row from the upload). */
 export function useCourseLinks(ctx: Ctx, stamp: string): (course: string) => string | null {
@@ -41,7 +45,7 @@ export function useCourseLinks(ctx: Ctx, stamp: string): (course: string) => str
       alive = false;
     };
   }, [groupId, stamp]);
-  return useCallback((course: string) => (flags.courses ? (ids[course.trim().toLowerCase()] ?? null) : null), [ids]);
+  return useCallback((course: string) => (flags.courses ? (ids[courseKey(course)] ?? null) : null), [ids]);
 }
 
 /** A course's heading in the library: a link to its page when it has one. */
@@ -59,18 +63,34 @@ export function CourseHeading({ ctx, course, id }: { ctx: Ctx; course: string; i
   );
 }
 
+/** From the 1st of the month, the summaries a batch left for this month go
+ *  to the writer (lib/later.ts): a lecture that is gone, written or already
+ *  queued needs nothing; one the uploader's phone tried and the budget
+ *  stopped starts over. The library and the course page call it. */
+export function releaseWaiting(groupId: string): void {
+  if (!flags.courses) return;
+  void releaseLater(groupId, async (id) => {
+    const l = await getLecture(id);
+    if (!l || l.deleted_at || l.queued_at || (l.status !== "new" && l.status !== "failed")) return true;
+    await queueWriting(l, { retryFailed: l.status === "failed" });
+    return true;
+  }).catch(() => undefined);
+}
+
 /** The library's line for a batch upload that stopped half way (the tab was
- *  closed): "הועלו 3. נשארו 11 קבצים" with a way back to it. */
+ *  closed): "הועלו 3. נשארו 11 קבצים" with a way back to it. Not while the
+ *  batch still runs in this tab (the screen was left with Back). */
 export function BatchResumeLine({ ctx }: { ctx: Ctx }) {
   const [line, setLine] = useState<{ text: string; courseId: string | null } | null>(null);
   const groupId = ctx.group.id;
   useEffect(() => {
     if (!flags.courses) return;
     let alive = true;
+    releaseWaiting(groupId);
     import("../lib/batch")
-      .then(({ readBatch, remaining, resumeLine }) => {
+      .then(({ batchRunning, readBatch, remaining, resumeLine }) => {
         const b = readBatch(groupId);
-        if (alive && b && remaining(b).length) setLine({ text: resumeLine(b), courseId: b.courseId });
+        if (alive && b && remaining(b).length && !batchRunning()) setLine({ text: resumeLine(b), courseId: b.courseId });
       })
       .catch(() => undefined);
     return () => {

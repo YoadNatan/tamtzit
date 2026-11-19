@@ -180,7 +180,7 @@ export const writerTiming = {
 const MAX_IMAGES = 24;
 /** Pictures smaller than this on their longer side are thumbnails. */
 const MIN_FIGURE_SIDE = 100;
-const PART_TOKENS = 48_000;
+export const PART_TOKENS = 48_000;
 const OUTLINE_TOKENS = 8_000;
 const NOTES_TOKENS = 16_000;
 const MAX_SLIDES = 250;
