@@ -134,6 +134,25 @@ The server's part is built (phase 2, part A); the screens use these words.
 | A badly read item | לא נקראה טוב · לתקן טקסט |
 | Leaving an exam out of the course's picture | לא לכלול בחישוב הנושאים |
 | The limit of a day | אפשר להתחיל עד 3 מבחנים ביום. מתחדש בחצות. |
+| Back to one past exam | → למבחן הקודם |
+| Back to the simulation's setup | → לסימולציה |
+| Practising one past exam | לתרגל את המבחן (its own order, its options as printed); from the course page: לתרגל מבחן קודם |
+| The simulation's lengths, short first | קצר · 20 שאלות · 36 דקות; חצי · 50 שאלות; מלא (the whole exam) |
+| Only questions not seen yet | רק שאלות שעוד לא ראיתי (on by default) |
+| The simulation's clock | נשארו 1:42:10 (one clock for the whole simulation; it goes on while the phone is locked) |
+| Where the student is | שאלה 37 מתוך 100 |
+| Coming back to a question | לסמן לחזרה; once marked: מסומנת לחזרה |
+| Every question at a glance | מפת השאלות: ענית · לחזרה · בלי תשובה |
+| Submitting | להגיש; before it: להגיש עכשיו? נשארו 6 שאלות בלי תשובה. |
+| Submitted by the clock | הזמן נגמר, והסימולציה הוגשה. |
+| The result | 71 מתוך 97 נכונות; 3 שאלות עם תשובה מוצעת · 3 לא נספרו |
+| A mistake in the result | בחרת א׳, הנכונה ג׳; a blank: לא ענית. הנכונה ג׳ |
+| Practising a simulation's mistakes | רק הטעויות; the session's title: הטעויות מהסימולציה |
+| A simulation left open | יש סימולציה שעוד לא הוגשה · להמשיך |
+| Confirming a suggested key | לאשר; another: לסמן תשובה אחרת; none yet: לסמן תשובה |
+| A change of a key in the log | נועה: ג׳ במקום א׳ · נועה: אישור של ב׳ · נועה: ביטול (no gendered verbs) |
+| The reading while the server works | אפשר לסגור את הטלפון. ההעתקה ממשיכה בלעדיו. |
+| The reading when the phone copies (no server writer) | הטלפון מעתיק את הדפים. כדאי להשאיר את המסך פתוח. |
 
 ### Kept, on purpose
 

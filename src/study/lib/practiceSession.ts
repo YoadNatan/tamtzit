@@ -37,6 +37,8 @@ export type SessionQuestion = {
   options: string[];
   /** Practice 2.0: the style (null for release 1's questions, read as a case or "other"). */
   kind?: "mcq" | "case";
+  /** A past exam's item keeps its options in the exam's order (sources.md B5: "א+ב נכונות" must still point at א and ב). */
+  source?: string;
   style?: string | null;
   /** Question types: the form, a picture, a staged case's series and step. */
   form?: string;
@@ -113,7 +115,8 @@ export type Scope =
   | { kind: "exam"; exam: string } // e.<exam>
   | { kind: "quiz"; quiz: string } // q.<quiz>: an ended live quiz's questions
   | { kind: "paragraph"; lecture: string; part: number; anchor: number } // p.<lecture>.<part>.<anchor>: one paragraph's (N)
-  | { kind: "again"; group: string }; // r.<group>: what is due again today, each in another wording (Q-2)
+  | { kind: "again"; group: string } // r.<group>: what is due again today, each in another wording (Q-2)
+  | { kind: "mockWrong"; attempt: string }; // w.<attempt>: a simulation's mistakes, asked again (sources.md, phase 2)
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -144,6 +147,8 @@ export function parseScope(s: string | undefined): Scope | null {
       return UUID.test(arg) ? { kind: "quiz", quiz: arg } : null;
     case "r":
       return UUID.test(arg) ? { kind: "again", group: arg } : null;
+    case "w":
+      return UUID.test(arg) ? { kind: "mockWrong", attempt: arg } : null;
     case "p": {
       const m = /^([^.]+)\.(\d{1,5})\.(\d{1,5})$/.exec(arg);
       return m && UUID.test(m[1]) ? { kind: "paragraph", lecture: m[1], part: Number(m[2]), anchor: Number(m[3]) } : null;
@@ -156,7 +161,7 @@ export function parseScope(s: string | undefined): Scope | null {
 /** The mode an answer is recorded with: a past exam, or any session in
  *  "מצב מבחן", is "exam"; otherwise the scope's. */
 export function modeOf(scope: Scope, timed = false): Mode {
-  if (timed || scope.kind === "exam") return "exam";
+  if (timed || scope.kind === "exam" || scope.kind === "mockWrong") return "exam";
   if (scope.kind === "lecture" || scope.kind === "paragraph") return "lecture";
   if (scope.kind === "mistakes" || scope.kind === "again") return "mistakes";
   return "course";
@@ -273,6 +278,8 @@ export function pickQueue(o: {
     for (const [id] of [...open].filter(([id]) => inScope.has(id)).sort(byTime)) put(id);
     return take(out);
   }
+  // A simulation's mistakes: in the simulation's order (the caller loads them so).
+  if (scope.kind === "mockWrong") return take(qs.map((q) => q.id));
   if (scope.kind === "exam") {
     return take(
       [...qs]
@@ -343,7 +350,11 @@ export function cryptoRandom(): number {
 
 /** The order a question is shown in: a set question and a pin number to tap
  *  keep the stored order (the server shuffled them once); every other a fresh one. */
-export function orderFor(q: Pick<SessionQuestion, "options" | "form">, random: () => number = cryptoRandom): number[] {
+export function orderFor(q: Pick<SessionQuestion, "options" | "form"> & Partial<Pick<SessionQuestion, "source">>, random: () => number = cryptoRandom): number[] {
+  // A past exam's item is shown as the exam printed it: its options may name
+  // each other ("א+ב נכונות", "כל התשובות נכונות"), so a new order would make
+  // them wrong (sources.md B5, practiceSession's orderFor for source 'exam').
+  if (q.source === "exam") return q.options.map((_, i) => i);
   // A tap item's options are its pin numbers, in pin order. Every other form is shuffled for each
   // showing, set questions too (tf's statements, match's answers, order's steps), so a question
   // that comes back is not answered by remembering where things were (review QT-11).
@@ -446,7 +457,7 @@ export type SessionState = {
 export function startSession(o: {
   key: string;
   timed: boolean;
-  queue: Array<Pick<SessionQuestion, "id" | "vignette" | "question" | "options"> & Partial<Pick<SessionQuestion, "form" | "figure" | "layout">>>;
+  queue: Array<Pick<SessionQuestion, "id" | "vignette" | "question" | "options"> & Partial<Pick<SessionQuestion, "form" | "figure" | "layout" | "source">>>;
   now: number;
   setting?: number;
   random?: () => number;
@@ -696,6 +707,6 @@ export function unpracticed(o: { key: string; questions: SessionQuestion[]; late
   // A paragraph's questions are the ones section N places on it (the caller loads exactly those).
   if (scope.kind === "paragraph") qs = qs.filter((q) => q.lecture_id === scope.lecture && q.part_idx === scope.part);
   if (scope.kind === "topic") qs = qs.filter((q) => topicKey(q.topic) === scope.topic);
-  if (scope.kind === "mistakes" || scope.kind === "again" || scope.kind === "exam" || scope.kind === "quiz") return 0;
+  if (scope.kind === "mistakes" || scope.kind === "again" || scope.kind === "exam" || scope.kind === "quiz" || scope.kind === "mockWrong") return 0;
   return qs.length;
 }

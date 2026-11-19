@@ -59,10 +59,10 @@ const VALID: Record<string, (x: string, v: string) => boolean> = {
   at: (x) => /^\d+\.\d+$/.test(x),
   slide: (x) => /^\d{1,3}$/.test(x) && Number(x) >= 1,
   n: (x) => ["5", "10", "20", "all"].includes(x),
-  c: (x, v) => (v === "course" || v === "upload" || v === "ask" ? UUID(x) : x.length <= 200),
+  c: (x, v) => (v === "course" || v === "upload" || v === "ask" || v === "mock" ? UUID(x) : x.length <= 200),
   many: (x) => x === "1",
   seg: (x) => ["exams", "lectures", "made"].includes(x),
-  s: (x) => x.length <= 200 && (!/^[pbr]\./.test(x) || /^p\.[0-9a-f-]{36}\.\d+\.\d+$|^b\.[0-9a-f-]{36}\.[1-9]\d{0,2}$|^r\.[0-9a-f-]{36}$/.test(x)),
+  s: (x) => x.length <= 200 && (!/^[pbrxw]\./.test(x) || /^p\.[0-9a-f-]{36}\.\d+\.\d+$|^b\.[0-9a-f-]{36}\.[1-9]\d{0,2}$|^[rxw]\.[0-9a-f-]{36}$/.test(x)),
   t: (x, v) => (v === "wall" ? ["top", "new", "needed", "mine"].includes(x) : x.length <= 200),
   first: (x) => x.length <= 500,
   new: (x) => x === "1",
@@ -84,6 +84,7 @@ const PARAMS: Record<string, string[]> = {
   lecture: ["l", "at", "slide", "mk", "read", "follow"],
   practice: ["l", "s", "n", "x", "r"],
   exams: ["e", "c", "new"],
+  mock: ["c", "e"],
   quiz: ["q", "l", "c", "new", "mk", "m", "preset", "pf", "pt"],
   cards: ["l", "s"],
   ask: ["l", "at", "first", "c"],
@@ -152,6 +153,10 @@ const ALL_ROUTES: Route[] = [
   { v: "upload", many: true },
   { v: "course", c: ID },
   { v: "course", c: ID, seg: "lectures" },
+  { v: "mock", c: ID },
+  { v: "mock", c: ID, e: ID2 },
+  { v: "practice", s: `x.${ID}` },
+  { v: "practice", s: `w.${ID}`, n: "all" },
   { v: "help" },
   { v: "lecture", l: ID },
   { v: "lecture", l: ID, at: { part: 1, anchor: 3 }, slide: 23, mk: ID2, read: true, follow: true },
@@ -290,6 +295,8 @@ test("tabOf: the spec's four tabs, Today's set, and immersive screens with none"
     [{ v: "practice", l: ID, x: "round" }, null, null],
     [{ v: "exams" }, "practice", "today"],
     [{ v: "exams", isNew: true }, null, null],
+    [{ v: "mock", c: ID }, null, null], // the simulation's setup (sources.md, phase 2)
+    [{ v: "practice", s: `x.${ID}` }, null, null], // a simulation running
     [{ v: "cards", l: ID }, "practice", "today"],
     [{ v: "cards", s: "today" }, null, null],
     [{ v: "group" }, "group", "group"],
@@ -408,6 +415,9 @@ const SAMPLES: Array<[Route, (f: Flags) => boolean]> = [
   [{ v: "exams" }, (f) => f.exams],
   [{ v: "exams", e: ID }, (f) => f.exams],
   [{ v: "exams", isNew: true }, (f) => f.exams],
+  [{ v: "mock", c: ID }, (f) => f.exams],
+  [{ v: "practice", s: `x.${ID}` }, (f) => f.practice && f.exams],
+  [{ v: "practice", s: `w.${ID}` }, (f) => f.practice && f.exams],
   [{ v: "quiz", q: ID }, (f) => f.quiz],
   [{ v: "quiz", isNew: true, l: ID }, (f) => f.quiz],
   [{ v: "quiz", isNew: true, l: ID, m: ID2, preset: "end", pf: 0, pt: 3 }, (f) => f.quiz],
@@ -571,8 +581,9 @@ test("the schema a build needs follows its flags (§2.11, §12.2.2): F and W alw
   assert.deepEqual(requiredSchema(flagSet(R8), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, T: 1, U: 1, J: 1 });
   // Wave 5's phase 3 (decision 3: usable early): T-2 ("הקבוצה צריכה אותך", NEEDS_ME) is section T's end (T at 2);
   // the museum and the boss need U's traps (U at 2).
-  // Its EXAMS flag: past exams (sources.md phase 2) need section S at 2.
-  assert.deepEqual(requiredSchema(flagSet(R12), ALL_ENDS), { F: 1, Q: 2, Z: 2, C: 2, K: 2, P: 2, W: 2, M: 2, N: 1, V: 1, T: 3, U: 2, J: 1, H: 2, G: 2, E: 1, S: 2 });
+  // Its EXAMS flag: past exams (sources.md phase 2) need the course pages too, which R12 has not: no S.
+  assert.deepEqual(requiredSchema(flagSet(R12), ALL_ENDS), { F: 1, Q: 2, Z: 2, C: 2, K: 2, P: 2, W: 2, M: 2, N: 1, V: 1, T: 3, U: 2, J: 1, H: 2, G: 2, E: 1 });
+  assert.deepEqual(requiredSchema(flagSet([...R12, "COURSES"]), ALL_ENDS).S, 2, "with the course pages, section S at 2");
   assert.deepEqual(requiredSchema(flagSet([...R8, "MUSEUM"]), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, T: 1, U: 2, J: 1 });
   assert.deepEqual(requiredSchema(flagSet([...R8, "BOSS"]), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, T: 1, U: 2, J: 1, H: 2 });
   assert.deepEqual(requiredSchema(flagSet(["MUSEUM", "BOSS"]), ALL_ENDS), { F: 1, W: 1 }, "without the pulse the museum and the boss show nothing and need nothing");
@@ -587,8 +598,9 @@ test("the schema a build needs follows its flags (§2.11, §12.2.2): F and W alw
   assert.deepEqual(requiredSchema(flagSet(["CORRECTIONS"]), ALL_ENDS), { F: 1, W: 2, K: 2 }, "corrections: K's end and W2");
   assert.deepEqual(requiredSchema(flagSet(["CARDS", "BLANK_TABLE"]), ALL_ENDS), { F: 1, W: 1, C: 2 }, "a blank table needs practice");
   assert.deepEqual(requiredSchema(flagSet(["COURSES"]), ALL_ENDS), { F: 1, W: 1, S: 1 }, "courses: section S at 1 (sources.md B8)");
-  assert.deepEqual(requiredSchema(flagSet(["QUESTIONS", "EXAMS"]), ALL_ENDS), { F: 1, W: 1, Q: 2, S: 2 }, "past exams and their simulation: section S at 2 (sources.md B8)");
-  assert.deepEqual(requiredSchema(flagSet(["QUESTIONS", "EXAMS", "COURSES"]), ALL_ENDS), { F: 1, W: 1, Q: 2, S: 2 }, "S 2 has S 1 in it");
+  // Past exams live in their course and are practised in sessions: COURSES and PRACTICE too.
+  assert.deepEqual(requiredSchema(flagSet(["QUESTIONS", "PRACTICE", "COURSES", "EXAMS"]), ALL_ENDS), { F: 1, W: 1, Q: 2, S: 2 }, "past exams and their simulation: section S at 2, which has S 1 in it (sources.md B8)");
+  assert.deepEqual(requiredSchema(flagSet(["QUESTIONS", "EXAMS"]), ALL_ENDS), { F: 1, W: 1, Q: 2 }, "past exams without the course pages and practice show nothing and need nothing more");
   assert.deepEqual(requiredSchema(flagSet(["EXAMS"]), ALL_ENDS), { F: 1, W: 1 }, "past exams without questions show nothing and need nothing");
   for (const [release, names] of RELEASES) {
     assert.ok(!("B" in requiredSchema(flagSet(names), ALL_ENDS)), `release ${release}: never B (review F-5)`);
@@ -689,6 +701,8 @@ test("Back's words name where it goes, in the spec's or the approved screens' wo
   assert.equal(BACK_LABEL.me, "→ שלי");
   assert.equal(screenKey({ v: "course", c: ID }), "course");
   assert.equal(BACK_LABEL.course, "→ לקורס", "the course page (sources.md's mockups)");
+  assert.equal(BACK_LABEL.exams, "→ למבחן הקודם", "one past exam (sources.md, phase 2)");
+  assert.equal(BACK_LABEL.mock, "→ לסימולציה", "the simulation's setup");
   const s6 = spec.slice(spec.indexOf("## 6. The Hebrew copy deck"), spec.indexOf("## 7. Work packages"));
   const s51 = spec.slice(spec.indexOf("### 5.1 The shell"), spec.indexOf("### 5.2 Routes"));
   const mockups = join(process.cwd(), "docs", "study", "proposal", "mockups");

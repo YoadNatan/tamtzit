@@ -16,7 +16,9 @@ import { installPdfPolyfills } from "./polyfills";
 
 // Every page of a PDF is stored as a picture, so they are kept modest: a
 // 100-page deck at this size is about 8-12 MB, which the free storage tier
-// (1 GB, shared with the other apps) can hold for a block of lectures.
+// (1 GB, shared with the other apps) can hold for a block of lectures. A
+// past exam's pages are drawn larger (1500 px, examPages.ts): small print and
+// circled answers must stay readable for the model.
 const PAGE_LONG_SIDE = 1200;
 const QUALITY = 0.78;
 
@@ -24,7 +26,7 @@ export type PdfDeck = {
   slides: Slide[];
   /** A JPEG of page n (1-based), sized for reading on a phone and for the
    *  model, and the page's labelled diagram when it has one (pdfGeo.ts). */
-  pageImage(n: number): Promise<{ blob: Blob; width: number; height: number; geo?: FigureGeo }>;
+  pageImage(n: number, longSide?: number): Promise<{ blob: Blob; width: number; height: number; geo?: FigureGeo }>;
 };
 
 /** A failure while reading a deck, with the step it happened in (shown in
@@ -84,19 +86,19 @@ export async function readPdf(data: ArrayBuffer): Promise<PdfDeck> {
 
   return {
     slides,
-    async pageImage(n) {
+    async pageImage(n, longSide = PAGE_LONG_SIDE) {
       try {
-        return await pageImageOf(n);
+        return await pageImageOf(n, longSide);
       } catch (e) {
         throw e instanceof ReadError ? e : new ReadError(`image ${n}`, e);
       }
     },
   };
 
-  async function pageImageOf(n: number): Promise<{ blob: Blob; width: number; height: number; geo?: FigureGeo }> {
+  async function pageImageOf(n: number, longSide: number): Promise<{ blob: Blob; width: number; height: number; geo?: FigureGeo }> {
     const page = await doc.getPage(n);
     const base = page.getViewport({ scale: 1 });
-    const scale = Math.min(3, PAGE_LONG_SIDE / Math.max(base.width, base.height));
+    const scale = Math.min(3, longSide / Math.max(base.width, base.height));
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(viewport.width);
@@ -114,6 +116,10 @@ export async function readPdf(data: ArrayBuffer): Promise<PdfDeck> {
       geo = null;
     }
     page.cleanup();
-    return { blob, width: canvas.width, height: canvas.height, ...(geo ? { geo } : {}) };
+    // Released before the next page (a 120-page exam would otherwise hold every canvas).
+    const out = { blob, width: canvas.width, height: canvas.height, ...(geo ? { geo } : {}) };
+    canvas.width = 0;
+    canvas.height = 0;
+    return out;
   }
 }

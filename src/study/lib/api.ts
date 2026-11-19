@@ -167,6 +167,8 @@ const PERSONAL: Array<[prefix: string, store: "local" | "session"]> = [
   ["study-today:", "session"],
   // The guide's memory of what it showed and what was done (docs/study/guide.md).
   ["study-guide:", "local"],
+  // A simulation left open on this phone (past exams, sources.md phase 2): its attempt.
+  ["study-mock:", "local"],
 ];
 
 /** Deletes every personal entry that is not `userId`'s (all of them for null),

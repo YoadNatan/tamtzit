@@ -32,12 +32,14 @@ export type Route =
   | { v: "practice"; l?: string; s?: string; n?: "5" | "10" | "20" | "all"; x?: PracticeStep; r?: string }
   //   s: l.<lecture> · c.<course> · m (my mistakes) · m.<lecture> · t.<topic key> · e.<exam> · q.<quiz> (a live quiz's questions)
   //      · p.<lecture>.<part>.<anchor> (N: a paragraph's questions) · b.<lecture>.<slide> (E: a blank table) · r.<group> (Q-2: another wording)
+  //      · x.<attempt> (a simulation: its clock, its grid, its result) · w.<attempt> (a simulation's mistakes, asked again)
   //   x (practice 2.0, with l): new (מה ליצור) · example (דוגמה ומיקוד) · bank (הבנק נבנה, r: the request) · round (סבב חדש)
   | { v: "exams"; e?: string; c?: string; isNew?: true }
   | { v: "quiz"; q?: string; l?: string; c?: string; isNew?: true; mk?: string; m?: string; preset?: "end" | "coffee" | "stop"; pf?: number; pt?: number } // m, preset, pf, pt: Z/M, from a meeting or a part range
   | { v: "cards"; l?: string; s?: string } // s: today · l.<lecture> · c.<course>
   | { v: "ask"; l?: string; at?: At; first?: string; c?: string } // first: the library ask bar's text, sent once; c: a course's id ("לשאול על כל הקורס")
   | { v: "course"; c: string; seg?: CourseSeg } // the course page (sources.md, phase 1): c is the course's id
+  | { v: "mock"; c: string; e?: string } // "סימולציה" (sources.md, phase 2): the setup of a course's simulation; e: the exam chosen
   | { v: "group" }
   | { v: "marathon"; m?: string; isNew?: true; edit?: true }
   | { v: "me" }
@@ -75,6 +77,8 @@ const KEYED = [
   { prefix: "p.", re: new RegExp(`^p\\.${UUID}\\.\\d{1,5}\\.\\d{1,5}$`) },
   { prefix: "b.", re: new RegExp(`^b\\.${UUID}\\.([1-9]\\d{0,2})$`) },
   { prefix: "r.", re: new RegExp(`^r\\.${UUID}$`) },
+  { prefix: "x.", re: new RegExp(`^x\\.${UUID}$`) },
+  { prefix: "w.", re: new RegExp(`^w\\.${UUID}$`) },
 ];
 
 const id = (x: string | null): string | undefined => (x && ID.test(x) ? x : undefined);
@@ -185,6 +189,10 @@ export function parseRoute(search: string, _hash?: string): Route {
     case "course": {
       const c = id(g("c"));
       return c ? clean({ v: "course" as const, c, seg: oneOf(g("seg"), COURSE_SEGS) }) : { v: "library" };
+    }
+    case "mock": {
+      const c = id(g("c"));
+      return c ? clean({ v: "mock" as const, c, e: id(g("e")) }) : { v: "library" };
     }
     case "marathon":
       return clean({ v: "marathon", m: id(g("m")), isNew: one(g("new")), edit: one(g("edit")) });
@@ -317,6 +325,11 @@ export function routeUrl(r: Route): string {
       put("c", r.c);
       put("seg", r.seg);
       break;
+    case "mock":
+      put("v", r.v);
+      put("c", r.c);
+      put("e", r.e);
+      break;
     case "marathon":
       put("v", r.v);
       put("m", r.m);
@@ -409,7 +422,10 @@ export function tabOf(r: Route, f: Flags): Tab | null {
     case "practice":
       return r.s || r.x ? null : practice;
     case "exams":
-      return r.isNew ? null : practice;
+      // Past exams live in their course (sources.md): the library's tab once the course pages are on.
+      return r.isNew ? null : f.courses ? "library" : practice;
+    case "mock":
+      return null;
     case "cards":
       return r.s ? null : practice;
     case "group":
@@ -471,7 +487,7 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
       const l = r.l ?? lectureOfKey(r.s);
       if (!f.practice) return off(practiceOf(l));
       if (r.s === "m" || r.s.startsWith("m.") || r.s.startsWith("r.")) return f.mistakes ? ok : off(practiceOf(l), NOTICE.mistakes);
-      if (r.s.startsWith("e.")) return f.exams ? ok : off(practiceOf(l));
+      if (r.s.startsWith("e.") || r.s.startsWith("x.") || r.s.startsWith("w.")) return f.exams ? ok : off(practiceOf(l));
       if (r.s.startsWith("q.")) return f.quiz ? ok : off(practiceOf(l));
       if (r.s.startsWith("p.")) return f.anchor ? ok : off(practiceOf(l));
       if (r.s.startsWith("b.")) return f.blankTable ? ok : off(practiceOf(l));
@@ -479,6 +495,8 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
     }
     case "exams":
       return f.exams ? ok : off(practiceOf());
+    case "mock":
+      return f.exams ? ok : off(f.courses ? { v: "course", c: r.c } : practiceOf());
     case "quiz":
       if (f.quiz) return ok;
       return off(r.l && f.questions ? { v: "practice", l: r.l } : r.l ? { v: "lecture", l: r.l } : { v: "library" });
@@ -599,6 +617,8 @@ export const BACK_LABEL: Record<string, string> = {
   wall: "→ לקיר",
   library: "→ לספרייה",
   course: "→ לקורס",
+  exams: "→ למבחן הקודם",
+  mock: "→ לסימולציה",
   group: "→ יחד",
   me: "→ שלי",
 };

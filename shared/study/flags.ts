@@ -27,7 +27,10 @@ export function flagsFrom(e: Record<string, unknown>) {
     // Q-2: "הטעויות שלי" and another wording ride on progress (A2). Decision 1
     // (17 Nov 2026): no account; they are the device's member's own.
     mistakes: practice && progress,
-    exams: questions && on(e.VITE_STUDY_EXAMS),
+    // Past exams (sources.md phase 2): the upload, the review, replaying an
+    // exam and the simulation. They live in their course and are practised in
+    // sessions, so they need the course pages and practice too (section S at 2).
+    exams: practice && on(e.VITE_STUDY_COURSES) && on(e.VITE_STUDY_EXAMS),
     quiz,
     cards,
     cardsReview: cards && on(e.VITE_STUDY_CARDS_REVIEW), // C's review (release 8; no account, decision 1)

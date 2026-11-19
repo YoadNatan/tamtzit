@@ -101,7 +101,8 @@ test("health's schemaOk asks for the server's sections and what the app built wi
   assert.deepEqual(healthSchema(set(["CORRECTIONS"])), { F: 1, W: 2, Q: 1, C: 1, K: 2 }, "corrections: K's end and W2's hardening");
   assert.deepEqual(healthSchema(set(["ASK"])), { F: 1, W: 2, Q: 1, C: 1, K: 2 }, "לשאול: K's end (W 2 is the server's own)");
   assert.deepEqual(healthSchema(set(["COURSES"])), { F: 1, W: 2, Q: 1, C: 1, K: 1, S: 1 }, "courses: section S at 1");
-  assert.deepEqual(healthSchema(set(["QUESTIONS", "EXAMS"])), { F: 1, W: 2, Q: 2, C: 1, K: 1, S: 2 }, "past exams: section S at 2");
+  assert.deepEqual(healthSchema(set(["QUESTIONS", "PRACTICE", "COURSES", "EXAMS"])), { F: 1, W: 2, Q: 2, C: 1, K: 1, S: 2 }, "past exams: section S at 2");
+  assert.deepEqual(healthSchema(set(["QUESTIONS", "EXAMS"])), { F: 1, W: 2, Q: 2, C: 1, K: 1 }, "past exams without the course pages show nothing");
 });
 
 test("the per-op needs are §12.2.2's (questions at Q 2, cards at C 2 and ask at K 2 with their ends)", () => {
