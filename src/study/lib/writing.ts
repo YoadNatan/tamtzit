@@ -20,15 +20,15 @@ const QUEUE_SECONDS = 48 * 3600;
 const QUEUE_MAX_CHARS = 290_000;
 /** Pictures smaller than this on their longer side are thumbnails (as the writer has it). */
 const MIN_FIGURE_SIDE = 100;
-/** Whether this device has seen the group's server write (uploadNote's line). */
+/** Whether this device has seen the group's server write (help and the guide say so). */
 const SERVER_KEY = "study-server-on";
 
-/** Remembers whether the group's server writes, for the upload's note. */
+/** Remembers whether the group's server writes, for help and the guide. */
 export function rememberServer(on: boolean): void {
   try {
     localStorage.setItem(SERVER_KEY, on ? "1" : "0");
   } catch {
-    /* private mode: the note stays the plain one */
+    /* private mode: help and the guide say the plain thing */
   }
 }
 

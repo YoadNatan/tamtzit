@@ -71,10 +71,7 @@ export default function Join({ initialCode, onJoined }: Props) {
         <p className="join-kicker">סיכום מלא לכל הרצאה</p>
         <h1 className="join-name">תמצית</h1>
         {flags.guide && initialCode ? <p className="a-small a-muted join-invited">יש הזמנה. נשאר רק להקליד שם.</p> : null}
-        <p className="a-para a-muted">
-          מעלים מצגת של הרצאה, ותוך כמה דקות יש סיכום מלא בעברית: לפי סדר ההרצאה, עם המונחים באנגלית, התמונות
-          מהשקפים וההסברים שחסרים. כל הקבוצה רואה כל סיכום.
-        </p>
+        <p className="a-para a-muted">מעלים מצגת, ותוך כמה דקות יש סיכום בעברית לכל הקבוצה.</p>
 
         <div className="a-card join-form">
           <div className="a-seg" role="tablist" aria-label="איך נכנסים">
@@ -86,7 +83,7 @@ export default function Join({ initialCode, onJoined }: Props) {
             </button>
           </div>
           {flags.guide && mode === "create" && !hadCode && !code ? (
-            <p className="a-callout warn join-alone">קיבלתם קישור מהקבוצה? ״יש לי קוד״, והקוד נמצא בסוף הקישור. כאן נפתחת קבוצה חדשה וריקה.</p>
+            <p className="a-callout warn join-alone">זו קבוצה חדשה וריקה. קיבלתם קישור? ״יש לי קוד״, הקוד בסוף הקישור.</p>
           ) : null}
 
           <form onSubmit={submit} className="a-stack">

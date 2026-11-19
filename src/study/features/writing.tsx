@@ -347,11 +347,10 @@ export async function afterUpload(lecture: Lecture, _figurePaths: string[]): Pro
   }
 }
 
-/** The upload's saving line: with the server writing, it says the app may be
- *  closed once the slides are saved (design-platform §1.A step 1). */
-export function uploadNote(done: number, total: number): string | null {
-  const line = `שומרים את השקפים והתמונות: ${done} מתוך ${total}`;
-  return serverKnownOn() ? `${line}. כדאי להשאיר את המסך פתוח עד שהשמירה נגמרת. אחרי זה הסיכום נכתב בשרת, גם אם סוגרים את האפליקציה.` : line;
+/** The upload's saving line, short (Yoad, 19 Nov 2026): how far the saving
+ *  is, and to keep the screen open until it ends. */
+export function uploadNote(done: number, total: number): string {
+  return `שומרים… ${done} מתוך ${total} · להשאיר את המסך פתוח עד הסוף`;
 }
 
 /** What help says about writing and sharing (spec §6.2): "שיתוף" offers

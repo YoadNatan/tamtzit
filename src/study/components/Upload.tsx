@@ -13,7 +13,7 @@ import { readPptx, type Deck, type Slide } from "../lib/pptx";
 /* ── Adding a lecture ──
  * The deck is read right here in the browser (nothing big leaves the phone
  * except shrunken pictures), then the slides and pictures are saved for the
- * group and the summary starts. W's slot can replace the saving line and queue the
+ * group and the summary starts. W's slot words the saving line and queues the
  * server writer once the slides are saved; then B's slot opens the lecture
  * (§12.2.3). It asks nothing: Yoad's decision 2 of 17 Nov 2026 removed
  * "להכין גם שאלות וכרטיסיות?" (no question or card is written automatically;
@@ -227,7 +227,7 @@ export default function Upload({ group, courses, ctx }: Props) {
           <div className="a-bar">
             <i style={{ width: `${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }} />
           </div>
-          <span className="a-small a-muted">{uploadNote(progress.done, progress.total) ?? `שומר שקפים ותמונות: ${progress.done} מתוך ${progress.total}`}</span>
+          <span className="a-small a-muted">{uploadNote(progress.done, progress.total)}</span>
         </div>
       ) : parsed ? (
         <div className="ph-foot">

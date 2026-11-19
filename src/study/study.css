@@ -227,6 +227,10 @@ main.join {
 .join-signin {
   justify-self: start;
 }
+/* "פתיחת קבוצה חדשה" fits its half of the row down to 320 px. */
+.join .a-seg > .a-btn {
+  padding-inline: var(--sp-2);
+}
 
 /* ═════════════ the library ═════════════ */
 
