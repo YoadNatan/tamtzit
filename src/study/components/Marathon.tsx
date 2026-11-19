@@ -10,6 +10,7 @@ import { isolateLatin } from "../lib/rich";
 import LaneDay from "./LaneDay";
 import { Avatar, BackLink, Head, Loading, RouteLink, StickyActions } from "./Shell";
 import "../styles/plan.css";
+import { pickerDir } from "../lib/bidi";
 
 /* ── Marathons (?v=marathon; spec §6.4 A R1-R6, section P; the run-of-show
  *    as plan.html s1 lists a day) ──
@@ -297,11 +298,11 @@ function MarathonEdit({ ctx, id }: { ctx: ScreenProps<"marathon">["ctx"]; id?: s
           </label>
           <label className="a-field">
             <span>יום</span>
-            <input className="a-input" type="date" value={day} min={today} onChange={(e) => setDay(e.target.value)} />
+            <input className="a-input" type="date" dir={pickerDir()} value={day} min={today} onChange={(e) => setDay(e.target.value)} />
           </label>
           <label className="a-field">
             <span>שעה</span>
-            <input className="a-input" type="time" value={clock} onChange={(e) => setClock(e.target.value)} />
+            <input className="a-input" type="time" dir={pickerDir()} value={clock} onChange={(e) => setClock(e.target.value)} />
           </label>
           <div className="a-seg" role="radiogroup" aria-label="כמה זמן">
             {[2, 3, 4, 6].map((h) => (

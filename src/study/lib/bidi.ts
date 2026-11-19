@@ -29,3 +29,12 @@ export function trimRun(run: string): string {
   }
   return s;
 }
+
+/** The direction for a native date or time field. The phone draws its value
+ *  in the phone's own language ("19 Nov 2026" in English, "19 בנוב׳ 2026" in
+ *  Hebrew), and inside the app's right-to-left page an English value came out
+ *  as "Nov 2026 19" on iPhone Safari. So the field takes the direction of the
+ *  phone's language: right to left only for a right-to-left language. */
+export function pickerDir(lang: string | undefined = typeof navigator === "undefined" ? undefined : navigator.language): "rtl" | "ltr" {
+  return /^(he|iw|yi|ar|fa|ur)\b/i.test(lang ?? "") ? "rtl" : "ltr";
+}

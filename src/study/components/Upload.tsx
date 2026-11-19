@@ -9,6 +9,7 @@ import { guideMark } from "../lib/guideMark";
 import { mimeFor, shrinkImage } from "../lib/images";
 import { readPdf, ReadError, type PdfDeck } from "../lib/pdf";
 import { readPptx, type Deck, type Slide } from "../lib/pptx";
+import { pickerDir } from "../lib/bidi";
 
 /* ── Adding a lecture ──
  * The deck is read right here in the browser (nothing big leaves the phone
@@ -206,7 +207,7 @@ export default function Upload({ group, courses, ctx }: Props) {
           </label>
           <label className="a-field">
             <span>תאריך ההרצאה</span>
-            <input className="a-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <input className="a-input" type="date" dir={pickerDir()} value={date} onChange={(e) => setDate(e.target.value)} />
           </label>
         </div>
       ) : null}

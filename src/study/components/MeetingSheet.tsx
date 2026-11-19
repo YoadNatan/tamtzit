@@ -4,6 +4,7 @@ import { getSections, listLectures, type LectureRow, type Section } from "../lib
 import { cancelMeeting, defaultWhen, israelInstant, israelParts, meetingWords, saveMeeting, slideRange, type BandMeeting } from "../lib/meeting";
 import { isolateLatin } from "../lib/rich";
 import { Sheet } from "./Shell";
+import { pickerDir } from "../lib/bidi";
 
 /* ── "הפגישה הבאה": planning (package M; the meeting design §4.3 item 1) ──
  *
@@ -140,11 +141,11 @@ export default function MeetingSheet({
             <div className="a-row">
               <label className="a-field m-date">
                 <span>תאריך</span>
-                <input className="a-input" type="date" value={date} disabled={started} onChange={(e) => setDate(e.target.value)} />
+                <input className="a-input" type="date" dir={pickerDir()} value={date} disabled={started} onChange={(e) => setDate(e.target.value)} />
               </label>
               <label className="a-field m-time">
                 <span>שעה</span>
-                <input className="a-input" type="time" value={time} step={300} onChange={(e) => setTime(e.target.value)} />
+                <input className="a-input" type="time" dir={pickerDir()} value={time} step={300} onChange={(e) => setTime(e.target.value)} />
               </label>
             </div>
           </fieldset>

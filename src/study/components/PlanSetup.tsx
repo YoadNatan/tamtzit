@@ -7,6 +7,7 @@ import { lectureFacts, planDayRows, priceSlip, savePlan, saveLaneDays, todayIso 
 import { isolateLatin } from "../lib/rich";
 import { Icon } from "./Icon";
 import { BackLink, Head, StickyActions } from "./Shell";
+import { pickerDir } from "../lib/bidi";
 
 /* ── The plan's setup, and the price of a day that slipped (package G;
  *    plan.html s2: "תוכנית עד המבחן") ──
@@ -125,7 +126,7 @@ export default function PlanSetup({
             </label>
             <label className="a-field">
               <span>תאריך המבחן</span>
-              <input className="a-input" type="date" value={exam} min={dateOfDay(dayOfDate(today) + 1)} max={dateOfDay(dayOfDate(today) + 180)} onChange={(e) => setExam(e.target.value)} />
+              <input className="a-input" type="date" dir={pickerDir()} value={exam} min={dateOfDay(dayOfDate(today) + 1)} max={dateOfDay(dayOfDate(today) + 180)} onChange={(e) => setExam(e.target.value)} />
             </label>
             <fieldset className="pl-lectures">
               <legend className="a-small">ההרצאות של הבלוק</legend>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LATIN_RUN, trimRun } from "./bidi.js";
+import { LATIN_RUN, pickerDir, trimRun } from "./bidi.js";
 
 const runs = (text: string) => {
   LATIN_RUN.lastIndex = 0;
@@ -16,4 +16,11 @@ test("a Latin run ends before the separator: \"Loop diuretics · מנגנון\" 
   assert.deepEqual(runs("כמו IV (לאט)."), ["IV"]);
   assert.deepEqual(runs("(K⁺-sparing) משתנים"), ["(K⁺-sparing)"]);
   assert.deepEqual(runs("ענית ׳NCC׳, אבל"), ["NCC"]);
+});
+
+test("a date or time field takes the phone language's direction, so \"19 Nov 2026\" never reads \"Nov 2026 19\"", () => {
+  for (const lang of ["en-US", "en-IL", "en", "ru-RU", "de"]) assert.equal(pickerDir(lang), "ltr", lang);
+  for (const lang of ["he-IL", "he", "iw", "ar-EG", "fa"]) assert.equal(pickerDir(lang), "rtl", lang);
+  assert.equal(pickerDir(""), "ltr");
+  assert.equal(pickerDir("hr-HR"), "ltr", "Croatian is not Hebrew");
 });
