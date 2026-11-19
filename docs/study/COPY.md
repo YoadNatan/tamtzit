@@ -93,7 +93,7 @@ these and no other.
 | The cut the answer read (never "context", never "retrieval") | נבחרו 12 מתוך 340 פסקאות |
 | A citation in that answer | [הרצאה 7 · ש׳ 14] (the lecture's number in the course, then the slide) |
 | Several files picked at once | העלאה של כמה קבצים |
-| A summary that does not fit the month's budget | יחכה לחודש הבא (several: 3 סיכומים יחכו לחודש הבא) |
+| A summary that does not fit the month's budget | on the card: 3 סיכומים יחכו לחודש הבא; on its row: הסיכום יחכה לחודש הבא (never a bare "יחכה", which reads as the file waiting) |
 | One round of questions over several lectures | סבב על כמה הרצאות (עד 5 הרצאות, לפחות 4 שאלות מכל הרצאה) |
 | Two courses that are one | לאחד קורסים (never "למזג") |
 | Back to a course's page | → לקורס |
@@ -103,8 +103,16 @@ these and no other.
 | Practising a course's questions | לתרגל מה שכבר יש · בחינם (184) |
 | The batch upload's price card | המחיר מראש · סיכומים ל-8 הרצאות: כ-$7 · נשארו החודש $24 |
 | The batch's progress | קוראים קובץ 4 מתוך 14 · כדאי להשאיר את המסך פתוח |
-| Coming back to a batch that stopped | הועלו 3. נשארו 11 קבצים · לבחור אותם שוב |
-| A file of a batch, uploaded | ✓ הועלה (and while it waits: מחכה; while it goes: עולה…) |
+| Coming back to a batch that stopped | הועלו 3. נשארו 11 קבצים, then: ההעלאה נעצרה באמצע. בוחרים שוב את אותם קבצים, ומה שכבר עלה מדלגים עליו. נשארו: … (forgetting it: לא להמשיך) |
+| More files than the list shows | ועוד 7 קבצים · להראות; adding files once some are picked: להוסיף עוד |
+| A picked file that cannot be uploaded, in the count | נבחרו 12 קבצים · אחד לא נתמך |
+| A batch with no course yet | צריך לכתוב לאיזה קורס הקבצים שייכים. (under the field) |
+| A course question before any summary | the button is off: אפשר לשאול כשיהיה סיכום ראשון. |
+| A course question no paragraph matches | לא מצאנו בסיכומים של הקורס פסקה על זה. אפשר לנסח אחרת, למשל עם שם התרופה או המושג. |
+| Merging, on the button | לאחד עם ״מיקרו״ (both names in ״…״ in the sentence above it) |
+| A number field's hint | למשל 100 (never a bare number, which reads as a saved value) |
+| A file of a batch, uploaded | ✓ הועלה (and while it waits: מחכה; while it goes: עולה…, its line: שומרים שקפים 12 מתוך 20, then השקפים נשמרו) |
+| A file's line in the batch | 20 שקפים (and · PDF for a PDF; never "הרצאה" or "PowerPoint" while every file is a lecture) |
 
 ### Kept, on purpose
 
