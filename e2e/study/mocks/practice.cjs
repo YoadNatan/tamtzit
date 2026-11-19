@@ -223,7 +223,8 @@ const studyDay = (iso) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jer
 const POINTS_PER = [4, 4, 6, 6, 5, 4, 5, 4];
 const RED_FLAGS = [0, 1, 1, 1, 1, 1, 0, 0];
 const KINDS = ["drug", "mechanism", "indication", "adverse", "contra", "number"];
-const STYLE_ORDER = ["case", "mechanism", "drug_choice", "adverse_contra", "compare", "not_true", "blank_table"];
+const NEW_STYLES = ["image", "label", "steps", "tf", "match", "order"];
+const STYLE_ORDER = ["case", "mechanism", "drug_choice", "adverse_contra", "compare", "not_true", "blank_table", ...NEW_STYLES];
 const halfUp = (x) => Math.floor(x + 0.5 + 1e-9);
 function partQuestions(level, points, red) {
   if (points <= 0) return 0;
@@ -307,6 +308,136 @@ function draftItem(section, style, k, rewrite) {
   };
 }
 
+/* ── Question types (docs/study/question-types.md): synthetic items of each type ── */
+
+/** The pins of a figure's labels in reading order (server/study/labels.ts: top to bottom, right to left in a row). */
+function pinsOf(geo) {
+  const c = geo.labels.map((l, i) => ({ i, x: l.b.x + l.b.w / 2, y: l.b.y + l.b.h / 2 }));
+  const by = [...c].sort((a, b) => a.y - b.y || b.x - a.x);
+  const rows = [];
+  for (const p of by) {
+    const row = rows[rows.length - 1];
+    if (row && Math.abs(p.y - row[0].y) <= 0.04) row.push(p);
+    else rows.push([p]);
+  }
+  const order = rows.flatMap((r) => r.sort((a, b) => b.x - a.x));
+  return order.map((p, j) => ({ n: j + 1, x: Math.round(p.x * 1e4) / 1e4, y: Math.round(p.y * 1e4) / 1e4, label: geo.labels[p.i].t }));
+}
+const labelBase = (geo) => ({ kind: "label", fig: "fig:3-1", stage: geo.stage, img: geo.img, ...(geo.clip ? { clip: geo.clip } : {}), lines: geo.lines, baked: false, masks: [] });
+
+/** One item of a new type about the fixture (slide 3's nephron, the diuretics); steps also returns its step 2. */
+function typedItem(style, geo, k = 0) {
+  const s = 3;
+  const tag = ` [ש' ${s}]`;
+  switch (style) {
+    case "tf":
+      return {
+        kind: "mcq", form: "tf", question: "אילו מהמשפטים נכונים?", vignette: "", layout: null, figure: "",
+        options: ["Furosemide מעכבת את NKCC2", "Furosemide חוסכת אשלגן", "Furosemide היא loop diuretic"],
+        seq: [1, 0, 1], answer: null,
+        explanations: [`נכון: היא מעכבת NKCC2 בלולאה.${tag}`, `לא נכון: Furosemide גורמת לאיבוד אשלגן.${tag}`, `נכון.${tag}`],
+        whens: ["", "", ""], takeaway: `Furosemide היא loop diuretic שמעכבת NKCC2.${tag}`, slides: [s], topic: "Furosemide", aspect: "mechanism",
+      };
+    case "match":
+      return {
+        kind: "mcq", form: "match", question: "מה מתאים לכל תרופה?", vignette: "", figure: "",
+        layout: { kind: "match", prompts: ["Furosemide", "Hydrochlorothiazide", "Amiloride"] },
+        options: ["ENaC", "NKCC2", "NCC", "Carbonic anhydrase"], seq: [1, 2, 0], answer: null,
+        explanations: [`Amiloride חוסמת ENaC.${tag}`, `Furosemide מעכבת NKCC2.${tag}`, `Hydrochlorothiazide מעכבת NCC.${tag}`, `של Acetazolamide, לא של אף אחת מהן.${tag}`],
+        whens: [], takeaway: `כל משתן ומקטע המטרה שלו.${tag}`, slides: [s], topic: "Diuretics", aspect: "mechanism",
+      };
+    case "order":
+      return {
+        kind: "mcq", form: "order", question: "מה סדר המקטעים לאורך הנפרון?", vignette: "", layout: null, figure: "",
+        options: ["Loop of Henle", "Glomerulus", "Collecting duct", "Proximal tubule"], seq: [1, 3, 0, 2], answer: null,
+        explanations: [`שלישי, אחרי ה-Proximal tubule.${tag}`, `ראשון: כאן מתחיל הסינון.${tag}`, `אחרון.${tag}`, `שני.${tag}`],
+        whens: [], takeaway: `Glomerulus, Proximal tubule, Loop of Henle, Collecting duct.${tag}`, slides: [s], topic: "Nephron", aspect: "physiology",
+      };
+    case "label": {
+      const pins = pinsOf(geo);
+      const target = pins.find((p) => p.label === "Loop of Henle");
+      if (k % 2 === 1) {
+        // tap mode: "באיזה מספר מסומן X?", the options are the pins' numbers
+        return {
+          kind: "mcq", form: "tap", figure: "fig:3-1", vignette: "", question: "באיזה מספר מסומן Loop of Henle?",
+          layout: { ...labelBase(geo), mode: "tap", pins: pins.map(({ n, x, y }) => ({ n, x, y })) },
+          options: pins.map((p) => String(p.n)), answer: target.n - 1, seq: null,
+          explanations: pins.map((p) => `${p.n} הוא ${p.label}.${p === target ? ` הלולאה מרכזת את השתן.${tag}` : ""}`),
+          whens: [], takeaway: `Loop of Henle מרכזת את השתן.${tag}`, slides: [s], topic: "Loop of Henle", aspect: "anatomy",
+        };
+      }
+      const names = ["Glomerulus", "Loop of Henle", "Collecting duct", "Proximal tubule"];
+      return {
+        kind: "mcq", form: "one", figure: "fig:3-1", vignette: "", question: `מה מסומן במספר ${target.n} בשרטוט?`,
+        layout: { ...labelBase(geo), mode: "name", pins: pins.map(({ n, x, y }) => ({ n, x, y })), ask: target.n },
+        options: names, answer: 1, seq: null,
+        explanations: names.map((nm) => (nm === "Loop of Henle" ? `נכון: זו הלולאה.${tag}` : `${nm} מסומן במספר אחר.${tag}`)),
+        whens: ["", "", "", ""], takeaway: `Loop of Henle מרכזת את השתן.${tag}`, slides: [s], topic: "Loop of Henle", aspect: "anatomy",
+      };
+    }
+    case "image":
+      return {
+        kind: "mcq", form: "one", figure: "fig:3-1", vignette: "", question: "מה מוצג בתמונה שבשקף 3?",
+        layout: { kind: "image", fig: "fig:3-1" }, options: ["נפרון", "אונה של כבד", "נאדית ריאה", "בלוטת יותרת הכליה"], answer: 0, seq: null,
+        explanations: [`נכון: מקטעי הנפרון.${tag}`, `לא.${tag}`, `לא.${tag}`, `לא.${tag}`], whens: ["", "", "", ""],
+        takeaway: `השקף מראה את מקטעי הנפרון.${tag}`, slides: [s], topic: "Nephron", aspect: "anatomy",
+      };
+    case "steps": {
+      const base = "גבר בן 70 עם אי ספיקת לב מקבל Spironolactone ותרופה ממשפחת ACE inhibitors. הוא מגיע לחדר מיון עם חולשת שרירים.";
+      const resolved = "בבדיקות הדם נמצאה Hyperkalemia.";
+      const update = "ב-ECG נראים גלי T גבוהים.";
+      const one = {
+        kind: "case", form: "one", figure: "", vignette: base, question: "מה ההפרעה הצפויה בבדיקות הדם?",
+        layout: { kind: "steps", of: 2, lead: 0 }, options: ["Hyperkalemia", "Hypokalemia", "Hypernatremia", "Hypercalcemia"], answer: 0, seq: null,
+        explanations: [`Spironolactone חוסכת אשלגן.${tag}`, `ההפך.${tag}`, `לא קשור.${tag}`, `לא קשור.${tag}`], whens: ["", "", "", ""],
+        takeaway: `Spironolactone עם ACE inhibitor מעלים אשלגן.${tag}`, slides: [s], topic: "Spironolactone", aspect: "adverse", step: 1,
+      };
+      const two = {
+        ...one, vignette: `${base} ${resolved} ${update}`, question: "מה מייצב ראשון את הממברנה של שריר הלב?",
+        layout: { kind: "steps", of: 2, lead: `${base} ${resolved}`.length }, options: ["Calcium gluconate", "Furosemide", "להמשיך Spironolactone", "Digoxin"], answer: 0,
+        explanations: [`נכון.${tag}`, `לא ראשון.${tag}`, `מסוכן.${tag}`, `מסוכן.${tag}`], step: 2,
+      };
+      return { ...one, more: [two] };
+    }
+    default:
+      return null;
+  }
+}
+
+/** The part of the fixture lecture that holds slide 3 (its picture). */
+const partOfSlide3 = (db, lectureId) => db.sections.find((x) => x.lecture_id === lectureId && x.slide_from <= 3 && x.slide_to >= 3);
+
+/** Seeds the bank with a question of each new type on the fixture lecture (qtypes.cjs). Returns their ids by type. */
+function seedTypes(db, lectureId, geo) {
+  const P = db.practice;
+  const sec = partOfSlide3(db, lectureId);
+  const out = {};
+  const put = (item, style, series) => {
+    const n = ++P.seq.question;
+    const q = {
+      id: hex("9b000000", n), group_id: db.group.id, lecture_id: lectureId, batch_id: null, exam_id: null, exam_no: null, ref_lecture: null, source: "ai",
+      part_idx: sec.idx, kind: item.kind, difficulty: 2, vignette: item.vignette, question: item.question, options: item.options, slides: item.slides,
+      topic: item.topic, aspect: item.aspect, has_key: true, model: "mock", created_by: db.members[0]?.user_id ?? null, created_at: new Date(Date.now() - 60_000 + n).toISOString(),
+      retired_at: null, retired_by: null, retire_note: "", anchor: null, quote: "", part_gen: 0, teaser: "", option_tags: [], hidden_at: null, stale_at: null,
+      style, figure: item.figure ?? "", form: item.form ?? "one", layout: item.layout ?? null, series: series ?? null, step: series ? item.step : null,
+    };
+    P.questions.push(q);
+    P.keys.set(q.id, { answer: item.answer, explanations: item.explanations, takeaway: item.takeaway, whens: item.whens ?? [], seq: item.seq ?? null });
+    return q.id;
+  };
+  out.tf = put(typedItem("tf", geo), "tf");
+  out.match = put(typedItem("match", geo), "match");
+  out.order = put(typedItem("order", geo), "order");
+  out.labelName = put(typedItem("label", geo, 0), "label");
+  out.labelTap = put(typedItem("label", geo, 1), "label");
+  out.image = put(typedItem("image", geo), "image");
+  const st = typedItem("steps", geo);
+  const series = hex("5e000000", ++P.seq.question);
+  out.step1 = put(st, "steps", series);
+  out.step2 = put(st.more[0], "steps", series);
+  return out;
+}
+
 function p2Seed(P) {
   Object.assign(P, {
     points: [],
@@ -364,6 +495,7 @@ function planOf(db, P, lectureId, o) {
       points: { total: parts.reduce((s, p) => s + p.points, 0), current: stale.length === 0 && parts.some((p) => p.points > 0), stale, busy: parts.some((p) => p.busy) },
       levels: { focused: sum("focused"), full: sum("full"), deep: sum("deep") },
       plan: { level, total, parts: counts.map((c, i) => ({ ...c, questions: q[i], covers: level === "focused" ? q[i] : c.points })), batches: q.reduce((n, x) => n + batchSizes(x).length, 0) },
+      ...factsOf(db, P, lectureId, chosen.map((p) => p.part_idx)),
       estimate: {
         readUsd: stale.length ? 0.14 : 0, questionsUsd: round2(total * 0.025), solverUsd: round2(total * 0.005), totalUsd: round2((stale.length ? 0.14 : 0) + total * 0.025), perQuestionUsd: 0.025,
         levels: { focused: round2(sum("focused") * 0.025), full: round2(sum("full") * 0.025), deep: round2(sum("deep") * 0.025) }, rewordUsd: 0.03, styleUsd: 0.01,
@@ -371,6 +503,34 @@ function planOf(db, P, lectureId, o) {
       spent: { groupUsd: db.spent, mineUsd: db.mySpent, capUsd: db.budgetUsd, share: 0.8, memberShare: 0.4 },
     },
   };
+}
+
+/** Question types: each part's facts and the defaults for the chosen parts (shared/study/forms.ts's rule). */
+function factsOf(db, P, lectureId, chosen) {
+  const lecture = db.lectures.find((l) => l.id === lectureId);
+  const facts = {};
+  for (const s of db.sections.filter((x) => x.lecture_id === lectureId)) {
+    const figs = (lecture?.slides ?? []).filter((x) => x.n >= s.slide_from && x.n <= s.slide_to).flatMap((x) => x.figures ?? []);
+    const captioned = [...String(s.markdown ?? "").matchAll(/\(fig:(\d+)-(\d+)\)/g)].filter((m) => Number(m[1]) >= s.slide_from && Number(m[1]) <= s.slide_to).length;
+    const points = {};
+    for (const p of P.points.filter((x) => x.lecture_id === lectureId && x.part_idx === s.idx)) points[p.kind] = (points[p.kind] ?? 0) + 1;
+    facts[String(s.idx)] = { tables: false, figures: Math.min(captioned, figs.length) || captioned, labelled: figs.filter((f) => f.geo).length, points };
+  }
+  const all = { figures: 0, labelled: 0, points: {} };
+  for (const k of chosen) {
+    const f = facts[String(k)];
+    if (!f) continue;
+    all.figures += f.figures;
+    all.labelled += f.labelled;
+    for (const [kk, v] of Object.entries(f.points)) all.points[kk] = (all.points[kk] ?? 0) + v;
+  }
+  const total = Object.values(all.points).reduce((a, b) => a + b, 0);
+  const pharm = ["drug", "mechanism", "indication", "adverse", "contra"].reduce((n, kk) => n + (all.points[kk] ?? 0), 0);
+  const defaults = ["case", "tf", ...(total > 0 && pharm * 2 >= total ? ["mechanism", "drug_choice", "adverse_contra"] : ["match", "order"])];
+  if (all.labelled >= 1) defaults.push("label");
+  if (all.figures >= 2) defaults.push("image");
+  if (total >= 12) defaults.push("steps");
+  return { facts, defaults: defaults.slice(0, 6) };
 }
 
 const LEVELS = ["focused", "full", "deep", "custom"];
@@ -396,6 +556,9 @@ const draftLine = (d) => {
 };
 
 module.exports = {
+  seedTypes,
+  typedItem,
+  pinsOf,
   seed(db) {
     db.practice = {
       batches: [],
@@ -445,8 +608,8 @@ module.exports = {
         id: hex("9a000000", n), group_id: lecture.group_id, lecture_id: lecture.id, batch_id: d.batch_id, exam_id: null, exam_no: null, ref_lecture: null, source: "ai",
         part_idx: d.part_idx, kind: d.kind, difficulty: d.difficulty, vignette: d.vignette, question: d.question, options: d.options, slides: d.slides,
         topic: d.topic, aspect: d.aspect, has_key: true, model: "mock", created_by: d.created_by, created_at: now(), retired_at: null, retired_by: null, retire_note: "",
-        anchor: d.anchor, quote: d.quote ?? "", part_gen: d.part_gen ?? 0, teaser: "", figure: "", option_tags: [], hidden_at: null, stale_at: null, fixed_at: null,
-        style: d.style, points: d.points, request_id: d.request_id,
+        anchor: d.anchor, quote: d.quote ?? "", part_gen: d.part_gen ?? 0, teaser: "", figure: d.figure ?? "", option_tags: [], hidden_at: null, stale_at: null, fixed_at: null,
+        style: d.style, points: d.points, request_id: d.request_id, form: d.form ?? "one", layout: d.layout ?? null, series: d.series ?? null, step: d.step ?? null,
       };
       P.questions.push(q);
       P.keys.set(q.id, P.draftKeys.get(d.id));
@@ -595,6 +758,10 @@ module.exports = {
       "study_question_whens",
       "study_question_for_fix",
       "study_question_fix",
+      // question types (section X)
+      "study_answer_set",
+      "study_question_set_feedback",
+      "study_lecture_set_geo",
     ]);
     if (!RPCS.has(fn)) return undefined;
     check.rpc(fn, body, where);
@@ -703,13 +870,18 @@ module.exports = {
         if (!d) return refuse("draft not found");
         if (d.status !== "pending") return refuse("not pending");
         if (d.lease_until && Date.parse(d.lease_until) > Date.now()) return refuse("busy");
+        // Section Q 3: a staged case is kept or removed whole, in step order.
+        const whole = d.series ? P.drafts.filter((x) => x.series === d.series && x.status === "pending").sort((a, b) => a.step - b.step) : [d];
         if (fn === "study_draft_remove") {
-          Object.assign(d, { status: "removed", decided_by: me, decided_at: now(), updated_at: now() });
-          notify("study_question_drafts", "UPDATE", d);
+          for (const x of whole) {
+            Object.assign(x, { status: "removed", decided_by: me, decided_at: now(), updated_at: now() });
+            notify("study_question_drafts", "UPDATE", x);
+          }
           return json(null);
         }
-        if (!["ok", "unchecked"].includes(d.check_state)) return refuse("not checked");
-        return json(keepToBank(d, me));
+        if (whole.some((x) => !["ok", "unchecked"].includes(x.check_state))) return refuse("not checked");
+        const ids = whole.map((x) => keepToBank(x, me));
+        return json(ids[0]);
       }
       case "study_draft_keep_all": {
         const rq = P.qrequests.find((r) => r.id === body.p_request);
@@ -758,6 +930,57 @@ module.exports = {
         P.fixes = [...(P.fixes ?? []), { question_id: q.id, verdict: body.p_verdict, slides: sl, note: q.fix_note, by: me }];
         notify("study_questions", "UPDATE", q);
         return json(null);
+      }
+      case "study_answer_set": {
+        const q = qOf(body.p_question);
+        if (!q) return refuse("question not found");
+        if (q.retired_at) return refuse("retired");
+        if (!["lecture", "course", "mistakes", "exam"].includes(body.p_mode ?? "lecture")) return refuse("bad mode");
+        if (q.hidden_at) return refuse("hidden");
+        if (!["tf", "match", "order"].includes(q.form)) return refuse("not a set question");
+        if (P.inQuiz?.has(q.id)) return refuse("in quiz");
+        const k = P.keys.get(q.id);
+        if (!k?.seq) return refuse("no key");
+        const ch = body.p_choices ?? null;
+        const n = q.options.length;
+        if (ch !== null) {
+          const bad =
+            !Array.isArray(ch) || ch.length !== k.seq.length || ch.some((c) => !Number.isInteger(c) || c < 0 || c >= n) ||
+            (q.form === "tf" && ch.some((c) => c !== 0 && c !== 1)) || (q.form !== "tf" && new Set(ch).size !== ch.length);
+          if (bad) return refuse("bad choices");
+        }
+        const bet = body.p_confidence ?? null;
+        if (bet !== null && ![1, 2, 3].includes(bet)) return refuse("bad bet");
+        const right = ch ? k.seq.filter((v, i) => ch[i] === v).length : 0;
+        const correct = Boolean(ch) && right === k.seq.length;
+        P.answers.push({ user_id: me, question_id: q.id, choice: null, choices: ch, correct, mode: body.p_mode ?? "lecture", ms: body.p_ms ?? null, confidence: bet, answered_at: now() });
+        return json([{ seq: k.seq, explanations: k.explanations, takeaway: k.takeaway, correct, whens: k.whens ?? [], right_n: right, total: k.seq.length }]);
+      }
+      case "study_question_set_feedback": {
+        const answered = mine();
+        return json(
+          (body.p_ids || [])
+            .filter((id) => answered.some((a) => a.question_id === id) && P.keys.get(id)?.seq)
+            .map((id) => {
+              const k = P.keys.get(id);
+              const last = answered.filter((a) => a.question_id === id).pop();
+              return { question_id: id, seq: k.seq, explanations: k.explanations, takeaway: k.takeaway, whens: k.whens ?? [], choices: last?.choices ?? null };
+            }),
+        );
+      }
+      case "study_lecture_set_geo": {
+        const lecture = lectureOf(body.p_lecture);
+        if (!lecture || lecture.deleted_at) return refuse("lecture not found");
+        const list = body.p_geo;
+        if (!Array.isArray(list) || !list.length || list.length > 300) return refuse("bad geometry");
+        for (const e of list) {
+          const slide = lecture.slides.find((x) => x.n === e.n);
+          const fig = slide?.figures?.find((f) => f.k === e.k);
+          if (!fig || !e.geo || e.geo.v !== 1 || !Array.isArray(e.geo.labels) || e.geo.labels.length < 3) return refuse("bad geometry");
+        }
+        for (const e of list) lecture.slides.find((x) => x.n === e.n).figures.find((f) => f.k === e.k).geo = e.geo;
+        P.geoCalls = [...(P.geoCalls ?? []), { lecture: lecture.id, by: me, geo: list }];
+        return json(list.length);
       }
       case "study_retire_question":
         // Revoked from members (package Q's review, finding Q2; SEC-13): only the owner retires a question.
@@ -903,21 +1126,38 @@ async function p2Write({ res, db, P, b, me, log, touch, notify }) {
   }
   const per = Math.max(1, Math.ceil(b.points.length / Math.max(1, b.wanted)));
   const made = [];
+  const lecture = db.lectures.find((l) => l.id === b.lecture_id);
+  const geo = lecture?.slides.find((x) => x.n === 3)?.figures?.[0]?.geo ?? null;
+  let labels = 0;
   const save = (k, rewrite, replaces) => {
     const style = b.styles[k] ?? rq.styles[0];
-    const item = draftItem(section, style, k + b.seq * 5 + (rewrite ? 7 : 0), rewrite);
+    // Question types: a synthetic item of the type (a label without geometry becomes a picture question).
+    const typed = NEW_STYLES.includes(style) ? typedItem(style === "label" && !geo ? "image" : style, geo, style === "label" ? labels++ : k) : null;
+    const item = typed ?? draftItem(section, style, k + b.seq * 5 + (rewrite ? 7 : 0), rewrite);
     const t = now();
+    const series = typed?.more ? hex("5e000000", ++P.seq.draft) : null;
     const d = {
       id: hex("d4000000", ++P.seq.draft), group_id: db.group.id, lecture_id: b.lecture_id, request_id: rq.id, batch_id: b.id, part_idx: b.part_idx, style,
       points: b.points.slice(k * per, k * per + per), kind: item.kind, difficulty: 2, vignette: item.vignette, question: item.question, options: item.options,
       slides: item.slides, topic: section.title.replace(/[^A-Za-z ,+-]/g, "").trim() || "Diuretics", aspect: "other", anchor: k % 3, quote: "", part_gen: section.gen ?? 0,
       teaser: "", figure: "", option_tags: [], status: "pending", check_state: "checking", rewrites: rewrite ? 1 : 0, replaces: replaces ?? null, lease_until: null,
       question_id: null, model: "mock", created_by: rq.created_by, decided_by: null, decided_at: null, created_at: t, updated_at: t,
+      form: item.form ?? "one", layout: item.layout ?? null, series, step: series ? 1 : null,
+      ...(typed ? { figure: item.figure ?? "", topic: item.topic, aspect: item.aspect, check_state: style === "label" ? "ok" : "checking" } : {}),
     };
     P.drafts.push(d);
-    P.draftKeys.set(d.id, { answer: item.answer, explanations: item.explanations, takeaway: item.takeaway, whens: item.whens });
+    P.draftKeys.set(d.id, { answer: item.answer, explanations: item.explanations, takeaway: item.takeaway, whens: item.whens, seq: item.seq ?? null });
     notify("study_question_drafts", "INSERT", d);
     line({ t: "draft", d: draftLine(d), ...(replaces ? { replaces } : {}) });
+    // A staged case's later steps follow, in the same series (never counted on their own).
+    for (const more of typed?.more ?? []) {
+      const m = { ...d, id: hex("d4000000", ++P.seq.draft), vignette: more.vignette, question: more.question, options: more.options, layout: more.layout, step: more.step, created_at: now(), updated_at: now() };
+      P.drafts.push(m);
+      P.draftKeys.set(m.id, { answer: more.answer, explanations: more.explanations, takeaway: more.takeaway, whens: more.whens, seq: null });
+      notify("study_question_drafts", "INSERT", m);
+      line({ t: "draft", d: draftLine(m) });
+      d.more = [...(d.more ?? []), m];
+    }
     return d;
   };
   for (let k = 0; k < b.wanted; k++) {
@@ -930,10 +1170,14 @@ async function p2Write({ res, db, P, b, me, log, touch, notify }) {
   await pause(P.p2pace);
   const failed = [];
   for (const { k, d } of made) {
+    // A label draft is keyed by the picture's geometry: already ok, never solved.
+    if (d.style === "label") continue;
     const state = P.unchecked(d, k) ? "unchecked" : P.solverFails(d, k) ? "failed" : "ok";
-    Object.assign(d, { check_state: state, updated_at: now() });
-    notify("study_question_drafts", "UPDATE", d);
-    line({ t: "check", id: d.id, state });
+    for (const x of [d, ...(d.more ?? [])]) {
+      Object.assign(x, { check_state: state, updated_at: now() });
+      notify("study_question_drafts", "UPDATE", x);
+      line({ t: "check", id: x.id, state });
+    }
     if (state === "failed") failed.push({ k, d });
   }
   db.calls.push(`ledger study_settle kind=solver ref=${b.id} p_key=1`);

@@ -459,3 +459,14 @@
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
+
+/* ── question types: a staged case's story so far, folded (always here: a staged case loads no lazy chunk) ── */
+.pq-sofar summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.pq-sofar[open] .pq-vignette {
+  color: var(--muted);
+}

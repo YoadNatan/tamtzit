@@ -122,7 +122,15 @@ function flagSetOf(name) {
   const k = every || set === "k" || set === "v" || set === "j" || m;
   // anchor: package N's flag (every flag on, M's and wave 4's sets, or E2E_ANCHOR=1 on a release's set built with VITE_STUDY_ANCHOR too).
   const anchor = every || m || (set !== "off" && process.env.E2E_ANCHOR === "1");
-  return { set, any: set !== "off", today: set === "all" || t, cardsReview: every || t, questions: set !== "off", cards: set !== "off", ask: k, corrections: k, var: every || set === "v" || w4, wall: every || set === "j" || w4, meeting: every || m, guess: every || m, account: every, quiz: every || set === "rel2" || k, anchor, progress: every || a5, mistakes: every || a5, pulse: every || u, museum: every || h5, boss: every || h5, marathons: every || g, groupPlan: every || g, needsMe: set === "all" || g, eve: every || g, traps: every || e5, blankTable: every || e5, guide: set === "guide" || set === "prod" };
+  return { set, any: set !== "off", today: set === "all" || t, cardsReview: every || t, questions: set !== "off", cards: set !== "off", ask: k, corrections: k, var: every || set === "v" || w4, wall: every || set === "j" || w4, meeting: every || m, guess: every || m, account: every, quiz: every || set === "rel2" || k, anchor, progress: every || a5, mistakes: every || a5, pulse: every || u, museum: every || h5, boss: every || h5, marathons: every || g, groupPlan: every || g, needsMe: set === "all" || g, eve: every || g, traps: every || e5, blankTable: every || e5, guide: set === "guide" || set === "prod", qtypes: set === "prod" };
+}
+
+/** Slide 3's picture as the upload stores it with question types: the generated
+ *  nephron drawing (fixtures/nephron.png) and its labels' geometry, as
+ *  src/study/lib/pptxGeo.ts reads it from the fixture deck (fixtures/nephron-geo.json). */
+function nephronFigure(withGeo = true) {
+  const geo = JSON.parse(fs.readFileSync(path.join(FIXTURES, "nephron-geo.json"), "utf8"));
+  return { k: 1, path: `${GROUP.id}/${LECTURE_ID}/s3-1.jpg`, w: 480, h: 288, ...(withGeo ? { geo } : {}) };
 }
 
 /** The fixture lecture: slides, outline and its eight parts (synthetic, spec review FE-10). */
@@ -215,6 +223,13 @@ async function createMock(o) {
   if (!fs.existsSync(dumpPath)) throw new Error("e2e/study/schema-dump.json is missing: run `npm run test:contract` first");
   const schema = JSON.parse(fs.readFileSync(dumpPath, "utf8"));
   const fx = fixtureLecture();
+  // Question types (set "prod"): slide 3's picture with its labels, and the picture in the storage.
+  let qtypes = false;
+  try {
+    qtypes = Boolean(flagSetOf(o.flags).qtypes);
+  } catch {
+    // a script's own flag word that is not one of the mock's sets: no question types
+  }
 
   const problems = [];
   const calls = [];
@@ -265,9 +280,10 @@ async function createMock(o) {
       id: LECTURE_ID, group_id: GROUP.id, course: fx.outline.course, title: fx.outline.title, lecturer: fx.outline.lecturer,
       lecture_date: "2026-11-14", source_name: "deck.pptx", source_kind: "pptx", status: "ready", error: null,
       created_by: A.user.id, created_at: t, updated_at: t, queued_at: null, deleted_at: null, deleted_by: null,
-      slides: fx.slides.map((s) => ({ n: s.n, title: s.title, lines: s.lines, tables: s.tables, notes: s.notes, figures: [] })),
+      slides: fx.slides.map((s) => ({ n: s.n, title: s.title, lines: s.lines, tables: s.tables, notes: s.notes, figures: qtypes && s.diagram ? [nephronFigure()] : [] })),
       ...extra,
     });
+    if (qtypes) db.files.set(`${GROUP.id}/${LECTURE_ID}/s3-1.jpg`, fs.readFileSync(path.join(FIXTURES, "nephron.png")));
     fx.outline.parts.forEach((p, idx) =>
       db.sections.push({ lecture_id: LECTURE_ID, idx, title: p.heading, slide_from: p.from, slide_to: p.to, markdown: fx.parts[idx], status: "ready", error: null, updated_at: t, lease_until: null, attempts: 0, retry_at: null, writer: null, rev: 0, gen: 0 }),
     );
@@ -838,4 +854,4 @@ async function createMock(o) {
   };
 }
 
-module.exports = { createMock, flagSetOf, GROUP, LECTURE_ID, SB, SCHEMA_ALL, SCHEMA_SQL };
+module.exports = { createMock, flagSetOf, GROUP, LECTURE_ID, nephronFigure, SB, SCHEMA_ALL, SCHEMA_SQL };

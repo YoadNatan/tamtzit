@@ -64,7 +64,9 @@
   background: #ffffff;
   box-shadow: 0 0 0 1px #b8b8c8;
 }
-/* Pins: a 26 px circle in a 44 px target, placed by percent (the box is left-to-right). */
+/* Pins: a 26 px circle (the pin itself, dark blue with white digits: 10:1)
+   grown to a 44 px target by its ::before; placed by percent in a
+   left-to-right box. */
 .qf-pins {
   position: absolute;
   inset: 0;
@@ -72,42 +74,43 @@
 .qf-pin {
   position: absolute;
   transform: translate(-50%, -50%);
-  min-width: 44px;
-  min-height: 44px;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: #ffffff;
-  font: inherit;
-  font-weight: 700;
-  font-size: 14px;
-  cursor: pointer;
-}
-.qf-pin > span:first-child {
   width: 26px;
   height: 26px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: #1d3b8f; /* white digits: 10:1 */
+  background: #1d3b8f;
+  color: #ffffff;
+  border: 0;
+  padding: 0;
   box-shadow: 0 0 0 2px #ffffff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.qf-pin::before {
+  content: "";
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  bottom: -9px;
+  left: -9px;
+  border-radius: 50%;
 }
 .qf-pin.static {
   cursor: default;
   pointer-events: none;
 }
-.qf-pin.picked > span:first-child,
-.qf-pin:focus-visible > span:first-child {
+.qf-pin.picked,
+.qf-pin:focus-visible {
+  outline: none;
   box-shadow:
     0 0 0 2px #ffffff,
     0 0 0 5px #f2a900;
 }
-.qf-pin:focus-visible {
-  outline: none;
-}
-.qf-pin.asked > span:first-child {
+.qf-pin.asked {
   box-shadow:
     0 0 0 2px #ffffff,
     0 0 0 5px #c41e23;
@@ -264,15 +267,4 @@
 }
 .qt-order h3 {
   margin: 0;
-}
-
-/* ── a staged case ── */
-.pq-sofar summary {
-  cursor: pointer;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-}
-.pq-sofar[open] .pq-vignette {
-  color: var(--muted);
 }

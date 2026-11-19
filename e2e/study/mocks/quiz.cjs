@@ -134,7 +134,7 @@ module.exports = {
         return Math.min(preset.length, q.n_wanted);
       }
       const pool = P.questions
-        .filter((x) => x.group_id === q.group_id && q.lecture_ids.includes(x.lecture_id ?? x.ref_lecture) && !x.retired_at && x.has_key && (q.kinds === "all" || x.kind === q.kinds))
+        .filter((x) => x.group_id === q.group_id && q.lecture_ids.includes(x.lecture_id ?? x.ref_lecture) && !x.retired_at && x.has_key && (x.form ?? "one") === "one" && (x.step ?? 1) === 1 && (q.kinds === "all" || x.kind === q.kinds))
         .filter((x) => q.part_from === null || q.part_from === undefined || (x.part_idx ?? -1) >= q.part_from && (x.part_idx ?? -1) <= q.part_to)
         .map((x) => ({
           x,
@@ -331,7 +331,7 @@ module.exports = {
       case "study_quiz_pool": {
         if (!isMember(body.p_group)) return json([]);
         const by = new Map();
-        for (const x of P.questions.filter((y) => y.group_id === body.p_group && !y.retired_at && y.has_key && (y.lecture_id ?? y.ref_lecture))) {
+        for (const x of P.questions.filter((y) => y.group_id === body.p_group && !y.retired_at && y.has_key && (y.form ?? "one") === "one" && (y.step ?? 1) === 1 && (y.lecture_id ?? y.ref_lecture))) {
           const k = x.lecture_id ?? x.ref_lecture;
           const row = by.get(k) ?? { lecture_id: k, mcq: 0, cases: 0 };
           if (x.kind === "mcq") row.mcq += 1;

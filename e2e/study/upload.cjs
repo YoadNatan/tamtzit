@@ -94,7 +94,15 @@ const IPHONE = `(() => { for (const [o, k] of [
         const lec = mock.db.lectures[0];
         const files = mock.db.files.size;
         if (!lec || !files) throw new Error("not saved");
-        results.push(`ok ${label}: read and saved, ${lec.slides.length} slides, ${files} files`);
+        // Question types (set "prod"): slide 3's picture is stored with its 5 labels' geometry (pptxGeo.ts).
+        let geoNote = "";
+        if (flagSetOf().qtypes && path.extname(file) === ".pptx") {
+          const fig = lec.slides.find((s) => s.n === 3)?.figures?.[0];
+          const n = fig?.geo?.labels?.length ?? 0;
+          if (n !== 5) throw new Error(`slide 3's figure has ${n} labels, not 5`);
+          geoNote = ", slide 3's picture with its 5 labels";
+        }
+        results.push(`ok ${label}: read and saved, ${lec.slides.length} slides, ${files} files${geoNote}`);
       } catch (e) {
         failed++;
         results.push(`FAIL ${label}: ${e.message}${errors.length ? ` (${errors.slice(0, 2).join(" | ")})` : ""}`);

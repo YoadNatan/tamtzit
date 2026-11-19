@@ -103,7 +103,9 @@ module.exports = {
     const followers = (mid, u) => [...M.presence.entries()].filter(([k, p]) => k.startsWith(`${mid}:`) && !k.endsWith(`:${u}`) && p.last > now() - FOLLOW).length;
     const questionOf = (id) => P.questions.find((q) => q.id === id);
     const keyOf = (id) => P.keys.get(id) ?? null;
-    const usable = (q) => q && !q.retired_at && !q.stale_at && !q.hidden_at && q.has_key !== false && keyOf(q.id);
+    // Section M 3: text questions with one answer only (no picture, no set, no later step).
+    const usable = (q) =>
+      q && !q.retired_at && !q.stale_at && !q.hidden_at && q.has_key !== false && keyOf(q.id) && (q.form ?? "one") === "one" && (q.step ?? 1) === 1 && !["label", "image"].includes(q.style ?? "");
     const quizzesOf = (mid) => Z.quizzes.filter((z) => z.meeting_id === mid);
     const over = (m) =>
       !m.cancelled_at && (m.day < today() || (m.started_at && Date.parse(m.started_at) < now() - 4 * 3_600_000) || quizzesOf(m.id).some((z) => z.preset === "end" && z.state === "ended"));
