@@ -34,7 +34,7 @@ const now = () => new Date().toISOString();
 const uuid = (n) => `${String(n).padStart(8, "0")}-0000-4000-8000-${String(n).padStart(12, "0")}`;
 /** A database with every section loaded, at the versions the approved features
  *  need (spec §2.11, §12.2.2): the SQL always runs before a release's flags. */
-const SCHEMA_ALL = { F: 1, A: 1, W: 2, Q: 3, Z: 3, C: 3, K: 2, P: 2, M: 3, N: 1, V: 1, U: 3, J: 1, H: 3, B: 1, G: 2, E: 1, T: 3, X: 1, S: 1 };
+const SCHEMA_ALL = { F: 1, A: 1, W: 2, Q: 3, Z: 3, C: 3, K: 2, P: 2, M: 3, N: 1, V: 1, U: 3, J: 1, H: 3, B: 1, G: 2, E: 1, T: 3, X: 1, S: 2 };
 /** The registry this branch's SQL writes (each section's last statement in
  *  supabase/study-schema.sql): what production's study_schema() answers once
  *  the release's SQL has run. Builds with every flag off and release 1's
@@ -53,7 +53,7 @@ const SCHEMA_SQL = sqlSchema();
  *  "j" (wave 4's J: the SQL's J 1), "m" (wave 4's M: the SQL's M 1) and "w4"
  *  (all of wave 4), every section for the sets that turn on what is not
  *  built yet. */
-const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1"];
+const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2"];
 const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_ALL) });
 /** The flag set a build was made with, as the e2e scripts name it: "off", "rel1"
  *  (release 1: VITE_STUDY_QUESTIONS, VITE_STUDY_PRACTICE and VITE_STUDY_CARDS;
@@ -101,16 +101,20 @@ const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_A
  *  which no script tells apart), against this branch's SQL;
  *  "s1" (courses, docs/study/sources.md phase 1: "prod" with
  *  VITE_STUDY_COURSES, against this branch's SQL, which has section S at 1);
+ *  "s2" (past exams, sources.md phase 2: "s1" with VITE_STUDY_EXAMS, which
+ *  needs section S at 2; the server's part only so far, so the exams' tab
+ *  still shows its "soon" screen);
  *  E2E_ANCHOR=1 says a release's build has
  *  VITE_STUDY_ANCHOR too (package N: a paragraph's comments show in its chip
  *  row, not the dot). `any`: a package's flag is on, so the "תרגול" tab shows
  *  (questions or cards); the others name the features the scripts look for. */
 function flagSetOf(name) {
   const set = name || process.env.E2E_FLAGS || "off";
-  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1"].includes(set))
-    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1, prod or s1`);
+  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2"].includes(set))
+    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1, prod, s1 or s2`);
   if (set === "guide1") return { ...flagSetOf("rel1"), set, guide: true };
   if (set === "s1") return { ...flagSetOf("prod"), set, courses: true };
+  if (set === "s2") return { ...flagSetOf("s1"), set, exams: true };
   const every = set === "all" || set === "notoday";
   const w5x = set === "w5x" || set === "guide" || set === "prod";
   const h5 = set === "h5" || w5x;

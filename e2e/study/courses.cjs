@@ -29,7 +29,7 @@
 //      why. A question no paragraph matches: its words, and the question
 //      stays in the field. The batch from the library with no course: the
 //      tap marks the field and says why under it.
-// Without VITE_STUDY_COURSES (every set but "s1" and "all") it checks that
+// Without VITE_STUDY_COURSES (every set but "s1", "s2" and "all") it checks that
 // nothing of it shows: no course link, ?v=course → the library, the batch →
 // one lecture's upload, ?v=ask&c= → the library's question, no call of
 // section S.
@@ -177,7 +177,9 @@ const israelDay = (plus) => {
 
       /* ── 2. the course page and its sheet ── */
       await page.getByRole("heading", { level: 1, name: COURSE }).waitFor({ timeout: 15000 });
-      expect(norm(await page.locator(".ph-sub").first().innerText()) === "2 הרצאות", "the head: 2 הרצאות");
+      // With VITE_STUDY_EXAMS ("s2") the head counts the course's past exams too.
+      const head = flags.exams ? "2 הרצאות · 0 מבחנים קודמים" : "2 הרצאות";
+      expect(norm(await page.locator(".ph-sub").first().innerText()) === head, `the head: ${head}`);
       expect(norm(await page.locator(".c-exam").innerText()).includes("עוד אין תאריך"), "no exam date yet");
       const free = page.locator(".c-free");
       expect(norm(await free.innerText()) === "לתרגל מה שכבר יש · בחינם (5)", "לתרגל מה שכבר יש · בחינם (5)");
