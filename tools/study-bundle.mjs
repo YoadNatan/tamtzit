@@ -29,7 +29,7 @@ const flagsOff = process.argv.includes("--flags") && process.argv[process.argv.i
 const FLAGS = [
   "QUESTIONS", "PRACTICE", "QUIZ", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "ASK", "RECORDINGS", "PDF", "ACCOUNT",
   "PROGRESS", "MARATHONS", "EXAMS", "MEETING", "ANCHOR", "VAR", "WALL", "TODAY", "GUESS", "NEEDS_ME", "PULSE",
-  "MUSEUM", "BOSS", "GROUP_PLAN", "TRAPS", "BLANK_TABLE", "QUIZ_ROUNDS", "EVE", "GUIDE", "QTYPES",
+  "MUSEUM", "BOSS", "GROUP_PLAN", "TRAPS", "BLANK_TABLE", "QUIZ_ROUNDS", "EVE", "GUIDE", "QTYPES", "COURSES",
 ];
 for (const f of FLAGS) {
   if (flagsOff) delete process.env[`VITE_STUDY_${f}`];

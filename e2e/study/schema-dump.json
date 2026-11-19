@@ -487,6 +487,63 @@
     "required": 2
    }
   ],
+  "study_course_merge": [
+   {
+    "args": [
+     "p_from",
+     "p_into"
+    ],
+    "required": 2
+   }
+  ],
+  "study_course_overview": [
+   {
+    "args": [
+     "p_course"
+    ],
+    "required": 1
+   }
+  ],
+  "study_course_rename": [
+   {
+    "args": [
+     "p_course",
+     "p_name"
+    ],
+    "required": 2
+   }
+  ],
+  "study_course_set": [
+   {
+    "args": [
+     "p_course",
+     "p_exam_date",
+     "p_minutes",
+     "p_n"
+    ],
+    "required": 4
+   }
+  ],
+  "study_course_upsert": [
+   {
+    "args": [
+     "p_group",
+     "p_name",
+     "p_exam_date",
+     "p_minutes",
+     "p_n"
+    ],
+    "required": 2
+   }
+  ],
+  "study_courses_of": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
   "study_create_group": [
    {
     "args": [
@@ -2281,6 +2338,16 @@
     "required": 3
    }
   ],
+  "study_request_plan": [
+   {
+    "args": [
+     "p_request",
+     "p_plan",
+     "p_key"
+    ],
+    "required": 2
+   }
+  ],
   "study_request_progress": [
    {
     "args": [
@@ -2801,6 +2868,18 @@
    "resolved_by",
    "resolved_at"
   ],
+  "study_courses": [
+   "id",
+   "group_id",
+   "name",
+   "name_key",
+   "exam_date",
+   "exam_minutes",
+   "exam_n",
+   "created_by",
+   "created_at",
+   "deleted_at"
+  ],
   "study_dispute_backs": [
    "dispute_id",
    "user_id",
@@ -3319,7 +3398,8 @@
    "focus",
    "points",
    "created_by",
-   "created_at"
+   "created_at",
+   "plan_id"
   ],
   "study_questions": [
    "id",
@@ -3707,6 +3787,11 @@
     "resolved"
    ],
    "delete": true
+  },
+  "study_courses": {
+   "insert": [],
+   "update": [],
+   "delete": false
   },
   "study_dispute_backs": {
    "insert": [],

@@ -81,6 +81,22 @@ was, so that new copy stays plain.
 | The question count chosen by number | משלי | מספר אחר (״משלי״ stays the wall's button for writing one's own) |
 | The app tour | סיור באפליקציה | סיור קצר באפליקציה (one name: the offer, שלי, help and the running tour) |
 
+### New words: courses (`sources.md`, phase 1)
+
+Plain words for what phase 1 adds; screens and the server's own lines use
+these and no other.
+
+| Concept | Words |
+|---|---|
+| A course (the lectures' shared course text, now with its own page) | קורס; its page: עמוד הקורס |
+| Asking about every lecture of a course | לשאול על כל הקורס |
+| The cut the answer read (never "context", never "retrieval") | נבחרו 12 מתוך 340 פסקאות |
+| A citation in that answer | [הרצאה 7 · ש׳ 14] (the lecture's number in the course, then the slide) |
+| Several files picked at once | העלאה של כמה קבצים |
+| A summary that does not fit the month's budget | יחכה לחודש הבא (several: 3 סיכומים יחכו לחודש הבא) |
+| One round of questions over several lectures | סבב על כמה הרצאות (עד 5 הרצאות, לפחות 4 שאלות מכל הרצאה) |
+| Two courses that are one | לאחד קורסים (never "למזג") |
+
 ### Kept, on purpose
 
 - **״על בטוח״, ״נראה לי״, ״ניחוש״** (how sure an answer is): plain Hebrew, and Yoad's own
