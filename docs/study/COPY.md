@@ -114,6 +114,27 @@ these and no other.
 | A file of a batch, uploaded | ✓ הועלה (and while it waits: מחכה; while it goes: עולה…, its line: שומרים שקפים 12 מתוך 20, then השקפים נשמרו) |
 | A file's line in the batch | 20 שקפים (and · PDF for a PDF; never "הרצאה" or "PowerPoint" while every file is a lecture) |
 
+### New words: past exams (`sources.md`, phase 2)
+
+The server's part is built (phase 2, part A); the screens use these words.
+`failText.ts` has the codes' words in the area "exam".
+
+| Concept | Words |
+|---|---|
+| An exam of an earlier year, uploaded by the group | מבחן קודם; several: מבחנים קודמים |
+| An exam practised against one clock | סימולציה (never "מבחן לתרגול" or "מבחן לדוגמה") |
+| A key the app solved and no member checked | תשובה מוצעת · לא נבדקה (never "מאומתת") |
+| An item left out of a score (no key, or a suggested key it is not sure of) | לא נספרה |
+| An item that needs a look (badly read, or no key) | לבדיקה |
+| A key a member marked | סומנה ע״י נועה: ג׳ · לבטל |
+| Copying an exam's questions | להעתיק את השאלות; while it runs: מעתיקים עמודים 9–12 מתוך 28… |
+| The upload's button | להעלות ולהעתיק את השאלות · כ-$1.40 (the usual price; no sentence about where the exam goes, decision 1) |
+| Pages that were not read | עמודים 13–16 לא נקראו · לנסות שוב; one page: לקרוא שוב את עמוד 7 |
+| What was found | נמצאו 98 שאלות · 91 עם תשובה · 7 לבדיקה; open questions: 2 שאלות פתוחות דולגו. |
+| A badly read item | לא נקראה טוב · לתקן טקסט |
+| Leaving an exam out of the course's picture | לא לכלול בחישוב הנושאים |
+| The limit of a day | אפשר להתחיל עד 3 מבחנים ביום. מתחדש בחצות. |
+
 ### Kept, on purpose
 
 - **״על בטוח״, ״נראה לי״, ״ניחוש״** (how sure an answer is): plain Hebrew, and Yoad's own
