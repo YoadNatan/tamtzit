@@ -159,7 +159,7 @@
       "prompts": [],
       "answer": 2,
       "seq": [],
-      "marked_by": "circle",
+      "marked_by": "printed",
       "figure": {
        "page": 0,
        "x": 0,
@@ -211,7 +211,7 @@
       "prompts": [],
       "answer": 1,
       "seq": [],
-      "marked_by": "bold",
+      "marked_by": "printed",
       "figure": {
        "page": 0,
        "x": 0,
@@ -304,7 +304,7 @@
        1,
        0
       ],
-      "marked_by": "circle",
+      "marked_by": "printed",
       "figure": {
        "page": 0,
        "x": 0,
@@ -450,7 +450,7 @@
       "prompts": [],
       "answer": 0,
       "seq": [],
-      "marked_by": "circle",
+      "marked_by": "printed",
       "figure": {
        "page": 0,
        "x": 0,
@@ -532,41 +532,49 @@
    "12 ד"
   ],
   "reply": {
+   "versions": [],
    "keys": [
     {
      "no": 1,
      "answer": 2,
-     "seq": []
+     "seq": [],
+     "state": ""
     },
     {
      "no": 2,
      "answer": 0,
-     "seq": []
+     "seq": [],
+     "state": ""
     },
     {
      "no": 4,
      "answer": 3,
-     "seq": []
+     "seq": [],
+     "state": ""
     },
     {
      "no": 8,
      "answer": 1,
-     "seq": []
+     "seq": [],
+     "state": ""
     },
     {
      "no": 11,
      "answer": 0,
-     "seq": []
+     "seq": [],
+     "state": ""
     },
     {
      "no": 12,
      "answer": 3,
-     "seq": []
+     "seq": [],
+     "state": ""
     },
     {
      "no": 40,
      "answer": 1,
-     "seq": []
+     "seq": [],
+     "state": ""
     }
    ]
   }
@@ -598,6 +606,22 @@
     },
     {
      "no": 3,
+     "answer": 0,
+     "seq": [],
+     "conf": 3
+    },
+    {
+     "no": 5,
+     "answer": -1,
+     "seq": [
+      1,
+      1,
+      0
+     ],
+     "conf": 2
+    },
+    {
+     "no": 10,
      "answer": 0,
      "seq": [],
      "conf": 3

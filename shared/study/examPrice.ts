@@ -10,29 +10,33 @@ import { SUMMARY_PRICES } from "./batch";
  * reservation: each unit reserves its own worst case when it runs. */
 
 /** The read, key and solve prompts' lengths in characters (the system prompts). */
-export const EXAM_PROMPT_CHARS = { read: 2274, key: 799, solve: 861 } as const;
+export const EXAM_PROMPT_CHARS = { read: 3421, key: 1299, solve: 861 } as const;
 /** Pages are stored at most 1,500 px on the long side (the phone's pdf.ts and images.ts), A4 shaped. */
 export const EXAM_PAGE_SIDE = 1500;
-/** A read unit's pages (B6.2): 4, each with the page after it as context. */
+/** A read unit's pages (B6.2): 4, with the page after them and the page before them as context. */
 export const READ_PAGES = 4;
-/** What a typical unit writes, and the questions a page holds on average. */
+/** What a typical unit writes (a solve unit's thinking included), and the questions a page holds on average. */
 const TYPICAL_READ_OUT = 6_000;
-const TYPICAL_SOLVE_OUT = 1_500;
+const TYPICAL_SOLVE_OUT = 5_000;
 const ITEMS_PER_PAGE = 3.3;
 const CHARS_PER_TOKEN = 2.5;
 
 /** A picture's input tokens: width × height / 750 (budget.ts's imageTokens). */
 const pictureTokens = (w: number, h: number) => Math.ceil((w * h) / 750);
-const PAGE_TOKENS = pictureTokens(EXAM_PAGE_SIDE, Math.round(EXAM_PAGE_SIDE * 1.414));
+/** An A4 page 1,500 px tall: 1,061 × 1,500. */
+const PAGE_TOKENS = pictureTokens(Math.round(EXAM_PAGE_SIDE / 1.414), EXAM_PAGE_SIDE);
 
-/** One call's usual price: its input at the cache-write rate (as estimateUsd), its output. */
+/** One call's usual price: its input at the plain input rate (the systems are
+ *  too short to be cached, so nothing is written to the cache), its output.
+ *  Each unit's own reservation (estimateUsd) is the worst case, not this. */
 function callUsd(inputChars: number, outTokens: number, imageTokens = 0): number {
   const input = Math.max(0, inputChars) / CHARS_PER_TOKEN + Math.max(0, imageTokens);
-  return (input * Math.max(SUMMARY_PRICES.in, SUMMARY_PRICES.w5m) + Math.max(0, outTokens) * SUMMARY_PRICES.out) / 1_000_000;
+  return (input * SUMMARY_PRICES.in + Math.max(0, outTokens) * SUMMARY_PRICES.out) / 1_000_000;
 }
 
 /** The read units of an exam's pages, as section S queues them: 4 pages
- *  each (the key sheet's pages apart), each with the page after it as context. */
+ *  each (the key sheet's pages apart), each with the page after it as
+ *  context (and, after the first, the page before it). */
 export function readUnits(pages: readonly number[]): Array<{ pages: number[]; next: number | null }> {
   const sorted = [...pages].sort((a, b) => a - b);
   const out: Array<{ pages: number[]; next: number | null }> = [];
@@ -49,7 +53,7 @@ export function examPriceUsd(o: { pages: number; keyPages?: number; keySource?: 
   if (!pages) return 0;
   let usd = 0;
   for (const u of readUnits(Array.from({ length: pages }, (_, i) => i + 1))) {
-    const seen = u.pages.length + (u.next !== null ? 1 : 0);
+    const seen = u.pages.length + (u.next !== null ? 1 : 0) + (u.pages[0] > 1 ? 1 : 0);
     usd += callUsd(prompts.read + 400, TYPICAL_READ_OUT, seen * PAGE_TOKENS);
   }
   if (keyPages) usd += callUsd(prompts.key + 100, 600, keyPages * PAGE_TOKENS);

@@ -634,7 +634,7 @@ export const ExamItem = z.object({
   prompts: z.array(z.string()).describe('Form "match": the items to match, in order; otherwise empty'),
   answer: z.number().int().describe('Form "one": the 0-based index of the option the pages mark as correct, or -1'),
   seq: z.array(z.number().int()).describe('Forms "tf" (1 or 0 per statement) and "match" (the option of each prompt), when marked; otherwise empty'),
-  marked_by: z.string().describe('"circle", "bold", "key_page" or "none"'),
+  marked_by: z.string().describe('"key_page", "printed", "handwritten" (a student\'s own marks) or "none"'),
   figure: ExamFigure.describe("The box of the picture the question needs, or page 0"),
   parse_conf: z.number().int().describe("3: every word clear; 2: a few words unsure; 1: the question may be wrong or incomplete"),
   page: z.number().int().describe("The page the question starts on"),
@@ -650,8 +650,12 @@ export const ExamKey = z.object({
   no: z.number().int().describe("The question's number"),
   answer: z.number().int().describe("The 0-based index of the option the key gives (א/A/1 = 0), or -1"),
   seq: z.array(z.number().int()).describe("A question keyed per statement or per prompt: its values in order; otherwise empty"),
+  state: z.string().describe('"cancelled" (the key says the question was cancelled), "several" (more than one answer accepted; answer is the first), or ""'),
 });
-export const ExamKeys = z.object({ keys: z.array(ExamKey) });
+export const ExamKeys = z.object({
+  versions: z.array(z.string()).describe("The exam versions the key gives separate keys for (נוסח א, נוסח ב...), or empty when it gives one key"),
+  keys: z.array(ExamKey),
+});
 export type ExamKey = z.infer<typeof ExamKey>;
 
 /** Solved keys of items that came without one (solve unit). */

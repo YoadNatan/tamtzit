@@ -90,6 +90,7 @@ function claimOf(j: Job): ExamClaim {
     exam: { id: EXAM, group_id: GROUP, title: "מועד א׳ 2025", key_source: "separate" },
     pages: j.pages.map(pageOf),
     next: j.next !== null ? pageOf(j.next) : null,
+    prev: j.kind === "read" && j.pages[0] > 1 ? pageOf(j.pages[0] - 1) : null,
     seen: [...items.keys()].sort((a, b) => a - b),
     items:
       j.kind === "solve"
@@ -166,18 +167,32 @@ const rest = createServer(async (req, res) => {
       if (!j) return send(res, 400, pgError("lease lost"));
       let saved = 0;
       let updated = 0;
+      let repeats = 0;
+      const len = (x: SaveItem) => x.vignette.length + x.question.length + x.options.join("").length;
       for (const it of body.p_items as SaveItem[]) {
         const had = items.get(it.no);
+        // As section S: a number from another page is the same question over two pages (the longer copy stays) or a repeat.
+        if (had && had.page !== it.page) {
+          if (Math.abs(had.page - it.page) !== 1) {
+            repeats += 1;
+            continue;
+          }
+          if (len(it) <= len(had)) {
+            updated += 1;
+            continue;
+          }
+        }
         const row: Stored = { ...it, id: had?.id ?? `q-${it.no}`, key: had?.key ?? { answer: null, seq: null, origin: null, conf: null } };
         if (had) updated += 1;
         else saved += 1;
-        if (row.key.origin !== "sheet" && row.key.origin !== "member" && (it.answer >= 0 || it.seq.length)) putKey(row, it, "exam", null);
+        if ((row.key.origin === null || row.key.origin === "exam") && (it.answer >= 0 || it.seq.length))
+          putKey(row, it, it.marked_by === "handwritten" ? "solved" : "exam", it.marked_by === "handwritten" ? 2 : null);
         const s = sheet.get(it.no);
         if (s) putKey(row, s, "sheet", null);
         items.set(it.no, row);
       }
       skipped += body.p_skipped;
-      return send(res, 200, { saved, updated, skipped: 0 });
+      return send(res, 200, { saved, updated, skipped: 0, repeats });
     }
     case "/rest/v1/rpc/study_exam_save_keys": {
       const j = held(body);
@@ -206,14 +221,14 @@ const rest = createServer(async (req, res) => {
 });
 
 /* ── Anthropic: the fixture's replies, chosen by the unit's system and pages ── */
-type Mode = "ok" | "hang" | "refusal" | "garbled";
+type Mode = "ok" | "hang" | "refusal" | "garbled" | "versions";
 let mode: Mode = "ok";
 let ANTHROPIC = "";
 const usage = { input_tokens: 9000, cache_creation_input_tokens: 2000, cache_read_input_tokens: 0, output_tokens: 1 };
 const ev = (e: object & { type: string }) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
 function replyFor(body: any): unknown {
   const system = body.system?.[0]?.text;
-  if (system === EXAM_KEY_SYSTEM) return FIX.key.reply;
+  if (system === EXAM_KEY_SYSTEM) return mode === "versions" ? { versions: ["א", "ב"], keys: [] } : FIX.key.reply;
   if (system === EXAM_SOLVE_SYSTEM) return FIX.solve.reply;
   const lead = String(body.messages?.[0]?.content?.[0]?.text ?? "");
   const first = Number(/start on pages? (\d+)/.exec(lead)?.[1]);
@@ -302,10 +317,10 @@ test("read units: 4 pages each, the next page as context, the last unit with non
   assert.deepEqual(readUnits([3, 1, 2, 9, 7]), [{ pages: [1, 2, 3, 7], next: 9 }, { pages: [9], next: null }], "in page order, gaps kept");
 });
 
-test("toSaveItems: whole items in their order; a question that starts on the context page or was saved already is skipped; bad keys and boxes dropped", () => {
+test("toSaveItems: whole items in their order; a question that starts on the context page or was saved already from another unit's pages is skipped; bad keys and boxes dropped", () => {
   const u2 = FIX.units[1];
   const { items: got, rejected } = toSaveItems(u2.reply.questions, { pages: u2.pages, next: u2.next, seen: [1, 2, 3, 4] });
-  assert.deepEqual(got.map((i) => i.no), [5, 6, 7, 8], "the end of question 4 at the top of page 5 is not copied again");
+  assert.deepEqual(got.map((i) => `${i.no}:${i.page}`), ["4:5", "5:5", "6:6", "7:7", "8:8"], "the end of question 4 at the top of page 5 goes on: section S keeps the longer copy");
   assert.equal(rejected, 0);
   const tf = got.find((i) => i.no === 5)!;
   assert.deepEqual([tf.form, tf.seq, tf.answer], ["tf", [1, 1, 0], -1]);
@@ -331,6 +346,18 @@ test("toSaveItems: whole items in their order; a question that starts on the con
   assert.deepEqual(bad.items.map((i) => [i.no, i.answer, i.figure, i.seq.length]), [[32, -1, "", 0], [35, -1, "", 0]], "an answer out of range and a box on a page not shown are dropped; the next unit's item 33 is left to it");
   const again = toSaveItems([{ ...first, no: 1, question: first.question + " (תוקן)" } as never], { pages: [1], next: 2, seen: [1, 2, 3], reread: true });
   assert.equal(again.items.length, 1, "a page read again replaces its numbers");
+  // Marks only when the uploader said the answers are marked in the exam; a student's own marks say so.
+  const raw0 = FIX.units[0].reply.questions;
+  const none = toSaveItems(raw0, { pages: [1, 2, 3, 4], next: 5, seen: [], keySource: "none" }).items;
+  assert.ok(none.every((i) => i.answer === -1 && i.seq.length === 0), "no answers in an exam without them");
+  const marked = toSaveItems([{ ...raw0[0], marked_by: "handwritten" }, { ...raw0[2], marked_by: "circle" }], { pages: [1, 2, 3, 4], next: 5, seen: [], keySource: "marked" }).items;
+  assert.deepEqual(marked.map((i) => [i.answer, i.marked_by]), [[2, "handwritten"], [1, "none"]]);
+  // The page before as context: a shared case's picture may sit on it. One number on two far pages: both go on (a repeat, counted by section S).
+  const ctx = toSaveItems(
+    [{ ...raw0[0], no: 13, page: 6, figure: { page: 4, x: 100, y: 100, w: 500, h: 300 } }, { ...raw0[0], no: 1, page: 7 }] as never,
+    { pages: [5, 6, 7, 8], next: 9, prev: 4, seen: [1] },
+  ).items;
+  assert.deepEqual(ctx.map((i) => `${i.no}:${i.page}:${i.figure}`), ["1:7:", "13:6:pg:4:100,100,500,300"]);
 });
 
 test("toSheetKeys and toSolvedKeys: by number, fitting each item's form, with a confidence", () => {
@@ -380,12 +407,22 @@ test("the read request: the same cached system for every exam, no lecture list, 
     assert.ok(EXAM_READ_SYSTEM.includes(rule), rule);
   }
   const texts = call.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text);
-  assert.equal(texts[0], "Copy the questions that start on pages 1-4. Page 5 follows them as context only.\nAlready copied (skip them): 1, 2.");
+  assert.equal(
+    texts[0],
+    "Copy the questions that start on pages 1-4. Page 5 follows them as context only.\nThe uploader says the correct answers are marked in this exam.\nAlready copied (skip them): 1, 2.",
+  );
   assert.ok(texts[1].startsWith("Page 1. Its extracted lines, a hint only:\nעמוד 1 מתוך 12"));
   assert.ok(texts[5].startsWith("Page 5 (context only: finish a question that continues here; copy nothing that starts here)"));
   const images = call.content.filter((b) => b.type === "image") as Array<{ source: { url: string } }>;
   assert.deepEqual(images.map((i) => i.source.url.split("?")[0].slice(-7)), ["/p1.jpg", "/p2.jpg", "/p3.jpg", "/p4.jpg", "/p5.jpg"]);
   assert.equal(call.imageTokens, 5 * Math.ceil((1500 * 2121) / 750));
+  // The page before as context; an exam without answers says so in the user turn (the system stays the same).
+  const mid = unitCall({ ...job, pages: [5, 6, 7, 8].map(pageOf), next: pageOf(9), prev: pageOf(4), exam: { ...job.exam, key_source: "none" } })!;
+  const midTexts = mid.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text);
+  assert.ok(midTexts[0].includes("Page 4 comes before them as context only.") && midTexts[0].includes("no answers marked"), midTexts[0]);
+  assert.ok(midTexts[1].startsWith("Page 4 (context only: copy nothing from it but a shared case"));
+  assert.equal(mid.content.filter((b) => b.type === "image").length, 6);
+  assert.equal(mid.system, EXAM_READ_SYSTEM);
   // A scan: no lines, the same pictures.
   scan = true;
   const s = unitCall({ ...job, pages: [1, 2, 3, 4].map(pageOf), next: pageOf(5) })!;
@@ -425,7 +462,8 @@ async function wholeExam(label: string) {
     const k = items.get(n)!.key;
     return `${n}:${k.answer ?? k.seq?.join("") ?? "-"}:${k.origin}${k.conf ? k.conf : ""}`;
   });
-  assert.deepEqual(keys, ["1:2:sheet", "2:0:sheet", "3:1:exam", "4:3:sheet", "5:110:exam", "6:012:solved3", "7:0:solved2", "8:1:sheet", "9:1:solved1", "10:0:exam", "11:0:sheet", "12:3:sheet"], label);
+  // A key sheet apart: the marks on the exam's pages are not its key (a student's copy); the items the sheet lacks are solved.
+  assert.deepEqual(keys, ["1:2:sheet", "2:0:sheet", "3:0:solved3", "4:3:sheet", "5:110:solved2", "6:012:solved3", "7:0:solved2", "8:1:sheet", "9:1:solved1", "10:0:solved3", "11:0:sheet", "12:3:sheet"], label);
   assert.equal(skipped, FIX.open_questions, `${label}: the open questions skipped, counted`);
   // One reservation per unit (kind exam, ref unit, no daily check), settled once, finished with its cost.
   const reserves = rpcs("study_reserve");
@@ -466,7 +504,8 @@ test("a 12-page text PDF: the key sheet, three read units and a solve unit yield
   assert.ok(lead.includes("Already copied (skip them): 1, 2, 3, 4."), lead);
   assert.ok(read2.body.messages[0].content.some((b: any) => b.type === "text" && b.text.includes("extracted lines") && b.text.includes("עמוד 5 מתוך 12")));
   const solve = calls.find((c) => c.body.system[0].text === EXAM_SOLVE_SYSTEM)!;
-  assert.deepEqual([...solve.body.messages[0].content[0].text.matchAll(/Question (\d+) \(form (\w+)\)/g)].map((m) => `${m[1]}${m[2]}`), ["6match", "7one", "9one"], "only the items left without a key");
+  assert.deepEqual([...solve.body.messages[0].content[0].text.matchAll(/Question (\d+) \(form (\w+)\)/g)].map((m) => `${m[1]}${m[2]}`), ["3one", "5tf", "6match", "7one", "9one", "10one"], "only the items left without a key");
+  assert.ok(lead.includes("Page 4 comes before them as context only.") && lead.includes("separate key sheet"), lead);
   assert.equal(solve.body.output_config.effort, "medium");
 });
 
@@ -478,6 +517,15 @@ test("a 12-photo scan: no text lines anywhere, the same pictures, the same items
     assert.ok(content.every((b) => b.type !== "text" || !b.text!.includes("extracted lines")));
     assert.ok(content.some((b) => b.type === "image"));
   }
+});
+
+test("a key sheet with a column per version keys nothing: the unit fails as versions (no retry), and the items are solved", async () => {
+  jobs = [{ id: "j-key", kind: "key", pages: [13], next: null, status: "pending" }];
+  mode = "versions";
+  assert.equal((await kick()).status, 202);
+  await drain();
+  assert.deepEqual([jobs[0].status, jobs[0].error], ["failed", "versions"]);
+  assert.equal(rpcs("study_exam_save_keys").length, 0);
 });
 
 test("a timeout keeps what arrived and fails the unit as timeout (section S retries it once); a refusal, an unreadable answer", async () => {

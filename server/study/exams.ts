@@ -24,11 +24,15 @@ import { figureOk } from "./writer.js";
  * exam_read, ops/practice.ts). Section S queues units of work in
  * study_private.exam_jobs and kicks /api/study/work {exam}; this module runs
  * one claimed unit:
- *   read   up to 4 pages as pictures (their lines a hint) and the next page as
+ *   read   up to 4 pages as pictures (their lines a hint), the next page as
  *          context only, so a question split over two pages is copied whole
- *          by the unit it starts in; the numbers already saved are skipped;
- *          saved by number (an upsert: a unit read again changes the same rows)
- *   key    a key sheet uploaded apart, merged by number ('sheet')
+ *          by the unit it starts in, and the page before as context for a
+ *          case shared with the questions on its pages; the numbers already
+ *          saved are skipped; saved by number (an upsert: a unit read again
+ *          changes the same rows; a number another page had is a repeat);
+ *          marks count only when the uploader said they are in the exam
+ *   key    a key sheet uploaded apart, merged by number ('sheet'; "בוטלה"
+ *          retires the item; a sheet of several versions keys nothing)
  *   solve  up to 20 items left without a key, answered with a confidence
  *          ('solved', "תשובה מוצעת · לא נבדקה"; under 3 it counts in no score)
  * Each unit reserves its worst case (kind "exam", ref "unit", no daily check:
@@ -42,7 +46,8 @@ import { figureOk } from "./writer.js";
 export const READ_PAGES = 4;
 const READ_TOKENS = 12_000;
 const KEY_TOKENS = 4_000;
-const SOLVE_TOKENS = 8_000;
+/** Thinking counts in max_tokens: 20 medical questions think more than they write. */
+const SOLVE_TOKENS = 16_000;
 /** A unit stops at 200 s (B6.2), well inside the 330-second lease. */
 export const UNIT_STOP_MS = 200_000;
 /** Exam pages are stored at most 1,500 px on the long side (the phone's pdf.ts and images.ts). */
@@ -62,6 +67,8 @@ export type ExamClaim = {
   exam: { id: string; group_id: string; title: string; key_source: string };
   pages: ExamPage[];
   next: ExamPage | null;
+  /** The page before the unit's first (a read unit), context for a shared case. */
+  prev?: ExamPage | null;
   seen: number[];
   items: SolveInput[] | null;
 };
@@ -76,11 +83,13 @@ export type SaveItem = {
   prompts: string[];
   answer: number;
   seq: number[];
+  /** "handwritten": a student's own mark, saved as a suggested answer (section S). */
+  marked_by: "key_page" | "printed" | "handwritten" | "none";
   figure: string;
   parse_conf: number;
   page: number;
 };
-export type SaveKey = { no: number; answer: number; seq: number[]; conf?: number };
+export type SaveKey = { no: number; answer: number; seq: number[]; conf?: number; state?: "cancelled" | "several" };
 export type UnitResult = { status: "done" | "failed"; error: string | null; saved: number; costUsd: number };
 
 const int = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
@@ -91,18 +100,22 @@ const tidy = (s: string) => s.replace(/\s+/g, " ").trim();
  *  question 5-600 characters; 2-6 options of 1-400 characters, in their
  *  printed order ("א+ב נכונות" stays where it is); a match needs 2-6
  *  prompts. A key that does not fit its item is dropped (the item stays,
- *  unkeyed); a figure box is kept only on a page the unit saw. An item that
- *  starts on the context page is the next unit's, and a number already saved
- *  is skipped unless the unit reads a page again (it then replaces it).
- *  Within the unit, a number copied twice keeps its longer copy. */
+ *  unkeyed), and so is every mark unless the uploader said the answers are
+ *  marked in the exam; a figure box is kept only on a page the unit saw. An
+ *  item that starts on the next page is the next unit's. A number already
+ *  saved is skipped unless it starts on the unit's own pages (section S
+ *  then keeps the longer copy of a question over two pages, or counts a
+ *  repeated number) or the unit reads a page again (it then replaces it).
+ *  Within the unit, a number copied twice from one page keeps its longer copy. */
 export function toSaveItems(
   raw: readonly ExamItem[],
-  unit: { pages: number[]; next: number | null; seen: readonly number[]; reread?: boolean },
+  unit: { pages: number[]; next: number | null; prev?: number | null; seen: readonly number[]; reread?: boolean; keySource?: string },
 ): { items: SaveItem[]; rejected: number } {
-  const byNo = new Map<number, SaveItem>();
+  const byNo = new Map<string, SaveItem>();
   let rejected = 0;
   const seen = new Set(unit.seen);
-  const onPage = new Set([...unit.pages, ...(unit.next !== null ? [unit.next] : [])]);
+  const marks = unit.keySource === undefined || unit.keySource === "marked";
+  const onPage = new Set([...unit.pages, ...(unit.next !== null ? [unit.next] : []), ...(unit.prev ? [unit.prev] : [])]);
   for (const r of raw) {
     const no = int(r.no);
     const question = tidy(r.question ?? "");
@@ -125,7 +138,8 @@ export function toSaveItems(
       continue;
     }
     if (startsOn !== null && unit.next !== null && startsOn === unit.next && !unit.pages.includes(startsOn)) continue; // the next unit's
-    if (seen.has(no) && !unit.reread) continue;
+    const own = startsOn !== null && unit.pages.includes(startsOn);
+    if (seen.has(no) && !unit.reread && !own) continue;
     const n = options.length;
     const ans = int(r.answer);
     const seq = (r.seq ?? []).map((v) => int(v));
@@ -146,20 +160,23 @@ export function toSaveItems(
       question,
       options,
       prompts,
-      answer: form === "one" && ans !== null && ans >= 0 && ans < n ? ans : -1,
-      seq: seqOk ? (seq as number[]) : [],
+      answer: marks && form === "one" && ans !== null && ans >= 0 && ans < n ? ans : -1,
+      seq: marks && seqOk ? (seq as number[]) : [],
+      marked_by: r.marked_by === "handwritten" || r.marked_by === "printed" || r.marked_by === "key_page" ? r.marked_by : "none",
       figure: box && box[2] > 0 && box[3] > 0 ? `pg:${fp}:${box.join(",")}` : "",
       parse_conf: clampInt(int(r.parse_conf) ?? 2, 1, 3),
-      page: startsOn !== null && unit.pages.includes(startsOn) ? startsOn : unit.pages[0],
+      page: own ? startsOn : unit.pages[0],
     };
-    const had = byNo.get(no);
-    if (!had || item.question.length + item.options.join("").length > had.question.length + had.options.join("").length) byNo.set(no, item);
+    const at = `${no}:${item.page}`;
+    const had = byNo.get(at);
+    if (!had || item.question.length + item.options.join("").length > had.question.length + had.options.join("").length) byNo.set(at, item);
   }
-  return { items: [...byNo.values()].sort((a, b) => a.no - b.no), rejected };
+  return { items: [...byNo.values()].sort((a, b) => a.no - b.no || a.page - b.page), rejected };
 }
 
 /** A key sheet's answers as they may be merged (pure): a number 1-500, and
- *  an option index 0-5 or a list of 2-6 values. */
+ *  an option index 0-5 or a list of 2-6 values; a cancelled question ("בוטלה")
+ *  with neither; several answers accepted: the first, marked "several". */
 export function toSheetKeys(raw: readonly ExamKey[]): SaveKey[] {
   const out = new Map<number, SaveKey>();
   for (const k of raw) {
@@ -167,7 +184,8 @@ export function toSheetKeys(raw: readonly ExamKey[]): SaveKey[] {
     const ans = int(k.answer);
     const seq = (k.seq ?? []).map((v) => int(v));
     if (no === null || no < 1 || no > 500) continue;
-    if (ans !== null && ans >= 0 && ans <= 5) out.set(no, { no, answer: ans, seq: [] });
+    if (k.state === "cancelled") out.set(no, { no, answer: -1, seq: [], state: "cancelled" });
+    else if (ans !== null && ans >= 0 && ans <= 5) out.set(no, { no, answer: ans, seq: [], ...(k.state === "several" ? { state: "several" as const } : {}) });
     else if (seq.length >= 2 && seq.length <= 6 && seq.every((v) => v !== null && v >= 0 && v <= 5)) out.set(no, { no, answer: -1, seq: seq as number[] });
   }
   return [...out.values()].sort((a, b) => a.no - b.no);
@@ -248,10 +266,16 @@ export function unitCall(c: ExamClaim): Call | null {
   let chars = 0;
   let tokens = 0;
   const lead =
-    c.kind === "read" ? examReadRequest({ pages: c.pages.map((p) => p.n), next: c.next?.n ?? null, seen: c.seen }) : examKeyRequest(c.pages.map((p) => p.n));
+    c.kind === "read"
+      ? examReadRequest({ pages: c.pages.map((p) => p.n), next: c.next?.n ?? null, prev: c.prev?.n ?? null, seen: c.seen, keySource: c.exam.key_source })
+      : examKeyRequest(c.pages.map((p) => p.n));
   content.push({ type: "text", text: lead });
   chars += lead.length;
-  const shown = [...c.pages.map((p) => ({ p, context: false })), ...(c.kind === "read" && c.next ? [{ p: c.next, context: true }] : [])];
+  const shown: Array<{ p: ExamPage; context: boolean | "before" }> = [
+    ...(c.kind === "read" && c.prev ? [{ p: c.prev, context: "before" as const }] : []),
+    ...c.pages.map((p) => ({ p, context: false })),
+    ...(c.kind === "read" && c.next ? [{ p: c.next, context: true }] : []),
+  ];
   for (const { p, context } of shown) {
     const img = picture(p);
     if (!img) return null;
@@ -284,7 +308,7 @@ export async function claimExam(sb: SupabaseClient, examId: string): Promise<Exa
   if (error) throw new HttpError(error.message === "forbidden" ? 403 : 500, error.message);
   if (!data || typeof data !== "object") return null;
   const c = data as ExamClaim;
-  return { ...c, pages: c.pages ?? [], seen: c.seen ?? [], items: c.items ?? null, next: c.next ?? null };
+  return { ...c, pages: c.pages ?? [], seen: c.seen ?? [], items: c.items ?? null, next: c.next ?? null, prev: c.prev ?? null };
 }
 
 const log = (c: ExamClaim, what: string, e: unknown) =>
@@ -396,8 +420,10 @@ export async function runExamUnit(sb: SupabaseClient, c: ExamClaim, opts: { stop
       const { items: save } = toSaveItems(items, {
         pages: c.pages.map((p) => p.n),
         next: c.next?.n ?? null,
+        prev: c.prev?.n ?? null,
         seen: c.seen,
         reread: c.reread === true,
+        keySource: c.exam.key_source,
       });
       if (save.length || doc) {
         const { data, error: e } = await sb.rpc("study_exam_save_items", keyed({ p_job: c.job, p_lease: c.lease, p_items: save, p_skipped: skipped }));
@@ -405,10 +431,18 @@ export async function runExamUnit(sb: SupabaseClient, c: ExamClaim, opts: { stop
         const r = data as { saved?: number; updated?: number } | null;
         saved = (r?.saved ?? 0) + (r?.updated ?? 0);
       }
+    } else if (c.kind === "key" && doc && Array.isArray(doc.versions) && doc.versions.length > 1) {
+      // A column per version: which one is this exam's cannot be told, so nothing is keyed from it.
+      if (!error) error = "versions";
     } else {
       const keys =
         c.kind === "key"
-          ? toSheetKeys(list("keys").flatMap((x) => (ExamKey.safeParse(x).success ? [ExamKey.parse(x)] : [])))
+          ? toSheetKeys(
+              list("keys").flatMap((x) => {
+                const k = ExamKey.safeParse(x && typeof x === "object" ? { state: "", ...x } : x); // a line without its state is a plain answer
+                return k.success ? [k.data] : [];
+              }),
+            )
           : toSolvedKeys(c.items ?? [], list("answers").flatMap((x) => (ExamSolvedItem.safeParse(x).success ? [ExamSolvedItem.parse(x)] : [])));
       if (keys.length) {
         const { data, error: e } = await sb.rpc("study_exam_save_keys", keyed({ p_job: c.job, p_lease: c.lease, p_keys: keys }));
