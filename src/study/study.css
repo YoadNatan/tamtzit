@@ -291,6 +291,7 @@ main.join {
   font-size: var(--text-body);
   font-weight: 700;
   line-height: 1.4;
+  overflow-wrap: anywhere; /* a file's name as a title has no space to break at */
 }
 .lc-state {
   display: flex;

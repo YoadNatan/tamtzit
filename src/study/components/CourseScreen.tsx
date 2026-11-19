@@ -67,6 +67,11 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
     }
   }, [route.c, groupId]);
 
+  // Summaries a batch left for next month start once it has come (lib/later.ts).
+  useEffect(() => {
+    void import("../features/courses").then(({ releaseWaiting }) => releaseWaiting(groupId));
+  }, [groupId]);
+
   useEffect(() => {
     void load();
     // A lecture uploaded or written meanwhile: the list and the counts follow.
@@ -98,6 +103,9 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
   const when = examWhen(course.exam_date, course.days_left);
   const length = examLength(course.exam_n, course.exam_minutes);
   const exams = course.exams.length;
+  // The course question reads ready parts: none while no lecture is ready or
+  // being written (a lecture being written may have ready parts already).
+  const noSummary = course.ready === 0 && list !== null && !list.some((l) => l.status === "writing");
 
   return (
     <main className="course-page">
@@ -147,9 +155,20 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
           )
         ) : null}
         {flags.ask ? (
-          <RouteLink to={{ v: "ask", c: course.id }} go={ctx.go} className={`a-btn wide${flags.practice && course.questions > 0 ? "" : " primary"}`}>
-            לשאול על כל הקורס
-          </RouteLink>
+          noSummary ? (
+            <>
+              <button type="button" className="a-btn wide" disabled aria-describedby="c-ask-why">
+                לשאול על כל הקורס
+              </button>
+              <p id="c-ask-why" className="a-small a-muted c-free-none">
+                אפשר לשאול כשיהיה סיכום ראשון.
+              </p>
+            </>
+          ) : (
+            <RouteLink to={{ v: "ask", c: course.id }} go={ctx.go} className={`a-btn wide${flags.practice && course.questions > 0 ? "" : " primary"}`}>
+              לשאול על כל הקורס
+            </RouteLink>
+          )
         ) : null}
       </div>
 
@@ -290,11 +309,11 @@ function CourseSheet({ ctx, course, onClose, onSaved }: { ctx: ScreenProps<"cour
             <div className="a-row c-nums">
               <label className="a-field">
                 <span>כמה שאלות</span>
-                <input className="a-input" inputMode="numeric" dir="ltr" value={n} onChange={(e) => setN(e.target.value)} placeholder="100" maxLength={3} />
+                <input className="a-input" inputMode="numeric" dir={n ? "ltr" : "rtl"} value={n} onChange={(e) => setN(e.target.value)} placeholder="למשל 100" maxLength={3} />
               </label>
               <label className="a-field">
                 <span>כמה דקות</span>
-                <input className="a-input" inputMode="numeric" dir="ltr" value={minutes} onChange={(e) => setMinutes(e.target.value)} placeholder="180" maxLength={3} />
+                <input className="a-input" inputMode="numeric" dir={minutes ? "ltr" : "rtl"} value={minutes} onChange={(e) => setMinutes(e.target.value)} placeholder="למשל 180" maxLength={3} />
               </label>
             </div>
             {badNumber(n, 5, 300) ? <p className="a-small a-error">{failText("bad questions", "course")}</p> : null}
@@ -352,11 +371,17 @@ function CourseSheet({ ctx, course, onClose, onSaved }: { ctx: ScreenProps<"cour
               </label>
               {target ? (
                 <p className="a-small a-muted">
-                  כל ההרצאות של <bdi>{course.name}</bdi> יעברו ל<bdi>״{target.name}״</bdi>, והקורס <bdi>{course.name}</bdi> יימחק מהרשימה.
+                  כל ההרצאות של <bdi>״{course.name}״</bdi> יעברו ל<bdi>״{target.name}״</bdi>, והקורס <bdi>״{course.name}״</bdi> יימחק מהרשימה. אי אפשר לבטל את זה.
                 </p>
               ) : null}
               <button type="submit" className="a-btn" disabled={busy !== "" || !target}>
-                לאחד
+                {target ? (
+                  <>
+                    לאחד עם <bdi>״{target.name}״</bdi>
+                  </>
+                ) : (
+                  "לאחד"
+                )}
               </button>
             </form>
           ) : null}

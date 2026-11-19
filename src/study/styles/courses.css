@@ -48,6 +48,15 @@
   color: inherit;
   text-decoration: none;
 }
+/* A lecture named after its file ("Lecture_07_Pharmacokinetics_final_v2")
+   has no space to break at: it breaks anywhere rather than widen the page. */
+.a-li.c-row > div {
+  min-width: 0;
+}
+.a-li.c-row b,
+.ca-src b {
+  overflow-wrap: anywhere;
+}
 .c-h3 {
   margin: 0;
   font: 800 var(--text-body) / 1.3 var(--font-display);
@@ -67,6 +76,35 @@
 /* ── העלאה של כמה קבצים ── */
 .u-files {
   gap: 0;
+}
+/* "להוסיף עוד": the picker as a link in the list's head. */
+.u-add {
+  position: relative;
+  cursor: pointer;
+}
+.u-add input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.u-bad-count {
+  font-weight: 600;
+  font-size: var(--text-small);
+}
+.u-more {
+  justify-self: start;
+  padding: var(--sp-5) 0 var(--sp-2);
+}
+.u-why {
+  margin: calc(-1 * var(--sp-2)) 0 0;
+}
+.upload-many .ph-foot {
+  flex-wrap: wrap;
+}
+.u-foot-note {
+  flex-basis: 100%;
+  margin: 0;
 }
 .u-row {
   display: grid;

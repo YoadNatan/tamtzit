@@ -142,14 +142,14 @@ function UploadOne({ group, courses, ctx }: Props) {
           <span>
             <strong>בחירת קובץ</strong>
             <br />
-            מצגת PowerPoint ‏(.pptx) או PDF
+            מצגת PowerPoint ‏(<bdi dir="ltr">.pptx</bdi>) או PDF
           </span>
         )}
       </label>
       {flags.courses && !parsed && !reading ? (
         <p className="a-small up-many">
           <RouteLink to={{ v: "upload", many: true }} go={ctx.go} className="a-link">
-            להעלות כמה קבצים יחד
+            העלאה של כמה קבצים
           </RouteLink>
         </p>
       ) : null}

@@ -1,9 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { batchCost, cardUsd, type DeckSize } from "../../../shared/study/batch";
 import { createLecture, getLecture, groupSpent, health, listLectures } from "../lib/api";
-import { BATCH_MAX, clearBatch, markFile, newBatch, pickAgain, readBatch, remaining, resumeLine, sameFile, settle, writeBatch, type Batch } from "../lib/batch";
+import {
+  BATCH_MAX,
+  clearBatch,
+  markFile,
+  newBatch,
+  pickAgain,
+  readBatch,
+  remaining,
+  resumeLine,
+  sameFile,
+  setBatchRunning,
+  settle,
+  writeBatch,
+  type Batch,
+} from "../lib/batch";
 import { courseKey, coursesOf } from "../lib/courses";
 import { guideMark } from "../lib/guideMark";
+import { addLater } from "../lib/later";
 import { baseName, deckSize, figuresOf, fileProblem, readDeck } from "../lib/readDeck";
 import { afterUpload, writingHelp } from "../features/writing";
 import type { Ctx } from "../features/types";
@@ -13,23 +28,43 @@ import "../styles/courses.css";
 /* ── "העלאה של כמה קבצים" (sources.md, phase 1; mockups batch.html, batch-progress.html) ──
  *
  * ?v=upload&many=1 (&c=<course id> from the course page): many lectures at
- * once, each a row with its type ("הרצאה"; past exams come with phase 2).
+ * once, each a row with its slides (every file is a lecture; its type shows
+ * once phase 2 adds past exams).
  * Every file is read here first, so the price is on the screen before
  * anything goes: "סיכומים ל-8 הרצאות: כ-$7 · נשארו החודש $24", and the
- * summaries that do not fit this month's budget wait for the next one (the
- * lectures themselves upload now). Then one file at a time, through the same
+ * summaries that do not fit this month's budget wait for the next one: the
+ * lectures upload now, but their summaries are handed to the writer only
+ * from the 1st (lib/later.ts). The files are listed by name, numbers in
+ * order ("שיעור 2" before "שיעור 10"), so the lectures' numbers in the
+ * course follow the files'; the first 5 rows show, the rest fold. Then one
+ * file at a time, through the same
  * steps as one lecture's upload (its slides and pictures, the lecture, the
  * summary queued): "קוראים קובץ 4 מתוך 14 · כדאי להשאיר את המסך פתוח".
  *
  * Before the first file the list is written on the phone (lib/batch.ts); a
- * tab closed half way comes back to "הועלו 3. נשארו 11 קבצים · לבחור אותם
- * שוב", and the files picked again skip the ones already up. */
+ * tab closed half way comes back to "הועלו 3. נשארו 11 קבצים", and the files
+ * picked again skip the ones already up. While it uploads, closing or
+ * reloading the tab asks first. */
 
 type RowState = "reading" | "ready" | "bad" | "already" | "waiting" | "uploading" | "done" | "failed";
-type Row = { key: string; file: File; state: RowState; slides?: number; size?: DeckSize; note?: string; saved?: { done: number; total: number } };
+type Row = {
+  key: string;
+  file: File;
+  state: RowState;
+  slides?: number;
+  size?: DeckSize;
+  note?: string;
+  saved?: { done: number; total: number };
+  /** Its summary waits for next month (set when the upload starts). */
+  later?: boolean;
+};
 
 const keyOf = (f: File) => `${f.name}|${f.size}`;
 const ext = (name: string) => /\.(pptx|pdf)$/i.exec(name)?.[0] ?? "";
+/** By name, numbers in order: "שיעור 2" before "שיעור 10". */
+const byName = (a: Row, b: Row) => a.file.name.localeCompare(b.file.name, "he", { numeric: true, sensitivity: "base" });
+/** Rows shown before "ועוד N · להראות". */
+const FOLD = 5;
 
 let wakeLock: { release(): Promise<void> } | null = null;
 async function holdScreen(on: boolean): Promise<void> {
@@ -56,9 +91,12 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
   const [rows, setRows] = useState<Row[]>([]);
   const [phase, setPhase] = useState<"pick" | "running" | "done">("pick");
   const [resume, setResume] = useState<Batch | null>(null);
-  const [money, setMoney] = useState<{ spent: number; cap: number } | null>(null);
+  const [money, setMoney] = useState<{ spent: number; cap: number; ahead: boolean } | null>(null);
   const [current, setCurrent] = useState(0);
   const [note, setNote] = useState("");
+  const [all, setAll] = useState(false);
+  const [noCourse, setNoCourse] = useState(false);
+  const courseInput = useRef<HTMLInputElement>(null);
   const reading = useRef<Promise<void>>(Promise.resolve());
   const serverWrites = writingHelp().serverWrites;
 
@@ -79,7 +117,10 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
         const { batch, landed } = settle(b, ids);
         if (landed.length) {
           writeBatch(groupId, batch);
-          for (const e of landed) void getLecture(e.id ?? "").then((l) => l && afterUpload(l, [])).catch(() => undefined);
+          for (const e of landed) {
+            if (e.later && e.id) addLater(groupId, e.id); // its summary waits, as the card said
+            else void getLecture(e.id ?? "").then((l) => l && afterUpload(l, [])).catch(() => undefined);
+          }
         }
         b = remaining(batch).length ? batch : null;
         if (!b) clearBatch(groupId);
@@ -95,7 +136,7 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
       } else setCourse(name);
     })();
     Promise.all([groupSpent(groupId).catch(() => null), health()])
-      .then(([spent, h]) => alive && spent !== null && typeof h?.budgetUsd === "number" && setMoney({ spent, cap: h.budgetUsd }))
+      .then(([spent, h]) => alive && spent !== null && typeof h?.budgetUsd === "number" && setMoney({ spent, cap: h.budgetUsd, ahead: h.features?.points_ahead === true }))
       .catch(() => undefined);
     return () => {
       alive = false;
@@ -104,6 +145,19 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
 
   // Leaving the screen ends the wake lock.
   useEffect(() => () => void holdScreen(false), []);
+
+  // While files upload, closing or reloading the tab asks first (Back in the
+  // app leaves the screen and the uploads go on).
+  const running = phase === "running";
+  useEffect(() => {
+    if (!running) return;
+    const ask = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", ask);
+    return () => window.removeEventListener("beforeunload", ask);
+  }, [running]);
 
   const patch = useCallback((key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r))), []);
 
@@ -150,7 +204,7 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
       const problem = fileProblem(f);
       added.push({ key: keyOf(f), file: f, state: problem ? "bad" : "reading", note: problem || undefined });
     }
-    setRows((rs) => [...rs, ...added]);
+    setRows((rs) => [...rs, ...added].sort(byName));
     const notes = [
       skipped ? (skipped === 1 ? "קובץ אחד כבר הועלה, ודילגנו עליו." : `${skipped} קבצים כבר הועלו, ודילגנו עליהם.`) : "",
       over ? `אפשר עד ${BATCH_MAX} קבצים בכל פעם. ${over === 1 ? "קובץ אחד לא נוסף" : `${over} קבצים לא נוספו`}.` : "",
@@ -163,7 +217,13 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
   const toUpload = rows.filter((r) => r.state === "ready");
   const stillReading = rows.some((r) => r.state === "reading");
   const cost = useMemo(
-    () => (toUpload.length ? batchCost(toUpload.map((r) => r.size!), { spentUsd: money?.spent ?? 0, capUsd: money?.cap ?? Number.POSITIVE_INFINITY }) : null),
+    () =>
+      toUpload.length
+        ? batchCost(
+            toUpload.map((r) => r.size!),
+            { spentUsd: money?.spent ?? 0, capUsd: money?.cap ?? Number.POSITIVE_INFINITY, ahead: money?.ahead },
+          )
+        : null,
     [toUpload, money],
   );
   // The summaries past this month's budget, in upload order (the last ones).
@@ -172,8 +232,17 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
 
   const start = async (list: Row[]) => {
     const name = course.trim();
-    if (!name || !list.length) return;
+    if (!name) {
+      // The reason by the field, which takes the focus (the button says nothing).
+      setNoCourse(true);
+      courseInput.current?.focus();
+      return;
+    }
+    if (!list.length) return;
+    // The summaries the card said wait (on a first start; a retry keeps each row's own).
+    if (phase === "pick") for (const r of list) r.later = waitsNextMonth(r.key);
     setPhase("running");
+    setBatchRunning(true);
     setNote("");
     window.scrollTo({ top: 0 }); // the progress card, at the top
     void holdScreen(true);
@@ -184,21 +253,23 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
         : newBatch(name, cid, list.map((r) => r.file));
     writeBatch(groupId, batch);
     setResume(null);
-    for (const r of list) patch(r.key, { state: "waiting" });
+    for (const r of list) patch(r.key, { state: "waiting", later: r.later });
     let n = 0;
     for (const r of list) {
       setCurrent(++n);
       patch(r.key, { state: "uploading", saved: { done: 0, total: r.slides ?? 0 } });
       try {
         const id = crypto.randomUUID();
-        batch = markFile(batch, r.file, { id });
+        batch = markFile(batch, r.file, r.later ? { id, later: true } : { id });
         writeBatch(groupId, batch);
         const parsed = await readDeck(r.file);
         const { lecture, figurePaths } = await createLecture(
           { groupId, title: baseName(r.file.name).trim() || r.file.name, lecturer: "", course: name, date: "", sourceName: r.file.name, kind: parsed.kind, slides: parsed.slides, figures: figuresOf(parsed), id },
           (done, total) => patch(r.key, { saved: { done, total } }),
         );
-        await afterUpload(lecture, figurePaths).catch(() => undefined);
+        // A summary past this month's money waits: the lecture is up, its writing starts from the 1st.
+        if (r.later) addLater(groupId, lecture.id);
+        else await afterUpload(lecture, figurePaths).catch(() => undefined);
         batch = markFile(batch, r.file, { done: true });
         writeBatch(groupId, batch);
         patch(r.key, { state: "done" });
@@ -208,6 +279,7 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
     }
     guideMark("upload"); // the guide's first step (nothing without VITE_STUDY_GUIDE)
     if (!remaining(batch).length) clearBatch(groupId);
+    setBatchRunning(false);
     void holdScreen(false);
     if (!cid) {
       const rows = await coursesOf(groupId).catch(() => []);
@@ -221,12 +293,18 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
     setResume(null);
   };
 
-  const running = phase === "running";
   const total = rows.filter((r) => ["waiting", "uploading", "done", "failed"].includes(r.state)).length;
   const done = rows.filter((r) => r.state === "done").length;
   const failed = rows.filter((r) => r.state === "failed");
   const uploading = rows.find((r) => r.state === "uploading");
   const frac = uploading?.saved && uploading.saved.total ? uploading.saved.done / uploading.saved.total : 0;
+  const later = rows.filter((r) => r.later && r.state === "done").length;
+  const bad = rows.filter((r) => r.state === "bad").length;
+  const good = rows.length - bad;
+  // The first rows, and every one that will not upload (its reason); the rest fold while picking.
+  const shown = phase !== "pick" || all ? rows : rows.filter((r, i) => i < FOLD || r.state === "bad");
+  const folded = rows.length - shown.length;
+  const missingCourse = phase === "pick" && rows.length > 0 && !course.trim();
   const back = cid ? { v: "course" as const, c: cid } : { v: "library" as const };
 
   return (
@@ -241,10 +319,10 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
       {resume && phase === "pick" ? (
         <section className="a-card u-resume" aria-label="העלאה שנעצרה">
           <p>
-            <b>{resumeLine(resume)}</b> · לבחור אותם שוב
+            <b>{resumeLine(resume)}</b>
           </p>
           <p className="a-small a-muted">
-            ההעלאה נעצרה באמצע. בוחרים שוב את אותם קבצים, ומה שכבר עלה מדלגים עליו:{" "}
+            ההעלאה נעצרה באמצע. בוחרים שוב את אותם קבצים, ומה שכבר עלה מדלגים עליו. נשארו:{" "}
             {remaining(resume)
               .slice(0, 4)
               .map((f) => baseName(f.name))
@@ -253,7 +331,7 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
           </p>
           <div className="a-row">
             <button type="button" className="a-btn ghost small" onClick={forget}>
-              לא צריך
+              לא להמשיך
             </button>
           </div>
         </section>
@@ -265,9 +343,15 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
             <label className="a-field">
               <span>קורס או בלוק</span>
               <input
+                ref={courseInput}
                 className="a-input"
                 value={course}
-                onChange={(e) => setCourse(e.target.value)}
+                aria-invalid={noCourse && !course.trim() ? true : undefined}
+                aria-describedby={missingCourse ? "u-course-why" : undefined}
+                onChange={(e) => {
+                  setCourse(e.target.value);
+                  setNoCourse(false);
+                }}
                 list="study-courses-many"
                 dir="auto"
                 maxLength={120}
@@ -280,36 +364,29 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
               </datalist>
             </label>
           ) : null}
-          <label className={`a-card dashed drop${rows.length ? " has-file" : ""}`}>
-            <input
-              type="file"
-              multiple
-              accept=".pptx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-              onChange={(e) => {
-                pick(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            {resume && !rows.length ? (
-              <span>
-                <strong>לבחור אותם שוב</strong>
-                <br />
-                את אותם קבצים, מאיפה שהם שמורים בטלפון
-              </span>
-            ) : rows.length ? (
-              <span>
-                <strong>להוסיף עוד</strong>
-                <br />
-                {`עד ${BATCH_MAX} קבצים בכל פעם`}
-              </span>
-            ) : (
-              <span>
-                <strong>בחירת קבצים</strong>
-                <br />
-                {`מצגות PowerPoint ‏(.pptx) או PDF, עד ${BATCH_MAX} קבצים`}
-              </span>
-            )}
-          </label>
+          {missingCourse ? (
+            <p id="u-course-why" className={`a-small u-why${noCourse ? " a-error" : " a-muted"}`} role={noCourse ? "alert" : undefined}>
+              צריך לכתוב לאיזה קורס הקבצים שייכים.
+            </p>
+          ) : null}
+          {!rows.length ? (
+            <label className="a-card dashed drop">
+              <FileInput onPick={pick} />
+              {resume ? (
+                <span>
+                  <strong>לבחור אותם שוב</strong>
+                  <br />
+                  את אותם קבצים, מאיפה שהם שמורים בטלפון
+                </span>
+              ) : (
+                <span>
+                  <strong>בחירת קבצים</strong>
+                  <br />
+                  מצגות PowerPoint ‏(<bdi dir="ltr">.pptx</bdi>) או PDF, עד {BATCH_MAX} קבצים
+                </span>
+              )}
+            </label>
+          ) : null}
         </>
       ) : null}
 
@@ -335,6 +412,11 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
                 ? "הסיכומים נכתבים בשרת. אפשר לסגור את האפליקציה."
                 : "כל הרצאה מסוכמת כשפותחים אותה."}
           </p>
+          {later ? (
+            <p className="a-small a-muted">
+              {later === 1 ? "הסיכום של הרצאה אחת יחכה לחודש הבא." : `הסיכומים של ${later} הרצאות יחכו לחודש הבא.`} הם יתחילו כשהאפליקציה תיפתח בטלפון הזה בחודש הבא.
+            </p>
+          ) : null}
           <div className="a-row">
             {failed.length ? (
               <button type="button" className="a-btn" onClick={() => void start(failed)}>
@@ -352,18 +434,28 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
         <>
           {phase === "pick" ? (
             <div className="a-sec">
-              <h2>{rows.length === 1 ? "נבחר קובץ אחד" : `נבחרו ${rows.length} קבצים`}</h2>
+              <h2>
+                {good === 1 ? "נבחר קובץ אחד" : `נבחרו ${good} קבצים`}
+                {bad ? <span className="a-muted u-bad-count">{bad === 1 ? " · אחד לא נתמך" : ` · ${bad} לא נתמכים`}</span> : null}
+              </h2>
+              <label className="a-link u-add">
+                <FileInput onPick={pick} />
+                להוסיף עוד
+              </label>
             </div>
           ) : null}
           <section className="a-card u-files" aria-label="הקבצים">
-            {rows.map((r) => (
+            {shown.map((r) => (
               <FileRow key={r.key} row={r} waits={waitsNextMonth(r.key)} queued={serverWrites} onRemove={phase === "pick" ? () => setRows((rs) => rs.filter((x) => x.key !== r.key)) : undefined} />
             ))}
+            {folded ? (
+              <button type="button" className="a-link u-more" onClick={() => setAll(true)}>
+                {folded === 1 ? "ועוד קובץ אחד · להראות" : `ועוד ${folded} קבצים · להראות`}
+              </button>
+            ) : null}
           </section>
         </>
       ) : null}
-
-      {note ? <p className="a-small a-muted">{note}</p> : null}
 
       {phase === "pick" && toUpload.length ? (
         <section className="a-card u-cost" aria-label="המחיר מראש">
@@ -390,15 +482,18 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
 
       {phase === "pick" ? (
         <StickyActions>
+          {/* What the button cannot say, right above it. */}
+          {note ? <p className="a-small a-muted u-foot-note">{note}</p> : null}
+          {ready.length === 0 && rows.length && !stillReading ? <p className="a-small a-muted u-foot-note">אף קובץ לא מוכן להעלאה.</p> : null}
           {rows.length ? (
-            <button type="button" className="a-btn primary wide" disabled={!toUpload.length || stillReading || !course.trim()} onClick={() => void start(toUpload)}>
+            <button type="button" className="a-btn primary wide" disabled={!toUpload.length || stillReading} onClick={() => void start(toUpload)}>
               {stillReading ? "קוראים את הקבצים…" : toUpload.length === 1 ? "העלאה (קובץ אחד)" : `העלאה (${toUpload.length} קבצים)`}
             </button>
           ) : null}
         </StickyActions>
-      ) : null}
-      {phase === "pick" && rows.length && !course.trim() && !stillReading ? <p className="a-small a-muted">צריך לכתוב לאיזה קורס הקבצים שייכים.</p> : null}
-      {ready.length === 0 && rows.length && !stillReading && phase === "pick" ? <p className="a-small a-muted">אף קובץ לא מוכן להעלאה.</p> : null}
+      ) : (
+        note ? <p className="a-small a-muted">{note}</p> : null
+      )}
     </main>
   );
 }
@@ -412,20 +507,38 @@ const STATE: Partial<Record<RowState, { label: string; cls: string }>> = {
   already: { label: "כבר הועלה", cls: "a-chip ok" },
 };
 
+/** The file picker: several files, PowerPoint or PDF. */
+function FileInput({ onPick }: { onPick: (list: FileList | null) => void }) {
+  return (
+    <input
+      type="file"
+      multiple
+      accept=".pptx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      onChange={(e) => {
+        onPick(e.target.files);
+        e.target.value = "";
+      }}
+    />
+  );
+}
+
 function FileRow({ row: r, waits, queued, onRemove }: { row: Row; waits: boolean; queued: boolean; onRemove?: () => void }) {
   const e = ext(r.file.name);
-  // The file's kind last, so its Latin word never sits between the Hebrew and the number.
-  const format = e.toLowerCase() === ".pdf" ? "PDF" : e ? "PowerPoint" : "";
-  const line = (...parts: Array<string | false | undefined>) => ["הרצאה", ...parts, format].filter(Boolean).join(" · ");
+  // Short: the slides, and "PDF" only for a PDF (last, so its Latin word never sits between the Hebrew and the number).
+  const pdf = e.toLowerCase() === ".pdf" ? "PDF" : "";
+  const line = (...parts: Array<string | false | undefined>) => [...parts, pdf].filter(Boolean).join(" · ");
+  const waitWords = "הסיכום יחכה לחודש הבא";
   const meta =
     r.state === "bad" || r.state === "failed"
       ? r.note
       : r.state === "uploading" && r.saved?.total
-        ? line(`שומרים שקפים ${r.saved.done} מתוך ${r.saved.total}`)
+        ? r.saved.done < r.saved.total
+          ? line(`שומרים שקפים ${r.saved.done} מתוך ${r.saved.total}`)
+          : line("השקפים נשמרו")
         : r.state === "done"
-          ? line(queued ? "הסיכום בתור" : `${r.slides ?? r.saved?.total ?? ""} שקפים`)
+          ? line(r.later ? waitWords : queued ? "הסיכום בתור" : `${r.slides ?? r.saved?.total ?? ""} שקפים`)
           : r.slides
-            ? line(`${r.slides} שקפים`, waits && "יחכה לחודש הבא")
+            ? line(`${r.slides} שקפים`, (waits || (r.state === "waiting" && r.later)) && waitWords)
             : line();
   const chip = STATE[r.state];
   return (
