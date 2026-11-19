@@ -14,7 +14,7 @@ import { miniScreen, type MiniRoute } from "./guideScreens";
  *    this group: the home shows "הצעדים הראשונים" once (sessionStorage, and a
  *    module copy for a browser without it).
  *  - guideSend(cmd): what the "?" buttons, help's "הראו לי" and "שלי" ask the
- *    layer to do (start a screen's mini-guide, a walk, …).
+ *    layer to do (start a screen's mini-guide, the app tour, a walk, …).
  *
  * Nothing here talks to the network. */
 
@@ -22,6 +22,7 @@ export type GuideEvent = "para" | "bet" | "upload" | "invite";
 export type GuideCommand =
   | { type: "mark"; ev: GuideEvent }
   | { type: "screen"; opener?: HTMLElement | null }
+  | { type: "tour"; opener?: HTMLElement | null }
   | { type: "walk"; walk: string; opener?: HTMLElement | null }
   | { type: "stop" }
   | { type: "changed" };

@@ -66,6 +66,10 @@ export type Memory = {
   known?: string[];
   /** The day (YYYY-MM-DD) the last "חדש" hint showed: at most one a day. */
   hintDay?: string;
+  /** The home's one-time offer of the app tour, for a member who never had
+   *  the first steps (joined before the guide): answered by starting the
+   *  tour ("taken") or by "לא עכשיו" ("dismissed"); never offered again. */
+  offer?: "taken" | "dismissed";
 };
 
 export const MEMORY_PREFIX = "study-guide:";
@@ -104,6 +108,7 @@ export function parseMemory(raw: string | null | undefined): Memory {
   if (o.tips === false) m.tips = false;
   if (Array.isArray(o.known)) m.known = o.known.filter((e): e is string => typeof e === "string");
   if (typeof o.hintDay === "string") m.hintDay = o.hintDay;
+  if (o.offer === "taken" || o.offer === "dismissed") m.offer = o.offer;
   return m;
 }
 
@@ -267,6 +272,11 @@ const EVENT_TITLE: Record<DoneEvent, string> = {
   group: "להציץ ב״יחד״",
 };
 
+/** Whether the home offers the app tour: a member this device never started
+ *  the first steps for (Join's fresh mark starts them at once, so a new
+ *  member never sees both) who has not answered the offer yet. */
+export const offerWanted = (m: Pick<Memory, "born" | "offer">) => !m.born && !m.offer;
+
 /** Whether the home's card is live: started, not closed, hidden or retired. */
 export const cardLive = (m: Memory, now: number) => Boolean(m.born && !m.closed && !m.hidden && now - m.born <= RETIRE_MS);
 
@@ -394,6 +404,10 @@ export const TARGETS = {
   wallFoot: ".wall-screen .ph-foot",
   settings: ".settings .size-ctl",
   guideRows: ".g-me",
+  todayTab: `a.ph-tab[href="${APP_PATH}"]`, // the home: routeUrl({ v: "today" }) is APP_PATH
+  practiceTab: `a.ph-tab[href="${APP_PATH}?v=practice"], a.ph-tab[href="${APP_PATH}?v=cards"]`,
+  meTab: `a.ph-tab[href="${APP_PATH}?v=me"]`,
+  screenHelp: ".ph-head .guide-btn",
 } as const;
 
 const T = TARGETS;
@@ -596,7 +610,14 @@ export function walkOf(id: WalkId, f: Flags, x: Facts): Walk | null {
             title: "לקבוע פגישה",
             steps: [
               { at: tabbedBut(f, "group"), place: "יחד", go: { v: "group" }, target: sel(T.groupTab), say: "הפגישות ב״יחד״.", until: "route" },
-              { at: onGroup, place: "יחד", go: { v: "group" }, target: sel(T.newMeeting), say: "קובעים מועד, מה קוראים ומי מקריאים. פגישה שנשמרת מופיעה אצל כל הקבוצה.", until: "end" },
+              {
+                at: onGroup,
+                place: "יחד",
+                go: { v: "group" },
+                target: sel(T.newMeeting),
+                say: "קובעים מתי נפגשים ומה קוראים. הפגישה מופיעה אצל כל הקבוצה, ומי שלוחצים ״להקריא לקבוצה״ מקריאים.",
+                until: "end",
+              },
             ],
           }
         : null;
@@ -631,7 +652,7 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
         steps: [
           m(T.todayMinutes, "בוחרים כמה זמן יש היום, והתור נחתך בהתאם. התור גלוי רק לך."),
           m(T.todayQueue, "התור שלי: מה כדאי לחזור עליו עכשיו. כשהוא ריק, הוא מתמלא כשמתרגלים וקוראים."),
-          ...(f.meeting ? [m(T.meetingBand, "הפגישה של היום: מתי, מה קוראים ומי מקריאים.")] : []),
+          ...(f.meeting ? [m(T.meetingBand, "הפגישה של היום: מתי ומה קוראים.")] : []),
           m(T.libraryTab, "ההרצאות עצמן בספרייה."),
         ],
       };
@@ -696,11 +717,35 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
     case "me":
       return {
         screen: "שלי",
-        steps: [m(T.settings, "״א-״ ו״א+״ משנים את גודל הטקסט, רק במכשיר הזה."), m(T.guideRows, "כאן מכבים או מחזירים את הטיפים, ומתחילים מחדש את הצעדים הראשונים.")],
+        steps: [m(T.guideRows, "״מדריך לאפליקציה״: הסיור הקצר, הצעדים הראשונים והטיפים."), m(T.settings, "״א-״ ו״א+״ משנים את גודל הטקסט, רק במכשיר הזה.")],
       };
     default:
       return null;
   }
+}
+
+/** The app tour ("סיור קצר באפליקציה"): the tab bar, one tab at a time, then
+ *  the screen's "?". It runs on any screen with the tab bar (the home's
+ *  offer, "שלי", help) and, like a mini-guide, only points: a tab it rings
+ *  works as always, and leaving the screen ends the tour. Steps whose
+ *  element is not on the page (no "תרגול" tab with Today on, no "?" on help)
+ *  are skipped when it runs. */
+export function appTour(f: Flags): MiniGuide {
+  const m = (target: string, say: string): MiniStep => ({ target: sel(target), say });
+  const library = "בספרייה כל ההרצאות של הקבוצה, מסוכמות. מעלים מצגת או PDF, ותוך כמה דקות יש סיכום לכולם.";
+  // "תרגול" is a tab only without Today (with Today its screens are under "היום").
+  const practice = f.today ? "" : f.questions ? `בתרגול: ${andList(["שאלות", f.cards && "כרטיסיות"])} לכל הרצאה. התשובות גלויות רק לך.` : f.cards ? "כאן הכרטיסיות של כל הרצאה." : "";
+  return {
+    screen: "סיור באפליקציה",
+    steps: [
+      ...(f.today ? [m(T.todayTab, "״היום״ הוא מסך הבית: מה כדאי לחזור עליו עכשיו, לפי הזמן שיש.")] : []),
+      m(T.libraryTab, library),
+      ...(practice ? [m(T.practiceTab, practice)] : []),
+      m(T.groupTab, `ב״יחד״: ${andList(["מי מקריאים עכשיו", f.meeting && "הפגישה הבאה", f.quiz && "מבחן קבוצתי", "שאלות פתוחות"])}.`),
+      m(T.meTab, `ב״שלי״: ${andList([f.progress && "ההתקדמות שלך", "גודל הטקסט", "העזרה"])}. שם גם ״מדריך לאפליקציה״, אם רוצים את הסיור שוב.`),
+      m(T.screenHelp, "״?״ למעלה מסביר את המסך שפתוח. בהרצאה זה ״איך קוראים כאן?״."),
+    ],
+  };
 }
 
 /* ─────────────────────────── "איך עושים…?" ─────────────────────────── */
@@ -737,7 +782,7 @@ export function howTos(f: Flags): HowTo[] {
     { on: true, key: "readaloud", title: "להקריא לקבוצה", answer: "בהרצאה ← ״להקריא לקבוצה״. מתחיל מיד אצל כולם.", words: "הקראה להקריא ביחד", walk: "readaloud" },
     { on: f.corrections, key: "correct", title: "לתקן טעות בסיכום", answer: "נוגעים בפסקה ← ״תיקון״. התיקון מחכה לאישור מהקבוצה, ואפשר לבטל.", words: "טעות תיקון שגיאה", walk: "correct" },
     { on: f.quiz, key: "quiz", title: "לפתוח מבחן קבוצתי", answer: "בהרצאה ← ״מבחן קבוצתי״. נפתח לכולם רק כשלוחצים לפתוח.", words: "מבחן קבוצתי חידון ביחד", walk: "quizopen" },
-    { on: f.meeting, key: "meeting", title: "לקבוע פגישה", answer: "יחד ← ״לקבוע פגישה״: מתי, מה קוראים ומי מקריאים.", words: "פגישה מפגש זום", walk: "meeting" },
+    { on: f.meeting, key: "meeting", title: "לקבוע פגישה", answer: "יחד ← ״לקבוע פגישה״: מתי ומה קוראים. מי שלוחצים ״להקריא לקבוצה״ מקריאים.", words: "פגישה מפגש זום", walk: "meeting" },
     { on: f.ask, key: "ask", title: "לשאול את החומר", answer: "בספרייה כותבים בשורת החיפוש. ״לשאול״ עונה מהשקפים ונספר ב״נשארו היום״.", words: "חיפוש לחפש שאלה בינה", walk: "ask" },
     { on: f.today, key: "today", title: "התור של היום", answer: "היום ← בוחרים 10, 20 או 45 דקות ← ״להתחיל״. מה שלא נכנס עובר למחר.", words: "תור חזרה היום דקות", walk: "today" },
     { on: true, key: "readmark", title: "לסמן שקראתי", answer: "בסוף הסיכום ״סימון שקראתי״. כל הקבוצה רואה מי קראו.", words: "קראתי סימון קריאה", walk: "readmark" },
@@ -801,7 +846,7 @@ const HINTS: Hint[] = [
   { flag: "practice", title: "תרגול", say: "אפשר לתרגל כל הרצאה, עם הימור ״על בטוח״. התשובות רק לך.", go: { v: "try", s: "b" } },
   { flag: "cards", title: "כרטיסיות", say: "לכל הרצאה יש כרטיסיות לחזרה.", walk: "cards" },
   { flag: "quiz", title: "מבחן קבוצתי", say: "״כולנו נגד המבחן״: מבחן לכל הקבוצה, בלי נקודות אישיות.", walk: "quizopen" },
-  { flag: "meeting", title: "הפגישה היומית", say: "קובעים ב״יחד״ פגישה: מה קוראים ומי מקריאים.", walk: "meeting" },
+  { flag: "meeting", title: "הפגישה היומית", say: "קובעים ב״יחד״ פגישה: מתי ומה קוראים.", walk: "meeting" },
   { flag: "anchor", title: "מה יושב על הפסקה", say: "מתחת לכל פסקה רואים את השאלות, הכרטיסיות והתגובות שלה.", walk: "read" },
   { flag: "corrections", title: "תיקון בסיכום", say: "מצאתם טעות? נוגעים בפסקה ← ״תיקון״.", walk: "correct" },
   { flag: "var", title: "כרטיס צהוב ו-VAR", say: "על תיקון שנוי במחלוקת אפשר להרים כרטיס צהוב.", go: { v: "group" } },
@@ -826,6 +871,8 @@ export function hintFlags(f: Flags): string[] {
  *  (a new member meets everything as new). */
 export function nextHint(m: Memory, f: Flags, today: string, now: number): Hint | null {
   if (!m.tips || !m.known) return null;
+  // One thing at a time: while the home offers the tour, no "חדש" hint.
+  if (offerWanted(m)) return null;
   if (m.hintDay === today) return null;
   if (m.born && now - m.born <= RETIRE_MS) return null;
   return HINTS.find((h) => f[h.flag] && !m.known!.includes(h.flag)) ?? null;
@@ -857,4 +904,11 @@ export const COPY = {
   readerChip: "איך קוראים כאן?",
   newKicker: (title: string) => `חדש · ${title}`,
   showMe: "הראו לי",
+  guideTitle: "מדריך לאפליקציה",
+  tourTitle: "סיור קצר באפליקציה",
+  offerLine: "דקה-שתיים: מה יש בכל לשונית. רק מראים, שום דבר לא נלחץ ולא נשלח.",
+  tourStart: "להתחיל סיור",
+  offerLater: "לא עכשיו",
+  offerWhere: "אפשר לחזור לסיור מתי שרוצים: ״שלי״ ← ״מדריך לאפליקציה״.",
+  meTourLine: "דקה-שתיים, במסכים האמיתיים",
 } as const;

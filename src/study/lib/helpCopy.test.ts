@@ -68,7 +68,7 @@ const ALL_ENDS: Ends = { Q: true, C: true, B: true };
  *  the designs' tables replace and extend it). */
 const HELP: Array<[string, (f: Flags) => boolean]> = [
   ["מה זה תמצית", () => true],
-  ["המדריך", (f) => f.guide], // the guide (docs/study/guide.md)
+  ["מדריך לאפליקציה", (f) => f.guide], // the guide (docs/study/guide.md)
   ["העלאת הרצאה", () => true],
   ["הנקודות שצריך לדעת", (f) => f.practice], // package B, decision 2 of 17 Nov 2026
   ["קריאה יחד", () => true],

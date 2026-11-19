@@ -15,8 +15,9 @@ import "../styles/meeting.css";
  * Before the reading: the opening "3 לקפה · בפרקים הקודמים" (5 minutes,
  * three questions on what was read before, answered alone; any member opens
  * it and hosts, or "לדלג לסדר היום"), with M-2 the pre-guess on today's
- * first part, then the three-line agenda ("סדר היום": today's reading and
- * reader; the pulse's hot spot when section U exists; the newest open
+ * first part, then the three-line agenda ("סדר היום": today's reading, and
+ * who reads once someone tapped "להקריא לקבוצה" (no reader is planned ahead,
+ * M 2); the pulse's hot spot when section U exists; the newest open
  * question), then "להתחיל להקריא" or "לעקוב אחרי ההקראה". After the reading
  * started: "מבחן קבוצתי על מה שנקרא · 5 שאלות" (the closing). At most two
  * rituals a study day (decision 7): one opening, one closing. ?v=meeting&new=1
@@ -86,7 +87,7 @@ export default function MeetingScreen({ route, ctx }: ScreenProps<"meeting">) {
 
   const rituals = ritualsNow(m, skipped);
   const coffeeLive = rituals.coffee === "live" && m.coffee;
-  const reader = m.reader_id ?? m.planned_reader;
+  const reader = m.reader_id;
   const readerName = reader ? ctx.nameOf(reader) || "ללא שם" : "";
   const slides = slideRange(m.slide_from, m.slide_to);
   const othersRead = m.reading && m.reader_id !== ctx.userId;
@@ -217,7 +218,7 @@ export default function MeetingScreen({ route, ctx }: ScreenProps<"meeting">) {
               {m.today ? "היום: " : `${whenLine(m)}: `}
               {isolateLatin(m.title ? `${m.lecture_title}: ${m.title}` : m.lecture_title, "ag1")} {slides ? <span className="a-tag">{slides}</span> : null}
             </b>
-            <span className="m">{reader ? `הקראה: ${readerName}` : "עוד לא נקבע מי מקריאים"}</span>
+            {reader ? <span className="m">{`הקראה: ${readerName}`}</span> : null}
           </div>
           {reader ? <Avatar id={reader} name={readerName} /> : null}
         </li>

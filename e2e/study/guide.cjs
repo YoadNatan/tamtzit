@@ -15,7 +15,9 @@
 //           STOP ("להקריא לקבוצה") rung and never passed; a creator's upload
 //           walk up to "יצירת סיכום" and the invite; the sandbox (?v=try); one
 //           "חדש" hint for an existing member; no storage at all; reduced
-//           motion. Then the review round's checks: every "?" mini-guide at
+//           motion; an existing member's one-time offer of the app tour
+//           ("סיור קצר באפליקציה": the tab bar step by step, from the home,
+//           "שלי" and help; "לא עכשיו" for good). Then the review round's checks: every "?" mini-guide at
 //           360×640 (the ring on screen, the bubble never over it), no "?"
 //           where there is nothing to show (Today's run), the empty practice
 //           page's "שאלות חדשות" with its cost, the reader's chip in sight
@@ -509,16 +511,17 @@ const SMALL = { width: 360, height: 640 };
         await solo.close();
       }
 
-      /* ───────────── K. an existing member: no card; one "חדש" hint for what is new ───────────── */
+      /* ───────────── K. an existing member: the tour offered once; one "חדש" hint for what is new ───────────── */
       const noa = mock.people["נועה"].user.id;
       const knownNoWall = ["today", "practice", "cards", "quiz", "meeting", "anchor", "corrections", "var", "ask", "progress", "pulse", "museum", "boss", "groupPlan", "traps", "blankTable"];
-      const old = await mock.open(browser, "נועה", { storage: { [`study-guide:${noa}`]: JSON.stringify({ v: 1, views: 0, did: [], list: [], tips: true, known: knownNoWall }) } });
+      // Noa already answered the tour's offer ("לא עכשיו"): the "חדש" hints come as before.
+      const old = await mock.open(browser, "נועה", { storage: { [`study-guide:${noa}`]: JSON.stringify({ v: 1, views: 0, did: [], list: [], tips: true, known: knownNoWall, offer: "dismissed" }) } });
       await old.page.goto(`${mock.base}/`);
       await waitBubble(old.page, "חדש · קיר האסוציאציות", 10000);
       const hintSay = await old.page.locator(".g-bubble .g-say").innerText();
       const hintSaid = await old.page.waitForFunction((t) => [...document.querySelectorAll(".sr-only[role=status]")].some((n) => n.textContent.includes(t)), hintSay, { timeout: 5000 }).then(() => true, () => false);
       check("the hint takes no focus, and the live region says it", hintSaid && !(await focusAt(old.page)).startsWith("bubble:"));
-      check("an existing member: no card, one hint for the wall", (await old.page.locator(".g-steps").count()) === 0 && (await old.page.locator(".g-ring:not([hidden])").count()) === 0);
+      check("an existing member who answered the offer: no card, one hint for the wall", (await old.page.locator(".g-steps").count()) === 0 && (await old.page.locator(".g-ring:not([hidden])").count()) === 0);
       await snap(old.page, out, "guide-27-hint-new").then((p) => a11y.push(...p));
       await old.page.locator(".g-bubble .a-btn", { hasText: "הבנתי" }).click();
       await noBubble(old.page);
@@ -531,18 +534,75 @@ const SMALL = { width: 360, height: 640 };
       await old.page.locator(".g-me input[type=checkbox]").uncheck();
       const tips = await old.page.evaluate((k) => JSON.parse(localStorage.getItem(k)).tips, `study-guide:${noa}`);
       check("tips off is kept on the device", tips === false);
-      // A member the guide has never seen: no card, no hint; what is on now is "known".
+
+      // A member the guide has never seen (joined before it): the home offers the tour, once; no hint meanwhile.
       const shoham = mock.people["שוהם"].user.id;
       const fresh = await mock.open(browser, "שוהם", { path: "/" });
-      await fresh.page.locator("main.today").waitFor({ timeout: 15000 });
-      await fresh.page.waitForTimeout(2500);
+      await fresh.page.locator("main.today .g-offer").waitFor({ timeout: 15000 });
+      await fresh.page.waitForTimeout(2000);
       const mem = await fresh.page.evaluate((k) => JSON.parse(localStorage.getItem(k) || "null"), `study-guide:${shoham}`);
-      check("never seen: no card, no hint, the flags on now recorded", (await fresh.page.locator(".g-steps, .g-bubble:not([hidden])").count()) === 0 && Array.isArray(mem?.known) && mem.known.includes("wall"), JSON.stringify(mem));
-      // Restarting the first steps from "שלי".
+      const offerText = (await fresh.page.locator(".g-offer").innerText()).replace(/\s+/g, " ");
+      check(
+        "never seen: the offer ״סיור קצר באפליקציה״ on Today, no first steps, no hint; the flags on now recorded",
+        offerText.includes("סיור קצר באפליקציה") && offerText.includes("להתחיל סיור") && offerText.includes("לא עכשיו") && (await fresh.page.locator(".g-step, .g-bubble:not([hidden])").count()) === 0 && Array.isArray(mem?.known) && mem.known.includes("wall"),
+        `${offerText} ${JSON.stringify(mem)}`,
+      );
+      await snap(fresh.page, out, "guide-28-offer").then((p) => a11y.push(...p));
+      // "להתחיל סיור": the tour over the tab bar, step by step, only pointing.
+      await fresh.page.locator(".g-offer .a-btn", { hasText: "להתחיל סיור" }).click();
+      await waitBubble(fresh.page, "1 מתוך");
+      const t1 = await bubble(fresh.page);
+      const tg = await geometry(fresh.page);
+      check("the tour starts at the first tab, ringed, the bubble clear of it and of the tab bar", /1 מתוך \d · סיור באפליקציה/.test(t1) && t1.includes("״היום״ הוא מסך הבית") && tg.ok, `${t1} ${JSON.stringify(tg)}`);
+      check("the bubble takes focus", (await focusAt(fresh.page)).startsWith("bubble:"));
+      await snap(fresh.page, out, "guide-29-tour").then((p) => a11y.push(...p));
+      const tour = await walkMini(fresh.page);
+      check(
+        "the tour: היום, ספרייה, יחד, שלי, then the screen's ?, each ringed with the bubble clear",
+        tour.length === 5 && /ספרייה/.test(tour[1].say) && /״יחד״/.test(tour[2].say) && /״שלי״/.test(tour[3].say) && /״\?״/.test(tour[4].say) && tour.every((t) => t.geo.ok),
+        JSON.stringify(tour.map((t) => [t.say.slice(0, 40), t.geo.ok])),
+      );
+      await fresh.page.locator(".g-bubble .a-btn", { hasText: "סיום" }).click();
+      await noBubble(fresh.page);
+      const after = await fresh.page.evaluate((k) => JSON.parse(localStorage.getItem(k) || "null"), `study-guide:${shoham}`);
+      check("סיום: focus back on the offer, which now says where the tour lives; offer answered", after?.offer === "taken" && !after?.born && (await focusAt(fresh.page)).includes("g-offer") && (await fresh.page.locator(".g-offer").innerText()).includes("״מדריך לאפליקציה״"), `${JSON.stringify(after)} ${await focusAt(fresh.page)}`);
+      check("the tour wrote nothing to the group", writes().length === 0, writes().join(" | "));
+      await fresh.page.reload();
+      await fresh.page.locator("main.today").waitFor({ timeout: 15000 });
+      await fresh.page.waitForTimeout(1500);
+      check("offered once: not after a reload", (await fresh.page.locator(".g-offer, .g-steps").count()) === 0);
+      // "שלי" → "מדריך לאפליקציה": the tour again, and the first steps for an existing member.
       await fresh.page.locator(".ph-tabs .ph-tab", { hasText: "שלי" }).click();
-      await fresh.page.locator(".g-me .a-btn", { hasText: "להתחיל" }).click();
+      await fresh.page.locator(".g-me").waitFor({ timeout: 15000 });
+      check("שלי: ״מדריך לאפליקציה״ is the heading, the tour its first row, above the settings", (await fresh.page.locator("#g-me-h").innerText()) === "מדריך לאפליקציה" && (await fresh.page.locator(".g-me .a-li").first().innerText()).includes("סיור קצר באפליקציה") && (await fresh.page.evaluate(() => Boolean(document.querySelector(".g-me").compareDocumentPosition(document.querySelector(".settings")) & Node.DOCUMENT_POSITION_FOLLOWING))));
+      await fresh.page.locator(".g-me .a-btn", { hasText: "להתחיל סיור" }).click();
+      await waitBubble(fresh.page, "1 מתוך");
+      check("שלי → להתחיל סיור: the tour runs right there", (await bubble(fresh.page)).includes("סיור באפליקציה") && path0(fresh.page) === "/?v=me");
+      await fresh.page.keyboard.press("Escape");
+      await noBubble(fresh.page);
+      await fresh.page.locator(".g-me").getByRole("button", { name: "להתחיל", exact: true }).click();
       await fresh.page.locator(".g-steps .g-step").first().waitFor({ timeout: 15000 });
       check("שלי → להתחיל: the first steps for an existing member", path0(fresh.page) === "/");
+      // Help: "מדריך לאפליקציה" first, above "איך עושים…?".
+      await fresh.page.goto(`${mock.base}/?v=help`);
+      await fresh.page.locator(".g-help-guide").waitFor({ timeout: 15000 });
+      check("help: ״מדריך לאפליקציה״ at the top, before איך עושים…?", await fresh.page.evaluate(() => Boolean(document.querySelector(".g-help-guide").compareDocumentPosition(document.querySelector("#howto")) & Node.DOCUMENT_POSITION_FOLLOWING)));
+      await fresh.page.locator(".g-help-guide .a-btn", { hasText: "להתחיל סיור" }).click();
+      await waitBubble(fresh.page, "1 מתוך");
+      check("help → להתחיל סיור: the tour", (await bubble(fresh.page)).includes("סיור באפליקציה"));
+      await snap(fresh.page, out, "guide-30-tour-help").then((p) => a11y.push(...p));
+      await fresh.page.locator(".g-bubble .g-close").click();
+      await noBubble(fresh.page);
+      // "לא עכשיו": gone for good, with a word on where the tour lives.
+      const later = await mock.open(browser, "נועה", { path: "/" });
+      await later.page.locator(".g-offer").waitFor({ timeout: 15000 });
+      await later.page.locator(".g-offer .a-link", { hasText: "לא עכשיו" }).click();
+      await later.page.locator(".a-toast", { hasText: "״מדריך לאפליקציה״" }).waitFor({ timeout: 5000 });
+      const laterMem = await later.page.evaluate((k) => JSON.parse(localStorage.getItem(k) || "null"), `study-guide:${noa}`);
+      await later.page.reload();
+      await later.page.locator("main.today").waitFor({ timeout: 15000 });
+      await later.page.waitForTimeout(1500);
+      check("לא עכשיו: the offer is gone, and stays gone after a reload", laterMem?.offer === "dismissed" && (await later.page.locator(".g-offer").count()) === 0, JSON.stringify(laterMem));
 
       /* ───────────── L. no storage at all, and reduced motion ───────────── */
       db.guideNoWrites = false;

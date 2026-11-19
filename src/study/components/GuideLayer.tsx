@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, ty
 import type { Ctx } from "../features/types";
 import { flags } from "../lib/flags";
 import {
+  appTour,
   COPY,
   hintFlags,
   MISSING_LINE,
@@ -39,8 +40,9 @@ import "../styles/guide.css";
  *
  * It runs three things: a walk (the first steps' "להראות", help's "הראו
  * לי"), which follows the member's own taps from screen to screen and ends
- * at a STOP without passing it; a screen's "?" mini-guide; and one "חדש"
- * hint a day for a feature turned on since the member last looked. Both
+ * at a STOP without passing it; a screen's "?" mini-guide, or the app tour
+ * (the same kind of run, over the tab bar); and one "חדש" hint a day for a
+ * feature turned on since the member last looked. Both
  * hide while a sheet is open, while the cards' swipe hint shows, and while
  * the member types. The layer never clicks, sends or writes anything but
  * its own memory on the device. */
@@ -240,9 +242,10 @@ export default function GuideLayer({ route, ctx }: { route: Route; ctx: Ctx }) {
     setRun({ kind: "walk", walk, i, opener, missing: false });
   }, []);
 
-  const startScreen = useCallback((opener: HTMLElement | null) => {
+  /** A mini-guide's run: a screen's "?" or the app tour (`tour`). */
+  const startScreen = useCallback((opener: HTMLElement | null, tour = false) => {
     const r = routeRef.current;
-    const g = screenGuide(r, flags);
+    const g = tour ? appTour(flags) : screenGuide(r, flags);
     // While the reader is live the page is never scrolled: only what is on screen.
     const live = roomLive();
     const steps = (g?.steps ?? []).filter((s) => {
@@ -260,6 +263,24 @@ export default function GuideLayer({ route, ctx }: { route: Route; ctx: Ctx }) {
     setRun({ kind: "mini", screen: g.screen, steps, i: 0, opener, at: routeUrl(r), tryIt: g.tryIt, y: window.scrollY });
   }, []);
 
+  /** The app tour points at the tab bar. Its entries (the home's offer,
+   *  "שלי", help) all have one; from anywhere else it first goes home (a
+   *  navigation, never a tap), and starts once the tab bar is there. */
+  const startTour = useCallback(
+    (opener: HTMLElement | null) => {
+      const tabs = () => [...document.querySelectorAll(".ph-tabs")].some(visible);
+      if (tabs()) return startScreen(opener, true);
+      ctxRef.current.go(flags.today ? { v: "today" } : { v: "library" });
+      let n = 0;
+      const wait = () => {
+        if (tabs()) startScreen(null, true);
+        else if (++n < 30) setTimeout(wait, 100);
+      };
+      setTimeout(wait, 100);
+    },
+    [startScreen],
+  );
+
   /* ── commands from the app's screens ── */
   useEffect(() => {
     const on = (e: Event) => {
@@ -269,13 +290,14 @@ export default function GuideLayer({ route, ctx }: { route: Route; ctx: Ctx }) {
         takePending();
         mark(cmd.ev);
       } else if (cmd.type === "screen") startScreen(cmd.opener ?? null);
+      else if (cmd.type === "tour") startTour(cmd.opener ?? null);
       else if (cmd.type === "walk") void startWalk(cmd.walk as WalkId, cmd.opener ?? null);
       else if (cmd.type === "stop") end(true);
     };
     window.addEventListener(GUIDE_EVENT, on);
     for (const ev of takePending()) mark(ev);
     return () => window.removeEventListener(GUIDE_EVENT, on);
-  }, [mark, startScreen, startWalk, end]);
+  }, [mark, startScreen, startTour, startWalk, end]);
 
   /* ── routes that tick a step off, and a ready summary on screen ("open") ── */
   useEffect(() => {

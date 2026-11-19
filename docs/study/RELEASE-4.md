@@ -345,7 +345,8 @@ cards. Some steps need a third member, and are marked so.
 
 **The meeting** (`VITE_STUDY_MEETING`):
 - Phone A: "יחד" → "לקבוע את הפגישה הבאה": today in a few minutes, a
-  lecture and its parts, "מי מקריאים": A. Save. Phone B's "יחד" shows the
+  lecture and its parts. Save. (No reader is planned ahead since section
+  M 2: whoever taps "להקריא לקבוצה" reads.) Phone B's "יחד" shows the
   band "הקבוצה היום · {time}" without a reload.
 - Phone A opens the meeting → "להתחיל להקריא". Phone B → "לעקוב אחרי
   ההקראה". Phone A's bar shows "עוקב אחד" (one line, above "ההקראה שלך

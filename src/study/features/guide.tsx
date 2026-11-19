@@ -7,7 +7,8 @@ import type { Ctx, ScreenProps } from "./types";
 /* ── The guide's slot (docs/study/guide.md) ──
  * What the app's screens render of the guide, each nothing without
  * VITE_STUDY_GUIDE. Everything with a body loads lazily (the layer that
- * rings and explains, the home's "הצעדים הראשונים", help's "איך עושים…?",
+ * rings and explains, the home's "הצעדים הראשונים" or its offer of the app
+ * tour, help's "מדריך לאפליקציה" and "איך עושים…?",
  * the rows in "שלי", the sandbox), so the study entry carries only these
  * wrappers, the "?" button and lib/guideMark.ts. */
 
@@ -59,24 +60,27 @@ export function ReaderGuideChip() {
 
 /** Whether the home's card will render, read without loading the guide, so
  *  its place is kept from the first paint (no jump when it arrives). */
-function cardWanted(ctx: Ctx): "expanded" | "collapsed" | null {
+function cardWanted(ctx: Ctx): "expanded" | "collapsed" | "offer" | null {
   if (freshFor(ctx.group.id)) return "expanded";
   try {
     const raw = localStorage.getItem(`study-guide:${ctx.userId}`);
-    if (!raw) return null;
-    const m = JSON.parse(raw) as { born?: number; closed?: boolean; hidden?: boolean; views?: number };
-    if (!m.born || m.closed || m.hidden || Date.now() - m.born > 14 * 86_400_000) return null;
+    // Never started and never answered: the one-time offer of the app tour.
+    if (!raw) return "offer";
+    const m = JSON.parse(raw) as { born?: number; closed?: boolean; hidden?: boolean; views?: number; offer?: string };
+    if (!m.born) return m.offer ? null : "offer";
+    if (m.closed || m.hidden || Date.now() - m.born > 14 * 86_400_000) return null;
     return (m.views ?? 0) < 2 ? "expanded" : "collapsed";
   } catch {
     return null;
   }
 }
 
-/** "הצעדים הראשונים" on the home (Today, or the library before Today). */
+/** "הצעדים הראשונים" on the home (Today, or the library before Today), or,
+ *  for a member who never had them, the one-time offer of the app tour. */
 export function GuideHome({ ctx, home, queue }: { ctx: Ctx; home: "today" | "library"; queue?: number | null }) {
   if (!flags.guide) return null;
   const want = cardWanted(ctx);
-  const hold = want ? <div className="g-steps-hold" aria-hidden="true" style={{ minHeight: want === "expanded" ? 260 : 76 }} /> : null;
+  const hold = want ? <div className="g-steps-hold" aria-hidden="true" style={{ minHeight: want === "expanded" ? 260 : want === "offer" ? 150 : 76 }} /> : null;
   return (
     <Suspense fallback={hold}>
       <GuideSteps ctx={ctx} home={home} queue={queue ?? null} />

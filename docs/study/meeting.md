@@ -23,13 +23,14 @@ with neither it says "הסימון נשמר רק אצלך.".
 
 - **"יחד" → "הפגישה"**: "אין פגישה מתוכננת." or the band (today.html s1):
   "הקבוצה היום · 09:00" with the slide range, the lecture and its parts,
-  "הקראה: שוהם", with M-2 "ניחוש לפני · 2 שאלות"; live, "הקראה עכשיו: שוהם"
+  with M-2 "ניחוש לפני · 2 שאלות"; live, "הקראה עכשיו: שוהם"
   and "לעקוב"; "3 לקפה פתוח" or the closing quiz while open; over, "הפגישה
   של היום הסתיימה."; then "פגישה שפספסת" (M-2) and "לקבוע את הפגישה הבאה".
 - **Planning** (`?v=meeting&new=1`, `&edit=1`): "מתי" (date and time,
   tomorrow at the last meeting's time by default), "מה קוראים" (a lecture
-  and its parts, from one to another, the slide range under them), "מי
-  מקריאים" (or "עוד לא נקבע"), "כותרת (לא חובה)". Any member saves or
+  and its parts, from one to another, the slide range under them),
+  "כותרת (לא חובה)". No reader is planned ahead (the owner's request,
+  section M 2): whoever taps "להקריא לקבוצה" reads. Any member saves or
   changes it; a newer version wins ("conflict"); "לבטל את הפגישה" before it
   starts.
 - **The meeting** (`?v=meeting&m=`, meeting.html s1): before the reading,
@@ -40,7 +41,7 @@ with neither it says "הסימון נשמר רק אצלך.".
   answers, never a number), the current one with its options and the bet,
   the head's chip "2/3". With M-2, "ניחוש על היום · 1 מתוך 2" with "יידלק
   בהקראה" ("לנחש", then "ניחשת …" and "לשנות"). "סדר היום": "היום: … ש׳ 1-5"
-  with "הקראה: שוהם", the pulse's hot spot when section U exists, and "שאלה
+  (with "הקראה: שוהם" once someone read aloud), the pulse's hot spot when section U exists, and "שאלה
   פתוחה: …" (one sent "לשאלה פתוחה למחר" at an earlier meeting first, else
   one open more than a day). The bottom bar: "לפתוח 3 לקפה", then
   "להתחיל להקריא" or "לעקוב אחרי ההקראה", and once someone read aloud,
@@ -86,7 +87,12 @@ line "בפגישה:" (the pre-guess and catch-up sentences with GUESS).
   warning waits for the switch `pulse` to exist and be on. It reads F, Q, Z
   and K's tables; section U's opt-out and section J's moments only when they
   exist. Its checks (M1-M14, SR4, SR5a, SR11, SR12) are in
-  `supabase/tests/study.sql` on section Z's fixtures.
+  `supabase/tests/study.sql` on section Z's fixtures. M 2 (the owner's
+  request) drops the planned reader: `study_meeting_save` still takes
+  `p_reader` (an open copy of the old app sends it) and ignores it, the band
+  no longer returns `planned_reader`, and the agenda names only the member
+  reading aloud now or last (`reader_id`). The column `planned_reader` stays,
+  unused, because an old copy still selects it.
 - **Client**: `features/meeting.tsx` (the slot: lazy screens, the reading's
   session start and stop, the follower count shared with K), `lib/meeting.ts`
   (the calls, the place reporter, the words), `components/MeetingScreen.tsx`,

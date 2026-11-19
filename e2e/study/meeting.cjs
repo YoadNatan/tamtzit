@@ -8,8 +8,9 @@
 //   NODE_PATH=$(npm root -g) node e2e/study/meeting.cjs <dist> <out dir> [off|rel1|rel2|k|m]
 //
 // With the meeting's flags (set "m": wave 3's flags + MEETING + GUESS):
-//   1  Shoham plans today's meeting (the lecture, parts 0-1, reader שוהם);
-//      "יחד" shows the band "הקבוצה היום · HH:MM · ש׳ 1-5 · הקראה: שוהם";
+//   1  Shoham plans today's meeting (the lecture, parts 0-1; no reader is
+//      planned ahead, M 2); "יחד" shows the band "הקבוצה היום · HH:MM · ש׳ 1-5"
+//      with no reader line;
 //   2  M-2: four members guess before the reading (no key on any phone);
 //   3  "3 לקפה": Noa opens it, two join, three questions stacked with
 //      "1/3"…, each reveal a word ("רובכם צדקו"), never a number; the agenda's
@@ -95,7 +96,7 @@ const israel = (ms) => {
   /* ── yesterday's meeting on L2: Noa was there, Dana was not; a stop, an answered question, a question sent to today ── */
   const Y = hex("3e000000", 900);
   M.meetings.push({
-    id: Y, group_id: GROUP.id, day: dayOf(Date.parse(t0)), starts_at: t0, lecture_id: L2, part_from: 0, part_to: 0, title: "", planned_reader: id("שוהם"), reader_id: id("שוהם"), reading: false,
+    id: Y, group_id: GROUP.id, day: dayOf(Date.parse(t0)), starts_at: t0, lecture_id: L2, part_from: 0, part_to: 0, title: "", planned_reader: null, reader_id: id("שוהם"), reading: false,
     started_at: t0, read_part: 0, guess_ids: [], guess_released: 0, cancelled_at: null, version: 3, created_by: id("שוהם"), updated_by: null, created_at: t0, updated_at: t0,
   });
   for (const who of ["נועה", "מאיה", "איתי", "דניאל", "רוני"]) M.presence.set(`${Y}:${id(who)}`, { first: Date.parse(t0), last: Date.parse(t0) + 3_600_000 });
@@ -206,18 +207,18 @@ const israel = (ms) => {
       await plan.locator(".m-parts .a-chip").nth(0).click();
       await plan.locator(".m-parts .a-chip").nth(0).click();
       await plan.locator(".m-parts .a-chip").nth(1).click();
-      await plan.getByRole("radio", { name: "שוהם" }).click();
+      check("1 no reader is planned ahead: no \"מי מקריאים\" in the sheet", (await plan.getByRole("radiogroup").count()) === 0 && (await plan.getByText("מי מקריאים").count()) === 0);
       check("1 the plan: parts 0-1 chosen, the slide range under them", norm(await plan.locator(".m-parts + .a-small").innerText()) === "ש׳ 1-5", await plan.locator(".m-parts + .a-small").innerText());
       await shot(shoham, "meeting-01-plan");
       await plan.getByRole("button", { name: "לשמור" }).click();
       await plan.waitFor({ state: "detached", timeout: 10000 });
       const today = M.meetings.find((m) => m.id !== Y);
-      check("1 saved: today, the lecture, parts 0-1, reader Shoham", today && today.day === dayOf(Date.now()) && today.lecture_id === L && today.part_from === 0 && today.part_to === 1 && today.planned_reader === id("שוהם"), JSON.stringify(today));
+      check("1 saved: today, the lecture, parts 0-1, no reader sent", today && today.day === dayOf(Date.now()) && today.lecture_id === L && today.part_from === 0 && today.part_to === 1 && today.planned_reader === null && !M.readerSent, JSON.stringify(today));
       await shoham.goto(`${mock.base}/?v=group`);
       const band = shoham.locator(`.m-band[data-meeting="${today.id}"]`);
       await band.waitFor({ timeout: 10000 });
       const bandText = norm(await band.innerText());
-      check(`1 "יחד": הקבוצה היום · ${soon.time} · ש׳ 1-5 · הקראה: שוהם`, bandText.startsWith(`הקבוצה היום · ${soon.time}`) && bandText.includes("ש׳ 1-5") && bandText.includes("הקראה: שוהם"), bandText);
+      check(`1 "יחד": הקבוצה היום · ${soon.time} · ש׳ 1-5, no reader line`, bandText.startsWith(`הקבוצה היום · ${soon.time}`) && bandText.includes("ש׳ 1-5") && !bandText.includes("הקראה") && !bandText.includes("מי מקריאים"), bandText);
       if (flags.guess) {
         const g = await band.locator(".m-guess-btn").waitFor({ timeout: 10000 }).then(() => band.locator(".m-guess-btn").innerText()).catch(() => "none");
         check("1 M-2 on the band: ניחוש לפני · 2 שאלות (the band chose the two guesses)", norm(g) === "ניחוש לפני · 2 שאלות" && today.guess_ids.length === 2, g);
@@ -290,8 +291,8 @@ const israel = (ms) => {
       await noa.locator(".m-agenda").waitFor({ timeout: 10000 });
       const agenda = await noa.locator(".m-agenda > li").evaluateAll((els) => els.map((e) => e.innerText.replace(/\s+/g, " ").trim()));
       check(
-        "3 the agenda: today's reading with its reader, the question sent from yesterday's meeting",
-        agenda.length === 2 && agenda[0].startsWith("היום: ") && agenda[0].includes("ש׳ 1-5") && agenda[0].includes("הקראה: שוהם") && agenda[1].startsWith("שאלה פתוחה: מה עושה LMT-Ros3?") && agenda[1].includes("מהפגישה הקודמת"),
+        "3 the agenda: today's reading (no reader before anyone reads aloud), the question sent from yesterday's meeting",
+        agenda.length === 2 && agenda[0].startsWith("היום: ") && agenda[0].includes("ש׳ 1-5") && !agenda[0].includes("הקראה") && !agenda[0].includes("מי מקריאים") && agenda[1].startsWith("שאלה פתוחה: מה עושה LMT-Ros3?") && agenda[1].includes("מהפגישה הקודמת"),
         JSON.stringify(agenda),
       );
       await shot(noa, "meeting-05-agenda", { primary: ".ph-foot .a-btn.primary" });

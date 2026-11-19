@@ -531,16 +531,16 @@ test("the tab bar (F-2): the spec's four tabs until Today, then היום · ספ
 
 test("the schema a build needs follows its flags (§2.11, §12.2.2): F and W always, the ends at 2, never B", () => {
   assert.deepEqual(requiredSchema(flagSet([]), ALL_ENDS), { F: 1, W: 1 }, "every build writes through section W (W1)");
-  assert.deepEqual(requiredSchema(flagSet(R4), ALL_ENDS), { F: 1, W: 1, Q: 2, Z: 2, M: 1, N: 1 });
+  assert.deepEqual(requiredSchema(flagSet(R4), ALL_ENDS), { F: 1, W: 1, Q: 2, Z: 2, M: 2, N: 1 });
   // Corrections wait for W2's hardening (§3.7, review M1): W 2 with them.
-  assert.deepEqual(requiredSchema(flagSet(R6), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, M: 1, N: 1, V: 1, J: 1 });
+  assert.deepEqual(requiredSchema(flagSet(R6), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, M: 2, N: 1, V: 1, J: 1 });
   // Decision 1 (17 Nov 2026): no account, so section A only for the withdrawn ACCOUNT flag.
-  assert.deepEqual(requiredSchema(flagSet(R8), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 1, N: 1, V: 1, T: 1, U: 1, J: 1 });
+  assert.deepEqual(requiredSchema(flagSet(R8), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, T: 1, U: 1, J: 1 });
   // Wave 5's phase 3 (decision 3: usable early): T-2 ("הקבוצה צריכה אותך", NEEDS_ME) is section T's end (T at 2);
   // the museum and the boss need U's traps (U at 2).
-  assert.deepEqual(requiredSchema(flagSet(R12), ALL_ENDS), { F: 1, Q: 2, Z: 2, C: 2, K: 2, P: 2, W: 2, M: 1, N: 1, V: 1, T: 3, U: 2, J: 1, H: 2, G: 2, E: 1 });
-  assert.deepEqual(requiredSchema(flagSet([...R8, "MUSEUM"]), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 1, N: 1, V: 1, T: 1, U: 2, J: 1 });
-  assert.deepEqual(requiredSchema(flagSet([...R8, "BOSS"]), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 1, N: 1, V: 1, T: 1, U: 2, J: 1, H: 2 });
+  assert.deepEqual(requiredSchema(flagSet(R12), ALL_ENDS), { F: 1, Q: 2, Z: 2, C: 2, K: 2, P: 2, W: 2, M: 2, N: 1, V: 1, T: 3, U: 2, J: 1, H: 2, G: 2, E: 1 });
+  assert.deepEqual(requiredSchema(flagSet([...R8, "MUSEUM"]), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, T: 1, U: 2, J: 1 });
+  assert.deepEqual(requiredSchema(flagSet([...R8, "BOSS"]), ALL_ENDS), { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, T: 1, U: 2, J: 1, H: 2 });
   assert.deepEqual(requiredSchema(flagSet(["MUSEUM", "BOSS"]), ALL_ENDS), { F: 1, W: 1 }, "without the pulse the museum and the boss show nothing and need nothing");
   assert.deepEqual(requiredSchema(flagSet(["TODAY", "NEEDS_ME"]), ALL_ENDS), { F: 1, W: 1, T: 3 }, "T-2: section T's end, with one question shown once (T 3)");
   assert.deepEqual(requiredSchema(flagSet(["NEEDS_ME"]), ALL_ENDS), { F: 1, W: 1 }, "without Today, NEEDS_ME shows nothing and needs nothing");
@@ -582,8 +582,8 @@ test("releases 1 and 2 on this branch: with Q's and C's ends questions and pract
   const have = sqlRegistry();
   assert.deepEqual(
     have,
-    { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 1, N: 1, B: 1, V: 1, J: 1, U: 2, H: 2, G: 2, E: 1, T: 3 },
-    "section F at version 1, W at 2 (W1 with W2's hardening), Q at 2 (Q's end and practice 2.0), Z at 2 (section Z with its end), C at 2 (C's end), K at 2 (K's end), P at 2 (A2: P's end), M at 1 (the day's meeting), N at 1 (the paragraph anchor), B at 1 (the points read ahead), V at 1 (disputes and VAR), J at 1 (the association wall), U at 2 (the anonymous counts, the pulse, and U-3's traps and museum), H at 2 (the boss battle, its heads and rounds unreadable from the table), G at 2 (the group's marathon plan, its meter counting to the study day's start), E at 1 (a member's own trap, the blank table's tables) and T at 3 (Today with T-2's end, one question shown once)",
+    { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, B: 1, V: 1, J: 1, U: 2, H: 2, G: 2, E: 1, T: 3 },
+    "section F at version 1, W at 2 (W1 with W2's hardening), Q at 2 (Q's end and practice 2.0), Z at 2 (section Z with its end), C at 2 (C's end), K at 2 (K's end), P at 2 (A2: P's end), M at 2 (the day's meeting, no reader planned ahead), N at 1 (the paragraph anchor), B at 1 (the points read ahead), V at 1 (disputes and VAR), J at 1 (the association wall), U at 2 (the anonymous counts, the pulse, and U-3's traps and museum), H at 2 (the boss battle, its heads and rounds unreadable from the table), G at 2 (the group's marathon plan, its meter counting to the study day's start), E at 1 (a member's own trap, the blank table's tables) and T at 3 (Today with T-2's end, one question shown once)",
   );
   // Package U: the pulse needs section U at 1, which this SQL registers. Its flag
   // depends on PROGRESS (flags.ts: the pulse's "אצלך" sits with progress), whose

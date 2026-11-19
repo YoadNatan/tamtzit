@@ -118,7 +118,8 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     // "הטעויות שלי" need only section P (A2: P's end at 2) and Q.
     ...(f.account ? { A: 1 } : {}),
     ...(f.progress || f.marathons ? { P: 2 } : {}),
-    ...(f.meeting ? { M: 1 } : {}),
+    // M 2: no reader planned ahead (the band and the agenda name only the live reader).
+    ...(f.meeting ? { M: 2 } : {}),
     ...(f.anchor ? { N: 1 } : {}),
     ...(f.var ? { V: 1 } : {}),
     // T-2 ("הקבוצה צריכה אותך") is section T's end: T at 2 (needsMe rides on

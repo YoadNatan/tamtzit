@@ -140,7 +140,8 @@ module.exports = {
         const at = Date.parse(body.p_starts_at);
         if (!Number.isFinite(at) || at < now() - 12 * 3_600_000 || at > now() + 14 * 86_400_000) return refuse("bad time");
         if ((body.p_title ?? "").length > 120) return refuse("bad title");
-        if (body.p_reader && !db.members.some((x) => x.group_id === g && x.user_id === body.p_reader)) return refuse("member not found");
+        // M 2: p_reader (an old copy still sends it) is ignored; no reader is planned ahead.
+        if ("p_reader" in body) M.readerSent = (M.readerSent ?? 0) + 1;
         const d = dayOf(at);
         const clash = (id) => M.meetings.some((x) => x.id !== id && x.group_id === g && x.day === d && x.lecture_id === l.id && !x.cancelled_at);
         if (!body.p_id) {
@@ -148,7 +149,7 @@ module.exports = {
           const t = iso(now());
           const m = {
             id: hex("3e000000", ++M.seq), group_id: g, day: d, starts_at: iso(at), lecture_id: l.id, part_from: pf, part_to: pt, title: (body.p_title ?? "").trim(),
-            planned_reader: body.p_reader ?? null, reader_id: null, reading: false, started_at: null, read_part: null, guess_ids: [], guess_released: 0, cancelled_at: null,
+            planned_reader: null, reader_id: null, reading: false, started_at: null, read_part: null, guess_ids: [], guess_released: 0, cancelled_at: null,
             version: 1, created_by: me, updated_by: null, created_at: t, updated_at: t,
           };
           M.meetings.push(m);
@@ -162,7 +163,7 @@ module.exports = {
         if ((m.started_at || m.reading) && (m.lecture_id !== l.id || m.part_from !== pf || m.part_to !== pt || m.day !== d)) return refuse("meeting started");
         if (clash(m.id)) return refuse("meeting exists");
         const keep = m.lecture_id === l.id && m.part_from === pf;
-        Object.assign(m, { day: d, starts_at: iso(at), lecture_id: l.id, part_from: pf, part_to: pt, title: (body.p_title ?? "").trim(), planned_reader: body.p_reader ?? null, updated_by: me });
+        Object.assign(m, { day: d, starts_at: iso(at), lecture_id: l.id, part_from: pf, part_to: pt, title: (body.p_title ?? "").trim(), updated_by: me });
         if (!keep) Object.assign(m, { guess_ids: [], guess_released: 0 });
         bump(m);
         return json([{ id: m.id, version: m.version }]);
@@ -394,7 +395,7 @@ module.exports = {
         const l = lectureOf(m.lecture_id);
         const reading = {
           lecture_id: m.lecture_id, lecture_title: l?.title ?? "", title: m.title || partsTitle(m), part_from: m.part_from, part_to: m.part_to,
-          slide_from: slideFrom(m), slide_to: slideTo(m), reader: nameOf(m.reader_id ?? m.planned_reader), reading: m.reading,
+          slide_from: slideFrom(m), slide_to: slideTo(m), reader: nameOf(m.reader_id), reading: m.reading,
         };
         const fromMeeting = (c) => M.events.some((e) => e.comment_id === c.id && (meetingOf(e.meeting_id)?.day ?? "9") < m.day);
         const prevLecture = M.meetings.filter((y) => y.group_id === m.group_id && y.day < m.day && !y.cancelled_at).sort((a, b) => (a.day < b.day ? 1 : -1))[0]?.lecture_id;
@@ -434,7 +435,7 @@ module.exports = {
           rows.map((m) => ({
             id: m.id, day: m.day, starts_at: m.starts_at, version: m.version, today: m.day === d, lecture_id: m.lecture_id, lecture_title: lectureOf(m.lecture_id)?.title ?? "",
             title: m.title || partsTitle(m), part_from: m.part_from, part_to: m.part_to, slide_from: slideFrom(m), slide_to: slideTo(m),
-            planned_reader: m.planned_reader, reader_id: m.reader_id, reading: m.reading, started_at: m.started_at, over: over(m),
+            reader_id: m.reader_id, reading: m.reading, started_at: m.started_at, over: over(m),
             guesses: m.guess_ids.length, guess_released: m.guess_released, my_guesses: M.guesses.filter((g) => g.meeting_id === m.id && g.user_id === me).length,
             coffee: quizRef(m, "coffee"), closing: quizRef(m, "end"),
           })),

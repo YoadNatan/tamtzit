@@ -143,6 +143,8 @@ export default function Me({ ctx }: ScreenProps<"me">) {
         </nav>
       ) : null}
       <MyLaneRows ctx={ctx} />
+      {/* The guide's own section, high on the screen so it is found (the owner's request). */}
+      <GuideMeRows ctx={ctx} />
 
       <section className="a-stack" aria-labelledby="settings-h">
         <div className="a-sec">
@@ -265,8 +267,6 @@ export default function Me({ ctx }: ScreenProps<"me">) {
           />
         ) : null}
       </section>
-
-      <GuideMeRows ctx={ctx} />
 
       <nav className="a-list links-card">
         <RouteLink to={{ v: "help" }} go={ctx.go} className="a-li row-link">

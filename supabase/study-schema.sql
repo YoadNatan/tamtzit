@@ -9412,9 +9412,14 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 --  production's data: it adds tables and functions, and replaces section
 --  Z's stub study_quiz__pick_preset (same name, argument and result).
 --
---  T1  the day's meeting as data: time, lecture, part range, the planned
---      reader; created ahead ("הפגישה הבאה") or by the first reading aloud of
---      the day. Shared in the group and published (the band, the banner).
+--  T1  the day's meeting as data: time, lecture, part range; created ahead
+--      ("הפגישה הבאה") or by the first reading aloud of the day. Shared in the
+--      group and published (the band, the banner). Whoever taps "להקריא
+--      לקבוצה" reads (reader_id).
+--  M 2 (the owner's request): no reader is planned ahead any more. The column
+--      planned_reader stays (an open copy of the old app still selects it)
+--      but nothing sets or reads it; study_meeting_save keeps p_reader and
+--      ignores it, so an old copy's save still works.
 --  M4  "לא ברור לי": a follower's anonymous tap on the paragraph being read;
 --      private rows, written only by a function, never published.
 --  M5  only the meeting's current reader is told where 3 or more members
@@ -9459,7 +9464,7 @@ create table if not exists public.study_meetings (
   part_from      int         not null check (part_from between 0 and 199),
   part_to        int         not null check (part_to between 0 and 199),
   title          text        not null default '' check (char_length(title) <= 120),
-  planned_reader uuid        references auth.users (id) on delete set null,
+  planned_reader uuid        references auth.users (id) on delete set null,   -- unused since M 2 (kept for old copies' selects)
   reader_id      uuid        references auth.users (id) on delete set null,   -- who reads aloud now, or last did
   reading        boolean     not null default false,
   started_at     timestamptz,
@@ -9625,9 +9630,11 @@ $$;
 
 -- "הפגישה הבאה": creates (p_id null) or changes a meeting. Any member, as a
 -- marathon. Errors: 'group not found', 'lecture not found', 'bad parts',
--- 'bad time', 'bad title', 'member not found', 'meeting exists' (that
+-- 'bad time', 'bad title', 'meeting exists' (that
 -- lecture already has a meeting that day), 'meeting not found', 'conflict',
 -- 'meeting started' (a started meeting keeps its lecture, parts and day).
+-- p_reader is ignored (M 2: no planned reader); it stays so an old copy of
+-- the app, which still sends it, saves as before.
 create or replace function public.study_meeting_save(p_id uuid, p_version int, p_group uuid, p_starts_at timestamptz,
   p_lecture uuid, p_part_from int, p_part_to int, p_title text default '', p_reader uuid default null)
 returns table (id uuid, version int)
@@ -9653,9 +9660,6 @@ begin
     raise exception 'bad time';
   end if;
   if char_length(coalesce(p_title, '')) > 120 then raise exception 'bad title'; end if;
-  if p_reader is not null and not exists (select 1 from public.study_members x where x.group_id = p_group and x.user_id = p_reader) then
-    raise exception 'member not found';
-  end if;
   d := study_private.day_of(p_starts_at);
   perform pg_advisory_xact_lock(hashtext('study_meeting:' || p_group::text));
   if p_id is null then
@@ -9663,8 +9667,8 @@ begin
                 where x.group_id = p_group and x.day = d and x.lecture_id = p_lecture and x.cancelled_at is null) then
       raise exception 'meeting exists';
     end if;
-    insert into public.study_meetings (group_id, day, starts_at, lecture_id, part_from, part_to, title, planned_reader, created_by)
-    values (p_group, d, p_starts_at, p_lecture, p_part_from, p_part_to, btrim(coalesce(p_title, '')), p_reader, me)
+    insert into public.study_meetings (group_id, day, starts_at, lecture_id, part_from, part_to, title, created_by)
+    values (p_group, d, p_starts_at, p_lecture, p_part_from, p_part_to, btrim(coalesce(p_title, '')), me)
     returning * into m;
   else
     select * into m from public.study_meetings x where x.id = p_id and x.group_id = p_group for update;
@@ -9672,7 +9676,7 @@ begin
     if m.version <> p_version then raise exception 'conflict'; end if;
     -- Review SEC4-2: once it started (or while it is read aloud), what is read and its day stay:
     -- a live reading, its place, the released guesses and "אישור בקול" all lean on them. The
-    -- time, the title and who is planned to read may still change.
+    -- time and the title may still change.
     if (m.started_at is not null or m.reading)
        and (p_lecture is distinct from m.lecture_id or p_part_from is distinct from m.part_from
             or p_part_to is distinct from m.part_to or d is distinct from m.day) then
@@ -9684,7 +9688,7 @@ begin
     end if;
     update public.study_meetings x
        set day = d, starts_at = p_starts_at, lecture_id = p_lecture, part_from = p_part_from, part_to = p_part_to,
-           title = btrim(coalesce(p_title, '')), planned_reader = p_reader,
+           title = btrim(coalesce(p_title, '')),
            guess_ids = case when x.lecture_id = p_lecture and x.part_from = p_part_from then x.guess_ids else '{}' end,
            guess_released = case when x.lecture_id = p_lecture and x.part_from = p_part_from then x.guess_released else 0 end,
            version = x.version + 1, updated_by = me, updated_at = now()
@@ -10232,7 +10236,7 @@ begin
            'part_from', m.part_from, 'part_to', m.part_to,
            'slide_from', (select s.slide_from from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = m.part_from),
            'slide_to', (select s.slide_to from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = m.part_to),
-           'reader', (select mb.name from public.study_members mb where mb.group_id = m.group_id and mb.user_id = coalesce(m.reader_id, m.planned_reader)),
+           'reader', (select mb.name from public.study_members mb where mb.group_id = m.group_id and mb.user_id = m.reader_id),
            'reading', m.reading)
     into rd from public.study_lectures l where l.id = m.lecture_id;
   select jsonb_build_object('id', c.id, 'body', c.body, 'lecture_id', c.lecture_id, 'lecture_title', l.title,
@@ -10277,7 +10281,7 @@ begin
            'part_from', m.part_from, 'part_to', m.part_to,
            'slide_from', (select s.slide_from from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = m.part_from),
            'slide_to', (select s.slide_to from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = m.part_to),
-           'planned_reader', m.planned_reader, 'reader_id', m.reader_id, 'reading', m.reading, 'started_at', m.started_at,
+           'reader_id', m.reader_id, 'reading', m.reading, 'started_at', m.started_at,
            'over', study_private.meeting_over(m),
            'guesses', cardinality(m.guess_ids), 'guess_released', m.guess_released,
            'my_guesses', (select count(*) from public.study_meeting_guess_answers a where a.meeting_id = m.id and a.user_id = auth.uid()),
@@ -10530,7 +10534,7 @@ exception when duplicate_object then
   null;
 end $$;
 
-insert into study_private.schema_sections (section, version) values ('M', 1)
+insert into study_private.schema_sections (section, version) values ('M', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION M ════
 

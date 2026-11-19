@@ -4686,7 +4686,6 @@ begin
       ('parts that are not there', '3c100000-0000-4000-8000-000000000001'::uuid, 0, 5, now(), null::uuid, 'bad parts'),
       ('parts backwards', '3c100000-0000-4000-8000-000000000001'::uuid, 1, 0, now(), null::uuid, 'bad parts'),
       ('a lecture of no group', gen_random_uuid(), 0, 0, now(), null::uuid, 'lecture not found'),
-      ('a reader who is not a member', '3c100000-0000-4000-8000-000000000003'::uuid, 0, 0, now(), 'dddddddd-0000-4000-8000-000000000004'::uuid, 'member not found'),
       ('a month ahead', '3c100000-0000-4000-8000-000000000003'::uuid, 0, 0, now() + interval '30 days', null::uuid, 'bad time')
     ) as t(label, lec, pf, pt, at, reader, want) loop
     begin
@@ -4694,8 +4693,8 @@ begin
       bad := bad || c.label || ' was saved; ';
     exception when others then if sqlerrm = c.want then n := n + 1; else bad := bad || c.label || ' → ' || sqlerrm || '; '; end if; end;
   end loop;
-  raise notice '%', mtest.m_is('M1', n || ' of 6 bad meetings refused with their reason' || case when bad <> '' then ' (' || bad || ')' else '' end,
-                                '6 of 6 bad meetings refused with their reason');
+  raise notice '%', mtest.m_is('M1', n || ' of 5 bad meetings refused with their reason' || case when bad <> '' then ' (' || bad || ')' else '' end,
+                                '5 of 5 bad meetings refused with their reason');
 end $$;
 do $$ begin perform public.study_meeting_save(current_setting('t.m')::uuid, 1, current_setting('t.gid')::uuid, now(),
     '3c100000-0000-4000-8000-000000000001', 0, 1, repeat('x', 121), null);
@@ -4713,9 +4712,15 @@ do $$ begin perform public.study_meeting_save(current_setting('t.m')::uuid, 7, c
 exception when others then raise notice 'M1d. %: someone changed it meanwhile (%)', case when sqlerrm = 'conflict' then 'ok' else 'FAIL' end, sqlerrm; end $$;
 select mtest.m_is('M1e. today''s band',
        (b ->> 'lecture_title') || ' · ' || (b ->> 'title') || ' · slides ' || (b ->> 'slide_from') || '-' || (b ->> 'slide_to')
-       || ' · reader Shoham ' || ((b ->> 'planned_reader') = :'u_shoham') || ' · today ' || (b ->> 'today') || ' · over ' || (b ->> 'over'),
-       'מלריה (פגישה) · מחזור החיים · מנגנונים · slides 1-24 · reader Shoham true · today true · over false')
+       || ' · planned reader ' || (b ? 'planned_reader') || ' · reader ' || coalesce(b ->> 'reader_id', 'none')
+       || ' · today ' || (b ->> 'today') || ' · over ' || (b ->> 'over'),
+       'מלריה (פגישה) · מחזור החיים · מנגנונים · slides 1-24 · planned reader false · reader none · today true · over false')
   from jsonb_array_elements(public.study_meeting_band(:'gid')) b;
+-- M 2: no reader is planned ahead. An old copy still sends p_reader (Shoham, above); it is ignored.
+select mtest.m_is('M1h. a reader an old copy sends is ignored: column · agenda reader',
+       coalesce(m.planned_reader::text, 'null') || ' · ' || coalesce(public.study_meeting_agenda(m.id) -> 'reading' ->> 'reader', 'none'),
+       'null · none')
+  from public.study_meetings m where m.id = current_setting('t.m')::uuid;
 -- Any member changes the plan, with its version (a title; the same parts keep the guesses).
 select mtest.m_is('M1f. Noa renames it (version 1 → 2)', (select version::text from public.study_meeting_save(current_setting('t.m')::uuid, 1, :'gid', now(), :'l1', 0, 1, 'מלריה', :'u_shoham')), '2');
 select mtest.m_is('M1g. the band shows the title', (select string_agg(b ->> 'title', ',') from jsonb_array_elements(public.study_meeting_band(:'gid')) b), 'מלריה');
@@ -5157,7 +5162,7 @@ reset role;
 -- Leave nothing open for the sections after this one.
 update public.study_quizzes set state = 'ended', ended_at = now() where state in ('lobby', 'question', 'reveal');
 update public.study_meetings set reading = false where reading;
-select mtest.m_is('M-reg. the registry', public.study_schema() ->> 'M', '1');
+select mtest.m_is('M-reg. the registry (M 2: no planned reader)', public.study_schema() ->> 'M', '2');
 -- The fixtures go, as at section Z's end: the quizzes, the lectures (their meetings, taps, guesses,
 -- questions and answers with them), the members and the helpers.
 delete from public.study_quizzes where group_id = :'gid';

@@ -113,7 +113,7 @@ const dayOf = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusal
   const t0 = ago(60 * 24 + 30);
   const Y = hex("7d000000", 1);
   const meeting = (o) => ({
-    group_id: db.group.id, lecture_id: L, part_from: 2, part_to: 2, title: "", planned_reader: id("שוהם"), reader_id: null, reading: false, started_at: null, read_part: null,
+    group_id: db.group.id, lecture_id: L, part_from: 2, part_to: 2, title: "", planned_reader: null, reader_id: null, reading: false, started_at: null, read_part: null,
     guess_ids: [], guess_released: 0, cancelled_at: null, version: 1, created_by: id("שוהם"), updated_by: null, created_at: t0, updated_at: t0, ...o,
   });
   M.meetings.push(meeting({ id: Y, day: dayOf(Date.parse(t0)), starts_at: t0, reader_id: id("שוהם"), started_at: t0, read_part: 2 }));

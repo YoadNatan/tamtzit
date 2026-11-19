@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { flagsFrom, requiredSchema, type Flags } from "./flags";
 import {
+  appTour,
   cardState,
   COPY,
   DONE_BY,
@@ -14,6 +15,7 @@ import {
   matches,
   NO_FACTS,
   nextHint,
+  offerWanted,
   paragraphActions,
   parseMemory,
   readMemory,
@@ -31,7 +33,7 @@ import {
   type WalkId,
 } from "./guide";
 import { miniScreen } from "./guideScreens";
-import { allowed, parseRoute, routeUrl, tabOf, type Route } from "./route";
+import { allowed, parseRoute, routeUrl, tabLinks, tabOf, type Route } from "./route";
 
 /* ── The guide (docs/study/guide.md) ──
  * Its registry under every release's flags: nothing for a feature that is
@@ -82,6 +84,8 @@ function allText(f: Flags): string {
     ...steps.flatMap((s) => [s.title, s.line]),
     ...walks.flatMap((w) => [w.title, ...w.steps.flatMap((s) => [s.say, s.empty ?? ""])]),
     ...minis.flatMap((g) => [g.screen, ...g.steps.map((s) => s.say)]),
+    appTour(f).screen,
+    ...appTour(f).steps.map((s) => s.say),
     ...howTos(f).flatMap((h) => [h.title, h.answer]),
   ].join("\n");
 }
@@ -178,6 +182,11 @@ test("every place the guide points at is in TARGETS, and every STOP ends its wal
     });
   }
   for (const r of ROUTES) for (const s of screenGuide(r, f)?.steps ?? []) assert.ok(known.has(s.target.sel), `${routeUrl(r)}: ${s.target.sel}`);
+  for (const [name, names] of SETS)
+    for (const s of appTour(flagSet(names)).steps) {
+      assert.ok(known.has(s.target.sel), `the tour (${name}): ${s.target.sel}`);
+      assert.ok(!stops(s.target.sel), `the tour (${name}) never points at a STOP: ${s.target.sel}`);
+    }
   // The costs and the group's live actions named in the design are all STOPs.
   for (const sel of [".practice-more", ".practice-empty .a-btn.primary", ".room-action button", ".m-unclear", ".read-mark .a-btn", ".wall-screen .ph-foot", ".upload .ph-foot .a-btn.primary"]) assert.ok(STOP_SELECTORS.includes(sel as never), sel);
 });
@@ -305,8 +314,10 @@ test("\"חדש\": one hint a day, for a flag turned on since, never in the first
   const f = flagSet(W4);
   const now = 100 * RETIRE_MS;
   const knewR1 = hintFlags(flagSet(R1));
-  const m: Memory = { v: 1, views: 0, did: [], list: [], tips: true, known: knewR1 };
+  const m: Memory = { v: 1, views: 0, did: [], list: [], tips: true, known: knewR1, offer: "dismissed" };
   const h = nextHint(m, f, "2026-11-18", now);
+  assert.equal(nextHint({ ...m, offer: undefined }, f, "2026-11-18", now), null, "one thing at a time: no hint while the home offers the tour");
+  assert.ok(nextHint({ ...m, offer: "taken" }, f, "2026-11-18", now), "the tour taken: hints as before");
   assert.ok(h && f[h.flag] && !knewR1.includes(h.flag), "a feature this member did not know");
   assert.equal(nextHint({ ...m, known: undefined }, f, "2026-11-18", now), null, "the first look records, says nothing");
   assert.equal(nextHint({ ...m, hintDay: "2026-11-18" }, f, "2026-11-18", now), null, "one a day");
@@ -398,4 +409,26 @@ test("the copy reads whole: no stray fragment, no dangling ending", () => {
   for (const line of Object.values(STOP_LINE)) assert.ok(!line.includes("כאן זה") && line.startsWith("לחיצה כאן"), line);
   const source = readFileSync(join(root, "src/study/lib/guide.ts"), "utf8");
   assert.ok(!/\. רק (לך|אצלך)\."/.test(source), "no sentence of the registry ends on a lone \"רק לך.\"");
+});
+
+test("the app tour: the tab bar one tab at a time, then the screen's \"?\"; offered once to a member who never had the first steps", () => {
+  const sels = (names: string[]) => appTour(flagSet(names)).steps.map((s) => s.target.sel);
+  assert.deepEqual(sels([]), [TARGETS.libraryTab, TARGETS.groupTab, TARGETS.meTab, TARGETS.screenHelp], "off: library, יחד, שלי, the ?");
+  assert.deepEqual(sels(R1), [TARGETS.libraryTab, TARGETS.practiceTab, TARGETS.groupTab, TARGETS.meTab, TARGETS.screenHelp], "production's three: + תרגול");
+  assert.deepEqual(sels(W5), [TARGETS.todayTab, TARGETS.libraryTab, TARGETS.groupTab, TARGETS.meTab, TARGETS.screenHelp], "with Today: היום first, no תרגול tab");
+  for (const [name, names] of SETS) {
+    const f = flagSet(names);
+    const tour = appTour(f).steps.map((s) => s.target.sel).join(" ");
+    for (const s of appTour(f).steps) assert.ok(s.say.length <= 160, `${name}: ${s.say}`);
+    // Every tab the bar draws (its href is routeUrl of its route) is one the tour rings.
+    for (const t of tabLinks(f)) assert.ok(tour.includes(`a.ph-tab[href="${routeUrl(t.route)}"]`), `${name}: the tour rings ${t.label} (${routeUrl(t.route)})`);
+  }
+  // The offer: a member this device never started the first steps for, until answered.
+  assert.equal(offerWanted({}), true, "joined before the guide: offered");
+  assert.equal(offerWanted({ born: 1 }), false, "a new member gets the first steps instead");
+  assert.equal(offerWanted({ offer: "taken" }), false, "taken: never again");
+  assert.equal(offerWanted({ offer: "dismissed" }), false, "״לא עכשיו״: never again");
+  assert.equal(parseMemory(JSON.stringify({ offer: "dismissed" })).offer, "dismissed");
+  assert.equal(parseMemory(JSON.stringify({ offer: "maybe" })).offer, undefined, "anything else is dropped");
+  assert.equal(cardState(parseMemory(JSON.stringify({ offer: "taken" })), [], Date.now()), "none", "the tour does not start the first steps");
 });

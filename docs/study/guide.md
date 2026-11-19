@@ -26,8 +26,25 @@
    - "להסתיר" מסתיר אותו, ואפשר לבטל.
    - אחרי 14 יום הוא נעלם לבד.
 
+**מי שהיו בקבוצה לפני המדריך.**
+
+- במסך הבית מופיע פעם אחת כרטיס ברור: **"סיור קצר באפליקציה"**, עם
+  "להתחיל סיור" ו"לא עכשיו".
+- הסיור עובר על הלשוניות למטה, אחת אחת (היום, ספרייה, תרגול כשיש, יחד,
+  שלי), ובסוף על "?" שבראש המסך. רק טבעת ובועה, "הבא" / "הקודם" / "סיום".
+  הוא לא לוחץ על כלום, ונגיעה בלשונית עובדת כרגיל ומסיימת את הסיור.
+- אחרי תשובה, כל תשובה, הכרטיס לא חוזר. אחרי "להתחיל סיור" נשארת במקומו
+  שורה אחת: "אפשר לחזור לסיור מתי שרוצים: ״שלי״ ← ״מדריך לאפליקציה״."
+  אחרי "לא עכשיו" אותו משפט מופיע כהודעה קצרה.
+- כל עוד הכרטיס מחכה לתשובה אין טיפ "חדש", כדי שלא יופיעו שני דברים של
+  המדריך באותו זמן.
+- הכרטיס תלוי במכשיר: הזיכרון של המדריך נשמר בטלפון, כמו כל השאר.
+
 **מה כולם מקבלים.**
 
+- **"מדריך לאפליקציה" ב"שלי"**, גבוה במסך (מעל ההגדרות): "סיור קצר
+  באפליקציה", הצעדים הראשונים, הטיפים, "איך עושים…?" ו"לנסות בלי לחץ".
+- **"מדריך לאפליקציה" בראש העזרה**, מעל "איך עושים…?", עם "להתחיל סיור".
 - **"?" בראש כל מסך:** סיור קצר במסך עצמו.
   - בהרצאה זה הצ׳יפ "איך קוראים כאן?", ראשון בשורת הפעולות, כך שתמיד רואים
     אותו.
@@ -40,8 +57,6 @@
 - **"איך עושים…?" בראש העזרה:** חיפוש מקומי, למשל "לתרגל", "להעלות" או
   "תגובה".
   - ליד כל תשובה יש "הראו לי", שמוביל לשם במסכים האמיתיים.
-- **ב"שלי":** אפשר להחזיר את הצעדים הראשונים או להתחיל אותם מההתחלה, לכבות
-  את הטיפים ולפתוח "לנסות בלי לחץ".
 - **"לנסות בלי לחץ":** פסקה לדוגמה ושאלה עם הימור. שום דבר לא נשמר ולא נשלח.
 - **"חדש":** כשנפתחת תכונה חדשה, מי שכבר בקבוצה מקבלים עליה טיפ אחד, לכל
   היותר טיפ אחד ביום. אפשר לכבות את זה ב"שלי".
@@ -85,6 +100,7 @@
 | 2.2 walks, "קודם / קחו אותי", Back re-sync, missing target after 2.5 s, STOP | `walkOf()` defines 13 walks: read, correct, upload, practice, invite, today, group, cards, readaloud, readmark, quizopen, meeting, ask. `stepWalk()` re-syncs on every frame, pushes no history entry, and steps back when a "select" target closes. A STOP rings the control, adds the STOP line, and its only button is "סיום". A walk ends quietly when the member goes on their own to a screen that is none of its steps, or that does not move it on (another tab instead of the ringed one). The browser's Back still re-syncs it, and "קחו אותי" still leads it. | The practice walk has one more step: "סבב חדש"'s start button, the screen between the lecture's practice and the session. The meeting walk rings "לקבוע פגישה" and ends there, because the save button is inside a sheet, where the guide always hides. |
 | 2.3 "?" mini-guides | `screenGuide()` covers Today, the library, the lecture, upload, practice (home and a lecture's, including its empty state), group, the wall and "שלי". Which screens have one is a single pure check, `miniScreen()` in `lib/guideScreens.ts`, that the registry and the entry's "?" (`hasScreenGuide`) both use, so no "?" shows with nothing behind it (Today's run has none). Steps whose element is missing are skipped and the count is recomputed. It ends with "כל העזרה", and with "לנסות שאלה לדוגמה" on practice. Head adds the "?" itself (`GuideButton`). The library's own `.help-btn` gives way to it. The reader has the chip "איך קוראים כאן?" first in `.lecture-actions`. A mini-guide that scrolled the page puts it back when it ends. While the room is live (reading aloud or following) it never scrolls, and keeps only the steps on screen. | The `.t-minutes`, `.room-bar` and `.n-anchor` lines are the design's, still to be proof-read. The quiz line "׳כולנו נגד המבחן׳: בלי נקודות אישיות, ו-80% זה ׳עברנו׳." matches helpCopy's quiz row ("ו-80% זה ׳עברנו׳"). |
 | 2.4 "איך עושים…?" | `HowTo.tsx` sits at the top of help (`#howto`, members only). The search folds niqqud, final letters and one leading ו/ה/ב/ל/מ/ש. It filters help's own rows, which appear under "כל ההסברים". With an empty query it shows "שאלות נפוצות" (the first six). When nothing matches it shows "לא מצאנו…". | The design's list was cut at entry 12. The how-tos after it follow the same rules: "לשאול את החומר", "התור של היום", "לסמן שקראתי", "לכתוב אסוציאציה", "לראות את ההתקדמות שלי", "להגדיל את הטקסט", "לנסות בלי לחץ". Each has its flag. |
+| Existing members (the owner's request, Nov 2026: "where is the guide?") | `Memory.offer` ("taken" / "dismissed"), `offerWanted()` (no `born`, no `offer`). `GuideSteps` renders `TourOffer` in the card's place on the home; `features/guide.tsx`'s `cardWanted` holds its place ("offer", 150 px) from the first paint. "להתחיל סיור" sends the new command `{ type: "tour" }`; `GuideLayer.startTour` runs `appTour(flags)` as a mini-guide run over the tab bar (new TARGETS: `todayTab`, `practiceTab`, `meTab`, `screenHelp`), from any screen that has the tab bar (it goes home first from one without). `nextHint()` says nothing while the offer waits. "שלי"'s section is now "מדריך לאפליקציה", moved above the settings, with the tour as its first row; help has the same row above "איך עושים…?"; help's row "המדריך" is now "מדריך לאפליקציה". | The tour does not start the first steps (`born` stays unset); "שלי" → "להתחיל" still does. |
 | "known flags" for "חדש" | `nextHint()`: one hint a day, on the home only, for a flag on now that the member did not know. It never comes in the first 14 days after joining, and tips can be turned off in "שלי". On the first look the flags that are on are recorded and nothing is said. | none |
 | storage scoped to the member, via PERSONAL | `study-guide:<userId>` (localStorage) was added to `api.ts`'s `PERSONAL`. Every read and write is in try/catch, with this load's copy as fallback. | none |
 | sandbox | `?v=try` (`s=b` for the bet) uses `SummaryView` and `PracticeQuestion` with local data and makes no request. | none |

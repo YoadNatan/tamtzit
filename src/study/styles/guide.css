@@ -128,6 +128,18 @@
   min-width: 0;
 }
 
+/* ── the home's one-time offer of the app tour ── */
+.g-offer {
+  border-color: var(--accent-edge);
+}
+.g-offer > p {
+  margin: 0;
+}
+.g-offer-actions {
+  align-items: center;
+  gap: var(--sp-5);
+}
+
 /* ── the sandbox ── */
 .try-screen .try-note {
   margin: 0;

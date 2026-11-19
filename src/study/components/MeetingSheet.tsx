@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Ctx } from "../features/types";
-import { getSections, listLectures, members, type LectureRow, type Member, type Section } from "../lib/api";
+import { getSections, listLectures, type LectureRow, type Section } from "../lib/api";
 import { cancelMeeting, defaultWhen, israelInstant, israelParts, meetingWords, saveMeeting, slideRange, type BandMeeting } from "../lib/meeting";
 import { isolateLatin } from "../lib/rich";
 import { Sheet } from "./Shell";
@@ -9,8 +9,9 @@ import { Sheet } from "./Shell";
  *
  * "מתי" (a date and a time; by default tomorrow at the last meeting's time,
  * else 09:00), "מה קוראים" (a lecture, then its parts from one to another,
- * the slide range under them: "ש׳ 19-33"), "מי מקריאים" (a member, or "עוד
- * לא נקבע"), "כותרת (לא חובה)". Any member saves or changes it (as a
+ * the slide range under them: "ש׳ 19-33"), "כותרת (לא חובה)". No reader is
+ * planned ahead: whoever taps "להקריא לקבוצה" reads (the owner's request,
+ * section M 2). Any member saves or changes it (as a
  * marathon); a stale version reloads the newer one ("conflict") and says so.
  * Before it starts, "לבטל את הפגישה". */
 
@@ -31,30 +32,27 @@ export default function MeetingSheet({
   const [date, setDate] = useState(first.date);
   const [time, setTime] = useState(first.time);
   const [lectures, setLectures] = useState<LectureRow[] | null>(null);
-  const [people, setPeople] = useState<Member[]>([]);
   const [lectureId, setLectureId] = useState(meeting?.lecture_id ?? "");
   const [parts, setParts] = useState<Section[]>([]);
   const [from, setFrom] = useState<number | null>(meeting?.part_from ?? null);
   const [to, setTo] = useState<number | null>(meeting?.part_to ?? null);
-  const [reader, setReader] = useState<string | null>(meeting ? meeting.planned_reader : null);
   const [title, setTitle] = useState(meeting?.title && meeting.title !== "" ? (meeting.title ?? "") : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let alive = true;
-    Promise.all([listLectures(ctx.group.id), members(ctx.group.id)])
-      .then(([l, m]) => {
+    listLectures(ctx.group.id)
+      .then((l) => {
         if (!alive) return;
         setLectures(l.filter((x) => !x.deleted_at));
-        setPeople(m);
         if (!lectureId && l[0]) setLectureId(l[0].id);
       })
       .catch(() => alive && setLectures([]));
     return () => {
       alive = false;
     };
-    // The lists load once; the chosen lecture is the form's.
+    // The list loads once; the chosen lecture is the form's.
   }, [ctx.group.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -104,7 +102,7 @@ export default function MeetingSheet({
     setBusy(true);
     setError("");
     try {
-      const r = await saveMeeting({ id: meeting?.id ?? null, version: meeting?.version ?? null, groupId: ctx.group.id, startsAt: at, lectureId, partFrom: from, partTo: to, title: title.trim(), reader });
+      const r = await saveMeeting({ id: meeting?.id ?? null, version: meeting?.version ?? null, groupId: ctx.group.id, startsAt: at, lectureId, partFrom: from, partTo: to, title: title.trim() });
       ctx.say(meeting ? "הפגישה עודכנה." : "הפגישה נקבעה.");
       onSaved(r.id);
       close();
@@ -161,7 +159,7 @@ export default function MeetingSheet({
             </select>
           </label>
           {lectures && !lectures.length ? <p className="a-small a-muted">עוד אין הרצאות בספרייה.</p> : null}
-          {started ? <p className="a-small a-muted m-started">הפגישה כבר התחילה: היום, ההרצאה והחלקים נשארים. אפשר לשנות את השעה, הכותרת ומי מקריאים.</p> : null}
+          {started ? <p className="a-small a-muted m-started">הפגישה כבר התחילה: היום, ההרצאה והחלקים נשארים. אפשר לשנות את השעה והכותרת.</p> : null}
           {parts.length ? (
             <div className="a-stack">
               <div className="a-wrap m-parts" role="group" aria-label="החלקים">
@@ -178,19 +176,6 @@ export default function MeetingSheet({
               {range ? <span className="a-small a-muted">{range}</span> : null}
             </div>
           ) : null}
-          <div className="a-stack">
-            <span className="a-small">מי מקריאים</span>
-            <div className="a-wrap" role="radiogroup" aria-label="מי מקריאים">
-              <button type="button" className={`a-chip${reader === null ? " busy" : ""}`} role="radio" aria-checked={reader === null} onClick={() => setReader(null)}>
-                עוד לא נקבע
-              </button>
-              {people.map((p) => (
-                <button key={p.user_id} type="button" className={`a-chip${reader === p.user_id ? " busy" : ""}`} role="radio" aria-checked={reader === p.user_id} onClick={() => setReader(p.user_id)}>
-                  <bdi>{p.name || "ללא שם"}</bdi>
-                </button>
-              ))}
-            </div>
-          </div>
           <label className="a-field">
             <span>כותרת (לא חובה)</span>
             <input className="a-input" value={title} maxLength={120} placeholder={partsTitle} onChange={(e) => setTitle(e.target.value)} dir="auto" />

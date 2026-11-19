@@ -120,7 +120,7 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       const MT = "3e000000-0000-4000-8000-000000000777";
       const t0 = new Date().toISOString();
       db.meetingMock.meetings.push({
-        id: MT, group_id: GROUP.id, day: tomorrow, starts_at: `${tomorrow}T18:00:00.000Z`, lecture_id: L, part_from: 2, part_to: 3, title: "", planned_reader: id("שוהם"), reader_id: null, reading: false,
+        id: MT, group_id: GROUP.id, day: tomorrow, starts_at: `${tomorrow}T18:00:00.000Z`, lecture_id: L, part_from: 2, part_to: 3, title: "", planned_reader: null, reader_id: null, reading: false,
         started_at: null, read_part: null, guess_ids: [], guess_released: 0, cancelled_at: null, version: 1, created_by: id("שוהם"), updated_by: null, created_at: t0, updated_at: t0,
       });
 

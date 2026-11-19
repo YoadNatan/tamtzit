@@ -44,7 +44,7 @@ export type BandMeeting = {
   part_to: number;
   slide_from: number | null;
   slide_to: number | null;
-  planned_reader: string | null;
+  /** Who reads aloud now, or last did ("להקריא לקבוצה"); no reader is planned ahead (M 2). */
   reader_id: string | null;
   reading: boolean;
   started_at: string | null;
@@ -66,7 +66,6 @@ export type MeetingRow = {
   part_from: number;
   part_to: number;
   title: string;
-  planned_reader: string | null;
   reader_id: string | null;
   reading: boolean;
   started_at: string | null;
@@ -150,7 +149,6 @@ export async function saveMeeting(m: {
   partFrom: number;
   partTo: number;
   title: string;
-  reader: string | null;
 }): Promise<{ id: string; version: number }> {
   const rows = await run<Array<{ id: string; version: number }>>(
     db().rpc("study_meeting_save", {
@@ -162,7 +160,6 @@ export async function saveMeeting(m: {
       p_part_from: m.partFrom,
       p_part_to: m.partTo,
       p_title: m.title,
-      p_reader: m.reader,
     }),
   );
   return rows[0];
@@ -192,7 +189,7 @@ export const catchupDone = (id: string) => run<null>(db().rpc("study_meeting_cat
 export async function meetingOn(groupId: string, lectureId: string, now = Date.now()): Promise<MeetingRow | null> {
   const { data, error } = await db()
     .from("study_meetings")
-    .select("id, group_id, day, starts_at, lecture_id, part_from, part_to, title, planned_reader, reader_id, reading, started_at, read_part, guess_ids, guess_released, cancelled_at, version")
+    .select("id, group_id, day, starts_at, lecture_id, part_from, part_to, title, reader_id, reading, started_at, read_part, guess_ids, guess_released, cancelled_at, version")
     .eq("group_id", groupId)
     .eq("lecture_id", lectureId)
     .eq("day", dayText(now))

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Ctx } from "../features/types";
 import { flags } from "../lib/flags";
-import { cardState, COPY, firstSteps, hintFlags, isDone, NO_FACTS, readMemory, writeMemory, type Facts, type Memory } from "../lib/guide";
+import { cardState, COPY, firstSteps, hintFlags, isDone, NO_FACTS, offerWanted, readMemory, writeMemory, type Facts, type Memory } from "../lib/guide";
 import { guideFacts } from "../lib/guideFacts";
 import { freshFor, GUIDE_EVENT, guideSend, type GuideCommand } from "../lib/guideMark";
 import { RouteLink } from "./Shell";
@@ -14,7 +14,13 @@ import "../styles/guide.css";
  * the ring and the bubble. Expanded on the first two home views, one row
  * from the third, "כל הצעדים בוצעו." when done, gone after 14 days or on
  * "להסתיר" (with "ביטול"); "שלי" brings it back. Never a scrim, never in
- * the way of the home's own blocks. */
+ * the way of the home's own blocks.
+ *
+ * A member who never had the first steps (joined before the guide) gets,
+ * in the same place, a one-time offer instead: "סיור קצר באפליקציה" with
+ * "להתחיל סיור" (the app tour over the tab bar) and "לא עכשיו". Either
+ * answer is kept on the device and the offer never comes back; the tour
+ * stays in "שלי" ← "מדריך לאפליקציה" and at the top of help. */
 
 /** One count per home view (React's development double effect counts once). */
 let lastView = 0;
@@ -38,6 +44,8 @@ export default function GuideSteps({ ctx, home, queue }: { ctx: Ctx; home: "toda
   });
   const [facts, setFacts] = useState<Facts | null>(null);
   const [open, setOpen] = useState(false);
+  /** The offer was answered with "להתחיל סיור" on this view: it stays as one line saying where the tour lives. */
+  const [offerOpen, setOfferOpen] = useState(false);
 
   // The memory changes elsewhere: a mark ticked a step, "שלי" brought the card back.
   useEffect(() => {
@@ -80,7 +88,8 @@ export default function GuideSteps({ ctx, home, queue }: { ctx: Ctx; home: "toda
   };
 
   const state = cardState(m, steps, Date.now());
-  if (state === "none" || state === "hidden" || state === "retired") return null;
+  if (state === "none") return offerWanted(m) || offerOpen ? <TourOffer ctx={ctx} home={home} onAnswer={() => setOfferOpen(true)} /> : null;
+  if (state === "hidden" || state === "retired") return null;
   if (!facts) return <div className="g-steps-hold" aria-hidden="true" style={{ minHeight: state === "collapsed" ? 76 : 260 }} />;
   if (!steps.length) return null;
 
@@ -187,6 +196,61 @@ export default function GuideSteps({ ctx, home, queue }: { ctx: Ctx; home: "toda
             כל הצעדים
           </button>
         </div>
+      )}
+    </section>
+  );
+}
+
+/** The home's one-time offer of the app tour (docs/study/guide.md). The
+ *  tour only points: it starts over the tab bar, and the member's own taps
+ *  do the rest. After "להתחיל סיור" the card stays for this view as one line
+ *  saying where the tour lives, and takes focus back when the tour ends. */
+function TourOffer({ ctx, home, onAnswer }: { ctx: Ctx; home: "today" | "library"; onAnswer: () => void }) {
+  const [started, setStarted] = useState(false);
+  const [gone, setGone] = useState(false);
+  const card = useRef<HTMLElement>(null);
+  const answer = (offer: Memory["offer"]) => {
+    writeMemory(ctx.userId, { ...readMemory(ctx.userId), offer });
+    guideSend({ type: "changed" });
+  };
+  if (gone) return null;
+  const start = () => {
+    answer("taken");
+    onAnswer();
+    setStarted(true);
+    guideSend({ type: "tour", opener: card.current });
+  };
+  const later = () => {
+    answer("dismissed");
+    setGone(true);
+    ctx.say(COPY.offerWhere);
+  };
+  return (
+    <section ref={card} className="a-card g-steps g-offer" aria-labelledby="g-offer-h" data-home={home} tabIndex={-1}>
+      <div className="g-steps-head">
+        <h2 className="a-h2" id="g-offer-h">
+          {COPY.tourTitle}
+        </h2>
+      </div>
+      {started ? (
+        <div className="g-steps-row">
+          <span className="a-small">{COPY.offerWhere}</span>
+          <button type="button" className="a-btn small" onClick={() => setGone(true)}>
+            {COPY.close}
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="a-small a-muted">{COPY.offerLine}</p>
+          <div className="a-row g-offer-actions">
+            <button type="button" className="a-btn primary small" onClick={start}>
+              {COPY.tourStart}
+            </button>
+            <button type="button" className="a-link" onClick={later}>
+              {COPY.offerLater}
+            </button>
+          </div>
+        </>
       )}
     </section>
   );

@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import type { Ctx } from "../features/types";
 import { flags } from "../lib/flags";
-import { cardLive, DONE_BY, hintFlags, readMemory, writeMemory, type Memory } from "../lib/guide";
+import { cardLive, COPY, DONE_BY, hintFlags, readMemory, writeMemory, type Memory } from "../lib/guide";
 import { GUIDE_EVENT, guideSend, type GuideCommand } from "../lib/guideMark";
 import { RouteLink, pushUrl } from "./Shell";
 import { APP_PATH } from "../lib/route";
 import "../styles/guide.css";
 
-/* ── The guide in "שלי" (docs/study/guide.md §2.5) ──
+/* ── "מדריך לאפליקציה" in "שלי" (docs/study/guide.md §2.5) ──
  * For members who joined before the guide, and for anyone who hid it: the
- * first steps again (or from the start), the "חדש" tips on or off, "איך
- * עושים…?" and the sandbox. Everything here is this device's only. */
+ * app tour ("סיור קצר באפליקציה", over the tab bar, right here), the first
+ * steps again (or from the start), the "חדש" tips on or off, "איך עושים…?"
+ * and the sandbox. Everything here is this device's only. */
 
 export default function GuideMe({ ctx }: { ctx: Ctx }) {
   const [m, setM] = useState<Memory>(() => readMemory(ctx.userId));
@@ -50,9 +51,26 @@ export default function GuideMe({ ctx }: { ctx: Ctx }) {
   return (
     <section className="a-stack" aria-labelledby="g-me-h">
       <div className="a-sec">
-        <h2 id="g-me-h">המדריך</h2>
+        <h2 id="g-me-h">{COPY.guideTitle}</h2>
       </div>
       <div className="a-list g-me">
+        <div className="a-li g-me-tour">
+          <div>
+            <b>{COPY.tourTitle}</b>
+            <span className="m">{COPY.meTourLine}</span>
+          </div>
+          <button
+            type="button"
+            className="a-btn small primary"
+            onClick={(e) => {
+              // Answers the home's offer too: the tour was found.
+              if (!m.offer) save({ offer: "taken" });
+              guideSend({ type: "tour", opener: e.currentTarget });
+            }}
+          >
+            {COPY.tourStart}
+          </button>
+        </div>
         <div className="a-li">
           <div>
             <b>הצעדים הראשונים</b>

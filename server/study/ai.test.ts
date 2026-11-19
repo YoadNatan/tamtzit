@@ -70,7 +70,7 @@ const answer = async (res: Response) => ({ status: res.status, body: await res.j
  *  "whoami" is design only). */
 const SEEDED = ["plaque", "whoami", "exam_read", "exam_explain"];
 /** Every section at the version any op needs. */
-const EVERYTHING = { F: 1, A: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 1, N: 1, V: 1, U: 1, J: 1, H: 1, B: 1, G: 1, E: 1, T: 1 };
+const EVERYTHING = { F: 1, A: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, U: 1, J: 1, H: 1, B: 1, G: 1, E: 1, T: 1 };
 
 test("only POST, only JSON", async () => {
   assert.deepEqual(await answer(await ai.fetch(new Request("http://localhost/api/study/ai"))), { status: 405, body: { error: "POST only" } });

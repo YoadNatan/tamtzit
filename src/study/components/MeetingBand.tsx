@@ -11,9 +11,9 @@ import "../styles/meeting.css";
  * spec §12.4.M, the meeting design §4.4) ──
  *
  * study_meeting_band(): today's meetings, else the next one within 14 days.
- * A planned one: "הקבוצה היום · 09:00" with the slide range, the title, "הקראה:
- * שוהם" and, with M-2, "ניחוש לפני · 2 שאלות"; a live one: "הקראה עכשיו:
- * שוהם" and "לעקוב"; "3 לקפה" or the closing quiz while open; over: "הפגישה
+ * A planned one: "הקבוצה היום · 09:00" with the slide range, the title and,
+ * with M-2, "ניחוש לפני · 2 שאלות" (no reader is planned ahead: whoever taps
+ * "להקריא לקבוצה" reads); a live one: "הקראה עכשיו: שוהם" and "לעקוב"; "3 לקפה" or the closing quiz while open; over: "הפגישה
  * של היום הסתיימה". The card adds "לקבוע את הפגישה הבאה", and with M-2 a
  * meeting this member missed ("פגישה שפספסת", catch-up: decision 1 opens it
  * without an account). Live through the meetings' channel and the group's
@@ -47,7 +47,7 @@ export function useBand(groupId: string): { rows: BandMeeting[] | null; error: b
 }
 
 export function BandItem({ ctx, m }: { ctx: Ctx; m: BandMeeting }) {
-  const who = m.reader_id ?? m.planned_reader;
+  const who = m.reader_id;
   const name = who ? ctx.nameOf(who) || "ללא שם" : "";
   const slides = slideRange(m.slide_from, m.slide_to);
   const head = m.today ? `הקבוצה היום · ${clockOf(m.starts_at)}` : `הפגישה הבאה · ${whenLine(m)}`;
@@ -78,19 +78,13 @@ export function BandItem({ ctx, m }: { ctx: Ctx; m: BandMeeting }) {
             </RouteLink>
           ) : null}
         </div>
-      ) : (
-        <div className="a-row between">
-          <span className="a-row">
-            {who ? <Avatar id={who} name={name} /> : null}
-            <span className="a-small">{who ? <>הקראה: <b>{name}</b></> : "עוד לא נקבע מי מקריאים"}</span>
-          </span>
-          {flags.guess && m.guesses > 0 && m.guess_released < m.guesses ? (
-            <RouteLink to={{ v: "meeting", m: m.id }} go={ctx.go} className="a-btn small m-guess-btn">
-              ניחוש לפני · {m.guesses === 1 ? "שאלה אחת" : `${m.guesses} שאלות`}
-            </RouteLink>
-          ) : null}
+      ) : flags.guess && m.guesses > 0 && m.guess_released < m.guesses ? (
+        <div className="a-row">
+          <RouteLink to={{ v: "meeting", m: m.id }} go={ctx.go} className="a-btn small m-guess-btn">
+            ניחוש לפני · {m.guesses === 1 ? "שאלה אחת" : `${m.guesses} שאלות`}
+          </RouteLink>
         </div>
-      )}
+      ) : null}
       {quizOpen(m.coffee) ? (
         <RouteLink to={{ v: "meeting", m: m.id }} go={ctx.go} className="a-btn small m-band-quiz">
           3 לקפה פתוח
