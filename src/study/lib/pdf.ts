@@ -1,3 +1,5 @@
+import type { FigureGeo } from "../../../shared/study/figureGeo";
+import { imageBoxes, pdfFigureGeo, type Ops, type PdfItem } from "./pdfGeo";
 import type { Slide } from "./pptx";
 import { cleanText } from "./pptx";
 import { installPdfPolyfills } from "./polyfills";
@@ -20,8 +22,9 @@ const QUALITY = 0.78;
 
 export type PdfDeck = {
   slides: Slide[];
-  /** A JPEG of page n (1-based), sized for reading on a phone and for the model. */
-  pageImage(n: number): Promise<{ blob: Blob; width: number; height: number }>;
+  /** A JPEG of page n (1-based), sized for reading on a phone and for the
+   *  model, and the page's labelled diagram when it has one (pdfGeo.ts). */
+  pageImage(n: number): Promise<{ blob: Blob; width: number; height: number; geo?: FigureGeo }>;
 };
 
 /** A failure while reading a deck, with the step it happened in (shown in
@@ -54,13 +57,17 @@ export async function readPdf(data: ArrayBuffer): Promise<PdfDeck> {
   const doc = await step("open", () => pdfjs.getDocument({ data: new Uint8Array(data) }).promise);
 
   const slides: Slide[] = [];
+  // Each page's text items with their positions, for the diagram labels (the lines above stay as they were).
+  const placed = new Map<number, PdfItem[]>();
   for (let n = 1; n <= doc.numPages; n++) {
     const page = await step(`page ${n}`, () => doc.getPage(n));
     const content = await step(`text ${n}`, () => page.getTextContent());
     const lines: string[] = [];
     let current = "";
+    const own: PdfItem[] = [];
     for (const item of content.items) {
       if (!("str" in item)) continue;
+      own.push({ str: item.str, transform: item.transform, width: item.width, height: item.height });
       current += item.str;
       if (item.hasEOL) {
         const line = cleanText(current);
@@ -70,6 +77,7 @@ export async function readPdf(data: ArrayBuffer): Promise<PdfDeck> {
     }
     const tail = cleanText(current);
     if (tail) lines.push(tail);
+    placed.set(n, own);
     slides.push({ n, title: lines[0] ?? "", lines, tables: [], images: [], notes: "" });
     page.cleanup();
   }
@@ -85,7 +93,7 @@ export async function readPdf(data: ArrayBuffer): Promise<PdfDeck> {
     },
   };
 
-  async function pageImageOf(n: number): Promise<{ blob: Blob; width: number; height: number }> {
+  async function pageImageOf(n: number): Promise<{ blob: Blob; width: number; height: number; geo?: FigureGeo }> {
     const page = await doc.getPage(n);
     const base = page.getViewport({ scale: 1 });
     const scale = Math.min(3, PAGE_LONG_SIDE / Math.max(base.width, base.height));
@@ -97,7 +105,15 @@ export async function readPdf(data: ArrayBuffer): Promise<PdfDeck> {
     const blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("encode-failed"))), "image/jpeg", QUALITY),
     );
+    // The geometry is optional: any failure leaves the page without labels.
+    let geo: FigureGeo | null = null;
+    try {
+      const ops = await page.getOperatorList();
+      geo = pdfFigureGeo(placed.get(n) ?? [], imageBoxes(ops, pdfjs.OPS as unknown as Ops), viewport);
+    } catch {
+      geo = null;
+    }
     page.cleanup();
-    return { blob, width: canvas.width, height: canvas.height };
+    return { blob, width: canvas.width, height: canvas.height, ...(geo ? { geo } : {}) };
   }
 }

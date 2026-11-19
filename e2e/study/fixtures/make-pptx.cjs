@@ -9,6 +9,15 @@
 // The deck is what src/study/lib/pptx.ts reads (presentation.xml, its rels,
 // slides with <p:sp> text, <a:tbl> tables and <p:pic> pictures) and opens in
 // PowerPoint and LibreOffice as a plain deck.
+//
+// A slide with "diagram" (slide 3, question types) gets a generated drawing of
+// a nephron (a circle and tube lines drawn into the pixels, nothing taken from
+// a course) cropped with a:srcRect, and its labels as text boxes: on the
+// picture, inside a group with a child scale, and outside it joined by
+// p:cxnSp connectors. pptxGeo.ts reads them back as the figure's labels. The
+// same drawing is e2e/study/fixtures/nephron.png (the mock's storage).
+//
+//   node e2e/study/fixtures/make-pptx.cjs --nephron   writes nephron.png again
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
@@ -57,6 +66,45 @@ function png(w, h, seed) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
 }
 
+/* The nephron drawing: white paper, a dark circle (the glomerulus) and
+ * thick tube polylines, w×h pixels. */
+function nephronPng(w = 480, h = 288) {
+  const raw = Buffer.alloc((w * 3 + 1) * h, 255);
+  for (let y = 0; y < h; y++) raw[y * (w * 3 + 1)] = 0;
+  const dot = (x, y, r, c) => {
+    for (let j = Math.floor(y - r); j <= y + r; j++)
+      for (let i = Math.floor(x - r); i <= x + r; i++) {
+        if (i < 0 || j < 0 || i >= w || j >= h || (i - x) ** 2 + (j - y) ** 2 > r * r) continue;
+        const k = j * (w * 3 + 1) + 1 + i * 3;
+        raw[k] = c[0];
+        raw[k + 1] = c[1];
+        raw[k + 2] = c[2];
+      }
+  };
+  const path = (pts, r, c) => {
+    for (let p = 1; p < pts.length; p++) {
+      const [x0, y0] = pts[p - 1];
+      const [x1, y1] = pts[p];
+      const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0));
+      for (let s = 0; s <= steps; s++) dot(x0 + ((x1 - x0) * s) / steps, y0 + ((y1 - y0) * s) / steps, r, c);
+    }
+  };
+  dot(w * 0.18, h * 0.22, h * 0.12, [120, 40, 60]); // the glomerulus
+  dot(w * 0.18, h * 0.22, h * 0.07, [230, 170, 180]);
+  const tube = [70, 110, 160];
+  path([[w * 0.26, h * 0.25], [w * 0.45, h * 0.2], [w * 0.55, h * 0.32], [w * 0.5, h * 0.45]], 5, tube); // proximal
+  path([[w * 0.5, h * 0.45], [w * 0.52, h * 0.9], [w * 0.6, h * 0.9], [w * 0.62, h * 0.45]], 5, [60, 140, 90]); // the loop
+  path([[w * 0.62, h * 0.45], [w * 0.75, h * 0.35], [w * 0.9, h * 0.38]], 5, [180, 120, 40]); // distal
+  path([[w * 0.9, h * 0.38], [w * 0.92, h * 0.95]], 7, [90, 90, 90]); // collecting duct
+  path([[w * 0.08, h * 0.85], [w * 0.92, h * 0.85]], 2, [180, 180, 180]); // a guide line
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
 const NS = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const para = (t) => `<a:p><a:r><a:rPr lang="he-IL"/><a:t>${esc(t)}</a:t></a:r></a:p>`;
@@ -70,6 +118,33 @@ const table = (rows) =>
     .join("")}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
 const picture = (i) =>
   `<p:pic><p:nvPicPr><p:cNvPr id="${20 + i}" name="Picture ${i}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rIdImg${i}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="1828800" y="3200400"/><a:ext cx="5486400" cy="3291840"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
+
+const labelBox = (id, l) =>
+  `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Label ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${l.x}" y="${l.y}"/><a:ext cx="${l.w}" cy="${l.h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/>${para(l.t)}</p:txBody></p:sp>`;
+/** The diagram's picture (cropped 5% on the left), its labels and connectors. */
+function diagram(d) {
+  const out = [
+    `<p:pic><p:nvPicPr><p:cNvPr id="20" name="Nephron"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rIdImg1"/><a:srcRect l="${d.crop_l || 0}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="1828800" y="3200400"/><a:ext cx="5486400" cy="3291840"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`,
+  ];
+  d.labels.forEach((l, i) => {
+    const id = 40 + i;
+    if (l.group) {
+      // A group with a child space twice as large: the label's own xfrm is in that space.
+      out.push(
+        `<p:grpSp><p:nvGrpSpPr><p:cNvPr id="${60 + i}" name="Group ${i}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="${l.x}" y="${l.y}"/><a:ext cx="${l.w}" cy="${l.h}"/><a:chOff x="0" y="0"/><a:chExt cx="${l.w * 2}" cy="${l.h * 2}"/></a:xfrm></p:grpSpPr>${labelBox(id, { ...l, x: 0, y: 0, w: l.w * 2, h: l.h * 2 })}</p:grpSp>`,
+      );
+    } else out.push(labelBox(id, l));
+    if (l.line) {
+      const [x1, y1, x2, y2] = l.line;
+      const flipH = x2 < x1 ? ' flipH="1"' : "";
+      const flipV = y2 < y1 ? ' flipV="1"' : "";
+      out.push(
+        `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${80 + i}" name="Connector ${i}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm${flipH}${flipV}><a:off x="${Math.min(x1, x2)}" y="${Math.min(y1, y2)}"/><a:ext cx="${Math.abs(x2 - x1)}" cy="${Math.abs(y2 - y1)}"/></a:xfrm><a:prstGeom prst="straightConnector1"><a:avLst/></a:prstGeom></p:spPr></p:cxnSp>`,
+      );
+    }
+  });
+  return out.join("");
+}
 
 async function main(out) {
   const zip = new JSZip();
@@ -90,9 +165,9 @@ async function main(out) {
     const pics = [];
     for (let p = 1; p <= (s.pictures || 0); p++) {
       media += 1;
-      zip.file(`ppt/media/image${media}.png`, png(240, 150, (k + p) % 4));
+      zip.file(`ppt/media/image${media}.png`, s.diagram && p === 1 ? nephronPng() : png(240, 150, (k + p) % 4));
       rels.push(`<Relationship Id="rIdImg${p}" Type="${REL}/image" Target="../media/image${media}.png"/>`);
-      pics.push(picture(p));
+      pics.push(s.diagram && p === 1 ? diagram(s.diagram) : picture(p));
     }
     if (s.notes) {
       zip.file(`ppt/notesSlides/notesSlide${k}.xml`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:notes ${NS}><p:cSld><p:spTree>${shape(2, "Notes", '<p:ph type="body"/>', para(s.notes))}</p:spTree></p:cSld></p:notes>`);
@@ -119,7 +194,10 @@ async function main(out) {
   return { slides: n, pictures: media, bytes: fs.statSync(out).size };
 }
 
-if (require.main === module) {
+if (require.main === module && process.argv[2] === "--nephron") {
+  fs.writeFileSync(path.join(__dirname, "nephron.png"), nephronPng());
+  console.log("nephron.png written");
+} else if (require.main === module) {
   const out = process.argv[2];
   if (!out) {
     console.error("usage: node e2e/study/fixtures/make-pptx.cjs <out.pptx>");
@@ -127,4 +205,4 @@ if (require.main === module) {
   }
   main(out).then((r) => console.log(JSON.stringify(r)));
 }
-module.exports = { makePptx: main };
+module.exports = { makePptx: main, nephronPng };

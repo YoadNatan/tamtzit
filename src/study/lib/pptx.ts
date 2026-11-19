@@ -1,5 +1,7 @@
 import JSZip from "jszip";
+import type { FigureGeo } from "../../../shared/study/figureGeo";
 import { hasWords, metafileText } from "./metafile";
+import { picturesGeo, slideSize } from "./pptxGeo";
 
 /* ── Reading a PowerPoint deck ──
  *
@@ -37,6 +39,9 @@ export type Slide = {
   /** Zip paths of the pictures on this slide, in document order. */
   images: string[];
   notes: string;
+  /** Question types: each picture's label geometry (aligned with images),
+   *  null where it has none (pptxGeo.ts). PPTX only; never in the summary. */
+  geo?: (FigureGeo | null)[];
 };
 
 export type Deck = {
@@ -124,6 +129,7 @@ export async function readPptx(data: ArrayBuffer | Uint8Array | Blob): Promise<D
   const text = async (path: string) => (await zip.file(path)?.async("string")) ?? "";
   const pres = await text("ppt/presentation.xml");
   if (!pres) throw new Error("not-a-pptx");
+  const sldSz = slideSize(pres);
   const presRels = readRels(await text("ppt/_rels/presentation.xml.rels"));
   const ids = [...pres.matchAll(/<p:sldId\b[^>]*r:id="([^"]+)"/g)].map((m) => m[1]);
 
@@ -148,9 +154,12 @@ export async function readPptx(data: ArrayBuffer | Uint8Array | Blob): Promise<D
       );
       notes = paragraphs(notesXml).join(" ");
     }
-    const images = s.imageRels
-      .map((id) => rels[id] && resolvePath(path, rels[id].target))
-      .filter((p): p is string => Boolean(p) && /\.(png|jpe?g|gif|bmp|webp)$/i.test(p));
+    const geoAll = picturesGeo(xml, sldSz, s.imageRels);
+    const kept = s.imageRels
+      .map((id, i) => ({ path: rels[id] && resolvePath(path, rels[id].target), geo: geoAll[i] ?? null }))
+      .filter((x): x is { path: string; geo: FigureGeo | null } => Boolean(x.path) && /\.(png|jpe?g|gif|bmp|webp)$/i.test(x.path));
+    const images = kept.map((x) => x.path);
+    const geo = kept.map((x) => x.geo);
     const lines = [...s.lines];
     const drawings = Object.values(rels).filter((r) => r.type.endsWith("/image") && /\.(wmf|emf)$/i.test(r.target));
     for (const d of drawings) {
@@ -158,7 +167,7 @@ export async function readPptx(data: ArrayBuffer | Uint8Array | Blob): Promise<D
       const labels = bytes ? metafileText(bytes).map(cleanText).filter(Boolean) : [];
       if (hasWords(labels)) lines.push(`${DRAWING_PREFIX} ${labels.join(" | ")}`);
     }
-    slides.push({ n, title: s.title, lines, tables: s.tables, images, notes });
+    slides.push({ n, title: s.title, lines, tables: s.tables, images, notes, ...(geo.some(Boolean) ? { geo } : {}) });
   }
 
   return {

@@ -1,4 +1,5 @@
 /// <reference path="./env.d.ts" />
+import type { FigureGeo } from "../../shared/study/figureGeo.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { flagsFrom, requiredSchema } from "../../shared/study/flags.js";
@@ -20,7 +21,8 @@ import { flagsFrom, requiredSchema } from "../../shared/study/flags.js";
 
 export const MODEL = "claude-opus-5-5";
 
-export type SlideFigure = { k: number; path: string; w: number; h: number };
+/** geo: the picture's label geometry, when the upload (or the backfill) found labels (question types). */
+export type SlideFigure = { k: number; path: string; w: number; h: number; geo?: FigureGeo };
 export type StoredSlide = {
   n: number;
   title: string;

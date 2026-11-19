@@ -1,3 +1,4 @@
+import type { FigureGeo } from "../../../shared/study/figureGeo";
 import { createClient, type RealtimeChannel, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import { REQUIRED_SCHEMA } from "./flags";
 import type { Slide } from "./pptx";
@@ -43,7 +44,8 @@ function fail(error: { message?: string }): never {
 
 export type Group = { id: string; name: string };
 export type Member = { user_id: string; name: string };
-export type Figure = { k: number; path: string; w: number; h: number };
+/** geo: the picture's label geometry (question types: "סימון על תמונה"), when the upload found labels. */
+export type Figure = { k: number; path: string; w: number; h: number; geo?: FigureGeo };
 export type StoredSlide = Omit<Slide, "images"> & { figures: Figure[] };
 export type LectureStatus = "new" | "outlining" | "writing" | "ready" | "failed";
 export type LectureRow = {
@@ -754,7 +756,7 @@ export type NewLecture = {
   kind: "pptx" | "pdf";
   slides: Slide[];
   /** The pictures to store for one slide: k = 0 is the whole page, k ≥ 1 embedded pictures. */
-  figures: (slide: Slide) => Promise<Array<{ k: number; blob: Blob; width: number; height: number }>>;
+  figures: (slide: Slide) => Promise<Array<{ k: number; blob: Blob; width: number; height: number; geo?: FigureGeo }>>;
 };
 
 /** Saves a new lecture's pictures and slides. Returns the lecture as saved and
@@ -778,9 +780,9 @@ export async function createLecture(
         const path = `${input.groupId}/${id}/s${s.n}-${f.k}.jpg`;
         const up = await c.storage.from("study").upload(path, f.blob, { contentType: "image/jpeg", upsert: true });
         if (up.error) throw up.error;
-        saved.push({ k: f.k, path, w: f.width, h: f.height });
+        saved.push({ k: f.k, path, w: f.width, h: f.height, ...(f.geo ? { geo: f.geo } : {}) });
       }
-      const { images: _images, ...rest } = s;
+      const { images: _images, geo: _geo, ...rest } = s;
       stored.push({ ...rest, figures: saved });
       onProgress(++done, total);
     }
@@ -806,6 +808,21 @@ export async function createLecture(
   const lecture: Lecture = { ...row, status: "new", error: null, created_by: me, created_at: now, updated_at: now, queued_at: null, deleted_at: null, deleted_by: null };
   return { id, lecture, figurePaths: stored.flatMap((s) => s.figures.map((f) => f.path)) };
 }
+
+/** "לסמן תוויות בשרטוטים": the label geometry of a lecture's pictures, read
+ *  again from the same file on this phone (study_lecture_set_geo, section X).
+ *  Returns how many pictures got labels. */
+export async function setLectureGeo(lectureId: string, geo: Array<{ n: number; k: number; geo: FigureGeo }>): Promise<number> {
+  const { data, error } = await client().rpc("study_lecture_set_geo", { p_lecture: lectureId, p_geo: geo });
+  if (error) fail(error);
+  return Number(data) || 0;
+}
+
+/** A picture's storage path: the pattern createLecture writes. */
+export const figurePathOf = (groupId: string, lectureId: string, fig: string): string | null => {
+  const m = /^fig:(\d{1,4})-(\d{1,3})$/.exec(fig);
+  return m ? `${groupId}/${lectureId}/s${m[1]}-${m[2]}.jpg` : null;
+};
 
 export async function figureUrls(paths: string[]): Promise<Record<string, string>> {
   if (!paths.length) return {};
