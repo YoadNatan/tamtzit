@@ -222,7 +222,7 @@ const dayOf = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusal
       expect(unclearRow.includes("פסקה שסימנת ׳לא ברור׳") && unclearRow.includes("מהפגישה") && unclearRow.includes("היפוקלמיה"), "the \"לא ברור\" paragraph from the meeting");
       const cardRow = steps.rows.find((r) => r.startsWith("card"));
       // Due: the forgotten card; new: her ten in the deck, the trap card and her private card (first among the new).
-      expect(/13 כרטיסים/.test(cardRow) && cardRow.includes("הגיע הזמן") && cardRow.includes("למשל"), `the cards' row: ${cardRow}`);
+      expect(/13 כרטיסיות/.test(cardRow) && cardRow.includes("הגיע הזמן") && cardRow.includes("למשל"), `the cards' row: ${cardRow}`);
       const startText = (await noa.locator(".t-start .a-btn.primary").innerText()).trim();
       steps.start = startText;
       const step2Row = steps.rows[steps.rows.length - (pulse ? 2 : 1)];
@@ -248,7 +248,7 @@ const dayOf = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusal
       // day's return (75 s) fits only when the cards leave room for it: greedy, in the table's order.
       const used = 30 + 75 + (progress ? 75 : 0) + (again ? 75 : 0) + 90;
       const cardsFit = Math.min(13, Math.floor((600 - used) / 30));
-      expect(ten.some((r) => r.startsWith("card") && r.includes(`${cardsFit} כרטיסים`)), `10 minutes: ${cardsFit} cards (${ten.find((r) => r.startsWith("card"))})`);
+      expect(ten.some((r) => r.startsWith("card") && r.includes(`${cardsFit} כרטיסיות`)), `10 minutes: ${cardsFit} cards (${ten.find((r) => r.startsWith("card"))})`);
       const step2Fits = used + cardsFit * 30 + 75 <= 600;
       expect(ten.some((r) => r.includes("טעית לפני 3 ימים")) === step2Fits, `10 minutes: the third day's return ${step2Fits ? "fits" : "waits for tomorrow"}`);
       expect((await noa.locator(".t-start .a-btn.primary").innerText()).trim() === `להתחיל · ${Math.ceil((used + cardsFit * 30 + (step2Fits ? 75 : 0)) / 60)} דק׳`, "the start's minutes follow the cut");

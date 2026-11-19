@@ -99,7 +99,7 @@ const HELP: Array<[string, (f: Flags) => boolean]> = [
   ["מה קשה לקבוצה", (f) => f.pulse],
   ["טעויות נפוצות", (f) => f.museum],
   ["ההתקדמות שלי", (f) => f.progress],
-  ["ערבי למידה", (f) => f.marathons],
+  ["מפגשי למידה", (f) => f.marathons],
   ["תוכנית עד המבחן", (f) => f.groupPlan],
   ["שמירת החשבון", (f) => f.account],
   ["הקלטות", (f) => f.recordings],
@@ -199,18 +199,18 @@ test("the contradicted lines are gone: the race scores the bet, and a correction
     for (const bad of [...FORBIDDEN, "הטקסט משתנה לכל הקבוצה", "״קבוצתי״", "שלושת המקומות הראשונים"]) assert.ok(!text.includes(bad), `release ${release}: ${bad}`);
   }
   const r6 = shown(flagSet(R6));
-  assert.ok(r6.includes("״מירוץ״: ניקוד לפי ההימור, ומהירות רק שוברת שוויון"), "decision 2");
+  assert.ok(r6.includes("״מירוץ״: ניקוד לפי כמה הייתם בטוחים, ומהירות רק שוברת שוויון"), "decision 2");
   assert.ok(r6.includes("התיקון מתעדכן לכל הקבוצה אחרי אישור של עוד חבר או חברה, או אישור בקול בפגישה."), "decision 5");
 });
 
 test("the gating rule: before release 8 no row promises in-app review's private cards or Today's queue (§12.7.6)", () => {
   for (const names of [R5, R6, R7]) {
     const text = shown(flagSet(names));
-    assert.ok(!text.includes("הופכת לכרטיס פרטי"), "private cards wait for in-app review");
+    assert.ok(!text.includes("הופכת לכרטיסייה פרטית"), "private cards wait for in-app review");
     assert.ok(!text.includes("להיכנס לתור שלך"), "the queue waits for Today");
   }
   const r8 = shown(flagSet(R8));
-  assert.ok(r8.includes("טעות שלך בתרגול או במבחן הקבוצתי הופכת לכרטיס פרטי, עם ההסבר בגב.") && r8.includes("כשמסמנים שנענתה, התשובה יכולה להיכנס לתור שלך ככרטיס."));
+  assert.ok(r8.includes("טעות שלך בתרגול או במבחן הקבוצתי הופכת לכרטיסייה פרטית, עם ההסבר בגב.") && r8.includes("כשמסמנים שנענתה, התשובה יכולה להיכנס לתור שלך ככרטיסייה."));
 });
 
 test("every line is gender-neutral (§6.0 rule 1) and names the services in <bdi> (rule 3)", () => {
@@ -276,10 +276,10 @@ test("release 2: Q's end is built, so practice's help row and privacy line are t
   for (const names of [R1, [...R1, "QUIZ"]]) {
     const f = flagSet(names);
     const practice = helpRows(f, W, R2_ENDS).find((r) => r.title === "תרגול")?.text ?? "";
-    assert.ok(practice.includes("הימור ביטחון (ניחוש · נראה לי · על בטוח)") && practice.includes("׳מתי כן׳") && practice.includes("שני דגלים"), practice);
+    assert.ok(practice.includes("מסמנים כמה בטוחים (ניחוש · נראה לי · על בטוח)") && practice.includes("׳מתי כן׳") && practice.includes("שני דגלים"), practice);
     assert.ok(privacyLines(f, "ספק המייל", R2_ENDS).some((l) => l.key === "practice" && l.head === "בתרגול:"));
     const text = shown(f, R2_ENDS);
-    for (const notYet of ["החפיסה שלך", "כרטיס פרטי", "שאלות שנכתבות מראש", "כתיבה מראש:"]) assert.ok(!text.includes(notYet), `release 2 says nothing of C's or B's ends: ${notYet}`);
+    for (const notYet of ["החפיסה שלך", "כרטיסייה פרטית", "שאלות שנכתבות מראש", "כתיבה מראש:"]) assert.ok(!text.includes(notYet), `release 2 says nothing of C's or B's ends: ${notYet}`);
   }
 });
 
@@ -287,15 +287,15 @@ test("release 2: the quiz's help row and privacy sentence, without the meeting's
   const f = flagSet([...R1, "QUIZ"]);
   assert.ok(f.quiz && !f.meeting);
   const row = helpRows(f, W, R2_ENDS).find((r) => r.title === "מבחן קבוצתי")?.text ?? "";
-  assert.ok(row.includes("עונים לבד עם הימור (ניחוש · נראה לי · על בטוח); כשהקבוצה חצויה יש 90 שניות לשכנע ועונים שוב."), row);
-  assert.ok(row.includes("״מירוץ״: ניקוד לפי ההימור, ומהירות רק שוברת שוויון; הטבלה רק לשחקני המירוץ ורק בתוך המשחק."), row);
+  assert.ok(row.includes("עונים לבד ומסמנים כמה בטוחים (ניחוש · נראה לי · על בטוח); כשהקבוצה חצויה יש 90 שניות לשכנע ועונים שוב."), row);
+  assert.ok(row.includes("״מירוץ״: ניקוד לפי כמה הייתם בטוחים, ומהירות רק שוברת שוויון; הטבלה רק לשחקני המירוץ ורק בתוך המשחק."), row);
   const group = privacyLines(f, "ספק המייל", R2_ENDS).find((l) => l.key === "group")?.text ?? "";
   assert.ok(group.includes("כשעונים פחות משלושה רואים רק כמה ענו, ומבחן של פחות משלושה לא מציג ציון לקבוצה."), group);
   const text = shown(f, R2_ENDS);
-  for (const later of ["שאלות פתיחה", "כרטיס ׳טעות נפוצה׳", "הפגישה היומית", "מבחן חי", "תחרותי"]) assert.ok(!text.includes(later), `release 2 says nothing of: ${later}`);
+  for (const later of ["שאלות פתיחה", "כרטיסיית ׳טעות נפוצה׳", "הפגישה היומית", "מבחן חי", "תחרותי"]) assert.ok(!text.includes(later), `release 2 says nothing of: ${later}`);
   // The two sentences come back with what they describe.
   assert.ok(shown(flagSet([...R1, "QUIZ", "MEETING"]), R2_ENDS).includes("בשאלות הפתיחה רואים רק אם רוב הקבוצה צדקה."));
-  assert.ok(shown(f, ALL_ENDS).includes("כרטיס ׳טעות נפוצה׳ נוצר רק כשלפחות 3 בחרו באותה תשובה, ונפתח למחרת."));
+  assert.ok(shown(f, ALL_ENDS).includes("כרטיסיית ׳טעות נפוצה׳ נוצרת רק כשלפחות 3 בחרו באותה תשובה, ונפתחת למחרת."));
 });
 
 test("W2: every release says that taps at once count once, that deleting stops the writing, and that no phone changes a part directly", () => {
@@ -319,12 +319,12 @@ test("C's end: the cards' help row, the privacy note's cards line and the quiz's
   assert.deepEqual(ENDS, { Q: true, C: true, B: true }, "this branch has Q's and C's ends, and B as decision 2 redefines it");
   const f = flagSet([...R1, "QUIZ"]);
   const cards = helpRows(f, W).find((r) => r.title === "כרטיסיות")?.text ?? "";
-  assert.ok(cards.includes("מוסיפים לחפיסה שלך חלק אחרי חלק, ועד 20 כרטיסים חדשים ביום."), cards);
-  assert.ok(!cards.includes("כרטיס פרטי") && !cards.includes("בית אחד לחזרות"), "no private card or home while review is off");
-  assert.equal(privacyLines(f, "ספק המייל").find((l) => l.key === "cards")?.text, "החפיסה שלך, הכרטיסים הפרטיים מהטעויות והזיכרון של כל כרטיס גלויים רק לך.");
-  assert.ok(shown(f, ENDS).includes("כרטיס ׳טעות נפוצה׳ נוצר רק כשלפחות 3 בחרו באותה תשובה, ונפתח למחרת."));
+  assert.ok(cards.includes("מוסיפים לחפיסה שלך חלק אחרי חלק, ועד 20 כרטיסיות חדשות ביום."), cards);
+  assert.ok(!cards.includes("כרטיסייה פרטית") && !cards.includes("בית אחד לחזרות"), "no private card or home while review is off");
+  assert.equal(privacyLines(f, "ספק המייל").find((l) => l.key === "cards")?.text, "החפיסה שלך, הכרטיסיות הפרטיות מהטעויות והזיכרון של כל כרטיסייה גלויים רק לך.");
+  assert.ok(shown(f, ENDS).includes("כרטיסיית ׳טעות נפוצה׳ נוצרת רק כשלפחות 3 בחרו באותה תשובה, ונפתחת למחרת."));
   const review = helpRows(flagSet([...R1, "QUIZ", "CARDS_REVIEW"]), W).find((r) => r.title === "כרטיסיות")?.text ?? "";
-  assert.ok(review.includes("טעות שלך בתרגול או במבחן הקבוצתי הופכת לכרטיס פרטי, עם ההסבר בגב. בוחרים בית אחד לחזרות: האפליקציה או Anki."), review);
+  assert.ok(review.includes("טעות שלך בתרגול או במבחן הקבוצתי הופכת לכרטיסייה פרטית, עם ההסבר בגב. בוחרים בית אחד לחזרות: האפליקציה או Anki."), review);
   for (const notYet of ["שאלות שנכתבות מראש", "כתיבה מראש:"]) assert.ok(!shown(f, ENDS).includes(notYet), `nothing of section B: ${notYet}`);
 });
 
@@ -353,12 +353,12 @@ test("T-1: Today's help names only the rows the build queues (each waits for its
   const all = today(["QUESTIONS", "PRACTICE", "QUIZ", "MEETING", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "VAR", "PROGRESS", "TODAY"]);
   assert.equal(
     all,
-    "המסך הראשון: הפגישה של היום, ומתחת ״התור שלי״ לפי הזמן שיש (10, 20 או 45 דקות): כרטיסים שהגיע זמנם, טעויות מהמבחן הקבוצתי, טעות ׳על בטוח׳ בניסוח חדש, פסקאות שסימנת ׳לא ברור׳ ועדכונים בסיכום. מה שלא נכנס עובר למחר. מ-4 ימי למידה מתוך 7 יש סימון. הכול גלוי רק לך.",
+    "המסך הראשון: הפגישה של היום, ומתחת ״התור שלי״ לפי הזמן שיש (10, 20 או 45 דקות): כרטיסיות שהגיע זמנן, טעויות מהמבחן הקבוצתי, טעות ׳על בטוח׳ בניסוח חדש, פסקאות שסימנת ׳לא ברור׳ ועדכונים בסיכום. מה שלא נכנס עובר למחר. מ-4 ימי למידה מתוך 7 יש סימון. הכול גלוי רק לך.",
   );
   // Production's set with Today and the review: cards only, no meeting, no quiz.
   assert.equal(
     today(["QUESTIONS", "PRACTICE", "CARDS", "CARDS_REVIEW", "TODAY"]),
-    "המסך הראשון: ״התור שלי״ לפי הזמן שיש (10, 20 או 45 דקות): כרטיסים שהגיע זמנם. מה שלא נכנס עובר למחר. מ-4 ימי למידה מתוך 7 יש סימון. הכול גלוי רק לך.",
+    "המסך הראשון: ״התור שלי״ לפי הזמן שיש (10, 20 או 45 דקות): כרטיסיות שהגיע זמנן. מה שלא נכנס עובר למחר. מ-4 ימי למידה מתוך 7 יש סימון. הכול גלוי רק לך.",
   );
   assert.equal(today(["CARDS"]), "", "no Today, no row");
 });

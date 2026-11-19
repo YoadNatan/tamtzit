@@ -61,7 +61,7 @@ export default function PracticeTab({ lc, spot }: { lc: LectureCtx; spot: Spot }
     setChecking(id);
     try {
       await (kind === "question" ? questionStillTrue(id) : cardStillTrue(id));
-      lc.ctx.say(kind === "question" ? "סומן כנכון. השאלה חוזרת לתרגול." : "סומן כנכון. הכרטיס חוזר לחזרות.");
+      lc.ctx.say(kind === "question" ? "סומן כנכון. השאלה חוזרת לתרגול." : "סומן כנכון. הכרטיסייה חוזרת לחזרות.");
       setTry((n) => n + 1);
     } catch (e) {
       lc.ctx.say(failText(e instanceof Error ? e.message : "", kind === "question" ? "practice" : "cards"));
@@ -89,7 +89,7 @@ export default function PracticeTab({ lc, spot }: { lc: LectureCtx; spot: Spot }
   if (!data.questions.length && !data.cards.length)
     return (
       <div className="a-card dashed n-empty">
-        <p className="a-small a-muted">עוד אין שאלות או כרטיסים על הפסקה הזו.</p>
+        <p className="a-small a-muted">עוד אין שאלות או כרטיסיות על הפסקה הזו.</p>
         <AddTrap lc={lc} spot={spot} />
       </div>
     );
@@ -105,7 +105,7 @@ export default function PracticeTab({ lc, spot }: { lc: LectureCtx; spot: Spot }
           <span className="a-chip">רק לך</span>
         </span>
       </div>
-      <ul className="a-list n-items" aria-label="השאלות והכרטיסים של הפסקה">
+      <ul className="a-list n-items" aria-label="השאלות והכרטיסיות של הפסקה">
         {data.questions.map((q) => {
           const st = questionState(q);
           return (
@@ -142,7 +142,7 @@ export default function PracticeTab({ lc, spot }: { lc: LectureCtx; spot: Spot }
                 <b dir="rtl">{isolateLatin(plain(c.kind === "cloze" ? clozeQuestion(c.front, "…") : c.front), `c${c.id}`)}</b>
                 {c.stale ? (
                   <div className="a-callout warn n-stale">
-                    <span>הפסקה של הכרטיס הזה תוקנה. כדאי לבדוק שהוא עדיין נכון; עד אז הוא לא מופיע בחזרות.</span>
+                    <span>הפסקה של הכרטיסייה הזו תוקנה. כדאי לבדוק שהיא עדיין נכונה; עד אז היא לא מופיעה בחזרות.</span>
                     <div className="a-row">
                       <button type="button" className="a-btn small" disabled={checking === c.id} onClick={() => void stillTrue("card", c.id)}>
                         עדיין נכון

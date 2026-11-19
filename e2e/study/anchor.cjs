@@ -9,7 +9,7 @@
 // The third argument (or E2E_FLAGS) names the build's flags as mock.cjs's
 // flagSetOf does; E2E_ANCHOR=1 says a release's build has VITE_STUDY_ANCHOR
 // too ("all" and "notoday" have it). With the flag:
-//   1  under ¶1.3 the chip row "2 שאלות · 2 כרטיסים · תגובה" (a card placed by
+//   1  under ¶1.3 the chip row "2 שאלות · 2 כרטיסיות · תגובה" (a card placed by
 //      its point's slide, one by its own anchor; the hidden question not
 //      counted; the comment in the row, not the dot), and "טעית כאן פעמיים."
 //      with "רק לך" for Noa only;
@@ -139,8 +139,8 @@ const ago = (min) => new Date(Date.now() - min * 60_000).toISOString();
       const chips = await chipTexts(noa, "1.3");
       const mine = norm(await row(noa, "1.3").locator(".n-mine").innerText());
       check(
-        "1 Noa's row under ¶1.3: 2 שאלות · 2 כרטיסים · תגובה, the comment in the row and not the dot",
-        chips.join("|") === "2 שאלות|2 כרטיסים|תגובה" && (await noa.locator('[data-part="1"] [data-blk="3"] .note-dot').count()) === 0,
+        "1 Noa's row under ¶1.3: 2 שאלות · 2 כרטיסיות · תגובה, the comment in the row and not the dot",
+        chips.join("|") === "2 שאלות|2 כרטיסיות|תגובה" && (await noa.locator('[data-part="1"] [data-blk="3"] .note-dot').count()) === 0,
         JSON.stringify(chips),
       );
       check("1 her private line: טעית כאן פעמיים. with רק לך", mine === `טעית כאן פעמיים.${back} רק לך`, mine);
@@ -152,7 +152,7 @@ const ago = (min) => new Date(Date.now() - min * 60_000).toISOString();
       await row(shoham, "1.3").waitFor({ timeout: 15000 });
       check(
         "1 Shoham sees the group's chips and no private line of Noa's",
-        (await chipTexts(shoham, "1.3")).join("|") === "2 שאלות|2 כרטיסים|תגובה" && (await shoham.locator(".n-mine").count()) === 0,
+        (await chipTexts(shoham, "1.3")).join("|") === "2 שאלות|2 כרטיסיות|תגובה" && (await shoham.locator(".n-mine").count()) === 0,
         JSON.stringify(await chipTexts(shoham, "1.3")),
       );
 
@@ -167,7 +167,7 @@ const ago = (min) => new Date(Date.now() - min * 60_000).toISOString();
       // The one frame K and N share, in anchor.html s2's order: תגובות · תיקון (K, with CORRECTIONS) · אסוציאציה (J, with WALL) · תרגול.
       const wantTabs = ["תגובות · 1", ...(flags.corrections ? ["תיקון"] : []), ...(flags.wall ? ["אסוציאציה"] : []), "תרגול · 4*"].join("|");
       check("2 the tabs: תגובות · 1, תיקון with CORRECTIONS, אסוציאציה with WALL, and תרגול · 4, on תרגול", tabs.join("|") === wantTabs, JSON.stringify(tabs));
-      check("2 the group's line and her marks", headLine === "של הקבוצה: 2 שאלות, 2 כרטיסים הסימונים רק לך", headLine);
+      check("2 the group's line and her marks", headLine === "של הקבוצה: 2 שאלות, 2 כרטיסיות הסימונים רק לך", headLine);
       check(
         "2 her states: טעית פעמיים · עוד לא ענית · הוסתרה עד בדיקה · בחפיסה · עוד לא בחפיסה",
         items.join("|") === "שאלה · מקרה קליני / טעית פעמיים|שאלה / עוד לא ענית|שאלה / הוסתרה עד בדיקה|כרטיס / בחפיסה|כרטיס / עוד לא בחפיסה",
@@ -220,7 +220,7 @@ const ago = (min) => new Date(Date.now() - min * 60_000).toISOString();
       check(
         "4 following: each row is one dot with its label; the reader's screen has neither",
         (await noa.locator(".n-anchor").count()) === 0 &&
-          (await noa.locator('.n-dot[data-spot="1.3"]').getAttribute("aria-label")) === "על הפסקה יש שאלות, כרטיסים או תגובות" &&
+          (await noa.locator('.n-dot[data-spot="1.3"]').getAttribute("aria-label")) === "על הפסקה יש שאלות, כרטיסיות או תגובות" &&
           (await shoham.locator(".n-anchor, .n-dot").count()) === 0,
       );
       await noa.locator('[data-part="1"] [data-blk="3"]').evaluate((el) => el.scrollIntoView({ block: "center" }));
@@ -238,7 +238,7 @@ const ago = (min) => new Date(Date.now() - min * 60_000).toISOString();
       const sheet2 = noa.getByRole("dialog", { name: "מה יושב על הפסקה" });
       await sheet2.getByText("הערה בלי שאלות").waitFor({ timeout: 5000 });
       await sheet2.getByRole("tab", { name: "תרגול" }).click();
-      await sheet2.getByText("עוד אין שאלות או כרטיסים על הפסקה הזו.").waitFor({ timeout: 5000 });
+      await sheet2.getByText("עוד אין שאלות או כרטיסיות על הפסקה הזו.").waitFor({ timeout: 5000 });
       check("5 an empty paragraph's תרגול says so", (await sheet2.locator(".n-start").count()) === 0);
       await shot(noa, "anchor-06-empty");
       await noa.keyboard.press("Escape");

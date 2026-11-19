@@ -521,7 +521,7 @@ export default function CardReview({ scope, ctx, limit, onEnd }: { scope: string
       try {
         await setMyCard(id, "delete");
         next(live.current.queue.filter((x) => x !== id));
-        ctx.say("הכרטיס הפרטי נמחק.", {
+        ctx.say("הכרטיסייה הפרטית נמחקה.", {
           label: "ביטול",
           run: () =>
             void setMyCard(id, "restore")
@@ -765,7 +765,7 @@ export default function CardReview({ scope, ctx, limit, onEnd }: { scope: string
                   {card ? (
                     <li>
                       <button className="danger-text" onClick={() => void deleteCurrent()}>
-                        {card.source === "mine" ? "למחוק את הכרטיס הפרטי" : "מחיקה לכל הקבוצה"}
+                        {card.source === "mine" ? "למחוק את הכרטיסייה הפרטית" : "מחיקה לכל הקבוצה"}
                       </button>
                     </li>
                   ) : null}
@@ -794,8 +794,8 @@ export default function CardReview({ scope, ctx, limit, onEnd }: { scope: string
           <span>
             {hinted && lapses >= 2
               ? lapses === 2
-                ? "שכחת את הכרטיס הזה פעמיים, אז מגיע רמז"
-                : `שכחת את הכרטיס הזה ${lapses} פעמים, אז מגיע רמז`
+                ? "שכחת את הכרטיסייה הזו פעמיים, אז מגיע רמז"
+                : `שכחת את הכרטיסייה הזו ${lapses} פעמים, אז מגיע רמז`
               : "לוח החזרות שלך, בקצב שלך"}
           </span>
           <span className="a-chip">רק לך</span>
@@ -883,7 +883,7 @@ export default function CardReview({ scope, ctx, limit, onEnd }: { scope: string
         <p className="a-row a-small a-muted review-left">
           <Icon name="clock" size={14} />
           <span>
-            {left ? `נשארו עוד ${left}, ${aboutMinutes(left)}.` : "זה הכרטיס האחרון בסבב."} מחר: {tomorrowN === 1 ? "כרטיס אחד" : `${tomorrowN} כרטיסים`}.
+            {left ? `נשארו עוד ${left}, ${aboutMinutes(left)}.` : "זו הכרטיסייה האחרונה בסבב."} מחר: {tomorrowN === 1 ? "כרטיסייה אחת" : `${tomorrowN} כרטיסיות`}.
           </span>
         </p>
       </div>

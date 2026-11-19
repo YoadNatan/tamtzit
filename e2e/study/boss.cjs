@@ -222,7 +222,7 @@ const until = async (fn, ms, what) => {
       await play(k(), [k(), k()]);
       expect(hud().heads[0].down && hud().team_hp === 100, "round 1: Furosemide falls at 100% right, the team untouched");
       const reveal1 = await s.locator(".boss-hud").innerText();
-      expect(/−34 לאתגר/.test(reveal1) && /הקבוצה לא איבדה נקודות/.test(reveal1), `the reveal says what it did (${reveal1.replace(/\n/g, " | ")})`);
+      expect(/התקדמנו ב-34%/.test(reveal1) && /הקבוצה לא איבדה נקודות/.test(reveal1), `the reveal says what it did (${reveal1.replace(/\n/g, " | ")})`);
       await shot(s, "h5-boss-reveal");
       await next();
       // Round 2 · Thiazides 1/2: all right: half its hit points.

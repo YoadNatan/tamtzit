@@ -123,7 +123,7 @@ const count = (n: number, one: string, many: (n: number) => string) => (n === 1 
 export function rowLabel(kind: Kind, n: number, o: { otherWording?: boolean; topic?: string } = {}): string {
   switch (kind) {
     case "card":
-      return count(n, "כרטיס אחד", (k) => `${k} כרטיסים`);
+      return count(n, "כרטיסייה אחת", (k) => `${k} כרטיסיות`);
     case "quiz":
       return `${n} מהמבחן הקבוצתי`;
     case "danger":

@@ -118,7 +118,7 @@ const TEXT: Record<string, string> = {
   "ask:refusal": "לא התקבלה תשובה לשאלה הזאת. אפשר לנסח אותה אחרת.",
   "mnemonic:refusal": "לא התקבלו אסוציאציות לפסקה הזאת.",
   // J's drafts: none passed the checks, so nothing was saved (the call was paid).
-  "mnemonic:empty": "הפעם לא יצאו טיוטות מדויקות לפסקה הזאת. אפשר לכתוב משלי.",
+  "mnemonic:empty": "הפעם לא יצאו טיוטות מדויקות לפסקה הזאת. אפשר לכתוב אחת משלך.",
   // J's drafts: another phone's request holds this paragraph's text (review SEC4-3); its drafts follow here.
   "mnemonic:busy": "הטיוטות לפסקה הזאת נכתבות עכשיו בטלפון אחר. הן יופיעו כאן בעוד רגע.",
   ...each(["practice", "cards"], "gave up", "החלק הזה נכשל שלוש פעמים, ולכן הוא נעצר. אפשר ליצור סבב חדש."),
@@ -145,7 +145,7 @@ const TEXT: Record<string, string> = {
   // practice and past exams
   "practice:retired": "השאלה הוצאה מהתרגול.",
   // server design §9.1, with §12.7.4's rows
-  "practice:bad bet": "ההימור הוא ניחוש, נראה לי או על בטוח.",
+  "practice:bad bet": "אפשר לסמן ניחוש, נראה לי או על בטוח.",
   "practice:hidden": "השאלה הוסתרה מהתרגול אחרי שני דגלים, עד שתיבדק מול השקף.",
   "practice:not flagged": "השאלה הזו לא הוסתרה, אז אין מה לבדוק. שאלה נכנסת לבדיקה אחרי שני דגלים.",
   "practice:bad source": "כדי להשאיר את השאלה צריך לבחור שקף שמראה שהמפתח נכון.",
@@ -174,7 +174,7 @@ const TEXT: Record<string, string> = {
   "practice:truncated": "הקריאה נקטעה באמצע. אפשר לנסות שוב.",
   "practice:draft not found": "השאלה הזו לא נמצאה. כדאי לרענן.",
   "practice:not pending": "השאלה כבר לא ממתינה: היא נוספה לבנק, הורדה או נוסחה מחדש. כדאי לרענן.",
-  "practice:not checked": "אפשר להוסיף לבנק שאלה רק אחרי הפותר העיוור. שאלה שהוא טעה בה אפשר לנסח מחדש או להוריד.",
+  "practice:not checked": "אפשר להוסיף לבנק רק שאלה שעברה בדיקה. שאלה שהבדיקה ענתה בה אחרת אפשר לנסח מחדש או להוריד.",
   "practice:reword limit": "השאלה הזו כבר נוסחה מחדש ארבע פעמים. אפשר להשאיר אותה או להוריד.",
   // question types (docs/study/question-types.md)
   "practice:not for steps": "מקרה בשלבים לא מנסחים מחדש. אפשר להשאיר אותו או להוריד.",
@@ -250,17 +250,16 @@ const TEXT: Record<string, string> = {
   "plan:bad minutes": "אפשר 30 עד 600 דקות ביום בסבב המשותף, ועד 840 בחופש הלמידה.",
   "plan:bad rounds": "כל הרצאה חוזרת 2 עד 4 פעמים.",
   "plan:conflict": "התוכנית השתנתה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.",
-  "plan:bad choice": "המחיר הוא עוד זמן ביום, או יום חזרה אחד פחות.",
-  "marathon:conflict": "ערב הלמידה השתנה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.",
-  "marathon:bad time": "מועד ערב הלמידה כבר עבר.",
+  "plan:bad choice": "אפשר להוסיף זמן ביום, או לוותר על יום חזרה אחד.",
+  "marathon:conflict": "מפגש הלמידה השתנה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.",
+  "marathon:bad time": "מועד מפגש הלמידה כבר עבר.",
   "marathon:bad agenda": "משהו בסדר היום לא תקין. כדאי לבנות אותו מחדש.",
-  "marathon:marathon over": "ערב הלמידה כבר הסתיים.",
+  "marathon:marathon over": "מפגש הלמידה כבר הסתיים.",
 
   // the day's meeting (meeting design §8.1; §12.7.4)
   "meeting:bad parts": "החלקים שנבחרו לא נמצאו בהרצאה.",
   "meeting:meeting not found": "הפגישה הזו לא נמצאה. כדאי לרענן.",
   "meeting:meeting exists": "להרצאה הזו כבר יש פגישה ביום הזה.",
-  "meeting:member not found": "מי שנבחרו להקראה כבר לא בקבוצה. כדאי לבחור שוב מהרשימה.",
   "meeting:question not found": "השאלה הזו כבר לא בניחושים של הפגישה. כדאי לרענן.",
   "meeting:bad time": "אפשר לקבוע פגישה עד שבועיים קדימה.",
   "meeting:bad title": "הכותרת ארוכה מדי (עד 120 תווים).",

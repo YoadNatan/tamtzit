@@ -90,7 +90,7 @@ const LEVEL_LINE: Record<Level, string> = {
   focused: "ממוקד: רק החשוב ביותר, דגלים אדומים, התוויות נגד ותרופות לבחירה.",
   full: "מלא: כל נקודה שצריך לדעת מופיעה לפחות פעם. דגלים אדומים תמיד בפנים.",
   deep: "מקיף: כל נקודה שצריך לדעת, מכמה כיוונים.",
-  custom: "משלי: מספר שבוחרים, והשאלות הולכות לנקודות החשובות קודם.",
+  custom: "מספר אחר: בוחרים כמה, והשאלות הולכות לנקודות החשובות קודם.",
 };
 const LEVELS: Level[] = ["focused", "full", "deep", "custom"];
 const codeOf = (e: unknown) => (e instanceof Error ? e.message : String(e ?? ""));
@@ -796,7 +796,7 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
             <span>כ-<bdi dir="ltr">{usd(total)}</bdi></span>
           </span>
         </div>
-        <p className="a-small a-muted">כל שאלה נבדקת בידי פותר עיוור לפני שהיא נכנסת לבנק. נשמרות לכל הקבוצה.</p>
+        <p className="a-small a-muted">כל שאלה נפתרת שוב בלי המפתח לפני שהיא נכנסת לבנק. נשמרות לכל הקבוצה.</p>
         {spent.groupUsd !== null ? (
           <p className="a-small a-muted">
             נוצלו החודש <bdi dir="ltr">{usd(spent.groupUsd)}</bdi> מתוך <bdi dir="ltr">{usd(spent.capUsd)}</bdi>.

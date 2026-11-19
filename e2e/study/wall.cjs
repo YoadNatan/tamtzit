@@ -149,7 +149,7 @@ const boxIn = (loc) => loc.evaluate((el) => {
       await tab.getByRole("button", { name: "משלי" }).click();
       await shoham.waitForURL(/x=post/, { timeout: 15000 });
       await shoham.getByLabel("האסוציאציה").fill(SHOHAM_BODY);
-      await shoham.getByText("צולים את התרופה, אף פעם לא אנשים או מטופלים.").waitFor();
+      await shoham.getByText("מצלמים את התרופה, אף פעם לא אנשים או מטופלים.").waitFor();
       await shoham.getByRole("button", { name: "לפרסם" }).click();
       await shoham.getByRole("alert").filter({ hasText: "חסרה שורת ׳על מה זה?׳" }).waitFor({ timeout: 5000 });
       expect(db.aids.length === 0, "\"על מה זה?\" is required: nothing posted without it");

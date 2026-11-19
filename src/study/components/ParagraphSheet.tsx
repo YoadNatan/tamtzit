@@ -185,7 +185,7 @@ function AnswerCard({
           slides: citedSlides(`${front} ${back}`).filter((n) => have.has(n)).slice(0, 12),
           commentId: question.id,
         });
-        lc.ctx.say("נוסף כרטיס לתור שלך · רק לך");
+        lc.ctx.say("נוספה כרטיסייה לתור שלך · רק לך");
       }
       onDone();
     } catch (e) {
@@ -199,7 +199,7 @@ function AnswerCard({
       <div className="a-row between">
         <span className="a-row">
           <Icon name="cards" size={14} />
-          <b className="a-small">לסמן שנענתה, וכרטיס לתור שלך</b>
+          <b className="a-small">לסמן שנענתה, וכרטיסייה לתור שלך</b>
         </span>
         <span className="a-chip">רק לך</span>
       </div>

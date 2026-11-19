@@ -52,6 +52,6 @@ test("why it reached her: the day in Israel time, a card or a question, gender-n
   assert.equal(V.dayWords("2026-11-18T05:00:00Z", now), "היום");
   assert.equal(V.dayWords("2026-11-17T20:00:00Z", now), "אתמול");
   assert.equal(V.dayWords("2026-11-15T08:00:00Z", now), "ביום ראשון");
-  assert.equal(V.reasonLine({ reason: "card", reason_at: "2026-11-15T08:00:00Z" }, now), "הגיע אליך כי ביום ראשון חזרת על כרטיס שנשען על השורה הישנה.");
+  assert.equal(V.reasonLine({ reason: "card", reason_at: "2026-11-15T08:00:00Z" }, now), "הגיע אליך כי ביום ראשון חזרת על כרטיסייה שנשענה על השורה הישנה.");
   assert.equal(V.reasonLine({ reason: "question", reason_at: "2026-11-17T20:00:00Z" }, now), "הגיע אליך כי אתמול ענית על שאלה שנשענה על השורה הישנה.");
 });

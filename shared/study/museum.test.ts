@@ -35,10 +35,10 @@ test("the thresholds: the app's constants are section U's (one place, read by bo
 test("decision 3: the museum's meter, from the counts", () => {
   const m = (o: Partial<{ exhibits: number; soon: number; need: number; retired: number }>) =>
     ({ state: "open", floor: 3, cutoff: "c", group_need: 0, exhibits: 0, retired: 0, soon: 0, traps: 0, need: 3, ...o }) as const;
-  assert.equal(museumMeterLine(m({ exhibits: 2, need: 1 })), "2 טעויות נפוצות · עוד הימור ׳על בטוח׳ שגוי אחד לטעות הנפוצה הבאה");
-  assert.equal(museumMeterLine(m({ exhibits: 2, need: 2 })), "2 טעויות נפוצות · עוד 2 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה");
-  assert.equal(museumMeterLine(m({ exhibits: 1, need: 3 })), "טעות נפוצה אחת · עוד 3 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה");
-  assert.equal(museumMeterLine(m({ exhibits: 0, need: 3 })), "עוד אין טעויות נפוצות · עוד 3 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה");
+  assert.equal(museumMeterLine(m({ exhibits: 2, need: 1 })), "2 טעויות נפוצות · עוד תשובה שגויה אחת ׳על בטוח׳ לטעות הנפוצה הבאה");
+  assert.equal(museumMeterLine(m({ exhibits: 2, need: 2 })), "2 טעויות נפוצות · עוד 2 תשובות שגויות ׳על בטוח׳ לטעות הנפוצה הבאה");
+  assert.equal(museumMeterLine(m({ exhibits: 1, need: 3 })), "טעות נפוצה אחת · עוד 3 תשובות שגויות ׳על בטוח׳ לטעות הנפוצה הבאה");
+  assert.equal(museumMeterLine(m({ exhibits: 0, need: 3 })), "עוד אין טעויות נפוצות · עוד 3 תשובות שגויות ׳על בטוח׳ לטעות הנפוצה הבאה");
   assert.equal(museumMeterLine(m({ exhibits: 2, soon: 1, need: 2 })), "2 טעויות נפוצות · טעות נפוצה חדשה נפתחת מחר", "found tonight: it opens tomorrow, never today (so nobody can guess who)");
   assert.equal(museumMeterLine(m({ exhibits: 0, soon: 2 })), "עוד אין טעויות נפוצות · 2 טעויות נפוצות חדשות נפתחות מחר");
   assert.equal(meterPct(m({ need: 3 })), 0);
@@ -47,7 +47,7 @@ test("decision 3: the museum's meter, from the counts", () => {
   assert.equal(museumGroupNeedLine(1), "הטעויות הנפוצות נפתחות מ-3 מתרגלים: עוד אדם אחד וזה נפתח.");
   assert.equal(museumGroupNeedLine(2), "הטעויות הנפוצות נפתחות מ-3 מתרגלים: עוד 2 אנשים וזה נפתח.");
   assert.equal(exhibitsWord(1), "טעות נפוצה אחת");
-  assert.equal(betsNeedWord(0), "עוד הימור ׳על בטוח׳ שגוי אחד לטעות הנפוצה הבאה", "never zero: a candidate at the floor is an exhibit already");
+  assert.equal(betsNeedWord(0), "עוד תשובה שגויה אחת ׳על בטוח׳ לטעות הנפוצה הבאה", "never zero: a candidate at the floor is an exhibit already");
 });
 
 test("an exhibit's words: the plaque when the op wrote one, the exhibit's own text otherwise", () => {

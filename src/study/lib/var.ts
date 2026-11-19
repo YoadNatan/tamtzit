@@ -356,6 +356,6 @@ export function dayWords(at: string, now = new Date()): string {
 /** Why an update reached her (corrections.html s3). */
 export function reasonLine(u: Pick<UpdateRow, "reason" | "reason_at">, now = new Date()): string {
   const when = u.reason_at ? dayWords(u.reason_at, now) : "";
-  const what = u.reason === "card" ? "חזרת על כרטיס שנשען" : "ענית על שאלה שנשענה";
+  const what = u.reason === "card" ? "חזרת על כרטיסייה שנשענה" : "ענית על שאלה שנשענה";
   return `הגיע אליך כי ${when ? when + " " : ""}${what} על השורה הישנה.`;
 }

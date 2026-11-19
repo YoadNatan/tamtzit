@@ -208,7 +208,7 @@ const ITEMS = [
         "1 the setup: the lecture with its 12 questions, the default mode, no cost",
         setupText.includes("המבחן לא עולה מהתקציב: השאלות כבר כתובות.") &&
           (await shoham.locator(".quiz-mode[aria-checked=true]").innerText()).includes("כולנו נגד המבחן") &&
-          setupText.includes("בלי טבלה: ניקוד ההימור רק לך. 80% זה ׳עברנו׳.") &&
+          setupText.includes("בלי טבלה: הניקוד שלך רק לך. 80% זה ׳עברנו׳.") &&
           setupText.includes("נקודות וטבלה לשחקני המירוץ, רק במשחק."),
         setupText.slice(0, 400),
       );
@@ -323,7 +323,7 @@ const ITEMS = [
       await shoham.locator(PRIMARY, { hasText: "לסבב 2" }).click();
       await see(noa, "סבב 2 · אחרי הוויכוח");
       await question(noa);
-      check("ZA-4 vote 2: no bet row, the note", (await noa.locator(".quiz-bets").count()) === 0 && (await textOf(noa)).includes("בסבב 2 אין הימור: נספר ההימור של הסבב הראשון."));
+      check("ZA-4 vote 2: no bet row, the note", (await noa.locator(".quiz-bets").count()) === 0 && (await textOf(noa)).includes("בסבב 2 לא מסמנים שוב: נספר מה שסימנת בסבב הראשון."));
       for (const p of [noa, maya, shoham, yael, roni]) await answer(p, k1, null);
       await revealed(noa);
       const r1 = await textOf(noa);
@@ -473,14 +473,14 @@ const ITEMS = [
       const team = Z.quizzes[0];
       const fin = Z.rounds.filter((r) => r.quiz_id === team.id && r.revealed_at && !r.voided_at).flatMap((r) => Z.answers.filter((a) => a.round_id === r.id && a.vote === r.vote));
       const pct = Math.round((100 * fin.filter((a) => a.correct).length) / fin.length);
-      const noaLine = /שלך: \d+ מתוך \d+ · ניקוד ההימור: \S+/.exec(end)?.[0];
-      const yaelLine = /שלך: \d+ מתוך \d+ · ניקוד ההימור: \S+/.exec(endY)?.[0];
+      const noaLine = /שלך: \d+ מתוך \d+ · ניקוד: \S+/.exec(end)?.[0];
+      const yaelLine = /שלך: \d+ מתוך \d+ · ניקוד: \S+/.exec(endY)?.[0];
       check(
         "13 the end: the team's score and 80% \"עברנו\" or not, a new record, the question that broke the group, each phone's own line only there",
         end.includes(`הקבוצה ענתה נכון על ${pct}%`) &&
           end.includes(pct >= 80 ? "עברנו!" : "80% זה ׳עברנו׳") &&
           end.includes("שיא חדש!") &&
-          end.includes("השאלה ששברה את הקבוצה") &&
+          end.includes("השאלה הכי קשה לקבוצה") &&
           Boolean(noaLine) &&
           Boolean(yaelLine) &&
           noaLine !== yaelLine &&

@@ -77,7 +77,7 @@ export default function TryScreen({ route, ctx }: ScreenProps<"try">) {
             פסקה
           </button>
           <button type="button" className="a-btn" role="tab" aria-selected={bets} onClick={() => ctx.go({ v: "try", s: "b" }, { replace: true })}>
-            שאלה עם הימור
+            שאלה עם ׳כמה בטוחים׳
           </button>
         </div>
       ) : null}

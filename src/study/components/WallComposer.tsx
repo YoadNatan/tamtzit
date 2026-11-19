@@ -266,7 +266,7 @@ export function ComposerForm({ ctx, lecture, sections, part, anchor, seed, live,
           </>
         ) : null}
         <p className="a-small a-muted wall-rule">
-          <Icon name="smile" size={12} /> צולים את התרופה, אף פעם לא אנשים או מטופלים.
+          <Icon name="smile" size={12} /> מצלמים את התרופה, אף פעם לא אנשים או מטופלים.
         </p>
         {error ? (
           <p className="a-error a-small" role="alert">

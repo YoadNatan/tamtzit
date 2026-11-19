@@ -80,10 +80,10 @@ export function cardState(c: Pick<TabCard, "in_deck" | "stale">): ItemState {
 /** The questions "לתרגל את הפסקה" asks: not hidden, not marked. */
 export const practiceable = (qs: readonly TabQuestion[]) => qs.filter((q) => !q.hidden && !q.stale);
 
-/** "של הקבוצה: 2 שאלות, 2 כרטיסים" (hidden questions are not the group's practice). */
+/** "של הקבוצה: 2 שאלות, 2 כרטיסיות" (hidden questions are not the group's practice). */
 export function groupLine(p: ParagraphPractice): string {
   const q = p.questions.filter((x) => !x.hidden).length;
-  const parts = [q ? countWord(q, "שאלה אחת", "שאלות") : "", p.cards.length ? countWord(p.cards.length, "כרטיס אחד", "כרטיסים") : ""].filter(Boolean);
+  const parts = [q ? countWord(q, "שאלה אחת", "שאלות") : "", p.cards.length ? countWord(p.cards.length, "כרטיסייה אחת", "כרטיסיות") : ""].filter(Boolean);
   return parts.length ? `של הקבוצה: ${parts.join(", ")}` : "";
 }
 

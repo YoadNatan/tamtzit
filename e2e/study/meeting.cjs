@@ -339,7 +339,7 @@ const israel = (ms) => {
         await followers[who].locator(".m-ding").waitFor({ timeout: PLACE_MS });
       }
       const ding = norm(await noa.locator(".m-ding").innerText());
-      check("4 דינג! on Noa's phone with her own line, like most of the group, רק לך", ding.startsWith("דינג! התשובה לניחוש 1") && ding.includes("ניחשת ספיגת K⁺, כמו רוב הקבוצה") && ding.includes("רק לך"), ding);
+      check("4 דינג! on Noa's phone with her own line, like most of the group, רק לך", ding.startsWith("התשובה לניחוש 1") && ding.includes("ניחשת ספיגת K⁺, כמו רוב הקבוצה") && ding.includes("רק לך"), ding);
       check("4 no number in any guess state", !M.bodies.some((b) => b.fn === "study_meeting_guess_state" && /"(counts?|right|answered|guessers)"/.test(b.body)));
       await shot(noa, "meeting-07-ding");
       // The card spans the screen gutter to gutter, its "הבנתי" whole (review M-DING-CLIPPED).
@@ -481,7 +481,7 @@ const israel = (ms) => {
           pieces.length === 2 && pieces[0].startsWith("התעכבנו על עצרנו להסביר Miltefosine טרטוגנית") && pieces[1].startsWith("שאלה שנפתרה נענתה למה Pentostam מחייבת ECG?") && pieces[1].includes("הארכת QTc"),
           JSON.stringify(pieces),
         );
-        check("8 בפרק הקודם של תמצית… · {n} דק׳ · רק לך", /^בפרק הקודם של תמצית… · \d+ דק׳ רק לך$/.test(sub), sub);
+        check("8 מה היה בפגישה · {n} דק׳ · רק לך", /^מה היה בפגישה · \d+ דק׳ רק לך$/.test(sub), sub);
         check("8 the readers' line: no time, no ׳באיחור׳", (await dana.getByText("בסוף ההשלמה מצטרפים לרשימה, בלי שעה ובלי ׳באיחור׳.", { exact: false }).count()) === 1);
         await shot(dana, "meeting-12-catchup", { primary: ".ph-foot .a-btn.primary" });
         await dana.getByRole("button", { name: "להתחיל השלמה" }).click();

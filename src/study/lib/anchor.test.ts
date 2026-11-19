@@ -29,11 +29,11 @@ test("the chips: singular for one, the mockup's order, comments from the reader'
   assert.equal(countWord(2, "שאלה", "שאלות"), "2 שאלות");
   assert.deepEqual(
     groupChips({ questions: 2, cards: 2 }, { total: 1, open: 0 }).map((c) => c.label),
-    ["2 שאלות", "2 כרטיסים", "תגובה"],
+    ["2 שאלות", "2 כרטיסיות", "תגובה"],
   );
   assert.deepEqual(
     groupChips({ questions: 1, cards: 1 }).map((c) => c.label),
-    ["שאלה", "כרטיס"],
+    ["שאלה", "כרטיסייה"],
   );
   assert.deepEqual(groupChips({ questions: 0, cards: 0 }, { total: 3, open: 1 }), [{ key: "comments", label: "3 תגובות", open: true }]);
   assert.deepEqual(groupChips({ questions: 0, cards: 0 }), []);
@@ -68,7 +68,7 @@ test("the tab's lines: the group's counts without hidden questions, and what 'ל
     questions: [q({ id: "a" }), q({ id: "b", answered: 1 }), q({ id: "c", hidden: true }), q({ id: "d", stale: true })],
     cards: [{ id: "x", kind: "qa" as const, front: "?", source: "ai", stale: false, in_deck: true, lapses: 0 }],
   };
-  assert.equal(groupLine(tab), "של הקבוצה: 3 שאלות, כרטיס אחד");
+  assert.equal(groupLine(tab), "של הקבוצה: 3 שאלות, כרטיסייה אחת");
   assert.equal(groupLine({ questions: [], cards: [] }), "");
   assert.equal(tabCount(tab), 4);
   assert.deepEqual(

@@ -298,11 +298,10 @@ test("the area decides, then the code, then the area's fallback (§6.3)", () => 
   assert.equal(failText("lecture not found", "plan"), "אחת ההרצאות כבר לא קיימת. כדאי לרענן.");
   assert.equal(failText("lecture not found"), "ההרצאה הזו נמחקה או לא נמצאה. אפשר לבדוק ב״נמחקו לאחרונה״.");
   assert.equal(failText("not signed in"), "הכניסה במכשיר הזה פגה. צריך להצטרף מחדש עם קוד הקבוצה.", "without flags.account");
-  assert.equal(failText("conflict", "marathon"), "ערב הלמידה השתנה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");
+  assert.equal(failText("conflict", "marathon"), "מפגש הלמידה השתנה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");
   // §12's areas
   assert.equal(failText("conflict", "meeting"), "הפגישה השתנתה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");
   assert.equal(failText("conflict", "plan"), "התוכנית השתנתה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");
-  assert.equal(failText("member not found", "meeting"), "מי שנבחרו להקראה כבר לא בקבוצה. כדאי לבחור שוב מהרשימה.");
   assert.equal(failText("member not found"), "רק מי שפתחו את הקבוצה יכולים לעשות את זה.", "the members' own row elsewhere");
   assert.equal(failText("not found", "today"), "לא נמצא. כדאי לרענן.");
   assert.equal(failText("group not found", "today"), "הקבוצה לא נמצאה. כדאי לרענן.");

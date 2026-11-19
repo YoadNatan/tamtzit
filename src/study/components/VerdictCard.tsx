@@ -74,7 +74,7 @@ export function AfterAccept({ verdict, id, done }: { verdict: Verdict; id: strin
         <b className="a-small">{done ? "התקבלה" : "אחרי ׳לקבל׳"}</b>
         {verdict.trap ? <span className="a-chip group">לתור של כולם</span> : null}
       </div>
-      <p className="a-small a-muted">{verdict.trap ? (done ? "ההכרעה הוצמדה לסיכום, ונוסף כרטיס על הטעות:" : "ההכרעה תוצמד לסיכום, ויתווסף כרטיס על הטעות:") : done ? "ההכרעה הוצמדה לסיכום." : "ההכרעה תוצמד לסיכום."}</p>
+      <p className="a-small a-muted">{verdict.trap ? (done ? "ההכרעה הוצמדה לסיכום, ונוספה כרטיסייה על הטעות:" : "ההכרעה תוצמד לסיכום, ותתווסף כרטיסייה על הטעות:") : done ? "ההכרעה הוצמדה לסיכום." : "ההכרעה תוצמד לסיכום."}</p>
       {verdict.trap ? (
         <p className="a-small">
           <b>{vText(verdict.trap.front, `tf${id}`)}</b> {vText(verdict.trap.back.replace(/\s*\[ש['׳][^\]]*\]\s*/g, " ").trim(), `tb${id}`)} <SlideTagOf slides={verdict.trap.slides} />

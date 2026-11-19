@@ -125,7 +125,7 @@ export default function FollowBar({ lc }: { lc: LectureCtx }) {
     <span className="m-follow">
       {ding ? (
         <span className="a-card m-ding" role="status">
-          <b>דינג! התשובה לניחוש {ding.n}</b>
+          <b>התשובה לניחוש {ding.n}</b>
           {ding.explanation ? (
             <span className="a-para" dir="rtl">
               {richText(ding.explanation, `dx${ding.n}`)}

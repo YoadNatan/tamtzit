@@ -111,11 +111,11 @@ test("the session key: s=b.<lecture>.<slide> (§12.2.1), and only that", () => {
 });
 
 test("a wrong row's line says the card is in only once it is saved (review UI-1)", () => {
-  assert.equal(savedLabel("pending", 1), "נשמרת ככרטיס…");
-  assert.equal(savedLabel("pending", 2), "נשמרות ככרטיסים…");
+  assert.equal(savedLabel("pending", 1), "נשמרת ככרטיסייה…");
+  assert.equal(savedLabel("pending", 2), "נשמרות ככרטיסיות…");
   assert.equal(savedLabel("yes", 1), "נכנסה לכרטיסיות");
   assert.equal(savedLabel("yes", 3), "נכנסו לכרטיסיות");
-  assert.equal(savedLabel("failed", 1), "לא נשמרה ככרטיס");
-  assert.equal(savedLabel("failed", 2), "לא נשמרו ככרטיסים");
+  assert.equal(savedLabel("failed", 1), "לא נשמרה ככרטיסייה");
+  assert.equal(savedLabel("failed", 2), "לא נשמרו ככרטיסיות");
   for (const s of ["pending", "failed"] as const) assert.ok(!/נכנס/.test(savedLabel(s, 1)) && !/נכנס/.test(savedLabel(s, 2)), `${s}: never "in the cards"`);
 });

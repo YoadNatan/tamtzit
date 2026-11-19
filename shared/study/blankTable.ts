@@ -142,8 +142,8 @@ export function wrongLine(t: BlankTable, r: number, wrong: readonly number[]): s
  *  the screen never says a card is saved before it is. */
 export type SaveState = "yes" | "no" | "failed" | "pending";
 export function savedLabel(saved: SaveState, cells: number): string {
-  if (saved === "failed") return cells === 1 ? "לא נשמרה ככרטיס" : "לא נשמרו ככרטיסים";
-  if (saved === "pending") return cells === 1 ? "נשמרת ככרטיס…" : "נשמרות ככרטיסים…";
+  if (saved === "failed") return cells === 1 ? "לא נשמרה ככרטיסייה" : "לא נשמרו ככרטיסיות";
+  if (saved === "pending") return cells === 1 ? "נשמרת ככרטיסייה…" : "נשמרות ככרטיסיות…";
   return cells === 1 ? "נכנסה לכרטיסיות" : "נכנסו לכרטיסיות";
 }
 

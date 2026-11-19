@@ -63,7 +63,7 @@ const CardBrowse = lazy(() => import("./CardBrowse"));
  * correction marked says so, with "עדיין נכון"; an open card shows "מאיפה
  * זה?" with its paragraph. */
 
-/** "כרטיס אחד", "7 כרטיסים". */
+/** "כרטיסייה אחת", "7 כרטיסיות". */
 
 /** Parts shown before "ועוד N חלקים" (the approved page shows five). */
 const PARTS_SHOWN = 5;
@@ -357,7 +357,7 @@ export default function LectureCards({ lectureId, ctx }: { lectureId: string; ct
     try {
       await adoptParts(lectureId, list, on);
       setDeck(await myDeck(lectureId));
-      if (!on) ctx.say("החלקים הוצאו מהחפיסה שלך. הכרטיסים שכבר למדת נשארים בלוח שלך.", { label: "ביטול", run: () => void adopt(list ?? inDeckParts.map((p) => p.part_idx), true) });
+      if (!on) ctx.say("החלקים הוצאו מהחפיסה שלך. הכרטיסיות שכבר למדת נשארות בלוח שלך.", { label: "ביטול", run: () => void adopt(list ?? inDeckParts.map((p) => p.part_idx), true) });
     } catch (e) {
       ctx.say(errText(e));
     }
@@ -366,7 +366,7 @@ export default function LectureCards({ lectureId, ctx }: { lectureId: string; ct
     try {
       await cardStillTrue(c.id);
       setCards((cur) => cur?.map((x) => (x.id === c.id ? { ...x, stale_at: null, checked_by: ctx.userId, checked_at: new Date().toISOString() } : x)) ?? cur);
-      ctx.say("סומן כנכון. הכרטיס חוזר לחזרות.");
+      ctx.say("סומן כנכון. הכרטיסייה חוזרת לחזרות.");
     } catch (e) {
       ctx.say(errText(e));
     }
@@ -415,7 +415,7 @@ export default function LectureCards({ lectureId, ctx }: { lectureId: string; ct
                 <CardFace card={c} revealed showChip={false} figureUrl={figureUrl} nameOf={ctx.nameOf} onSlide={setSlide} go={ctx.go} />
                 {c.stale_at ? (
                   <div className="a-callout warn stale-line">
-                    <span>הפסקה של הכרטיס הזה תוקנה. כדאי לבדוק שהוא עדיין נכון; עד אז הוא לא מופיע בחזרות.</span>
+                    <span>הפסקה של הכרטיסייה הזו תוקנה. כדאי לבדוק שהיא עדיין נכונה; עד אז היא לא מופיעה בחזרות.</span>
                     <div className="a-row">
                       <button className="a-btn small" onClick={() => void stillTrue(c)}>
                         עדיין נכון
@@ -597,7 +597,7 @@ export default function LectureCards({ lectureId, ctx }: { lectureId: string; ct
               <b>בחפיסה שלך: {cardsWord(deckOfMine.length)}</b>
               <p className="a-small a-muted">
                 {inDeckParts.length === 0 ? "עוד לא הוספת חלקים. " : inDeckParts.length === 1 ? "מחלק אחד. " : `מ-${inDeckParts.length} חלקים. `}
-                עד {newPerDay} חדשים ביום, כדי שהחפיסה לא תקבור אותך.
+                עד {newPerDay} כרטיסיות חדשות ביום, כדי שלא יצטברו יותר מדי.
               </p>
             </div>
           </div>
@@ -639,7 +639,7 @@ export default function LectureCards({ lectureId, ctx }: { lectureId: string; ct
                 <div className="a-li">
                   <button type="button" className="part-toggle" aria-expanded={openParts.has("none")} onClick={() => toggle("none")}>
                     <b>בלי חלק</b>
-                    <span className="m">{cardsWord(loose.length)} · כרטיס שכתבת נכנס לחפיסה שלך מעצמו</span>
+                    <span className="m">{cardsWord(loose.length)} · כרטיסייה שכתבת נכנסת לחפיסה שלך מעצמה</span>
                   </button>
                 </div>
                 {openParts.has("none") ? cardList(loose) : null}

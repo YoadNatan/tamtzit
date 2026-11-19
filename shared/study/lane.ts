@@ -315,7 +315,7 @@ export function phaseOn(plan: Pick<GroupPlan, "shared_from" | "leave_from" | "ex
   return day === plan.exam_date ? "exam" : "after";
 }
 
-/** "ק״מ 21 ✓ כל הסיכומים נקראו": every lecture read by at least half the members. */
+/** "אמצע הדרך ✓ כל הסיכומים נקראו": every lecture read by at least half the members. */
 export function allRead(facts: readonly Pick<LectureFact, "readers">[], members: number): boolean {
   return facts.length > 0 && facts.every((f) => f.readers * 2 >= Math.max(1, members));
 }
@@ -458,12 +458,12 @@ export function myLane(o: {
   const out: MyRow[] = [];
   const { cardsDue: c, mistakes: m } = o;
   if ((c && o.cardsRoute) || (m && o.mistakesRoute)) {
-    const cards = c && o.cardsRoute ? (c === 1 ? "כרטיס אחד" : `${c} כרטיסים`) : "";
+    const cards = c && o.cardsRoute ? (c === 1 ? "כרטיסייה אחת" : `${c} כרטיסיות`) : "";
     const errs = m && o.mistakesRoute ? (m === 1 ? "טעות פתוחה אחת" : `${m} טעויות פתוחות`) : "";
     out.push({
       key: "cards",
       title: [cards, errs].filter(Boolean).join(" ו-"),
-      line: errs ? "הטעויות שלך חוזרות בניסוח אחר" : "הכרטיסים שהגיע זמנם",
+      line: errs ? "הטעויות שלך חוזרות בניסוח אחר" : "הכרטיסיות שהגיע זמנן",
       minutes: Math.max(5, Math.ceil(((cards ? c * 30 : 0) + (errs ? m * 75 : 0)) / 60)),
       route: (errs ? o.mistakesRoute : o.cardsRoute)!,
     });

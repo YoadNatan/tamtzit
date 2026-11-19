@@ -515,7 +515,7 @@ function ProposalView({
               <span className="k-ok">
                 <Icon name="check" size={14} />
               </span>
-              <span>גם השאלות והכרטיסים שעל הפסקה</span>
+              <span>גם השאלות והכרטיסיות שעל הפסקה</span>
             </div>
           ) : null}
           {flags.var && flags.today ? (

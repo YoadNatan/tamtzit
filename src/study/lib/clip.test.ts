@@ -15,7 +15,7 @@ test("clip: a longer text is cut at its last whole word, with an ellipsis, never
 });
 
 test("cardsWord: the deck page's word for a count", () => {
-  assert.equal(cardsWord(1), "כרטיס אחד");
-  assert.equal(cardsWord(0), "0 כרטיסים");
-  assert.equal(cardsWord(5), "5 כרטיסים");
+  assert.equal(cardsWord(1), "כרטיסייה אחת");
+  assert.equal(cardsWord(0), "0 כרטיסיות");
+  assert.equal(cardsWord(5), "5 כרטיסיות");
 });

@@ -120,7 +120,7 @@ function WallList({ route, ctx, lecture, sections, figureUrl }: ScreenProps<"wal
   };
   const title = lecture?.title ?? route.d ?? "";
   const empty =
-    tab === "needed" ? "אין כרגע כרטיס שלפחות 3 מכם שוכחים." : tab === "mine" ? "כאן יופיעו האסוציאציות שנעצת לעצמך ומה שהעלית." : "עוד אין אסוציאציות בהרצאה הזו. מתחילים מפסקה: נוגעים בה ואז ״אסוציאציה״, או ״תנו לי 3 מצחיקות״.";
+    tab === "needed" ? "אין כרגע כרטיסייה שלפחות 3 מכם שוכחים." : tab === "mine" ? "כאן יופיעו האסוציאציות שנעצת לעצמך ומה שהעלית." : "עוד אין אסוציאציות בהרצאה הזו. מתחילים מפסקה: נוגעים בה ואז ״אסוציאציה״, או ״תנו לי 3 מצחיקות״.";
   const paras = useMemo(() => (picking ? paragraphs(sections) : []), [picking, sections]);
 
   return (

@@ -87,7 +87,7 @@ export default function MuseumScreen({ route, ctx }: ScreenProps<"museum">) {
       <Head back={<BackLink go={ctx.go} fallback={{ v: "group" }} />}>
         <h1 className="t">{named ? <>טעויות נפוצות · {isolateLatin(named, "mt")}</> : "טעויות נפוצות"}</h1>
         {data && data.meter.state === "open" && exhibits.length > 0 ? (
-          <span className="a-chip fun" aria-label={`${exhibits.length} מוצגים`}>
+          <span className="a-chip fun" aria-label={exhibits.length === 1 ? "טעות נפוצה אחת" : `${exhibits.length} טעויות נפוצות`}>
             {exhibits.length}
           </span>
         ) : null}

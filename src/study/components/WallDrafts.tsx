@@ -184,7 +184,7 @@ export default function WallDrafts({ route, ctx, lecture, sections }: ScreenProp
           {error}
         </p>
       ) : null}
-      <p className="a-small a-muted">שום דבר לא עולה לקיר בלי בן אדם, בשם או בלי שם. לפני שהמנצחת נכנסת לכרטיסים, היא נבדקת מול הפסקה.</p>
+      <p className="a-small a-muted">שום דבר לא עולה לקיר בלי בן אדם, בשם או בלי שם. לפני שהמנצחת נכנסת לכרטיסיות, היא נבדקת מול הפסקה.</p>
       <StickyActions>
         <button className="a-btn wide" onClick={() => open("line")}>
           <Icon name="pen" size={12} /> לכתוב משלי

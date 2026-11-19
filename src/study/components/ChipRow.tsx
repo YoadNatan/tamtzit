@@ -69,5 +69,5 @@ export default function ChipRow({
 
 /** The row while following a reader: one dot, so nothing pulls the eye. */
 export function ChipDot({ spot }: { spot: string }) {
-  return <span className="n-dot" data-spot={spot} role="img" aria-label="על הפסקה יש שאלות, כרטיסים או תגובות" />;
+  return <span className="n-dot" data-spot={spot} role="img" aria-label="על הפסקה יש שאלות, כרטיסיות או תגובות" />;
 }

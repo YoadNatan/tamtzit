@@ -59,7 +59,7 @@ function MarathonList({ ctx }: { ctx: ScreenProps<"marathon">["ctx"] }) {
   }, [ctx.group.id]);
   return (
     <main className="plan">
-      <Head back={<BackLink go={ctx.go} fallback={{ v: "group" }} />} title="מרתונים" />
+      <Head back={<BackLink go={ctx.go} fallback={{ v: "group" }} />} title="מפגשי למידה" />
       {error ? (
         <p className="a-error" role="alert">
           {error}
@@ -82,12 +82,12 @@ function MarathonList({ ctx }: { ctx: ScreenProps<"marathon">["ctx"] }) {
         </ul>
       ) : (
         <section className="a-card dashed empty pl-empty">
-          <p className="a-para">עוד אין ערב למידה. קובעים מועד, בוחרים הרצאות, ומסמנים מי בפנים.</p>
+          <p className="a-para">עוד אין מפגש למידה. קובעים מועד, בוחרים הרצאות, ומסמנים מי בפנים.</p>
         </section>
       )}
       <div className="a-row pl-days">
         <RouteLink to={{ v: "marathon", isNew: true }} go={ctx.go} className="a-btn primary">
-          ערב למידה חדש
+          מפגש למידה חדש
         </RouteLink>
         {flags.groupPlan ? (
           <RouteLink to={{ v: "plan" }} go={ctx.go} className="a-btn ghost">
@@ -133,14 +133,14 @@ function OneMarathon({ ctx, id }: { ctx: ScreenProps<"marathon">["ctx"]; id: str
   if (m === undefined && !error)
     return (
       <main className="plan">
-        <Head back={<BackLink go={ctx.go} fallback={{ v: "marathon" }} />} title="ערב למידה" />
+        <Head back={<BackLink go={ctx.go} fallback={{ v: "marathon" }} />} title="מפגש למידה" />
         <Loading />
       </main>
     );
   if (!m)
     return (
       <main className="plan">
-        <Head back={<BackLink go={ctx.go} fallback={{ v: "marathon" }} />} title="ערב למידה" />
+        <Head back={<BackLink go={ctx.go} fallback={{ v: "marathon" }} />} title="מפגש למידה" />
         <p className="a-error" role="alert">
           {error || failText("marathon not found", "marathon")}
         </p>
@@ -168,7 +168,7 @@ function OneMarathon({ ctx, id }: { ctx: ScreenProps<"marathon">["ctx"]; id: str
   return (
     <main className="plan">
       <Head back={<BackLink go={ctx.go} fallback={m.plan_id && flags.groupPlan ? { v: "plan" } : { v: "marathon" }} />}>
-        <h1 className="t">ערב למידה · {isolateLatin(m.title, "mh")}</h1>
+        <h1 className="t">מפגש למידה · {isolateLatin(m.title, "mh")}</h1>
         {m.state === "live" ? <span className="a-chip busy">עכשיו</span> : null}
       </Head>
       <p className="ph-sub">
@@ -276,7 +276,7 @@ function MarathonEdit({ ctx, id }: { ctx: ScreenProps<"marathon">["ctx"]; id?: s
       const minutes = hours * 60;
       const starts = new Date(dayStart(dayOfDate(day)) + (minutesOfClock(clock) - 240) * 60_000).toISOString();
       const mid = await saveMarathon(ctx.group.id, { id: have?.id ?? null, version: have?.version ?? null, title: title.trim(), starts_at: starts, minutes, lecture_ids: chosen, agenda: marathonAgenda(parts, minutes) });
-      ctx.say(have ? "ערב הלמידה עודכן, עם השם שלך." : "ערב הלמידה נקבע. כולם רואים אותו ב״יחד״.");
+      ctx.say(have ? "מפגש הלמידה עודכן, עם השם שלך." : "מפגש הלמידה נקבע. כולם רואים אותו ב״יחד״.");
       ctx.go({ v: "marathon", m: mid || have?.id }, { replace: true });
     } catch (e) {
       setError(failText(codeOf(e), "marathon"));
@@ -286,7 +286,7 @@ function MarathonEdit({ ctx, id }: { ctx: ScreenProps<"marathon">["ctx"]; id?: s
   };
   return (
     <main className="plan pl-setup">
-      <Head back={<BackLink go={ctx.go} fallback={id ? { v: "marathon", m: id } : { v: "marathon" }} />} title={id ? "עריכת ערב למידה" : "ערב למידה חדש"} />
+      <Head back={<BackLink go={ctx.go} fallback={id ? { v: "marathon", m: id } : { v: "marathon" }} />} title={id ? "עריכת מפגש למידה" : "מפגש למידה חדש"} />
       {!lectures ? (
         <Loading />
       ) : (
@@ -330,7 +330,7 @@ function MarathonEdit({ ctx, id }: { ctx: ScreenProps<"marathon">["ctx"]; id?: s
       ) : null}
       <StickyActions>
         <button type="button" className="a-btn primary wide" disabled={!ok || busy} onClick={() => void save()}>
-          {id ? "לשמור" : "לקבוע ערב למידה"}
+          {id ? "לשמור" : "לקבוע מפגש למידה"}
         </button>
       </StickyActions>
     </main>

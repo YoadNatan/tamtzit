@@ -60,10 +60,10 @@ export function exhibitsWord(n: number): string {
 
 /** How many more wrong "על בטוח" bets the closest candidate needs. */
 export function betsNeedWord(need: number): string {
-  return need <= 1 ? "עוד הימור ׳על בטוח׳ שגוי אחד לטעות הנפוצה הבאה" : `עוד ${need} הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה`;
+  return need <= 1 ? "עוד תשובה שגויה אחת ׳על בטוח׳ לטעות הנפוצה הבאה" : `עוד ${need} תשובות שגויות ׳על בטוח׳ לטעות הנפוצה הבאה`;
 }
 
-/** Decision 3's meter line: "2 טעויות נפוצות · עוד 4 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה",
+/** Decision 3's meter line: "2 טעויות נפוצות · עוד 4 תשובות שגויות ׳על בטוח׳ לטעות הנפוצה הבאה",
  *  or, when an exhibit was found and opens tomorrow, that instead of the bets. */
 export function museumMeterLine(m: Extract<MuseumMeter, { state: "open" }>): string {
   const head = exhibitsWord(m.exhibits);
@@ -126,7 +126,7 @@ export function badgeText(k: TrapCardKind): { chip: string; tone: string; aside:
 }
 /** museum.html s2's "למה זה כאן?". */
 export const VACCINE_WHY =
-  "כמה מכם טעו בזה ׳על בטוח׳, אז הכרטיס מגיע לכולם, גם אם לא טעית בזה. הוא יוצא מהחזרות כשכל הקבוצה עונה נכון ביומיים שונים.";
+  "כמה מכם טעו בזה ׳על בטוח׳, אז הכרטיסייה מגיעה לכולם, גם אם לא טעית בזה. היא יוצאת מהחזרות כשכל הקבוצה עונה נכון ביומיים שונים.";
 
 /** P-8's line, for the museum: an opted-out member reads no exhibit (reading is reciprocal, review SEC-8). */
 export const OUT_LINE = "התשובות שלך לא נספרות, ולכן גם הטעויות הנפוצות לא מוצגות לך. אפשר לחזור לספירה ב׳שלי׳, והן יחזרו אחרי הספירה של הלילה.";

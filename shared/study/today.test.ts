@@ -151,7 +151,7 @@ test("the lines of התור שלי, in today.html s1's words", () => {
       "2 מהמבחן הקבוצתי | טעית אתמול",
       "1 מטעויות ׳על בטוח׳, בניסוח חדש | על בטוח",
       "פסקה שסימנת ׳לא ברור׳ | מהפגישה",
-      "7 כרטיסים | הגיע הזמן",
+      "7 כרטיסיות | הגיע הזמן",
       "1 מהמבחן הקבוצתי | טעית לפני 3 ימים",
       "תרגול קצר · Primaquine · התוויות נגד | חלש אצלך, ולא אצל הקבוצה",
     ],
@@ -161,7 +161,7 @@ test("the lines of התור שלי, in today.html s1's words", () => {
   assert.equal(lines[5].example, undefined, "a topic's line is its label");
   // Trap cards only: the trap's chip.
   assert.equal(rowLines([item("card", 1, { trap: true })])[0].chip, TRAP_CHIP);
-  assert.equal(rowLabel("card", 1), "כרטיס אחד");
+  assert.equal(rowLabel("card", 1), "כרטיסייה אחת");
   assert.equal(rowLabel("unclear", 2), "2 פסקאות שסימנת ׳לא ברור׳");
   assert.equal(rowLabel("update", 3), "3 עדכונים בסיכום");
   assert.equal(rowLabel("again", 1), "טעות אחת בניסוח אחר");

@@ -11,6 +11,6 @@ export function clip(text: string, max: number): string {
   return `${(at >= max / 2 ? head.slice(0, at) : head).replace(/[\s:·,–-]+$/u, "")}…`;
 }
 
-/** "כרטיס אחד" or "5 כרטיסים": the deck's word for a count of cards
+/** "כרטיסייה אחת" or "5 כרטיסיות": the deck's word for a count of cards
  *  (cards.html s3), on the deck page and in the export sheet alike. */
-export const cardsWord = (n: number): string => (n === 1 ? "כרטיס אחד" : `${n} כרטיסים`);
+export const cardsWord = (n: number): string => (n === 1 ? "כרטיסייה אחת" : `${n} כרטיסיות`);

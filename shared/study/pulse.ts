@@ -53,12 +53,12 @@ export type MergedRow = PulseRow & {
   mine?: Bucket;
   /** P-5: the group's is not hot, the member's is. */
   alone: boolean;
-  /** P-6: the one row that shows "החור שנסגר השבוע". */
+  /** P-6: the one row that shows "השתפר השבוע". */
   closedNote: boolean;
 };
 
 /** The group's rows with the member's own beside each (P-3 … P-6): at most
- *  one row carries "החור שנסגר השבוע". */
+ *  one row carries "השתפר השבוע". */
 export function mergePulse(group: readonly PulseRow[], mine: readonly MyRow[]): MergedRow[] {
   const own = new Map(mine.map((m) => [`${m.lecture_id}|${m.topic_key}|${m.aspect}`, m.mine]));
   let closed = false;
@@ -113,7 +113,7 @@ export const OUT_LINE = "התשובות שלך לא נספרות, ולכן גם 
 export const EMPTY_LINE = `בהרצאה הזו עוד אין מספיק תשובות. זה מופיע כשלפחות ${FLOOR} מכם מתרגלים אותה, ומתעדכן בלילה.`;
 /** P-12, with §12.5.U's last sentence. */
 export const SETTING_LINE =
-  "התשובות, ההימורים, השכחות וסימוני ׳לא ברור׳ שלך לא ייספרו ב״מה קשה לקבוצה״, ב׳דרושה אסוציאציה׳ ובבחירת השאלות, מהלילה הבא. אפשר לחזור בכל רגע. מי שיוצאים מהספירה לא רואים את ״מה קשה לקבוצה״.";
+  "התשובות, סימוני ׳על בטוח׳, השכחות וסימוני ׳לא ברור׳ שלך לא ייספרו ב״מה קשה לקבוצה״, ב׳דרושה אסוציאציה׳ ובבחירת השאלות, מהלילה הבא. אפשר לחזור בכל רגע. מי שיוצאים מהספירה לא רואים את ״מה קשה לקבוצה״.";
 
 /** P-7's opening: tomorrow's meeting, or the next one. */
 export function briefHead(nextMeetingDay: string | null, today: string): string {

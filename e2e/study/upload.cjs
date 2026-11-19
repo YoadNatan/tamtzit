@@ -85,9 +85,9 @@ const IPHONE = `(() => { for (const [o, k] of [
         }
         await page.locator('input[type="file"]').setInputFiles(file);
         const ok = page.locator(".drop", { hasText: expect });
-        const bad = page.getByText(/לא הצלחתי לקרוא את הקובץ/);
+        const bad = page.getByText(/לא הצלחנו לקרוא את הקובץ/);
         await Promise.race([ok.waitFor({ timeout: 30000 }), bad.waitFor({ timeout: 30000 })]);
-        if (await bad.count()) throw new Error("read failed: לא הצלחתי לקרוא את הקובץ");
+        if (await bad.count()) throw new Error("read failed: לא הצלחנו לקרוא את הקובץ");
         if (iphone && path.extname(file) === ".pdf") a11y.push(...(await snap(page, out, "upload-iphone-pdf", { primary: ".ph-foot .a-btn.primary" })));
         await page.getByRole("button", { name: "יצירת סיכום" }).click();
         await page.waitForURL(/\/\?l=/, { timeout: 60000 });
@@ -128,7 +128,7 @@ const IPHONE = `(() => { for (const [o, k] of [
       await page.evaluate(() => localStorage.setItem("study-privacy-v1", "1"));
       await page.getByRole("button", { name: "העלאת הרצאה ראשונה" }).click();
       await page.locator('input[type="file"]').setInputFiles(bad);
-      await page.getByText(/לא הצלחתי לקרוא את הקובץ/).waitFor({ timeout: 30000 });
+      await page.getByText(/לא הצלחנו לקרוא את הקובץ/).waitFor({ timeout: 30000 });
       const detail = await page.locator(".upload-detail").innerText();
       if (!/^\S+ · 0\.0 MB · open: \w+: /.test(detail)) throw new Error(`small print: ${detail}`);
       a11y.push(...(await snap(page, out, "upload-broken-pdf")));

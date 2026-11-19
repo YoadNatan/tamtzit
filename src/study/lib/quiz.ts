@@ -482,7 +482,7 @@ export const QUIZ_ERROR_TEXT: Record<QuizError, string | null> = {
   "bad seconds": SETUP_WRONG,
   "bad preset": SETUP_WRONG,
   "bad parts": "החלקים שנבחרו לא נמצאו בהרצאה.",
-  "bad bet": "ההימור הוא ניחוש, נראה לי או על בטוח.",
+  "bad bet": "אפשר לסמן ניחוש, נראה לי או על בטוח.",
   "meeting not found": "הפגישה הזו לא נמצאה. כדאי לרענן.",
   already: "לפגישה הזו כבר יש מבחן כזה.",
   "need 3": "לאתגר קבוצתי צריך לפחות 3 משתתפים.",

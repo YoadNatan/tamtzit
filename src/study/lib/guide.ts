@@ -197,7 +197,7 @@ function step(id: StepId, f: Flags, x: Facts, creator: boolean): FirstStep | nul
       return x.ready.length ? { id, title: "לגעת בפסקה", line: `כל פסקה נפתחת: ${paragraphActions(f)}.`, walk: "read", doneBy: DONE_BY.S2 } : null;
     case "S4":
       return f.practice && x.practiceLecture
-        ? { id, title: "לענות על שאלה ולהמר", line: "בוחרים תשובה, ואז כמה בטוחים. התשובות גלויות רק לך.", walk: "practice", doneBy: DONE_BY.S4 }
+        ? { id, title: "לענות ולסמן כמה בטוחים", line: "בוחרים תשובה, ואז כמה בטוחים. התשובות גלויות רק לך.", walk: "practice", doneBy: DONE_BY.S4 }
         : null;
     case "S5":
       return f.today && (x.queue ?? 0) > 0
@@ -266,7 +266,7 @@ const EVENT_TITLE: Record<DoneEvent, string> = {
   upload: "להעלות הרצאה ראשונה",
   open: "לפתוח סיכום",
   para: "לגעת בפסקה",
-  bet: "לענות על שאלה ולהמר",
+  bet: "לענות ולסמן כמה בטוחים",
   run: "להתחיל את התור",
   invite: "להזמין את הקבוצה",
   group: "להציץ ב״יחד״",
@@ -702,7 +702,7 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
         screen: "יחד",
         steps: [
           m(T.nowHead, "מי מקריאים עכשיו, ו״לעקוב״."),
-          ...(f.meeting ? [m(T.meetingCard, "קובעים מועד, ובה שאלות פתיחה, סדר יום והקראה.")] : []),
+          ...(f.meeting ? [m(T.meetingCard, "קובעים פגישה, ובה שאלות פתיחה, סדר יום והקראה.")] : []),
           ...(f.quiz ? [m(T.quizCard, "׳כולנו נגד המבחן׳: בלי נקודות אישיות, ו-80% זה ׳עברנו׳.")] : []),
           ...(f.pulse ? [m(T.pulseCard, "מה קשה לקבוצה: הנושאים שהכי מכשילים עכשיו, בלי שמות.")] : []),
           ...(f.boss ? [m(T.bossCard, "אתגר קבוצתי: כל הקבוצה ביחד מול הנושאים שהכי מכשילים אותה.")] : []),
@@ -736,7 +736,7 @@ export function appTour(f: Flags): MiniGuide {
   // "תרגול" is a tab only without Today (with Today its screens are under "היום").
   const practice = f.today ? "" : f.questions ? `בתרגול: ${andList(["שאלות", f.cards && "כרטיסיות"])} לכל הרצאה. התשובות גלויות רק לך.` : f.cards ? "כאן הכרטיסיות של כל הרצאה." : "";
   return {
-    screen: "סיור באפליקציה",
+    screen: COPY.tourTitle,
     steps: [
       ...(f.today ? [m(T.todayTab, "״היום״ הוא מסך הבית: מה כדאי לחזור עליו עכשיו, לפי הזמן שיש.")] : []),
       m(T.libraryTab, library),
@@ -774,7 +774,7 @@ export function howTos(f: Flags): HowTo[] {
       key: "bet",
       title: "מה זה ״על בטוח״",
       answer: "אחרי שבוחרים תשובה מהמרים כמה בטוחים. ככה רואים איפה הביטחון מטעה.",
-      words: "הימור ביטחון ניחוש נראה לי",
+      words: "כמה בטוחים ביטחון ניחוש נראה לי הימור",
       open: { label: "לנסות", route: { v: "try", s: "b" } },
     },
     { on: f.cards, key: "cards", title: "לחזור על כרטיסיות", answer: "בהרצאה ← ״כרטיסיות״. נוגעים כדי להפוך, ומדרגים כמה קל היה.", words: "כרטיסים anki חזרה", walk: "cards" },
@@ -843,7 +843,7 @@ export type Hint = { flag: keyof Flags; title: string; say: string; walk?: WalkI
 /** One line for each feature a member may meet after it is turned on. */
 const HINTS: Hint[] = [
   { flag: "today", title: "היום", say: "המסך הראשון הוא עכשיו ״היום״: התור שלי לפי הזמן שיש.", go: { v: "today" } },
-  { flag: "practice", title: "תרגול", say: "אפשר לתרגל כל הרצאה, עם הימור ״על בטוח״. התשובות רק לך.", go: { v: "try", s: "b" } },
+  { flag: "practice", title: "תרגול", say: "אפשר לתרגל כל הרצאה, ולסמן כמה בטוחים בכל תשובה. התשובות רק לך.", go: { v: "try", s: "b" } },
   { flag: "cards", title: "כרטיסיות", say: "לכל הרצאה יש כרטיסיות לחזרה.", walk: "cards" },
   { flag: "quiz", title: "מבחן קבוצתי", say: "״כולנו נגד המבחן״: מבחן לכל הקבוצה, בלי נקודות אישיות.", walk: "quizopen" },
   { flag: "meeting", title: "הפגישה היומית", say: "קובעים ב״יחד״ פגישה: מתי ומה קוראים.", walk: "meeting" },

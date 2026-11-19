@@ -176,7 +176,8 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400
       expect(head.includes("תוכנית · מבחן בלוק פתוגן-מאכסן") && head.includes("יום 2/21"), `the head: ${head}`);
       expect((await text(noa, ".ph-sub")).includes("סבב משותף"), "the shared pass");
       const km = await text(noa, ".pl-km");
-      expect(km.includes("ק״מ 21") && km.includes("כל הסיכומים נקראו") && km.includes("ק״מ 42: המבחן"), `the marathon meter: ${km}`);
+      expect(km.includes("אמצע הדרך") && km.includes("כל הסיכומים נקראו") && km.includes("בסוף: המבחן") && !km.includes("ק״מ"), `the way to the exam: ${km}`);
+      expect(/^\d+% מהדרך למבחן$/.test((await noa.locator(".pl-km .a-bar").getAttribute("aria-label")) || ""), "the bar says how far, in percent");
       expect(km.includes("התוכנית מדייקת ככל שמתרגלים: 0 מתוך 3 הרצאות עם נתונים"), "decision 3's meter: nothing practised");
       expect(km.includes("עוד כ-20 תשובות ועוד 3 אנשים להרצאה הבאה"), "and how far the next lecture is");
       expect((await text(noa, "main.plan")).includes("שינוי אחרון: נועה"), "the last change's name");
@@ -211,7 +212,7 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400
       await noa.reload();
       await noa.locator("main.plan .pl-slip").waitFor({ timeout: 20000 });
       const slip = await text(noa, ".pl-slip");
-      expect(/^אתמול לא הספקנו את /.test(slip) && slip.includes("הבלוק זז להיום. כדי לסיים בזמן, בוחרים מחיר:"), `the slip's words: ${slip}`);
+      expect(/^אתמול לא הספקנו את /.test(slip) && slip.includes("הבלוק זז להיום. כדי לסיים בזמן, בוחרים אחד:"), `the slip's words: ${slip}`);
       expect(/עוד שעה ביום עד (ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת)/.test(slip) && slip.includes("לוותר על יום חזרה אחד"), "the two prices");
       expect((await noa.locator(".pl-day .a-chip", { hasText: "הוזז מאתמול" }).count()) >= 1, "the moved block says so on today's day");
       const bg = await noa.locator(".pl-slip").evaluate((e) => getComputedStyle(e).backgroundColor);
@@ -328,10 +329,11 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400
       const firstHref = await n3.locator("main.plan .a-list .a-li").first().getAttribute("href");
       const soonest = G.marathons.filter((m) => m.state !== "cancelled" && m.state !== "ended" && Date.parse(m.starts_at) + (m.minutes + 180) * 60_000 > Date.now()).sort((a, b) => (a.starts_at < b.starts_at ? -1 : 1))[0];
       expect(firstHref.includes(`m=${soonest.id}`), `soonest first, cancelled days gone: ${await n3.locator("main.plan .a-list").innerText()}`);
+      expect((await text(n3, ".ph-head")).includes("מפגשי למידה") && !(await text(n3, "main.plan")).includes("מרתון"), "the list is called מפגשי למידה");
       await shot(n3, "marathon-1-list");
       await n3.locator("main.plan .a-list .a-li").first().click();
       await n3.locator("main.plan .pl-day").waitFor({ timeout: 15000 });
-      expect((await text(n3, ".ph-head")).startsWith("→") || (await text(n3, ".ph-head")).includes("ערב למידה ·"), "one marathon");
+      expect((await text(n3, ".ph-head")).startsWith("→") || (await text(n3, ".ph-head")).includes("מפגש למידה ·"), "one marathon");
       const mid = new URL(n3.url()).searchParams.get("m");
       await n3.getByRole("radio", { name: "אולי" }).click();
       await n3.waitForTimeout(400);

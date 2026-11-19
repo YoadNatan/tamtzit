@@ -84,17 +84,19 @@ export function BossCardBody({ ctx }: { ctx: Ctx }) {
   );
 }
 
-function Hp({ label, hp, tone }: { label: string; hp: number; tone: "ok" | "bad" }) {
+/** One bar of the HUD: the group's points left ("נקודות של הקבוצה: 70"), or how much of the challenge is still open ("נשאר לסגור: 33%"). */
+function Hp({ label, hp, tone, unit }: { label: string; hp: number; tone: "ok" | "bad"; unit: "points" | "percent" }) {
   const v = Math.max(0, Math.min(100, hp));
+  const said = unit === "points" ? `${v} נקודות` : `${v}%`;
   return (
     <div className="a-meter">
       <div className="a-row between">
         <b className="a-small">{label}</b>
         <b className="a-small">
-          {v} נקודות
+          <bdi dir="ltr">{said}</bdi>
         </b>
       </div>
-      <div className="a-bar" role="img" aria-label={`${label}: ${v} נקודות`}>
+      <div className="a-bar" role="img" aria-label={`${label}: ${said}`}>
         <i style={{ width: `${v}%`, background: tone === "ok" ? "var(--ok)" : "var(--bad)" } as CSSProperties} />
       </div>
     </div>
@@ -118,8 +120,8 @@ export function BossHudBody({ state }: { state: unknown }) {
       </div>
       <div className="a-card flat">
         <div className="a-grid2">
-          <Hp label="הקבוצה" hp={b.team_hp} tone="ok" />
-          <Hp label="האתגר" hp={b.boss_hp} tone="bad" />
+          <Hp label="נקודות של הקבוצה" hp={b.team_hp} tone="ok" unit="points" />
+          <Hp label="נשאר לסגור" hp={b.boss_hp} tone="bad" unit="percent" />
         </div>
       </div>
       <ul className="a-wrap boss-heads" aria-label="הנושאים">
@@ -148,21 +150,9 @@ export function BossHudBody({ state }: { state: unknown }) {
             `פחות מ-${BOSS.PLAYERS} ענו, אז הסבב הזה לא נספר.`
           ) : (
             <>
-              {last.dmg ? (
-                <>
-                  <bdi dir="ltr">−{last.dmg}</bdi> לאתגר
-                </>
-              ) : (
-                "האתגר לא ירד"
-              )}
+              {last.dmg ? `התקדמנו ב-${last.dmg}%` : "הפעם לא התקדמנו"}
               {" · "}
-              {last.loss ? (
-                <>
-                  <bdi dir="ltr">−{last.loss}</bdi> לקבוצה
-                </>
-              ) : (
-                "הקבוצה לא איבדה נקודות"
-              )}
+              {last.loss ? `הקבוצה איבדה ${last.loss} נקודות` : "הקבוצה לא איבדה נקודות"}
             </>
           )}
         </p>

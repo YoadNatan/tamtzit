@@ -33,9 +33,9 @@ import "../styles/plan.css";
 /* ── The group's marathon plan (?v=plan; package G; plan.html s1, spec
  *    §12.6.G; Yoad's decision 3 of 17 Nov 2026) ──
  *
- * One day of the plan: the head "ערב למידה · {title}" with "יום {d}/{n}", the
- * phase and the exam under it; the marathon meter ("ק״מ 21 ✓ כל הסיכומים
- * נקראו" · "ק״מ 42: המבחן") with decision 3's line "התוכנית מדייקת ככל
+ * One day of the plan: the head "מפגש למידה · {title}" with "יום {d}/{n}", the
+ * phase and the exam under it; the way to the exam ("אמצע הדרך ✓ כל
+ * הסיכומים נקראו" · "בסוף: המבחן") with decision 3's line "התוכנית מדייקת ככל
  * שמתרגלים: N מתוך M הרצאות עם נתונים" and how far the next lecture is;
  * "המסלול הקבוצתי" with the last change's name and the day's blocks ("בעוד
  * 20 דק׳", "הוזז מאתמול"); "המסלול שלך" with "רק לך". A day that slipped
@@ -259,11 +259,11 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
       <div className="a-meter pl-km">
         <div className="a-row between">
           <span className="a-small">
-            <b>{read ? "ק״מ 21 ✓" : "ק״מ 21:"}</b> כל הסיכומים נקראו
+            <b>{read ? "אמצע הדרך ✓" : "אמצע הדרך:"}</b> כל הסיכומים נקראו
           </span>
-          <span className="a-small a-muted">ק״מ 42: המבחן</span>
+          <span className="a-small a-muted">בסוף: המבחן</span>
         </div>
-        <div className="a-bar group" role="img" aria-label={`ק״מ ${km} מתוך 42`}>
+        <div className="a-bar group" role="img" aria-label={`${Math.round((km / 42) * 100)}% מהדרך למבחן`}>
           <i style={{ width: `${Math.round((km / 42) * 100)}%` }} />
         </div>
         <p className="a-small pl-meter-line">{meter.head}</p>
@@ -295,7 +295,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
       )}
       {saved ? (
         <RouteLink to={{ v: "marathon", m: saved.id }} go={ctx.go} className="a-btn ghost small pl-open-day">
-          לערב הלמידה של היום הזה
+          למפגש הלמידה של היום הזה
         </RouteLink>
       ) : null}
 

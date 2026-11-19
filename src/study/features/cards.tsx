@@ -186,8 +186,8 @@ export function ReviewHomeSetting({ ctx }: { ctx: Ctx }) {
   };
   return (
     <div className="a-field review-home">
-      <span>חזרה על כרטיסים</span>
-      <div className="a-seg" role="radiogroup" aria-label="חזרה על כרטיסים">
+      <span>חזרה על כרטיסיות</span>
+      <div className="a-seg" role="radiogroup" aria-label="חזרה על כרטיסיות">
         <button type="button" className="a-btn small" role="radio" aria-checked={s.home === "app"} onClick={() => choose("app")}>
           באפליקציה
         </button>
@@ -195,7 +195,7 @@ export function ReviewHomeSetting({ ctx }: { ctx: Ctx }) {
           ב-<bdi dir="ltr">Anki</bdi>
         </button>
       </div>
-      <small>בית אחד לחזרות. ב-Anki כאן לא יופיעו כרטיסים לחזרה.</small>
+      <small>בית אחד לחזרות. ב-Anki כאן לא יופיעו כרטיסיות לחזרה.</small>
     </div>
   );
 }

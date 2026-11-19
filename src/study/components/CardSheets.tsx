@@ -730,7 +730,7 @@ export function CardSettingsSheet({ settings, onChange, say, onClose }: { settin
 
 const HOMES: Array<[ReviewHome, string]> = [
   ["app", "באפליקציה: לוח החזרות שלך כאן, בקצב שלך"],
-  ["anki", "ב-Anki: מייצאים וחוזרים שם; כאן לא יופיעו כרטיסים לחזרה"],
+  ["anki", "ב-Anki: מייצאים וחוזרים שם; כאן לא יופיעו כרטיסיות לחזרה"],
 ];
 const HOME_ASKED = "study-cards-home-asked";
 
@@ -774,7 +774,7 @@ export function ReviewHomeSheet({ settings, onSaved, onClose, say }: { settings:
     }
   };
   return (
-    <Sheet label="איפה חוזרים על הכרטיסים?" className="card-sheet home-sheet" onClose={onClose} head={<h2>איפה חוזרים על הכרטיסים?</h2>}>
+    <Sheet label="איפה חוזרים על הכרטיסיות?" className="card-sheet home-sheet" onClose={onClose} head={<h2>איפה חוזרים על הכרטיסיות?</h2>}>
       {(sheet) => (
         <>
           <p className="a-para a-muted">בית אחד לחזרות, כדי שלא יהיו שני לוחות שמושכים לשני כיוונים. אפשר לשנות בכל רגע ב״הגדרות״.</p>

@@ -38,7 +38,7 @@ import SlideSheet from "./SlideSheet";
  * sections קשה · בינוני · יושב טוב (only non-empty ones), the first one's header
  * carrying "אצלך" and "רק לך"; a row is "{topic} · {aspect}" with its slide
  * tag, the member's own chip on the left, "רק אצלך חם, אז זה נכנס לתור
- * האישי" or (one row at most) "החור שנסגר השבוע"; a tap practises the topic.
+ * האישי" or (one row at most) "השתפר השבוע"; a tap practises the topic.
  * Then "מחר בפגישה:" (or "בפגישה הבאה:") and the footer. Every lecture (no
  * l): one row a lecture, "קשה לקבוצה: …" or "הכול יושב טוב".
  *
@@ -303,7 +303,7 @@ function PulseLine({ row, to, go, onSlide }: { row: MergedRow; to: Route | null;
         {row.alone ? <span className="m">קשה רק לך, אז זה נכנס לתור האישי</span> : null}
         {row.closedNote ? (
           <span className="m">
-            <Icon name="award" size={11} /> החור שנסגר השבוע
+            <Icon name="award" size={11} /> השתפר השבוע
           </span>
         ) : null}
       </div>

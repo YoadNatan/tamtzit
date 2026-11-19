@@ -242,7 +242,7 @@ const level = (l, parts) =>
       check(
         "2 the plan's numbers: ממוקד · מלא · מקיף by the points, מלא by default, every part with its points, four styles, כמו במבחן",
         sub === `20 שקפים · 38 נקודות שצריך לדעת` &&
-          levels.map((x) => x.t).join("|") === `ממוקד ${level("focused", all)}|מלא ${level("full", all)}|מקיף ${level("deep", all)}|משלי …` &&
+          levels.map((x) => x.t).join("|") === `ממוקד ${level("focused", all)}|מלא ${level("full", all)}|מקיף ${level("deep", all)}|מספר אחר …` &&
           levels.find((x) => x.on === "true")?.t.startsWith("מלא") &&
           parts0.length === 8 &&
           parts0.every((t, i) => t.startsWith("✓ ") && t.endsWith(`· ${POINTS[i]}`)) &&
@@ -292,7 +292,7 @@ const level = (l, parts) =>
         search(shoham) === `?v=practice&l=${L}&x=example` &&
           norm(await shoham.locator(".ph-head .back").innerText()) === "→ מה ליצור" &&
           norm(await shoham.locator(".pc-cost").innerText()) ===
-            `${n} שאלות · כמו במבחן כ-$${(n * 0.025).toFixed(2)} כל שאלה נבדקת בידי פותר עיוור לפני שהיא נכנסת לבנק. נשמרות לכל הקבוצה. נוצלו החודש $12.40 מתוך $33.` &&
+            `${n} שאלות · כמו במבחן כ-$${(n * 0.025).toFixed(2)} כל שאלה נפתרת שוב בלי המפתח לפני שהיא נכנסת לבנק. נשמרות לכל הקבוצה. נוצלו החודש $12.40 מתוך $33.` &&
           norm(await shoham.locator(PRIMARY).innerText()) === `ליצור ${n} שאלות`,
         norm(await shoham.locator(".pc-cost").innerText()),
       );
@@ -378,7 +378,7 @@ const level = (l, parts) =>
           pendingNow.length === n - dropped &&
           replacedLines === 1 &&
           dropped === 1 &&
-          unchecked.includes("הפותר העיוור לא הספיק לבדוק אותה") &&
+          unchecked.includes("הבדיקה לא הספיקה לבדוק אותה") &&
           (await shoham.locator(".pb-verdict", { hasText: "נבדקה ✓" }).count()) === pendingNow.length - 1 &&
           (await shoham.locator(".pb-draft .a-tag").first().innerText()).startsWith("ש׳") &&
           norm(await shoham.locator(".pb-count").innerText()) === `${n - dropped}/${n}`,

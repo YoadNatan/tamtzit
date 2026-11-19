@@ -8,7 +8,7 @@ import { Avatar } from "./Shell";
 
 /* ── One entry of the wall (package J; wall.html s1, fun design §5.5) ──
  *
- * The chips "מנצחת השבוע" and "בגב הכרטיס של כולם", the body with its slide
+ * The chips "מנצחת השבוע" and "בגב הכרטיסייה של כולם", the body with its slide
  * tags, "על מה זה: …", the photo or the slide's picture, the author (avatar
  * and name, or "בלי שם"), the kind's chip, "קרדיט: …", and the two votes as
  * toggle buttons (aria-pressed; none on one's own). A menu: "שלי" (or
@@ -96,7 +96,7 @@ export default function WallEntry({ ctx, aid, figureUrl, onChange, showLecture }
           )}
           {aid.on_cards ? (
             <span className="a-chip busy on-cards">
-              <Icon name="cards" size={12} /> בגב הכרטיס של כולם
+              <Icon name="cards" size={12} /> בגב הכרטיסייה של כולם
             </span>
           ) : null}
         </div>
@@ -148,7 +148,7 @@ export default function WallEntry({ ctx, aid, figureUrl, onChange, showLecture }
             {menu ? (
               <ul>
                 <li>
-                  <button onClick={() => void act(() => pinAid(aid.id, !aid.pinned), aid.pinned ? "הורד מ׳שלי׳." : "ננעץ ב׳שלי׳: רק אצלך, בכרטיס ובחזרה.")}>
+                  <button onClick={() => void act(() => pinAid(aid.id, !aid.pinned), aid.pinned ? "הורד מ׳שלי׳." : "ננעץ ב׳שלי׳: רק אצלך, בכרטיסייה ובחזרה.")}>
                     {aid.pinned ? "להוריד מ׳שלי׳" : "שלי"}
                   </button>
                 </li>

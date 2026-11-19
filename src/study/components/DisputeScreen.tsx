@@ -220,14 +220,14 @@ export default function DisputeScreen({ route, ctx }: ScreenProps<"dispute">) {
       {s.state === "accepted" && s.verdict ? (
         <>
           <AfterAccept verdict={s.verdict} id={s.id} done />
-          <p className="a-small a-muted">{`החליט: ${s.decided_by ?? "ללא שם"}`}</p>
+          <p className="a-small a-muted">{`הכרעה: ${s.decided_by ?? "ללא שם"}`}</p>
         </>
       ) : null}
       {s.state === "overridden" ? (
         <aside className="a-callout warn a-stack v-override-box" aria-label="בהרצאה נאמר אחרת">
           <b>בהרצאה נאמר אחרת</b>
           {s.decision_note ? <p className="a-small">{vText(s.decision_note, `dn${s.id}`)}</p> : null}
-          <p className="a-small a-muted">{`החליט: ${s.decided_by ?? "ללא שם"}`}</p>
+          <p className="a-small a-muted">{`הכרעה: ${s.decided_by ?? "ללא שם"}`}</p>
         </aside>
       ) : null}
       {s.state === "closed" ? <p className="a-small a-muted">המחלוקת בוטלה.</p> : null}

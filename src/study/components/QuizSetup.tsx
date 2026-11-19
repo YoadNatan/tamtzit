@@ -208,7 +208,7 @@ export default function QuizSetup({ route, ctx }: ScreenProps<"quiz">) {
                 <b>{MODE_NAME[m]}</b>
                 {m === "coop" && record !== null ? <span className="a-chip busy">השיא: {record}%</span> : null}
               </span>
-              <span className="x">{m === "coop" ? "בלי טבלה: ניקוד ההימור רק לך. 80% זה ׳עברנו׳." : "נקודות וטבלה לשחקני המירוץ, רק במשחק."}</span>
+              <span className="x">{m === "coop" ? "בלי טבלה: הניקוד שלך רק לך. 80% זה ׳עברנו׳." : "נקודות וטבלה לשחקני המירוץ, רק במשחק."}</span>
             </button>
           ))}
         </div>

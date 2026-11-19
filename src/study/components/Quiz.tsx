@@ -688,7 +688,7 @@ export default function Quiz({ quizId, ctx }: ScreenProps<"quiz"> & { quizId: st
         {vote === 1 && playing && !sent && !pending && !timeUp ? (
           <section className="a-stack quiz-bet" aria-labelledby="quiz-bet-h">
             <div className="a-sec">
-              <h2 id="quiz-bet-h">ההימור</h2>
+              <h2 id="quiz-bet-h">כמה בטוחים?</h2>
               {!race ? <span className="a-chip">רק לך</span> : null}
             </div>
             <div className="a-row quiz-bets" role="group" aria-labelledby="quiz-bet-h">
@@ -701,7 +701,7 @@ export default function Quiz({ quizId, ctx }: ScreenProps<"quiz"> & { quizId: st
             <p className="a-small a-muted">{BET_SCALE}</p>
           </section>
         ) : null}
-        {vote === 2 && playing && !sent ? <p className="a-small a-muted">בסבב 2 אין הימור: נספר ההימור של הסבב הראשון.</p> : null}
+        {vote === 2 && playing && !sent ? <p className="a-small a-muted">בסבב 2 לא מסמנים שוב: נספר מה שסימנת בסבב הראשון.</p> : null}
         {!race && vote === 1 && !timeUp ? (
           <p className="a-callout quiz-note">
             <b>בלי שמות.</b> בחשיפה רואים רק כמה בחרו כל תשובה, ורק אם ענו לפחות 3.

@@ -181,7 +181,7 @@ export default function CardsToday({ ctx }: { ctx: Ctx }) {
 
       {review && rows.length > 0 && anki ? (
         <section className="a-card today-box" aria-label="להיום">
-          <p className="a-para">החזרות שלך ב-<bdi dir="ltr">Anki</bdi>, ולכן כאן אין כרטיסים לחזרה. מייצאים את החפיסה שלך אחרי כל הוספה או תיקון.</p>
+          <p className="a-para">החזרות שלך ב-<bdi dir="ltr">Anki</bdi>, ולכן כאן אין כרטיסיות לחזרה. מייצאים את החפיסה שלך אחרי כל הוספה או תיקון.</p>
           <div className="a-row">
             <button className="a-btn primary" onClick={() => setSheet("export")}>
               ייצוא ל-Anki

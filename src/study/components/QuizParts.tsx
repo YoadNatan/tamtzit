@@ -159,7 +159,7 @@ export function QuizEnd({ state, me, children }: { state: QuizState; me: string;
           {broke && broke.q ? (
             <section className="a-stack" aria-labelledby="quiz-broke-h">
               <div className="a-sec">
-                <h3 id="quiz-broke-h">השאלה ששברה את הקבוצה</h3>
+                <h3 id="quiz-broke-h">השאלה הכי קשה לקבוצה</h3>
               </div>
               <div className="a-card flat">
                 <p className="a-q" dir="rtl">
@@ -175,7 +175,7 @@ export function QuizEnd({ state, me, children }: { state: QuizState; me: string;
             <section className="a-card flat quiz-private" aria-label="רק לך">
               <div className="a-row between">
                 <span className="a-small">
-                  <b>שלך: {state.me.correct_n} מתוך {state.me.answered_n}</b> · ניקוד ההימור: <bdi dir="ltr">{signed(state.me.score)}</bdi>
+                  <b>שלך: {state.me.correct_n} מתוך {state.me.answered_n}</b> · ניקוד: <bdi dir="ltr">{signed(state.me.score)}</bdi>
                 </span>
                 <span className="a-chip">רק לך</span>
               </div>
@@ -201,14 +201,14 @@ export function Rules({ mode, seconds }: { mode: QuizState["quiz"]["mode"]; seco
     mode === "race"
       ? [
           ["clock", time, "מהירות רק שוברת שוויון"],
-          ["chat", "קודם לבד, עם הימור", BET_SCALE],
+          ["chat", "קודם לבד, ומסמנים כמה בטוחים", BET_SCALE],
           ["award", "נקודות וטבלה לשחקני המירוץ, רק במשחק.", "בלי שמות על התשובות"],
         ]
       : [
           ["clock", time, "בלי נקודות על מהירות"],
-          ["chat", "קודם לבד, עם הימור", "קבוצה חצויה? 90 שניות לשכנע, ואז עונים שוב"],
-          ["user", "בלי שמות על התשובות", "כל טלפון רואה רק את ההימור והטעויות שלו"],
-          ["award", "בסוף: ציון הקבוצה", "והשאלה ששברה את הקבוצה"],
+          ["chat", "קודם לבד, ומסמנים כמה בטוחים", "קבוצה חצויה? 90 שניות לשכנע, ואז עונים שוב"],
+          ["user", "בלי שמות על התשובות", "כל טלפון רואה רק את מה שסימן ואת הטעויות שלו"],
+          ["award", "בסוף: ציון הקבוצה", "והשאלה הכי קשה לקבוצה"],
         ];
   return (
     <section className="a-stack" aria-labelledby="quiz-rules-h">
@@ -254,7 +254,7 @@ export function ModeLine({ mode, record }: { mode: QuizState["quiz"]["mode"]; re
             ? "נקודות וטבלה לשחקני המירוץ, רק במשחק."
             : mode === "boss"
               ? "כל הקבוצה ביחד מול הנושאים הקשים: עונים לבד, ותשובות נכונות סוגרות נושא."
-              : "בלי טבלה: ניקוד ההימור רק לך. 80% זה ׳עברנו׳."}
+              : "בלי טבלה: הניקוד שלך רק לך. 80% זה ׳עברנו׳."}
         </span>
       </div>
     </section>

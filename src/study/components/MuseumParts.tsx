@@ -123,7 +123,7 @@ export function ExhibitBody({ ctx, lectureId, onShown }: { ctx: Ctx; lectureId: 
     <aside className="a-card flat museum-opening" aria-labelledby={`mo-${e.trap_id}`}>
       <div className="a-row between">
         <b className="a-small" id={`mo-${e.trap_id}`}>
-          פותחים בטעות נפוצה
+          פותחים עם טעות נפוצה אחת
         </b>
         <span className="a-chip group">30 שניות</span>
       </div>

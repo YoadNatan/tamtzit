@@ -243,7 +243,7 @@ export function SlipCard({ ctx, plan, missed, facts, onPriced }: { ctx: Ctx; pla
         </b>
         {tag ? <span className="a-tag">{tag}</span> : null}
       </div>
-      <p className="a-small">{`הבלוק זז ${to}. כדי לסיים בזמן, בוחרים מחיר:`}</p>
+      <p className="a-small">{`הבלוק זז ${to}. כדי לסיים בזמן, בוחרים אחד:`}</p>
       <div className="a-stack">
         <button type="button" className="a-btn" disabled={busy} onClick={() => void choose("longer")}>
           {prices.longer}

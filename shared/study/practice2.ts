@@ -77,7 +77,7 @@ export type PointsPart = {
 
 export const LEVELS = ["focused", "full", "deep", "custom"] as const;
 export type Level = (typeof LEVELS)[number];
-export const LEVEL_HE: Record<Level, string> = { focused: "ממוקד", full: "מלא", deep: "מקיף", custom: "משלי" };
+export const LEVEL_HE: Record<Level, string> = { focused: "ממוקד", full: "מלא", deep: "מקיף", custom: "מספר אחר" };
 /** Decision 1 (DECISIONS.md): the default count is מלא. */
 export const DEFAULT_LEVEL: Level = "full";
 

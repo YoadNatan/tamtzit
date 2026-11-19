@@ -179,7 +179,7 @@ export default function MeetingScreen({ route, ctx }: ScreenProps<"meeting">) {
 
       {showOpening && rituals.coffee === "offer" ? (
         <div className="a-card flat m-opening">
-          <p className="a-small">שלוש שאלות על מה שקראו בפגישות הקודמות. כל אחד ואחת עונים לבד, עם הימור; בחשיפה רואים רק אם רוב הקבוצה צדקה.</p>
+          <p className="a-small">שלוש שאלות על מה שקראו בפגישות הקודמות. כל אחד ואחת עונים לבד ומסמנים כמה בטוחים; בחשיפה רואים רק אם רוב הקבוצה צדקה.</p>
           <button type="button" className="a-btn ghost small m-skip" onClick={skip}>
             לדלג לסדר היום
           </button>
@@ -257,7 +257,7 @@ export default function MeetingScreen({ route, ctx }: ScreenProps<"meeting">) {
       </ul>
 
       {m.over ? <p className="a-card flat a-muted">הפגישה של היום הסתיימה.</p> : null}
-      {rituals.closing === "done" ? <p className="a-small a-muted">המבחן הקבוצתי של היום הסתיים. לכל היותר שני מבחנים קצרים ביום: שאלות הפתיחה ומבחן בסוף.</p> : null}
+      {rituals.closing === "done" ? <p className="a-small a-muted">המבחן הקבוצתי של היום הסתיים. לכל היותר שני מבחנים ביום: שאלות הפתיחה, ומבחן קבוצתי בסוף.</p> : null}
 
       <div className="a-row m-links">
         {!m.started_at ? (

@@ -63,7 +63,7 @@ export type Chip = { key: "questions" | "cards" | "comments"; label: string; ope
 export function groupChips(c: Pick<ParagraphChips, "questions" | "cards">, notes?: { total: number; open: number }): Chip[] {
   const out: Chip[] = [];
   if (c.questions > 0) out.push({ key: "questions", label: countWord(c.questions, "שאלה", "שאלות") });
-  if (c.cards > 0) out.push({ key: "cards", label: countWord(c.cards, "כרטיס", "כרטיסים") });
+  if (c.cards > 0) out.push({ key: "cards", label: countWord(c.cards, "כרטיסייה", "כרטיסיות") });
   if (notes && notes.total > 0) out.push({ key: "comments", label: countWord(notes.total, "תגובה", "תגובות"), open: notes.open > 0 });
   return out;
 }

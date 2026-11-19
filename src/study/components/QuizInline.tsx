@@ -154,7 +154,7 @@ export default function QuizInline({ ctx, quizId, onState }: { ctx: Ctx; quizId:
             })}
           </div>
           {playing && !sent && view.v === "question" ? (
-            <div className="a-row m-bets" role="group" aria-label="ההימור">
+            <div className="a-row m-bets" role="group" aria-label="כמה בטוחים">
               {([1, 2, 3] as const).map((b) => (
                 <button key={b} type="button" className="a-btn small" disabled={selected === null || busy} onClick={() => send(b)}>
                   {BET_WORDS[b]}

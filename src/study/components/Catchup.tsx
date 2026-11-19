@@ -117,7 +117,7 @@ export default function CatchupScreen({ route, ctx }: ScreenProps<"catchup">) {
         </h1>
       </Head>
       <p className="ph-sub">
-        <span>בפרק הקודם של תמצית…</span>
+        <span>מה היה בפגישה</span>
         <span aria-hidden="true">·</span>
         <span>{pack.minutes} דק׳</span>
         <span className="a-chip">רק לך</span>

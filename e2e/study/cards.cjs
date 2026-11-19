@@ -143,7 +143,7 @@ function lastSixPm() {
     const sub = page.locator(".deck-sub");
     if (!(await sub.count())) return 0;
     const text = await sub.innerText();
-    return /^כרטיס אחד/.test(text.trim()) ? 1 : Number((/(\d+) כרטיסים/.exec(text) ?? [])[1] ?? 0);
+    return /^כרטיסייה אחת/.test(text.trim()) ? 1 : Number((/(\d+) כרטיסיות/.exec(text) ?? [])[1] ?? 0);
   };
 
   let sh;
@@ -276,7 +276,7 @@ function lastSixPm() {
     await sh.getByRole("button", { name: "ייצוא ל-Anki" }).first().click();
     const exportSheet = sh.locator(".a-sheet", { hasText: "מה לייצא" });
     // Nothing of the deck is Shoham's own yet (decision 8): the whole deck is the choice.
-    await exportSheet.getByText("כל החפיסה (5 כרטיסים)").waitFor();
+    await exportSheet.getByText("כל החפיסה (5 כרטיסיות)").waitFor();
     check("7. before any part is added, the sheet offers no deck of one's own", (await exportSheet.getByText(/^החפיסה שלך/).count()) === 0);
     await exportSheet.getByText(/כ-0\.\dMB/).waitFor();
     a11y.push(...(await snap(sh, out, "cards-7-export")));
@@ -330,9 +330,9 @@ function lastSixPm() {
     const moreParts = (await sh.locator(".more-parts").innerText().catch(() => "")).trim();
     check(
       "C3. the deck page: 5 כרטיסים · 8 חלקים · made once for the group; the ring at 0, no part in her deck, five rows and 'ועוד 3 חלקים', its name in Anki",
-      /^5 כרטיסים · \d+ חלקים · נוצרו פעם אחת לכל הקבוצה$/.test((await sh.locator(".deck-sub").innerText()).trim()) &&
+      /^5 כרטיסיות · \d+ חלקים · נוצרו פעם אחת לכל הקבוצה$/.test((await sh.locator(".deck-sub").innerText()).trim()) &&
         (await ring()) === 0 &&
-        (await sh.getByText("בחפיסה שלך: 0 כרטיסים").count()) === 1 &&
+        (await sh.getByText("בחפיסה שלך: 0 כרטיסיות").count()) === 1 &&
         (await sh.locator(".deck-part .a-chip.ok").count()) === 0 &&
         (await sh.locator(".anki-path").innerText()).includes("תמצית::פרמקולוגיה לדוגמה::משתנים (Diuretics)") &&
         shownParts === 5 &&
@@ -351,8 +351,8 @@ function lastSixPm() {
     await sh.getByRole("button", { name: "ייצוא ל-Anki" }).first().click();
     const mineSheet = sh.locator(".a-sheet", { hasText: "מה לייצא" });
     // The deck page's word for a count (cards.html s3): "כרטיס אחד", "5 כרטיסים".
-    await mineSheet.getByText(`החפיסה שלך (${part0Cards === 1 ? "כרטיס אחד" : `${part0Cards} כרטיסים`})`, { exact: true }).waitFor();
-    await mineSheet.getByText("כל החפיסה (5 כרטיסים)").waitFor();
+    await mineSheet.getByText(`החפיסה שלך (${part0Cards === 1 ? "כרטיסייה אחת" : `${part0Cards} כרטיסיות`})`, { exact: true }).waitFor();
+    await mineSheet.getByText("כל החפיסה (5 כרטיסיות)").waitFor();
     a11y.push(...(await snap(sh, out, "cards-c3-export")));
     const [ownDownload] = await Promise.all([sh.waitForEvent("download", { timeout: 20_000 }), mineSheet.getByRole("button", { name: "ייצוא", exact: true }).click()]);
     const ownFile = path.join(out, "cards-export-mine.apkg");
@@ -446,7 +446,7 @@ function lastSixPm() {
       });
       await sh.getByRole("button", { name: "ייצוא ל-Anki" }).first().click();
       const cancelSheet = sh.locator(".a-sheet", { hasText: "מה לייצא" });
-      await cancelSheet.getByText("כל החפיסה (5 כרטיסים)").waitFor();
+      await cancelSheet.getByText("כל החפיסה (5 כרטיסיות)").waitFor();
       await cancelSheet.getByRole("button", { name: "ייצוא", exact: true }).click();
       await cancelSheet.getByRole("button", { name: "מכינים את החבילה…" }).waitFor({ state: "detached", timeout: 20_000 });
       await sh.waitForTimeout(500);
@@ -500,7 +500,7 @@ function lastSixPm() {
 
     /* ── C6 (CS-4): the review home, asked once ── */
     await sh.goto(mock.base + "/?v=cards");
-    const homeSheet = sh.locator(".a-sheet", { hasText: "איפה חוזרים על הכרטיסים?" });
+    const homeSheet = sh.locator(".a-sheet", { hasText: "איפה חוזרים על הכרטיסיות?" });
     await homeSheet.waitFor({ timeout: 10_000 });
     a11y.push(...(await snap(sh, out, "cards-c6-home")));
     await homeSheet.getByText(/^באפליקציה/).click();
@@ -710,7 +710,7 @@ function lastSixPm() {
     for (const pi of noaParts) await no.locator(`.deck-part[data-part="${pi}"]`).getByRole("button", { name: "להוסיף" }).click();
     await until(() => noaParts.every((pi) => m.adoptions.some((a) => a.user_id === noaId && a.part_idx === pi)), 5000, "Noa's two parts");
     await no.goto(mock.base + `/?v=cards&s=l.${L}`);
-    const noaHome = no.locator(".a-sheet", { hasText: "איפה חוזרים על הכרטיסים?" });
+    const noaHome = no.locator(".a-sheet", { hasText: "איפה חוזרים על הכרטיסיות?" });
     await noaHome.waitFor({ timeout: 10_000 });
     await noaHome.getByRole("button", { name: "שמירה" }).click();
     await noaHome.waitFor({ state: "detached" });

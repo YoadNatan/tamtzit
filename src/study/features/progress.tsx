@@ -46,14 +46,14 @@ export function MarathonsCard({ ctx }: { ctx: Ctx }) {
   }, [ctx.group.id, on]);
   if (!on || next === undefined) return null;
   return (
-    <section className="a-card flat pl-card" aria-label="ערבי למידה">
+    <section className="a-card flat pl-card" aria-label="מפגשי למידה">
       <div className="a-row between">
-        <b dir="rtl">{next ? `ערב למידה · ${next.title}` : "ערבי למידה"}</b>
+        <b dir="rtl">{next ? `מפגש למידה · ${next.title}` : "מפגשי למידה"}</b>
         <RouteLink to={next ? { v: "marathon", m: next.id } : { v: "marathon", isNew: true }} go={ctx.go} className="a-btn small">
-          {next ? "לערב הלמידה" : "ערב למידה חדש"}
+          {next ? "למפגש הלמידה" : "מפגש למידה חדש"}
         </RouteLink>
       </div>
-      <p className="a-small a-muted">{next ? `${next.line} · ${next.inN} בפנים` : "קובעים ערב למידה, בוחרים הרצאות, ומסמנים מי בפנים."}</p>
+      <p className="a-small a-muted">{next ? `${next.line} · ${next.inN} בפנים` : "קובעים מפגש למידה, בוחרים הרצאות, ומסמנים מי בפנים."}</p>
     </section>
   );
 }

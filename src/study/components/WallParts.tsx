@@ -152,7 +152,7 @@ export function ParagraphWallTab({ lc, spot }: { lc: LectureCtx; spot: Spot }) {
         </aside>
       ) : null}
       {rows === null && !error ? <p className="a-muted loading">טוען…</p> : null}
-      {rows && !rows.length ? <p className="a-small a-muted">עוד אין אסוציאציה לפסקה הזו. אפשר להתחיל משלוש טיוטות, או לכתוב משלי.</p> : null}
+      {rows && !rows.length ? <p className="a-small a-muted">עוד אין אסוציאציה לפסקה הזו. אפשר להתחיל משלוש טיוטות, או לכתוב אחת משלך.</p> : null}
       {sorted.map((a) => (
         <WallEntry key={a.id} ctx={ctx} aid={a} figureUrl={figureOf} onChange={load} />
       ))}

@@ -285,7 +285,7 @@ export default function Progress({ route, ctx }: ScreenProps<"progress">) {
   const cal = calibrationPick(data.calibration);
   const calibration =
     "row" in cal ? (
-      <section className="a-row pr-calibration" aria-label="כיול">
+      <section className="a-row pr-calibration" aria-label="כשסימנת ׳על בטוח׳">
         <span className="a-ring" style={{ "--p": `${cal.row.pct}%` } as CSSProperties} aria-hidden="true">
           <span>
             <bdi dir="ltr">{cal.row.pct}%</bdi>
@@ -304,7 +304,7 @@ export default function Progress({ route, ctx }: ScreenProps<"progress">) {
         </span>
       </section>
     ) : (
-      <section className="a-row pr-calibration" aria-label="כיול">
+      <section className="a-row pr-calibration" aria-label="כשסימנת ׳על בטוח׳">
         <span className="a-ring pr-ring-wait" style={{ "--p": `${Math.round((100 * (CALIBRATION_MIN - cal.left)) / CALIBRATION_MIN)}%` } as CSSProperties} aria-hidden="true">
           <span>
             <bdi dir="ltr">

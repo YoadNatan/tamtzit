@@ -149,7 +149,7 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       expect(rows.length === 5, `five rows (${rows.length})`);
       expect(/Loop diuretics · מנגנון פעולה/.test(rows[0]) && /ש׳ 6/.test(rows[0]) && /קשה$/.test(rows[0].trim()), "a row: topic · aspect, its slide, the member's own chip");
       expect((await s.getByText("קשה רק לך, אז זה נכנס לתור האישי").count()) === 1, "P-5 on the warm row that is hot for her");
-      expect((await s.getByText("החור שנסגר השבוע").count()) === 1, "P-6 once, though two rows closed this week");
+      expect((await s.getByText("השתפר השבוע").count()) === 1, "P-6 once, though two rows closed this week");
       const meterLine = await s.locator('[data-meter="lecture"]').innerText();
       expect(/5 מתוך 6 נושאים פתוחים · עוד אדם אחד לנושא הבא/.test(meterLine), `decision 3: the meter of the topics still below 3 (${meterLine})`);
       const brief = await s.locator(".pulse-brief").innerText();
