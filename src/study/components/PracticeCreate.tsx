@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { DIFFICULTIES, DIFFICULTY_HE, LEVEL_HE, REQUEST_MAX, STYLE_HE, STYLES, FOCUS_MAX, type Level, type Style } from "../../../shared/study/practice2";
+import { MCQ_STYLES } from "../../../shared/study/forms";
 import type { ScreenProps } from "../features/types";
+import { flags } from "../lib/flags";
 import { getLecture, type Lecture } from "../lib/api";
 import { failText } from "../lib/failText";
 import { shrinkImage, toBase64 } from "../lib/images";
@@ -23,6 +25,9 @@ import {
 import { dropReading, failedParts, markReading, type PartView, type PointPartRow, pointsReason, readingHere, readProgress, readTime } from "../lib/pointsRead";
 import { barLabel, richText } from "../lib/rich";
 import { BackLink, Head, Loading, StickyActions } from "./Shell";
+
+/** The styles this build offers: the question types only with their flag. */
+const SHOWN_STYLES: readonly Style[] = flags.qtypes ? STYLES : STYLES.filter((s) => (MCQ_STYLES as readonly string[]).includes(s));
 
 /* ── Practice 2.0: מה ליצור and דוגמה ומיקוד (proposal/practice-2/mockups.html) ──
  *
@@ -469,11 +474,11 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
             <span className="a-small a-muted">אפשר כמה</span>
           </div>
           <div className="a-wrap pc-styles" role="group" aria-labelledby="styles-h">
-            {STYLES.map((s: Style) => (
+            {SHOWN_STYLES.map((s: Style) => (
               <Toggle
                 key={s}
                 on={choices.styles.includes(s)}
-                onClick={() => setChoices((c) => ({ ...c, styles: c.styles.includes(s) && c.styles.length === 1 ? c.styles : STYLES.filter((x) => (x === s ? !c.styles.includes(s) : c.styles.includes(x))) }))}
+                onClick={() => setChoices((c) => ({ ...c, styles: c.styles.includes(s) && c.styles.length === 1 ? c.styles : SHOWN_STYLES.filter((x) => (x === s ? !c.styles.includes(s) : c.styles.includes(x))) }))}
               >
                 {STYLE_HE[s]}
               </Toggle>

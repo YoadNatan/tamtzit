@@ -303,5 +303,5 @@ test("סבב חדש: the union of the chosen sources, within the parts and style
   assert.equal(sessionCount(rows, { sources: ["new"], parts: [2], styles: ["case"] }), 5, "רק מקרים קליניים");
   assert.equal(sessionCount(rows, { sources: [] }), 0);
   assert.equal(sessionCount(rows, { sources: ["all"], lectures: ["other"] }), 0);
-  assert.equal(STYLES.length, 7);
+  assert.equal(STYLES.length, 13);
 });

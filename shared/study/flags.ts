@@ -63,6 +63,10 @@ export function flagsFrom(e: Record<string, unknown>) {
     // device and the group already have, writes nothing to the database and
     // calls no AI, so it needs no SQL section (requiredSchema is unchanged).
     guide: on(e.VITE_STUDY_GUIDE),
+    // Question types (docs/study/question-types.md): image, label, staged
+    // case, true/false, match and order. Section Q at 3 (the columns) and X 1
+    // (answering a set, the geometry backfill).
+    qtypes: practice && on(e.VITE_STUDY_QTYPES),
   } as const;
 }
 
@@ -106,6 +110,9 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     F: 1,
     W: 1,
     ...(f.questions ? { Q: ends.Q ? 2 : 1 } : {}),
+    // Question types: Q's columns (Q 3) and section X's functions. Z, M, H, U
+    // and C's filters come with the same run of the file; the app needs none of them.
+    ...(f.qtypes ? { Q: 3, X: 1 } : {}),
     ...(f.quiz ? { Z: 2 } : {}),
     ...(f.cards ? { C: ends.C ? 2 : 1 } : {}),
     ...(f.corrections || f.ask ? { K: 2 } : {}),

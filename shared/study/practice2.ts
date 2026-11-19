@@ -11,9 +11,13 @@
  * (op "questions", server/study/practice.ts), so no zod and no I/O.
  * Imports end in ".js" (spec §2.2). */
 
+import { canStyle, emptyFacts, NEW_STYLES, weightOf, type Form, type Layout, type PartFacts } from "./forms.js";
+
 // ── Points to know ──
 
-export const POINT_KINDS = ["drug", "mechanism", "indication", "adverse", "contra", "number"] as const;
+/** structure, process and finding (question types): anatomy, physiology and
+ *  imaging lectures, whose points fitted no pharmacology kind. */
+export const POINT_KINDS = ["drug", "mechanism", "indication", "adverse", "contra", "number", "structure", "process", "finding"] as const;
 export type PointKind = (typeof POINT_KINDS)[number];
 export const POINT_KIND_HE: Record<PointKind, string> = {
   drug: "תרופה",
@@ -22,6 +26,9 @@ export const POINT_KIND_HE: Record<PointKind, string> = {
   adverse: "תופעת לוואי",
   contra: "התוויית נגד",
   number: "מספר לזכור",
+  structure: "מבנה ומיקום",
+  process: "תהליך ושלבים",
+  finding: "ממצא",
 };
 
 /** A point to know, as study_points stores it and every member reads it. */
@@ -74,7 +81,7 @@ export const LEVEL_HE: Record<Level, string> = { focused: "ממוקד", full: "�
 /** Decision 1 (DECISIONS.md): the default count is מלא. */
 export const DEFAULT_LEVEL: Level = "full";
 
-export const STYLES = ["case", "mechanism", "drug_choice", "adverse_contra", "compare", "not_true", "blank_table"] as const;
+export const STYLES = ["case", "mechanism", "drug_choice", "adverse_contra", "compare", "not_true", "blank_table", ...NEW_STYLES] as const;
 export type Style = (typeof STYLES)[number];
 export const STYLE_HE: Record<Style, string> = {
   case: "מקרה קליני",
@@ -84,6 +91,12 @@ export const STYLE_HE: Record<Style, string> = {
   compare: "השוואה",
   not_true: "׳מה לא נכון׳",
   blank_table: "טבלה ריקה",
+  image: "שאלה על תמונה",
+  label: "סימון על תמונה",
+  steps: "מקרה קליני בשלבים",
+  tf: "נכון / לא נכון",
+  match: "התאמה",
+  order: "סידור",
 };
 /** The four styles the approved setup screen shows checked. */
 export const DEFAULT_STYLES: readonly Style[] = ["case", "mechanism", "drug_choice", "adverse_contra"];
@@ -236,12 +249,24 @@ export function batchSizes(questions: number): number[] {
   return Array.from({ length: k }, (_, i) => Math.floor(questions / k) + (i < questions % k ? 1 : 0));
 }
 
+/** At most this many items of a type in one part: a label item per labelled
+ *  picture twice over, an image item per captioned picture, two staged cases. */
+export function styleQuota(style: Style, f: PartFacts): number {
+  if (style === "label") return 2 * f.labelled;
+  if (style === "image") return f.figures;
+  if (style === "steps") return 2;
+  return Number.POSITIVE_INFINITY;
+}
+
 /** The plan of a request: per chosen part its questions, the points they
  *  must cover (neighbouring paragraphs together in a batch) and the style of
  *  each question, the request's styles in turn across the whole request. A
- *  blank table needs a part whose slides have a table (`tableParts`); a part
- *  without one takes the next style, and with blank_table the only style
- *  such a part gets no questions. */
+ *  style a part cannot have (canStyle on `partFacts`: a blank table needs a
+ *  table, a label item a labelled picture, an image item a captioned
+ *  picture), or whose quota in the part is used up, takes the next style; a
+ *  label item in a part with pictures but no labels becomes an image item.
+ *  A part none of the request's styles fits gets no questions. `tableParts`
+ *  is the older form of the facts (tables only). */
 export function planRequest(o: {
   points: readonly PlanPoint[];
   level: Level;
@@ -249,12 +274,34 @@ export function planRequest(o: {
   parts: readonly number[];
   styles: readonly Style[];
   tableParts?: ReadonlySet<number>;
+  partFacts?: ReadonlyMap<number, PartFacts>;
 }): Plan {
   const styles = STYLES.filter((s) => o.styles.includes(s));
-  const noTable = (part: number) => o.tableParts !== undefined && !o.tableParts.has(part);
-  const usableParts = o.parts.filter((p) => !(styles.length === 1 && styles[0] === "blank_table" && noTable(p)));
+  const factsOf = (part: number): PartFacts | null => {
+    if (o.partFacts) return o.partFacts.get(part) ?? emptyFacts();
+    if (o.tableParts) return { ...emptyFacts(), tables: o.tableParts.has(part), figures: 1e9, labelled: 1e9, points: { any: 1e9 } };
+    return null;
+  };
+  const fits = (s: Style, part: number) => {
+    const f = factsOf(part);
+    return !f || canStyle(s, f) || (s === "label" && canStyle("image", f));
+  };
+  const usableParts = o.parts.filter((p) => styles.some((s) => fits(s, p)));
   const counts = partCounts(o.points, usableParts);
-  const perPart = questionsPerPart(o.level, counts, o.count);
+  // A part whose every fitting style has a quota (only pictures, only staged cases) writes at most their sum.
+  const room = (part: number) => {
+    const f = factsOf(part);
+    if (!f) return Number.POSITIVE_INFINITY;
+    let n = 0;
+    for (const s of styles) {
+      const t = s === "label" && !canStyle("label", f) ? "image" : s;
+      if (!canStyle(t, f)) continue;
+      if (t === "image" && s === "label" && styles.includes("image")) continue; // counted once, as image
+      n += styleQuota(t, f);
+    }
+    return n;
+  };
+  const perPart = questionsPerPart(o.level, counts, o.count).map((n, i) => Math.min(n, room(counts[i].part_idx)));
   const batches: PlannedBatch[] = [];
   const parts: Plan["parts"] = [];
   let slot = 0;
@@ -265,15 +312,26 @@ export function planRequest(o: {
     parts.push({ ...c, questions, covers: cover.length });
     const sizes = batchSizes(questions);
     const shares = shareOut(cover.length, sizes, sizes.map(() => cover.length));
+    const f = factsOf(c.part_idx);
+    const used = new Map<Style, number>();
+    const take = (s: Style): Style | null => {
+      let t = s;
+      if (f && t === "label" && !canStyle("label", f) && canStyle("image", f)) t = "image";
+      if (f && (!canStyle(t, f) || (used.get(t) ?? 0) >= styleQuota(t, f))) return null;
+      used.set(t, (used.get(t) ?? 0) + 1);
+      return t;
+    };
     let at = 0;
     sizes.forEach((wanted, seq) => {
       const pts = cover.slice(at, at + shares[seq]).map((p) => p.id);
       at += shares[seq];
       const own: Style[] = [];
       for (let q = 0; q < wanted; q++) {
-        let s = styles[slot % styles.length];
-        // A blank table only where the slides have a table: the next style instead.
-        for (let k = 1; s === "blank_table" && noTable(c.part_idx) && k < styles.length; k++) s = styles[(slot + k) % styles.length];
+        // The style in turn; one the part cannot have (or whose quota is used): the next.
+        let s: Style | null = null;
+        for (let k = 0; k < styles.length && !s; k++) s = take(styles[(slot + k) % styles.length]);
+        // Every quota is used (the room above prevents it): a style the part can have, again.
+        if (!s) s = styles.find((x) => !f || canStyle(x, f)) ?? styles[0];
         own.push(s);
         slot += 1;
       }
@@ -282,6 +340,9 @@ export function planRequest(o: {
   });
   return { total: batches.reduce((s, b) => s + b.wanted, 0), parts, batches };
 }
+
+/** Every planned item's style, for the weighted estimate. */
+export const plannedStyles = (plan: Pick<Plan, "batches">): Style[] => plan.batches.flatMap((b) => b.styles);
 
 // ── The options of a request ──
 
@@ -393,10 +454,14 @@ export function pointsUsd(summaryChars: number, parts = 1): number {
   return round2(input + output);
 }
 
-/** A request of `questions` questions, at full price. */
-export const requestUsd = (questions: number): number => round2(Math.max(0, questions) * EXPECTED_USD.question);
-/** The blind solver's part of that (already in requestUsd). */
-export const solverUsd = (questions: number): number => round2(Math.max(0, questions) * EXPECTED_USD.solver);
+/** A request of `questions` questions, at full price: a number of plain
+ *  questions, or the planned styles, each weighted (forms.ts STYLE_WEIGHT: a
+ *  label item half, a staged case 2.5). */
+export const requestUsd = (questions: number | readonly string[]): number => round2(Math.max(0, weighted(questions)) * EXPECTED_USD.question);
+/** The blind solver's part of that (already in requestUsd; label items have none). */
+export const solverUsd = (questions: number | readonly string[]): number =>
+  round2(Math.max(0, typeof questions === "number" ? questions : weighted(questions.filter((s) => s !== "label"))) * EXPECTED_USD.solver);
+const weighted = (q: number | readonly string[]) => (typeof q === "number" ? q : weightOf(q));
 
 /** Rounded up to the cent, as the screens print it. */
 function round2(x: number): number {
@@ -433,6 +498,11 @@ export type Draft = {
   question_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Question types (section Q at 3): absent before; "one" for every older draft. */
+  form?: Form;
+  layout?: Layout | null;
+  series?: string | null;
+  step?: number | null;
 };
 
 /** Per part: the request's points of that part and how many of them its
@@ -513,7 +583,7 @@ export type DraftOnLine = Omit<Draft, "lecture_id" | "status" | "check_state" | 
 /** A line of writing a batch (no action, or "write") or of action "reword". */
 export type WriteLine =
   | { t: "start" }
-  | { t: "q"; q: { id: string; part_idx: number; kind: "mcq" | "case"; difficulty: number; vignette: string; question: string; options: string[]; slides: number[]; topic: string; aspect: string; anchor: number | null; teaser: string; figure: string; option_tags: string[]; style: Style | null } }
+  | { t: "q"; q: { id: string; part_idx: number; kind: "mcq" | "case"; difficulty: number; vignette: string; question: string; options: string[]; slides: number[]; topic: string; aspect: string; anchor: number | null; teaser: string; figure: string; option_tags: string[]; style: Style | null; form?: Form; layout?: Layout | null; series?: string | null; step?: number | null } }
   | { t: "draft"; d: DraftOnLine; replaces?: string }
   | { t: "check"; id: string; state: "ok" | "failed" | "unchecked" }
   | { t: "drop"; id: string }

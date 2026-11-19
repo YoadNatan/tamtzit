@@ -21,6 +21,10 @@ export const ASPECTS = {
   diagnosis: "אבחנה",
   treatment: "טיפול",
   prevention: "מניעה",
+  anatomy: "אנטומיה",
+  histology: "היסטולוגיה",
+  physiology: "פיזיולוגיה",
+  imaging: "הדמיה",
   other: "אחר",
 } as const;
 export type Aspect = keyof typeof ASPECTS;
