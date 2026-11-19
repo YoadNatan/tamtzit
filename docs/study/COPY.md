@@ -96,6 +96,15 @@ these and no other.
 | A summary that does not fit the month's budget | יחכה לחודש הבא (several: 3 סיכומים יחכו לחודש הבא) |
 | One round of questions over several lectures | סבב על כמה הרצאות (עד 5 הרצאות, לפחות 4 שאלות מכל הרצאה) |
 | Two courses that are one | לאחד קורסים (never "למזג") |
+| Back to a course's page | → לקורס |
+| A course's link in the library and its page's head | the course's name; under it: 25 הרצאות · 5 מבחנים קודמים |
+| The exam's date and what is left | המבחן ב-12.2 · עוד 23 ימים (the day itself: המבחן היום; past: המבחן היה ב-12.2) |
+| The exam's length | 100 שאלות · 3 שעות |
+| Practising a course's questions | לתרגל מה שכבר יש · בחינם (184) |
+| The batch upload's price card | המחיר מראש · סיכומים ל-8 הרצאות: כ-$7 · נשארו החודש $24 |
+| The batch's progress | קוראים קובץ 4 מתוך 14 · כדאי להשאיר את המסך פתוח |
+| Coming back to a batch that stopped | הועלו 3. נשארו 11 קבצים · לבחור אותם שוב |
+| A file of a batch, uploaded | ✓ הועלה (and while it waits: מחכה; while it goes: עולה…) |
 
 ### Kept, on purpose
 

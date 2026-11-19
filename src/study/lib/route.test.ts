@@ -59,7 +59,9 @@ const VALID: Record<string, (x: string, v: string) => boolean> = {
   at: (x) => /^\d+\.\d+$/.test(x),
   slide: (x) => /^\d{1,3}$/.test(x) && Number(x) >= 1,
   n: (x) => ["5", "10", "20", "all"].includes(x),
-  c: (x) => x.length <= 200,
+  c: (x, v) => (v === "course" || v === "upload" || v === "ask" ? UUID(x) : x.length <= 200),
+  many: (x) => x === "1",
+  seg: (x) => ["exams", "lectures", "made"].includes(x),
   s: (x) => x.length <= 200 && (!/^[pbr]\./.test(x) || /^p\.[0-9a-f-]{36}\.\d+\.\d+$|^b\.[0-9a-f-]{36}\.[1-9]\d{0,2}$|^r\.[0-9a-f-]{36}$/.test(x)),
   t: (x, v) => (v === "wall" ? ["top", "new", "needed", "mine"].includes(x) : x.length <= 200),
   first: (x) => x.length <= 500,
@@ -84,7 +86,9 @@ const PARAMS: Record<string, string[]> = {
   exams: ["e", "c", "new"],
   quiz: ["q", "l", "c", "new", "mk", "m", "preset", "pf", "pt"],
   cards: ["l", "s"],
-  ask: ["l", "at", "first"],
+  ask: ["l", "at", "first", "c"],
+  course: ["c", "seg"],
+  upload: ["c", "many"],
   marathon: ["m", "new", "edit"],
   progress: ["t", "x"],
   plan: ["edit", "lane", "d"],
@@ -136,11 +140,18 @@ test("every URL of §1 of every design, of §5.2 and of the addendum round-trips
 });
 
 /** Every route of §5.2 and §12.2.1, each with every parameter it takes. */
+/** The words COPY.md's "New words" tables give (docs/study/COPY.md: "| concept | words |"). */
+const COPY_WORDS = [...readFileSync(join(process.cwd(), "docs", "study", "COPY.md"), "utf8").matchAll(/^\| [^|]+ \| ([^|]+) \|$/gm)].flatMap((m) => m[1].split(/;|\(/)[0].trim());
+
 const ALL_ROUTES: Route[] = [
   { v: "today" },
   { v: "today", run: true },
   { v: "library" },
   { v: "upload" },
+  { v: "upload", c: ID, many: true }, // sources.md: the batch upload of a course
+  { v: "upload", many: true },
+  { v: "course", c: ID },
+  { v: "course", c: ID, seg: "lectures" },
   { v: "help" },
   { v: "lecture", l: ID },
   { v: "lecture", l: ID, at: { part: 1, anchor: 3 }, slide: 23, mk: ID2, read: true, follow: true },
@@ -163,6 +174,7 @@ const ALL_ROUTES: Route[] = [
   { v: "quiz", l: ID, preset: "stop", pf: 3, pt: 3 },
   { v: "cards", l: ID, s: "today" },
   { v: "ask", l: ID, at: { part: 0, anchor: 0 }, first: "מה נאמר על Primaquine בהיריון?" },
+  { v: "ask", c: ID }, // "לשאול על כל הקורס"
   { v: "group" },
   { v: "marathon", m: ID, isNew: true, edit: true },
   { v: "me" },
@@ -306,6 +318,9 @@ test("tabOf: the spec's four tabs, Today's set, and immersive screens with none"
     [{ v: "trap", l: ID }, null, null],
     [{ v: "lecture", l: ID }, null, null],
     [{ v: "upload" }, null, null],
+    [{ v: "upload", c: ID, many: true }, null, null],
+    [{ v: "course", c: ID }, "library", "library"],
+    [{ v: "ask", c: ID }, null, null],
     [{ v: "quiz", q: ID }, null, null],
   ];
   for (const [r, without, withToday] of cases) {
@@ -345,6 +360,8 @@ const RELEASES: Array<[string, string[]]> = [
   ["10", [...R9, "PDF"]],
   ["11", [...R9, "PDF", "RECORDINGS"]],
   ["12", R12],
+  ["courses (sources.md, phase 1)", [...R12, "COURSES"]],
+  ["courses without ask", ["COURSES", "QUESTIONS", "PRACTICE"]],
   ["every flag (QUIZ_ROUNDS too)", [...R12, "QUIZ_ROUNDS", "FAKE_ASR"]],
   ["every flag but TODAY", [...R12, "QUIZ_ROUNDS"].filter((f) => f !== "TODAY")],
   ["cards only", ["CARDS"]],
@@ -401,6 +418,11 @@ const SAMPLES: Array<[Route, (f: Flags) => boolean]> = [
   [{ v: "ask" }, (f) => f.ask],
   [{ v: "ask", l: ID, at: { part: 2, anchor: 4 } }, (f) => f.ask],
   [{ v: "ask", first: "שאלה" }, (f) => f.ask],
+  [{ v: "ask", c: ID }, (f) => f.ask && f.courses],
+  [{ v: "course", c: ID }, (f) => f.courses],
+  [{ v: "course", c: ID, seg: "lectures" }, (f) => f.courses],
+  [{ v: "upload", c: ID, many: true }, (f) => f.courses],
+  [{ v: "upload", many: true }, (f) => f.courses],
   [{ v: "progress" }, (f) => f.progress],
   [{ v: "progress", t: "mechanism" }, (f) => f.progress],
   [{ v: "progress", x: "danger" }, (f) => f.progress],
@@ -490,6 +512,11 @@ test("the replacements say the right thing and stay near (§5.2, §12.2.1)", () 
   assert.deepEqual(allowed({ v: "meeting", m: ID }, none), { route: { v: "group" }, notice: NOTICE.off });
   assert.deepEqual(allowed({ v: "dispute", d: ID }, none), { route: { v: "group" }, notice: NOTICE.off });
   assert.deepEqual(allowed({ v: "progress", x: "danger" }, none), { route: { v: "me" }, notice: NOTICE.off });
+  // Courses (sources.md, phase 1): without the course pages, the library, one lecture's upload, the library's question.
+  assert.deepEqual(allowed({ v: "course", c: ID }, none), { route: { v: "library" }, notice: NOTICE.off });
+  assert.deepEqual(allowed({ v: "upload", c: ID, many: true }, none), { route: { v: "upload" }, notice: NOTICE.off });
+  assert.deepEqual(allowed({ v: "ask", c: ID }, flagSet(["ASK"])), { route: { v: "ask" }, notice: NOTICE.off });
+  assert.deepEqual(allowed({ v: "ask", c: ID }, flagSet(["COURSES"])), { route: { v: "course", c: ID }, notice: NOTICE.off }, "the course page, without לשאול");
 });
 
 /** Every link F's own screens make under a flag set. */
@@ -656,6 +683,8 @@ test("Back's words name where it goes, in the spec's or the approved screens' wo
   assert.equal(BACK_LABEL.today, "→ להיום");
   assert.equal(BACK_LABEL.group, "→ יחד");
   assert.equal(BACK_LABEL.me, "→ שלי");
+  assert.equal(screenKey({ v: "course", c: ID }), "course");
+  assert.equal(BACK_LABEL.course, "→ לקורס", "the course page (sources.md's mockups)");
   const s6 = spec.slice(spec.indexOf("## 6. The Hebrew copy deck"), spec.indexOf("## 7. Work packages"));
   const s51 = spec.slice(spec.indexOf("### 5.1 The shell"), spec.indexOf("### 5.2 Routes"));
   const mockups = join(process.cwd(), "docs", "study", "proposal", "mockups");
@@ -664,7 +693,7 @@ test("Back's words name where it goes, in the spec's or the approved screens' wo
     .map((f) => readFileSync(join(mockups, f), "utf8"))
     .join("\n");
   for (const words of Object.values(BACK_LABEL)) {
-    const plain = [...COPY_NOW.values()].includes(words); // the plain copy pass (docs/study/COPY.md)
+    const plain = [...COPY_NOW.values()].includes(words) || COPY_WORDS.includes(words); // the plain copy pass (docs/study/COPY.md)
     assert.ok(s6.includes(`- ${words}\n`) || s51.includes(`"${words}"`) || approved.includes(`>${words}<`) || plain, `${words} is the spec's, an approved screen's or the plain copy's`);
   }
   // Every screen a tab opens has its own words, so a screen opened from a tab says where Back goes.

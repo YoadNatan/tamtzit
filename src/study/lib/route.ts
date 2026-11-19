@@ -26,7 +26,7 @@ export type At = { part: number; anchor: number };
 export type Route =
   | { v: "today"; run?: true } // T: "/" once flags.today; ?v=today is its alias; run=1 the session
   | { v: "library" } // explicit from F1Δ on (?v=library)
-  | { v: "upload" }
+  | { v: "upload"; c?: string; many?: true } // c: the course's id (sources.md, phase 1); many: "העלאה של כמה קבצים"
   | { v: "help" } // #howto scrolls to the guide's "איך עושים…?"
   | { v: "lecture"; l: string; at?: At; slide?: number; mk?: string; read?: true; follow?: true }
   | { v: "practice"; l?: string; s?: string; n?: "5" | "10" | "20" | "all"; x?: PracticeStep; r?: string }
@@ -36,7 +36,8 @@ export type Route =
   | { v: "exams"; e?: string; c?: string; isNew?: true }
   | { v: "quiz"; q?: string; l?: string; c?: string; isNew?: true; mk?: string; m?: string; preset?: "end" | "coffee" | "stop"; pf?: number; pt?: number } // m, preset, pf, pt: Z/M, from a meeting or a part range
   | { v: "cards"; l?: string; s?: string } // s: today · l.<lecture> · c.<course>
-  | { v: "ask"; l?: string; at?: At; first?: string } // first: the library ask bar's text, sent once
+  | { v: "ask"; l?: string; at?: At; first?: string; c?: string } // first: the library ask bar's text, sent once; c: a course's id ("לשאול על כל הקורס")
+  | { v: "course"; c: string; seg?: CourseSeg } // the course page (sources.md, phase 1): c is the course's id
   | { v: "group" }
   | { v: "marathon"; m?: string; isNew?: true; edit?: true }
   | { v: "me" }
@@ -55,6 +56,10 @@ export type Route =
   | { v: "try"; s?: "b" }; // the guide's sandbox (s=b: a question with a bet); nothing in it is saved
 
 export type Tab = "today" | "library" | "practice" | "group" | "me";
+
+/** The course page's segments (sources.md): its past exams, its lectures, what the group made. */
+export const COURSE_SEGS = ["exams", "lectures", "made"] as const;
+export type CourseSeg = (typeof COURSE_SEGS)[number];
 
 /** Practice 2.0's screens of a lecture (docs/study/proposal/practice-2/mockups.html). */
 export const PRACTICE_STEPS = ["new", "example", "bank", "round"] as const;
@@ -133,7 +138,7 @@ export function parseRoute(search: string, _hash?: string): Route {
     case "library":
       return { v: "library" };
     case "upload":
-      return { v: "upload" };
+      return clean({ v: "upload", c: id(g("c")), many: one(g("many")) });
     case "help":
       return { v: "help" };
     case "group":
@@ -176,7 +181,11 @@ export function parseRoute(search: string, _hash?: string): Route {
     case "cards":
       return clean({ v: "cards", l: id(g("l")), s: text(g("s"), 200) });
     case "ask":
-      return clean({ v: "ask", l: id(g("l")), at: at(g("at")), first: text(g("first"), 500) });
+      return clean({ v: "ask", l: id(g("l")), at: at(g("at")), first: text(g("first"), 500), c: id(g("c")) });
+    case "course": {
+      const c = id(g("c"));
+      return c ? clean({ v: "course" as const, c, seg: oneOf(g("seg"), COURSE_SEGS) }) : { v: "library" };
+    }
     case "marathon":
       return clean({ v: "marathon", m: id(g("m")), isNew: one(g("new")), edit: one(g("edit")) });
     case "progress":
@@ -296,6 +305,17 @@ export function routeUrl(r: Route): string {
       put("l", r.l);
       put("at", atText(r.at));
       put("first", r.first);
+      put("c", r.c);
+      break;
+    case "upload":
+      put("v", r.v);
+      put("c", r.c);
+      put("many", r.many);
+      break;
+    case "course":
+      put("v", r.v);
+      put("c", r.c);
+      put("seg", r.seg);
       break;
     case "marathon":
       put("v", r.v);
@@ -383,7 +403,9 @@ export function tabOf(r: Route, f: Flags): Tab | null {
     case "library":
       return "library";
     case "ask":
-      return r.l ? null : "library";
+      return r.l || r.c ? null : "library";
+    case "course":
+      return "library";
     case "practice":
       return r.s || r.x ? null : practice;
     case "exams":
@@ -465,7 +487,15 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
       if (r.s && !f.cardsReview) return off(clean({ v: "cards" as const, l: r.l ?? lectureOfKey(r.s) }), NOTICE.cardsReview);
       return ok;
     case "ask":
-      return f.ask ? ok : off(r.l ? clean({ v: "lecture" as const, l: r.l, at: r.at }) : { v: "library" });
+      if (!f.ask) return off(r.l ? clean({ v: "lecture" as const, l: r.l, at: r.at }) : r.c && f.courses ? { v: "course", c: r.c } : { v: "library" });
+      // "לשאול על כל הקורס" needs the course pages too: without them, the library's question.
+      if (r.c && (!f.courses || r.l)) return off(r.l ? clean({ v: "ask" as const, l: r.l, at: r.at, first: r.first }) : clean({ v: "ask" as const, first: r.first }));
+      return ok;
+    case "course":
+      return f.courses ? ok : off({ v: "library" });
+    case "upload":
+      // Several files at once, or a course's upload, come with the course pages; without them, one lecture.
+      return f.courses || (!r.c && !r.many) ? ok : off({ v: "upload" });
     case "progress":
       return f.progress ? ok : off({ v: "me" });
     case "plan":
@@ -568,6 +598,7 @@ export const BACK_LABEL: Record<string, string> = {
   marathon: "→ למפגש הלמידה",
   wall: "→ לקיר",
   library: "→ לספרייה",
+  course: "→ לקורס",
   group: "→ יחד",
   me: "→ שלי",
 };
