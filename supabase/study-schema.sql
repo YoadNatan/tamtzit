@@ -15715,3 +15715,12 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 insert into study_private.schema_sections (section, version) values ('X', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION X ════
+
+-- ════ BEGIN SECTION S · courses and past exams (sources.md) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION S · COURSES AND PAST EXAMS   (docs/study/sources.md, Part B)
+--  Part 8 of the SQL Editor's parts. Every change to an object of an
+--  earlier section is a create or replace, or an alter … if not exists,
+--  made here; nothing above is edited. Re-runnable.
+-- ════════════════════════════════════════════════════════════════════════
+-- ════ END SECTION S ════

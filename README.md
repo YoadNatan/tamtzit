@@ -57,7 +57,7 @@ npm run dev                  # http://localhost:5173/
 1. Supabase → **SQL Editor** → New query.
 2. לפתוח את `supabase/parts/1.sql` ב-GitHub → **Copy raw file** → להדביק → **Run**.
 3. לחכות לסיום בלי שגיאה (הודעות NOTICE כמו "already exists, skipping" תקינות).
-4. אותו דבר עם `2.sql`, `3.sql` וכן הלאה, **לפי הסדר**, עד `7.sql`.
+4. אותו דבר עם `2.sql`, `3.sql` וכן הלאה, **לפי הסדר**, עד `8.sql`.
 5. לבדוק: `select public.study_schema();` ו-`/api/study/health` עם `"schemaOk":true`.
 
 החלקים הם הקובץ עצמו, חתוך רק בין הסעיפים שלו, כך ששבעה חלקים לפי הסדר עושים
@@ -107,7 +107,7 @@ order are in [`docs/study/`](docs/study/README.md); the move out of the
 | `shared/study/` | code used by both the page and the server |
 | `api/study/*.ts` | the Vercel functions: `health`, `outline`, `section`, `work`, `ai` |
 | `server/study/` | the functions' shared code (outside `api/`, so Vercel does not count it as a function) |
-| `supabase/study-schema.sql` | the whole database; `supabase/parts/` the same in 7 parts |
+| `supabase/study-schema.sql` | the whole database; `supabase/parts/` the same in 8 parts |
 | `supabase/tests/` | SQL behaviour and concurrency tests, the stubs, a test copy of the board app's schema |
 | `e2e/study/` | Playwright flows against a mocked Supabase |
 | `tools/` | the unit-test runner, the contract and bundle checks, the SQL splitter, evals |
@@ -172,28 +172,29 @@ only after its SQL has run and its code is merged
 `E2E_FLAGS`, `NODE_PATH`, `STUDY_CONTRACT_PG`, `STUDY_CONTRACT_KEEP` and
 `STUDY_EVAL_FIXTURES`.
 
-## The SQL file, in 7 parts
+## The SQL file, in 8 parts
 
 [`supabase/study-schema.sql`](supabase/study-schema.sql) is the whole
 database: tables, Row Level Security, functions, the Storage bucket `study`,
 the realtime policies, the pg_cron jobs. It is safe to run again. At about
 0.9 MB it is too big for one paste into Supabase's SQL Editor, so
-[`supabase/parts/1.sql` … `7.sql`](supabase/parts/) hold the same file cut
+[`supabase/parts/1.sql` … `8.sql`](supabase/parts/) hold the same file cut
 between its sections (`tools/sql-parts.mjs`):
 
 1. Supabase → **SQL Editor** → New query.
 2. Open `supabase/parts/1.sql` on GitHub → **Copy raw file** → paste → **Run**.
 3. Wait until it finishes without an error (NOTICEs such as "… already
    exists, skipping" are harmless).
-4. The same with `2.sql`, `3.sql` and on, **in order**, through `7.sql`.
+4. The same with `2.sql`, `3.sql` and on, **in order**, through `8.sql`.
 5. Check: `select public.study_schema();` lists every section, and
    `/api/study/health` says `"schemaOk":true`.
 
-Running the seven in order does exactly what running the whole file does
+Running the eight in order does exactly what running the whole file does
 (checked on a local Postgres, fresh and over an existing schema, with the
 full behaviour test). If one part fails, fix the cause and run again from
 that part. After editing the schema, run `npm run sql:parts`; a unit test
-fails while the parts are stale. Run the SQL **before** the code that needs
+fails while the parts are stale, or while one is over 170 KB (the SQL Editor's
+limit). Run the SQL **before** the code that needs
 it deploys: until then `/api/study/health` says `"schemaOk":false`.
 
 The file changes one thing outside `study_`: the board app's sign-up
@@ -206,7 +207,7 @@ board's staff. Keep it identical to the board app's own `board-schema.sql`.
 is already set up):
 
 1. Authentication: anonymous sign-ins on.
-2. Run the SQL in 7 parts as above. If it prints "realtime.messages not
+2. Run the SQL in 8 parts as above. If it prints "realtime.messages not
    found", the project has no Realtime Authorization and follow-the-reader
    cannot connect.
 3. The server key: a random value of 32+ letters and digits, set on Vercel as
@@ -275,7 +276,7 @@ deleting the secret turns server writing off, and the phones write.
 
 ## Updating
 
-1. Run the new SQL (in 7 parts) *before* the new code deploys.
+1. Run the new SQL (in 8 parts) *before* the new code deploys.
 2. Merge; after the deploy, check `/api/study/health` (`"schemaOk":true`).
 3. Ask the group to close the app and open it again: a copy opened before the
    deploy keeps the old code until then.

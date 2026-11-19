@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// supabase/study-schema.sql in 7 parts, for Supabase's SQL Editor, which
+// supabase/study-schema.sql in 8 parts, for Supabase's SQL Editor, which
 // does not take the whole file (about 0.9 MB) in one paste.
 //
-//   npm run sql:parts            writes supabase/parts/1.sql … 7.sql
+//   npm run sql:parts            writes supabase/parts/1.sql … 8.sql
 //   node tools/sql-parts.mjs --check   exits 1 if those files are not what
 //                                      the schema makes now (a unit test
 //                                      runs this check)
 //
 // The parts are the file itself, cut only between its sections (the
 // "-- ════ BEGIN SECTION X" lines, which are top-level comments), so running
-// parts 1 to 7 in order, each to the end, does exactly what running the
+// parts 1 to 8 in order, each to the end, does exactly what running the
 // whole file does. Every part is safe to run again, as the file is.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -20,8 +20,12 @@ const SCHEMA = join(root, "supabase", "study-schema.sql");
 const DIR = join(root, "supabase", "parts");
 
 /** Each part after the first starts at this section. Sections added later
- *  go into the part of the section before them. */
-const STARTS = ["Q", "Z", "C", "P", "V", "H"];
+ *  go into the part of the section before them. Supabase's SQL Editor
+ *  refuses a run much larger than about 170 KB, so each part stays at or
+ *  under PART_MAX_BYTES (server/study/sqlParts.test.ts checks it). */
+const STARTS = ["Q", "Z", "C", "P", "V", "H", "S"];
+
+export const PART_MAX_BYTES = 170 * 1024;
 
 export function sqlParts(text) {
   const lines = text.split("\n");
