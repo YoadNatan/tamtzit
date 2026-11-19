@@ -3,7 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod/v4";
 import { blockSources, citedSlides } from "../../shared/study/edits.js";
-import { badCites, contextBlock, selectContext, type CourseContext, type CourseRow } from "./context.js";
+import { badCites, CONTEXT_LECTURES, contextBlock, selectContext, type CourseContext, type CourseRow } from "./context.js";
 import { costUsd, estimateUsd, floorUsage, reserve, type UsageLike } from "./budget.js";
 import { cleanSchema, settleFor, streamText, type Ledger } from "./claude.js";
 import {
@@ -116,7 +116,15 @@ export async function usesLeft(sb: SupabaseClient, groupId: string, kind: string
 
 /** One earlier turn as the phone kept it: the exact user text the server sent
  *  in its "turn" line, the answer, and the done line's signature. */
-export type Turn = { u: string; a: string; sig?: string };
+export type Turn = {
+  u: string;
+  a: string;
+  sig?: string;
+  /** A course turn: the lectures its answer cited, by the numbers they had
+   *  then (the context line's {n, id}), so a lecture uploaded or re-dated
+   *  since does not move its citations (courseHistory). */
+  lectures?: Array<{ n: number; id: string }>;
+};
 export type AskInput = {
   lectureId: string | null;
   course: string | null;
@@ -142,6 +150,14 @@ export function checkAskInput(question: unknown, history: unknown): string | nul
     if (typeof u !== "string" || typeof a !== "string" || !u || !a) return "bad history";
     if (sig !== undefined && sig !== null && typeof sig !== "string") return "bad history";
     if (chars(u) > ASK_LIMITS.turnU || chars(a) > ASK_LIMITS.turnA) return "too long";
+    const { lectures } = t as Record<string, unknown>;
+    if (lectures !== undefined && lectures !== null) {
+      if (!Array.isArray(lectures) || lectures.length > CONTEXT_LECTURES) return "bad history";
+      for (const l of lectures as unknown[]) {
+        const { n, id } = (l ?? {}) as Record<string, unknown>;
+        if (!Number.isInteger(n) || (n as number) < 1 || (n as number) > 999 || typeof id !== "string" || !UUID.test(id)) return "bad history";
+      }
+    }
   }
   return null;
 }
@@ -164,7 +180,12 @@ export function readAskInput(body: Record<string, unknown>): AskInput {
       courseId: id.toLowerCase(),
       question: body.question as string,
       focus: null,
-      history: (history as Turn[]).map((t) => ({ u: t.u, a: t.a, sig: typeof t.sig === "string" ? t.sig : undefined })),
+      history: (history as Turn[]).map((t) => ({
+        u: t.u,
+        a: t.a,
+        sig: typeof t.sig === "string" ? t.sig : undefined,
+        ...(Array.isArray(t.lectures) ? { lectures: t.lectures.map((l) => ({ n: l.n, id: l.id.toLowerCase() })) } : {}),
+      })),
     };
   }
   const lectureId = body.lectureId ?? null;
@@ -724,6 +745,27 @@ export function courseAskSystem(courseName: string, ctx: CourseContext): Anthrop
   ];
 }
 
+/** The history as the model reads it: each earlier answer's [הרצאה n · …]
+ *  renumbered to the lecture's place in the course now (its {n, id} from
+ *  the turn), so a lecture uploaded or re-dated during the conversation
+ *  does not make an old number point at another lecture. A lecture no
+ *  longer in the course loses its number ([ש׳ 14] is left). The text is
+ *  changed only after its signature is checked. */
+export function courseHistory(history: Turn[], all: Array<{ n: number; id: string }>): Turn[] {
+  const now = new Map(all.map((l) => [l.id, l.n]));
+  return history.map((t) => {
+    if (!t.lectures?.length) return t;
+    const then = new Map(t.lectures.map((l) => [l.n, l.id]));
+    const a = t.a.replace(/\[הרצאה\s*(\d{1,3})\s*·\s*/g, (all0, n: string) => {
+      const id = then.get(Number(n));
+      if (!id) return all0;
+      const m = now.get(id);
+      return m === undefined ? "[" : `[הרצאה ${m} · `;
+    });
+    return { ...t, a };
+  });
+}
+
 /** The context line: what was chosen, and where each paragraph is. */
 export function contextLine(ctx: CourseContext): string {
   return (
@@ -769,9 +811,12 @@ async function courseAsk(o: {
   const ctx = await selectContext(sb, course, query);
   if (!ctx.all.length) throw new HttpError(404, "no lectures");
   if (!ctx.total) throw new HttpError(409, "no summaries");
+  // No paragraph of the course matches the question at all: refused before
+  // anything is reserved, rather than a paid answer that says so.
+  if (!ctx.chosen) throw new HttpError(409, "no match");
   const userText = askUserText(input.question, null);
   const system = courseAskSystem(course.name, ctx);
-  const messages = askMessages(history, userText);
+  const messages = askMessages(courseHistory(history, ctx.all), userText);
   const inputChars =
     system.reduce((n, b) => n + b.text.length, 0) + history.reduce((n, t) => n + t.u.length + t.a.length, 0) + userText.length;
   const reservation = await reserve(sb, {

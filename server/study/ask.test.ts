@@ -11,6 +11,7 @@ import ai from "../../api/study/ai.js";
 import { blockSources } from "../../shared/study/edits.js";
 import {
   askMessages,
+  courseHistory,
   askSystem,
   badTags,
   checkAskInput,
@@ -1273,4 +1274,45 @@ test("op, course: another group's (or a merged) course is 404; no lectures 404; 
   const limited = await askCourse();
   assert.deepEqual([limited.status, await limited.json()], [429, { error: "daily_limit" }]);
   assert.equal(modelCalls().length, 0);
+});
+
+test("course history: earlier answers' lecture numbers follow their lectures; an unknown turn is left; a bad list is 400", () => {
+  const A = "aaaaaaaa-0000-4000-8000-00000000000a";
+  const B = "bbbbbbbb-0000-4000-8000-00000000000b";
+  const C = "cccccccc-0000-4000-8000-00000000000c";
+  // Then: A was 2 and B 3. Now a lecture dated before them came in: A is 3, B 4; C is gone.
+  const turns = [
+    { u: "q1", a: "כך [הרצאה 2 · ש׳ 4], וגם [הרצאה 3 · ש' 1-2] ו[הרצאה 5 · ש׳ 9].", lectures: [{ n: 2, id: A }, { n: 3, id: B }, { n: 5, id: C }] },
+    { u: "q2", a: "בלי מספרים [הרצאה 2 · ש׳ 4]" },
+  ];
+  const got = courseHistory(turns, [{ n: 1, id: "dddddddd-0000-4000-8000-00000000000d" }, { n: 3, id: A }, { n: 4, id: B }]);
+  assert.equal(got[0].a, "כך [הרצאה 3 · ש׳ 4], וגם [הרצאה 4 · ש' 1-2] ו[ש׳ 9].");
+  assert.equal(got[1].a, turns[1].a, "a turn without its lectures (an older phone) is sent as it was");
+  assert.equal(got[0].u, "q1");
+  assert.equal(checkAskInput("x", [{ u: "a", a: "b", lectures: [{ n: 0, id: A }] }]), "bad history");
+  assert.equal(checkAskInput("x", [{ u: "a", a: "b", lectures: [{ n: 1, id: "nope" }] }]), "bad history");
+  assert.equal(checkAskInput("x", [{ u: "a", a: "b", lectures: Array.from({ length: 5 }, (_, i) => ({ n: i + 1, id: A })) }]), "bad history");
+  assert.equal(checkAskInput("x", [{ u: "a", a: "b", lectures: [{ n: 7, id: A }] }]), null);
+});
+
+test("op, course: a signed turn's lecture numbers are sent as they are now; a question no paragraph matches is 409 before any reservation", async () => {
+  db.schema = { ...SCHEMA_S1 };
+  anthropicReplies.push(answerReply(COURSE_ANSWER));
+  const u0 = "מה נאמר על Examplazole?";
+  const a0 = "Examplazole מעכב Fakease. [הרצאה 7 · ש׳ 1]";
+  const ctxLine = (await readStream(await askCourse({ question: u0 }))).lines.find((l) => l.t === "context") as { lectures: Array<{ n: number; id: string }> } | undefined;
+  const nowB = ctxLine?.lectures[0];
+  assert.ok(nowB && nowB.n !== 7, "a lecture of the cut, numbered as now");
+  log = [];
+  anthropicReplies.push(answerReply(COURSE_ANSWER));
+  const turn = { u: u0, a: a0, sig: hex(`course:${COURSE}`, u0, a0), lectures: [{ n: 7, id: nowB!.id }] };
+  await readStream(await askCourse({ question: "ולמה?", history: [turn] }));
+  assert.deepEqual(
+    sentBody().messages.map((m: { content: string }) => m.content),
+    [u0, `Examplazole מעכב Fakease. [הרצאה ${nowB!.n} · ש׳ 1]`, "ולמה?"],
+  );
+  log = [];
+  const none = await askCourse({ question: "zzzz qqqq xxxx" });
+  assert.deepEqual([none.status, await none.json()], [409, { error: "no match" }]);
+  assert.equal(restCalls("/rest/v1/rpc/study_reserve").length, 0, "nothing reserved");
 });

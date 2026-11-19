@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { numberBlocks } from "../../shared/study/blocks.js";
+import { courseKey } from "../../shared/study/courseKey.js";
 import { citedSlides } from "../../shared/study/edits.js";
 import { coverage } from "./similar.js";
 import { HttpError, tidyMarkdown } from "./study.js";
@@ -11,7 +12,8 @@ import { HttpError, tidyMarkdown } from "./study.js";
  * reads, at $0 and with no stored index (an index would drift from the
  * corrections):
  *
- *   1. The course's lectures (its text matched by lower(btrim)), their ready
+ *   1. The course's lectures (their text matched by courseKey, the SQL's
+ *      study_private.course_key), their ready
  *      parts and points to know. Each part is scored by how much of the
  *      question its heading and its points' subjects hold (similar.ts's
  *      trigrams; English drug and receptor names carry most of it).
@@ -61,13 +63,11 @@ export type CourseContext = {
   all: CourseLecture[];
 };
 
-const keyOf = (course: string) => course.trim().toLowerCase();
-
 /** The course's lectures, in its order: by date (undated last), then when
  *  they were uploaded; numbered from 1. */
 export function courseLectures(rows: LectureRow[], nameKey: string): CourseLecture[] {
   return rows
-    .filter((l) => keyOf(l.course) === nameKey)
+    .filter((l) => courseKey(l.course) === nameKey)
     .sort(
       (a, b) =>
         (a.lecture_date === null ? 1 : 0) - (b.lecture_date === null ? 1 : 0) ||
@@ -172,27 +172,54 @@ export function pickParagraphs(o: {
   return { paragraphs: chosen, total: all.length };
 }
 
+/** Every row of a query, a page at a time: PostgREST answers at most 1000
+ *  rows a request, and a course of 25 lectures has thousands of points. The
+ *  query must be ordered, so the pages neither skip nor repeat a row. */
+export async function allRows<T>(page: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>, size = 1000): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += size) {
+    const { data, error } = await page(from, from + size - 1);
+    if (error) throw new HttpError(500, error.message);
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length < size) return out;
+  }
+}
+
 /** Reads the course's lectures, ready parts and points with the member's
- *  client (RLS: her group only) and picks the paragraphs for `query`. */
+ *  client (RLS: her group only), every page of each, and picks the
+ *  paragraphs for `query`. */
 export async function selectContext(sb: SupabaseClient, course: CourseRow, query: string): Promise<CourseContext> {
-  const ls = await sb
-    .from("study_lectures")
-    .select("id, title, course, lecture_date, created_at")
-    .eq("group_id", course.group_id)
-    .is("deleted_at", null);
-  if (ls.error) throw new HttpError(500, ls.error.message);
-  const all = courseLectures((ls.data ?? []) as LectureRow[], course.name_key);
+  const lectureRows = await allRows<LectureRow>((from, to) =>
+    sb
+      .from("study_lectures")
+      .select("id, title, course, lecture_date, created_at")
+      .eq("group_id", course.group_id)
+      .is("deleted_at", null)
+      .order("id")
+      .range(from, to),
+  );
+  const all = courseLectures(lectureRows, course.name_key);
   if (!all.length) return { paragraphs: [], chosen: 0, total: 0, lectures: [], all };
   const ids = all.map((l) => l.id);
   const [parts, points] = await Promise.all([
-    sb.from("study_sections").select("lecture_id, idx, title, markdown").in("lecture_id", ids).eq("status", "ready"),
-    sb.from("study_points").select("lecture_id, part_idx, subject, text").in("lecture_id", ids),
+    allRows<PartRow>((from, to) =>
+      sb
+        .from("study_sections")
+        .select("lecture_id, idx, title, markdown")
+        .in("lecture_id", ids)
+        .eq("status", "ready")
+        .order("lecture_id")
+        .order("idx")
+        .range(from, to),
+    ),
+    allRows<PointRow>((from, to) =>
+      sb.from("study_points").select("lecture_id, part_idx, subject, text").in("lecture_id", ids).order("id").range(from, to),
+    ),
   ]);
-  if (parts.error) throw new HttpError(500, parts.error.message);
-  if (points.error) throw new HttpError(500, points.error.message);
-  const rows = ((parts.data ?? []) as PartRow[]).sort((a, b) => a.lecture_id.localeCompare(b.lecture_id) || a.idx - b.idx);
+  const rows = parts.sort((a, b) => a.lecture_id.localeCompare(b.lecture_id) || a.idx - b.idx);
   const q = queryText(query);
-  const partScore = scoreParts(q, rows, (points.data ?? []) as PointRow[]);
+  const partScore = scoreParts(q, rows, points);
   const { paragraphs, total } = pickParagraphs({ query: q, lectures: all, parts: rows, partScore });
   const used = new Set(paragraphs.map((p) => p.lectureId));
   return { paragraphs, chosen: paragraphs.length, total, lectures: all.filter((l) => used.has(l.id)), all };

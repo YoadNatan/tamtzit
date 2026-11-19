@@ -85,7 +85,16 @@ export default function CourseAsk({ route, ctx }: ScreenProps<"ask">) {
     let done: Extract<CourseAskLine, { t: "done" }> | null = null;
     try {
       await askCourseStream(
-        { courseId, question, history: turns.filter((t) => t.sig).slice(-3).map((t) => ({ u: t.u, a: t.a, sig: t.sig })) },
+        {
+          courseId,
+          question,
+          // Each turn with its lectures' numbers then, so the server renumbers
+          // them if a lecture came in or was re-dated since (ask.ts courseHistory).
+          history: turns
+            .filter((t) => t.sig)
+            .slice(-3)
+            .map((t) => ({ u: t.u, a: t.a, sig: t.sig, ...(t.ctx?.lectures.length ? { lectures: t.ctx.lectures.map(({ n, id }) => ({ n, id })) } : {}) })),
+        },
         (l) => {
           if (l.t === "context") {
             cut = { chosen: l.chosen, total: l.total, lectures: l.lectures, paragraphs: l.paragraphs };
@@ -107,7 +116,11 @@ export default function CourseAsk({ route, ctx }: ScreenProps<"ask">) {
       const code = e instanceof Error ? (e.name === "AbortError" ? "aborted" : e.message) : "";
       if (code === "aborted" || code === "timeout") {
         if (liveRef.current) commit([...turns, { q: question, u, a: liveRef.current, sig: "", at: new Date().toISOString(), stop: "timeout", ctx: cut, badCites: [] }]);
-      } else setError(askError(code));
+      } else {
+        setError(askError(code));
+        // Not sent (offline, refused): the question goes back in the field, unless something was typed since.
+        if (!liveRef.current) setText((now) => (now.trim() ? now : question));
+      }
     } finally {
       abort.current = null;
       setLive(null);

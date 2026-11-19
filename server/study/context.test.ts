@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { numberBlocks } from "../../shared/study/blocks.js";
 import {
+  allRows,
   badCites,
   CONTEXT_CHARS,
   CONTEXT_LECTURES,
@@ -142,4 +143,17 @@ test("citations [הרצאה 7 · ש׳ 14]: read with either mark and ranges; a l
   };
   assert.deepEqual(badCites("כך. [הרצאה 1 · ש׳ 7] וגם [הרצאה 3 · ש' 5].", ctx), []);
   assert.deepEqual(badCites("כך. [הרצאה 1 · ש׳ 8] וגם [הרצאה 2 · ש׳ 5] ו-[ש' 2].", ctx), ["1·8", "2·5", "?·2"]);
+});
+
+test("every page of a read: 2,500 points come in three pages, none twice (PostgREST answers at most 1,000)", async () => {
+  const rows = Array.from({ length: 2500 }, (_, i) => ({ i }));
+  const asked: Array<[number, number]> = [];
+  const got = await allRows<{ i: number }>(async (from, to) => {
+    asked.push([from, to]);
+    return { data: rows.slice(from, Math.min(to + 1, from + 1000)), error: null };
+  });
+  assert.equal(got.length, 2500);
+  assert.equal(new Set(got.map((r) => r.i)).size, 2500);
+  assert.deepEqual(asked, [[0, 999], [1000, 1999], [2000, 2999]]);
+  await assert.rejects(allRows(async () => ({ data: null, error: { message: "boom" } })), /boom/);
 });

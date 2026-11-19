@@ -142,6 +142,8 @@ const TEXT: Record<string, string> = {
   // "לשאול על כל הקורס" (sources.md B6.9).
   "ask:course not found": "הקורס הזה לא נמצא. אולי הוא אוחד עם קורס אחר. כדאי לרענן.",
   "ask:no summaries": "עוד אין סיכום לאף הרצאה בקורס. אפשר לשאול כשיהיה סיכום ראשון.",
+  // No paragraph of the course matches the question (nothing was charged).
+  "ask:no match": "לא מצאנו בסיכומים של הקורס פסקה על זה. אפשר לנסח אחרת, למשל עם שם התרופה או המושג.",
   // Courses (sources.md B2): the course page's sheets.
   "course:course not found": "הקורס הזה לא נמצא. אולי הוא אוחד עם קורס אחר. כדאי לרענן.",
   "course:group not found": "הקבוצה לא נמצאה. כדאי לרענן.",
