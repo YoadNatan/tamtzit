@@ -318,8 +318,9 @@ All local: no real Supabase project, no live site, no API key.
   a page error, an unmocked or refused call, or an accessibility problem
   (`e2e/study/a11y.cjs`: contrast, 44 px targets, light and dark, 390 and
   360 px). Build again with a flag set's `VITE_STUDY_*` flags and run with
-  `E2E_FLAGS=<set>`: `off`, `rel1`, `w4`, `w5`, `w5x`, `guide`, `guide1`
-  and the others `e2e/study/mock.cjs` lists. The fixtures in
+  `E2E_FLAGS=<set>`: `off`, `rel1`, `w4`, `w5`, `w5x`, `guide`, `guide1`,
+  `prod`, `s1` (production's set with `VITE_STUDY_COURSES`:
+  `e2e/study/courses.cjs`) and the others `e2e/study/mock.cjs` lists. The fixtures in
   `e2e/study/fixtures/` are made for the tests (a synthetic lecture); the
   group's own lectures never go into git.
 
