@@ -236,6 +236,12 @@ const rest = createServer(async (req, res) => {
     return send(res, 200, [{ lecture_id: LECTURE, round: 3, part_idx: 1, heading: "מנגנונים", slide_from: 13, slide_to: 24, wanted: 2, effort: "high" }]);
   }
   if (p === "/rest/v1/rpc/study_request_plan") return typeof planLink === "string" ? send(res, 400, pgError(planLink)) : send(res, 200, planLink);
+  // A round's request: made and linked in one call; a refused link makes nothing.
+  if (p === "/rest/v1/rpc/study_request_create_in_plan") {
+    if (createRefusal) return send(res, 400, pgError(createRefusal));
+    if (typeof planLink === "string") return send(res, 400, pgError(planLink));
+    return send(res, 200, (createRows(a) as Array<Record<string, unknown>>).map((r) => ({ ...r, lectures: planLink })));
+  }
   if (p === "/rest/v1/study_question_requests" && eqOf(q, "plan_id")) return send(res, 200, planRows);
   if (p === "/rest/v1/study_question_requests") {
     return send(res, 200, [{ id: REQ, difficulty: "hard", focus: "רק מה שבודקים לפני טיפול", style_note: "מקרה קצר עם גיל ומין, חמש אפשרויות.", style_example: "אישה בת 28 עם חום. מה הצעד הבא?" }]);
@@ -823,7 +829,7 @@ test("create in a round: without section S, 503 schema and no request; a planId 
   assert.equal(rpcs("study_request_plan").length, 0);
 });
 
-test("create in a round: the request is made as before, then put in the round (study_request_plan, with the key); caps unchanged", async () => {
+test("create in a round: the request is made as before and put in the round in one call (study_request_create_in_plan, with the key); caps unchanged", async () => {
   schemaAnswer = { ...REQUIRED_SCHEMA, Q: 2, S: 1 };
   planRows = [{ lecture_id: OTHER(1) }, { lecture_id: OTHER(1) }];
   const alone = await call({ action: "create", options: { level: "deep", styles: ["case", "blank_table"], difficulty: "hard" } });
@@ -832,14 +838,13 @@ test("create in a round: the request is made as before, then put in the round (s
   const r = await call({ action: "create", options: { level: "deep", styles: ["case", "blank_table"], difficulty: "hard" }, planId: PLAN });
   assert.equal(r.status, 200);
   // The request and its batches are exactly a lecture's own: the same plan, the same caps.
-  const [c] = rpcs("study_request_create").map(args);
-  assert.deepEqual([c.p_request, c.p_batches], [own.p_request, own.p_batches]);
+  const [c] = rpcs("study_request_create_in_plan").map(args);
+  assert.deepEqual([c.p_request, c.p_batches, c.p_plan, c.p_key, c.p_lecture], [own.p_request, own.p_batches, PLAN, KEY, own.p_lecture]);
   assert.deepEqual({ ...r.json, round: undefined }, { ...alone.json, round: undefined });
-  const [link] = rpcs("study_request_plan").map(args);
-  assert.deepEqual(link, { p_request: REQ, p_plan: PLAN, p_key: KEY });
   assert.deepEqual(r.json.round, { planId: PLAN, lectures: 2 });
-  const order = log.filter((l) => l.path.endsWith("study_request_create") || l.path.endsWith("study_request_plan")).map((l) => l.path.split("_").pop());
-  assert.deepEqual(order, ["create", "plan"]);
+  // One call: no request made apart from its link, nothing to undo when the link is refused.
+  assert.equal(rpcs("study_request_create").length, 0);
+  assert.equal(rpcs("study_request_plan").length, 0);
   assert.equal(models().length, 0, "no model");
 });
 

@@ -371,18 +371,22 @@ export const createAction: Op = async (req, body) => {
   if (plan.total === 0) throw new HttpError(400, "no points");
   const used = plan.parts.filter((p) => p.questions > 0).map((p) => p.part_idx);
   if (planId) {
-    // Checked before the request is made, so a refused round leaves none
-    // behind; study_request_plan checks again under its lock.
+    // Checked first, to answer at once; study_request_create_in_plan checks
+    // again under the round's lock, and a refusal there undoes the request.
     if (plan.total < ROUND_MIN_PER_LECTURE) throw new HttpError(400, "too few questions");
     const others = await sb.from("study_question_requests").select("lecture_id").eq("plan_id", planId);
     if (others.error) throw new HttpError(500, others.error.message);
     const lectures = new Set(((others.data ?? []) as Array<{ lecture_id: string }>).map((r) => r.lecture_id).filter((l) => l !== lectureId));
     if (lectures.size >= ROUND_MAX_LECTURES) throw new HttpError(409, "round full");
   }
+  // In a round, the request and its link to the round are one call (one
+  // transaction): a link refused there ("round full" when two phones add the
+  // 5th and 6th lecture at once) leaves no request or batches behind.
   const { data, error } = await sb.rpc(
-    "study_request_create",
+    planId ? "study_request_create_in_plan" : "study_request_create",
     keyed({
       p_lecture: lectureId,
+      ...(planId ? { p_plan: planId } : {}),
       p_request: {
         level: options.level,
         count: plan.total,
@@ -396,8 +400,8 @@ export const createAction: Op = async (req, body) => {
       p_batches: plan.batches,
     }),
   );
-  if (error) throw new HttpError(CREATE_STATUS[error.message] ?? 500, error.message);
-  const rows = (data ?? []) as Array<{ request_id: string; round: number; batch_id: string; part_idx: number; seq: number; wanted: number }>;
+  if (error) throw new HttpError(CREATE_STATUS[error.message] ?? ROUND_STATUS[error.message] ?? 500, error.message);
+  const rows = (data ?? []) as Array<{ request_id: string; round: number; batch_id: string; part_idx: number; seq: number; wanted: number; lectures?: number }>;
   if (!rows.length) throw new HttpError(500, "no request");
   const answer: CreateAnswer = {
     request: {
@@ -413,11 +417,7 @@ export const createAction: Op = async (req, body) => {
     plan: plan.parts,
     estimate: { questionsUsd: requestUsd(plannedStyles(plan)) },
   };
-  if (planId) {
-    const linked = await sb.rpc("study_request_plan", keyed({ p_request: answer.request.id, p_plan: planId }));
-    if (linked.error) throw new HttpError(ROUND_STATUS[linked.error.message] ?? 500, linked.error.message);
-    answer.round = { planId, lectures: Number(linked.data) };
-  }
+  if (planId) answer.round = { planId, lectures: Number(rows[0].lectures) };
   return json(200, answer);
 };
 

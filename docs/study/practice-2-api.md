@@ -259,12 +259,13 @@ parts`.
 **A round over several lectures** (courses, `docs/study/sources.md` B6.7):
 the phone makes one id for the round and sends `create` once per lecture
 with `{ options, planId }`. Each lecture's request and batches are made
-exactly as above (the same caps), then `study_request_plan` puts the request
-in the round, and the answer adds `"round": { "planId": "…", "lectures": 3 }`.
-A round stays in one group, takes at most 5 lectures and at least 4
-questions of each. It needs section S at 1 (503 `schema`). Refusals, before
-any request is made: 400 `bad plan` (not an id, or the request is in another
-round), 400 `too few questions`, 409 `round full`.
+exactly as above (the same caps) and put in the round in one transaction
+(`study_request_create_in_plan`, under the round's lock), and the answer adds
+`"round": { "planId": "…", "lectures": 3 }`. A round stays in one group,
+takes at most 5 lectures and at least 4 questions of each. It needs section
+S at 1 (503 `schema`). Refusals, which leave no request behind: 400 `bad
+plan` (not an id, or another group's round), 400 `too few questions`, 409
+`round full` (also when two phones add the 5th and 6th lecture at once).
 
 Each batch writes at most 5 questions; a part with more has several batches
 (`seq`). Each batch carries the points it must cover and the style of each of
