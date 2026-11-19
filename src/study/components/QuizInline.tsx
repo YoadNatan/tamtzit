@@ -1,3 +1,4 @@
+import QuizMedia from "./QuizMedia";
 import { useEffect, useRef, useState } from "react";
 import type { Ctx } from "../features/types";
 import { coffeeChip } from "../lib/meeting";
@@ -132,6 +133,7 @@ export default function QuizInline({ ctx, quizId, onState }: { ctx: Ctx; quizId:
             {idx + 1} · {richText(q.vignette ? `${q.vignette} ${q.question}` : q.question, `cq${idx}`)}{" "}
             {q.slides.length ? <span className="a-tag">ש׳ {q.slides[0]}</span> : null}
           </p>
+          <QuizMedia questionId={q.id} />
           <div className="a-opts" role="radiogroup" aria-label={`שאלה ${idx + 1}`}>
             {q.options.map((o, i) => {
               const mine = sent ? sent.choice === i : selected === i;

@@ -45,6 +45,8 @@ type Props = {
   aside?: ReactNode;
   /** The headline's words, when the room has its own (a race's points). */
   headline?: string;
+  /** Under the lead-in: the question's picture (question types: QuizMedia). */
+  media?: ReactNode;
 };
 
 /** The headline at the reveal (practice's P5 words). */
@@ -124,6 +126,7 @@ export default function QuizQuestion(p: Props) {
       <p className="a-q" dir="rtl">
         {richText(q.question, "l")}
       </p>
+      {p.media ?? null}
 
       {!fb ? (
         <div ref={options} className="a-opts" role="radiogroup" aria-label="תשובות" onKeyDown={onKey}>

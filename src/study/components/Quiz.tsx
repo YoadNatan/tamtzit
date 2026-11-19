@@ -36,6 +36,7 @@ import { shareUrl, type Route } from "../lib/route";
 import { useQuiz } from "../lib/useQuiz";
 import FlagSheet from "./FlagSheet";
 import { Icon } from "./Icon";
+import QuizMedia from "./QuizMedia";
 import QuizQuestion, { LETTERS } from "./QuizQuestion";
 import { Bars, ModeLine, QuizEnd, RaceTable, revoteChip, Rules, VoteBlock } from "./QuizParts";
 import { Avatar, BackLink, Head, Loading, RouteLink, Sheet, StickyActions } from "./Shell";
@@ -635,6 +636,7 @@ export default function Quiz({ quizId, ctx }: ScreenProps<"quiz"> & { quizId: st
         onChoose={() => undefined}
         onSlide={(n) => (q.lecture_id ? setSlide({ l: q.lecture_id, n }) : undefined)}
         chips={z.lecture_ids.length > 1 && q.lecture_title ? <span className="a-chip quiz-source-chip"><bdi>{q.lecture_title}</bdi></span> : null}
+        media={<QuizMedia questionId={q.id} revealed={fb !== null} />}
         {...extra}
       />
     ) : (
