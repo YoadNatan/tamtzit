@@ -55,9 +55,9 @@ import { REQUIRED_SCHEMA, type Lecture } from "./study.js";
 
 type Item = Question;
 /** An option as the model writes it: Q's end adds "מתי כן" and the option's drug or organism ("" by default). */
-const opt = (text: string, why: string, correct = false, when = "", tag = "") => ({ text, correct, why, when, tag });
+const opt = (text: string, why: string, correct = false, when = "", tag = "", left = "") => ({ text, correct, why, when, tag, left });
 /** What Q's end and practice 2.0 add to a stand-in question: no paragraph (a part without a written summary), no teaser or diagram. */
-const END = { para: 0, teaser: "", figure: "" };
+const END = { para: 0, teaser: "", figure: "", resolved: "", stages: [] as Item["stages"] };
 
 /** Slides 5-7: a direct question and a case. */
 const PART1: { questions: Item[] } = {
@@ -234,6 +234,39 @@ for (const [name, text, from, to] of SAMPLES) {
   }
 }
 
+/** An option as the schema sends it (the question types add "left"; a staged case's stages repeat it). */
+const SPEC_OPTION = {
+  type: "object",
+  properties: {
+    text: {
+      type: "string",
+      description: "The option in Hebrew, English names as the lecture writes them; the same kind of thing as the other options, parallel in form and close in length; no letter or number in front",
+    },
+    correct: {
+      type: "boolean",
+      description: "true for the one best answer only; for a true/false question (tf) true for each true statement; for an order question true for every step",
+    },
+    why: {
+      type: "string",
+      description: "One or two Hebrew sentences from the slides: why this option is the answer, or why it is wrong for this question; ends with a slide tag such as [ש' 12]",
+    },
+    when: {
+      type: "string",
+      description: "For a wrong option: one short Hebrew line beginning 'מתי כן:' saying when this option would be the answer according to this lecture; an empty string when the lecture gives no such case, and for the correct option",
+    },
+    tag: {
+      type: "string",
+      description: "The drug, organism, stage or test this option names, in English exactly as the lecture writes it; an empty string when it names none",
+    },
+    left: {
+      type: "string",
+      description: "For a match question: the prompt this option answers (the drug, structure or finding it is matched to); an empty string otherwise and for a match's one extra option",
+    },
+  },
+  additionalProperties: false,
+  required: ["text", "correct", "why", "when", "tag", "left"],
+};
+
 /** The schema exactly as sent: §4.6's, with Q's end's fields (§12.3.Q: each
  *  option's "when" and "tag", the question's "para", "teaser" and "figure")
  *  and practice 2.0's ("style" and "points"). */
@@ -251,11 +284,11 @@ const SPEC_SCHEMA = {
           },
           aspect: {
             type: "string",
-            description: "One key: mechanism, uses, pk, adverse, contra, interactions, resistance, dosing, classification, epidemiology, lifecycle, pathogenesis, clinical, diagnosis, treatment, prevention, other",
+            description: "One key: mechanism, uses, pk, adverse, contra, interactions, resistance, dosing, classification, epidemiology, lifecycle, pathogenesis, clinical, diagnosis, treatment, prevention, anatomy, histology, physiology, imaging, other",
           },
           style: {
             type: "string",
-            description: "One key: case, mechanism, drug_choice, adverse_contra, compare, not_true, blank_table; one the request assigns, when it assigns styles",
+            description: "One key: case, mechanism, drug_choice, adverse_contra, compare, not_true, blank_table, image, label, steps, tf, match, order; one the request assigns, when it assigns styles",
           },
           points: {
             type: "array",
@@ -287,33 +320,7 @@ const SPEC_SCHEMA = {
           options: {
             type: "array",
             description: "Exactly the number of options the request asks for, exactly one of them correct",
-            items: {
-              type: "object",
-              properties: {
-                text: {
-                  type: "string",
-                  description: "The option in Hebrew, English names as the lecture writes them; the same kind of thing as the other options, parallel in form and close in length; no letter or number in front",
-                },
-                correct: {
-                  type: "boolean",
-                  description: "true for the one best answer only",
-                },
-                why: {
-                  type: "string",
-                  description: "One or two Hebrew sentences from the slides: why this option is the answer, or why it is wrong for this question; ends with a slide tag such as [ש' 12]",
-                },
-                when: {
-                  type: "string",
-                  description: "For a wrong option: one short Hebrew line beginning 'מתי כן:' saying when this option would be the answer according to this lecture; an empty string when the lecture gives no such case, and for the correct option",
-                },
-                tag: {
-                  type: "string",
-                  description: "The drug, organism, stage or test this option names, in English exactly as the lecture writes it; an empty string when it names none",
-                },
-              },
-              additionalProperties: false,
-              required: ["text", "correct", "why", "when", "tag"],
-            },
+            items: SPEC_OPTION,
           },
           para: {
             type: "integer",
@@ -334,9 +341,41 @@ const SPEC_SCHEMA = {
               type: "integer",
             },
           },
+          resolved: {
+            type: "string",
+            description: "For a staged case (steps): one Hebrew sentence stating step 1's answer as a fact of the case; an empty string otherwise",
+          },
+          stages: {
+            type: "array",
+            description: "For a staged case (steps): its steps 2 and 3 (one or two); an empty array otherwise",
+            items: {
+              type: "object",
+              properties: {
+                update: {
+                  type: "string",
+                  description: "One or two Hebrew sentences: what happens next in the case (a result, a change), without the answer to this step",
+                },
+                question: {
+                  type: "string",
+                  description: "The step's lead-in: one Hebrew question ending with '?'",
+                },
+                options: {
+                  type: "array",
+                  description: "Exactly the number of options the request asks for, exactly one correct",
+                  items: SPEC_OPTION,
+                },
+                resolved: {
+                  type: "string",
+                  description: "One Hebrew sentence stating this step's answer as a fact of the case, as the next step will read it",
+                },
+              },
+              additionalProperties: false,
+              required: ["update", "question", "options", "resolved"],
+            },
+          },
         },
         additionalProperties: false,
-        required: ["topic", "aspect", "style", "points", "takeaway", "difficulty", "case", "vignette", "question", "options", "para", "teaser", "figure", "slides"],
+        required: ["topic", "aspect", "style", "points", "takeaway", "difficulty", "case", "vignette", "question", "options", "para", "teaser", "figure", "slides", "resolved", "stages"],
       },
     },
   },
@@ -399,7 +438,7 @@ test("schema: no union parameters (limit 16)", () => {
 
 test("schema: every object closed (additionalProperties false)", () => {
   assert.ok(!/"additionalProperties":true/.test(SCHEMA_TEXT));
-  assert.equal((SCHEMA_TEXT.match(/"additionalProperties":false/g) ?? []).length, 3);
+  assert.equal((SCHEMA_TEXT.match(/"additionalProperties":false/g) ?? []).length, 5, "the set, a question, an option, a stage and its options");
 });
 
 test("schema: no enum or minimum sent (SDK 1.3.0 would demote them)", () => {
@@ -412,7 +451,7 @@ test("schema: field order kept (topic first, slides last)", () => {
 
 test("schema: size, and exactly the JSON §4.6 prints as sent, with Q's end's and practice 2.0's fields", () => {
   assert.equal(SCHEMA_TEXT, JSON.stringify(SPEC_SCHEMA));
-  assert.equal(SCHEMA_TEXT.length, 3678);
+  assert.equal(SCHEMA_TEXT.length, 6378, "with the question types' left, resolved and stages");
 });
 
 // ── 2. Stand-in output through the scanner and the checks ──
@@ -454,7 +493,7 @@ test("stream: the public line has no answer, explanation, 'מתי כן' or takea
   const line = JSON.stringify(toPublic("q-1", 4, r.item));
   assert.ok(!/"answer"|"explanations"|"takeaway"|"why"|"correct"|"whens?"/.test(line), line);
   // Q's end publishes the paragraph, the teaser, the diagram and the options' tags (study_questions has them too); practice 2.0 the style.
-  assert.deepEqual(Object.keys(JSON.parse(line).q), ["id", "part_idx", "kind", "difficulty", "vignette", "question", "options", "slides", "topic", "aspect", "anchor", "teaser", "figure", "option_tags", "style"]);
+  assert.deepEqual(Object.keys(JSON.parse(line).q), ["id", "part_idx", "kind", "difficulty", "vignette", "question", "options", "slides", "topic", "aspect", "anchor", "teaser", "figure", "option_tags", "style", "form", "layout", "series", "step"]);
 });
 
 // ── 3. Each rule rejects (or fixes) what it should ──
@@ -1199,7 +1238,7 @@ test("op: a part streams start, each question with its public fields only, and d
     ["start", "q", "q", "done"],
   );
   for (const l of r.lines.filter((x) => x.t === "q")) {
-    assert.deepEqual(Object.keys(l.q!), ["id", "part_idx", "kind", "difficulty", "vignette", "question", "options", "slides", "topic", "aspect", "anchor", "teaser", "figure", "option_tags", "style"]);
+    assert.deepEqual(Object.keys(l.q!), ["id", "part_idx", "kind", "difficulty", "vignette", "question", "options", "slides", "topic", "aspect", "anchor", "teaser", "figure", "option_tags", "style", "form", "layout", "series", "step"]);
     assert.ok(!/"answer"|"explanations"|"takeaway"|"why"|"correct"|"whens?"/.test(JSON.stringify(l)), "no key in a t:q line");
     assert.equal(l.q!.part_idx, 4);
   }

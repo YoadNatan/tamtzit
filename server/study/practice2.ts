@@ -13,6 +13,7 @@ import {
   type PointsLine,
   pointsUsd,
   type PointsPart,
+  plannedStyles,
   readOptions,
   requestUsd,
   solverUsd,
@@ -20,7 +21,9 @@ import {
   type StyleAnswer,
   type WriteLine,
 } from "../../shared/study/practice2.js";
+import { addFacts, defaultStylesFor, emptyFacts, isNewStyle, type PartFacts } from "../../shared/study/forms.js";
 import { estimateUsd, imageTokens, monthlyCap, POLICY, reserve } from "./budget.js";
+import { figureList } from "./cards.js";
 import { generateItems, settleFor } from "./claude.js";
 import type { Op } from "./ops/types.js";
 import { claimedParts, claimPoints, failParts, pieceEstimate, pointPieces, POINTS_READ_REF, readPoints } from "./points.js";
@@ -30,15 +33,19 @@ import {
   type DraftMode,
   knownDrafts,
   knownQuestions,
+  checkCall,
   maxTokensFor,
   questionsSystem,
   readPart,
+  solverFree,
+  solverItemOf,
+  typesCtx,
   REWRITE_MIN_MS,
   safe,
   SOLVER_MIN_MS,
 } from "./practice.js";
 import { type RequestPoint, rewriteRequest, STYLE_READ_SYSTEM, styleExampleBlock, styleReadRequest } from "./prompts/questions.js";
-import { checkQuestion, type Known, Question, QuestionSet, type SaveItem, tidy, toDraftPublic } from "./questions.js";
+import { checkQuestion, type Known, QuestionIn, QuestionSet, type SaveItem, tidy, toDraftPublic } from "./questions.js";
 import { solveQuestions, solverEstimate, type Verdict } from "./solver.js";
 import {
   anthropic,
@@ -151,6 +158,44 @@ async function planPoints(sb: SupabaseClient, lectureId: string): Promise<PlanPo
   return (data ?? []) as PlanPoint[];
 }
 
+/** What each part offers the question types (forms.ts canStyle): a table on
+ *  its slides, the pictures its summary captions (fig:N-K), those with label
+ *  geometry, its points by kind. */
+export function partFacts(
+  lecture: Pick<Lecture, "slides">,
+  parts: ReadonlyArray<Pick<StateRow, "part_idx" | "slide_from" | "slide_to">>,
+  sections: ReadonlyArray<{ idx: number; markdown: string | null }>,
+  points: ReadonlyArray<Pick<PlanPoint, "part_idx" | "kind">>,
+): Map<number, PartFacts> {
+  const tables = tableParts(lecture, parts);
+  const out = new Map<number, PartFacts>();
+  for (const p of parts) {
+    const md = sections.find((s) => s.idx === p.part_idx)?.markdown ?? "";
+    const captioned = md ? figureList([md], p.slide_from, p.slide_to) : [];
+    let labelled = 0;
+    for (const sl of lecture.slides) {
+      if (sl.n < p.slide_from || sl.n > p.slide_to) continue;
+      labelled += (sl.figures ?? []).filter((f) => f.geo && Array.isArray(f.geo.labels) && f.geo.labels.length >= 3).length;
+    }
+    const kinds: Record<string, number> = {};
+    for (const pt of points) if (pt.part_idx === p.part_idx) kinds[pt.kind] = (kinds[pt.kind] ?? 0) + 1;
+    out.set(p.part_idx, { tables: tables.has(p.part_idx), figures: captioned.length, labelled, points: kinds });
+  }
+  return out;
+}
+
+/** The facts of the chosen parts together (the defaults of the type chips). */
+export const factsOf = (facts: ReadonlyMap<number, PartFacts>, parts: readonly number[]): PartFacts =>
+  parts.reduce((a, p) => addFacts(a, facts.get(p) ?? emptyFacts()), emptyFacts());
+
+/** A request with a question type needs section X (Q 3 and X 1, docs/study/question-types.md): 409 "schema" before. */
+export async function needTypes(sb: SupabaseClient, styles: readonly string[]): Promise<void> {
+  if (!styles.some((s) => isNewStyle(s))) return;
+  const { data, error } = await sb.rpc("study_schema");
+  const have = !error && data && typeof data === "object" ? (data as Record<string, number>) : {};
+  if ((have.X ?? 0) < 1 || (have.Q ?? 0) < 3) throw new HttpError(409, "schema");
+}
+
 /** The parts whose slides show a table (a blank table needs one). */
 export function tableParts(lecture: Pick<Lecture, "slides">, parts: ReadonlyArray<Pick<StateRow, "part_idx" | "slide_from" | "slide_to">>): Set<number> {
   const tables = new Set(lecture.slides.filter((s) => s.tables.length > 0).map((s) => s.n));
@@ -196,9 +241,11 @@ export const planAction: Op = async (req, body) => {
     .filter((s) => stale.includes(s.idx))
     .reduce((n, s) => n + (s.markdown ?? "").length, 0);
   const parts = chosenParts(state, options);
-  const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, tableParts: tableParts(lecture, state) });
+  const facts = partFacts(lecture, state, (sections.data ?? []) as Array<{ idx: number; markdown: string | null }>, points);
+  const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, partFacts: facts });
   const levels = levelCounts(points, parts);
   const readUsd = stale.length ? pointsUsd(chars, stale.length) : 0;
+  const planned = plannedStyles(plan);
   const answer: PlanAnswer = {
     lecture: { slides: lecture.slides.length },
     parts: state,
@@ -210,12 +257,16 @@ export const planAction: Op = async (req, body) => {
     },
     levels,
     plan: { level: options.level, total: plan.total, parts: plan.parts, batches: plan.batches.length },
+    // Question types: what each part offers, and the types checked first for the chosen parts.
+    facts: Object.fromEntries([...facts].map(([k, v]) => [String(k), v])),
+    defaults: defaultStylesFor(factsOf(facts, parts)) as Style[],
     estimate: {
       readUsd,
-      questionsUsd: requestUsd(plan.total),
+      // Weighted by the planned types (a label item half, a staged case 2.5).
+      questionsUsd: requestUsd(planned),
       // The blind solver's part of questionsUsd, shown apart ("כל שאלה נבדקת בידי פותר עיוור").
-      solverUsd: solverUsd(plan.total),
-      totalUsd: Math.round((readUsd + requestUsd(plan.total)) * 100) / 100,
+      solverUsd: solverUsd(planned),
+      totalUsd: Math.round((readUsd + requestUsd(planned)) * 100) / 100,
       perQuestionUsd: EXPECTED_USD.question,
       levels: { focused: requestUsd(levels.focused), full: requestUsd(levels.full), deep: requestUsd(levels.deep) },
       rewordUsd: EXPECTED_USD.reword,
@@ -273,13 +324,20 @@ export const createAction: Op = async (req, body) => {
   const key = serverKey();
   const lecture = await loadLecture(sb, lectureId);
   if (options.style && !(await verifyStyle(key, lectureId, options.style))) throw new HttpError(400, "bad style");
-  const [state, points] = await Promise.all([pointsState(sb, lectureId), planPoints(sb, lectureId)]);
+  await needTypes(sb, options.styles);
+  const [state, points, sections] = await Promise.all([
+    pointsState(sb, lectureId),
+    planPoints(sb, lectureId),
+    sb.from("study_sections").select("idx, markdown").eq("lecture_id", lectureId),
+  ]);
+  if (sections.error) throw new HttpError(500, sections.error.message);
   const parts = chosenParts(state, options);
   const chosen = state.filter((s) => parts.includes(s.part_idx));
   // A part still being written has no points yet; one whose text changed is read again first.
   if (chosen.some((s) => s.summary !== "ready")) throw new HttpError(409, "summary not ready");
   if (chosen.some((s) => !s.current)) throw new HttpError(409, "points stale");
-  const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, tableParts: tableParts(lecture, state) });
+  const facts = partFacts(lecture, state, (sections.data ?? []) as Array<{ idx: number; markdown: string | null }>, points);
+  const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, partFacts: facts });
   if (plan.total === 0) throw new HttpError(400, "no points");
   const used = plan.parts.filter((p) => p.questions > 0).map((p) => p.part_idx);
   const { data, error } = await sb.rpc(
@@ -314,7 +372,7 @@ export const createAction: Op = async (req, body) => {
     },
     batches: rows.map((r) => ({ id: r.batch_id, part_idx: Number(r.part_idx), seq: Number(r.seq), wanted: Number(r.wanted) })),
     plan: plan.parts,
-    estimate: { questionsUsd: requestUsd(plan.total) },
+    estimate: { questionsUsd: requestUsd(plannedStyles(plan)) },
   };
   return json(200, answer);
 };
@@ -451,14 +509,20 @@ type DraftRow = {
   question: string;
   options: string[];
   status: string;
+  /** Question types (absent before section Q 3). */
+  form?: string;
+  layout?: { kind?: string; prompts?: string[] } | null;
+  series?: string | null;
 };
-type KeyRow = { answer: number; explanations: string[]; takeaway: string; whens: string[]; rewrites: number };
+/** answer null: a set question (its key stays on the server and is not needed to write it again). */
+type KeyRow = { answer: number | null; explanations: string[]; takeaway: string; whens: string[]; rewrites: number };
 
 /** study_draft_reword's refusals, as HTTP statuses. */
 const REWORD_STATUS: Record<string, number> = {
   busy: 409,
   "not pending": 409,
   "reword limit": 409,
+  "not for steps": 409,
   "draft not found": 404,
   forbidden: 403,
   "not signed in": 401,
@@ -495,17 +559,28 @@ export const rewordAction: Op = async (req, body, started) => {
   const client = anthropic();
   serverKey();
   const lecture = await loadLecture(sb, lectureId);
-  const dr = await sb
+  let dr = await sb
     .from("study_question_drafts")
-    .select("id, lecture_id, request_id, batch_id, part_idx, style, points, vignette, question, options, status")
+    .select("id, lecture_id, request_id, batch_id, part_idx, style, points, vignette, question, options, status, form, layout, series")
     .eq("id", draftId)
     .maybeSingle();
+  // A database before section Q 3 has no question types' columns: the draft is a plain one.
+  if (dr.error && /column/.test(dr.error.message)) {
+    dr = await sb
+      .from("study_question_drafts")
+      .select("id, lecture_id, request_id, batch_id, part_idx, style, points, vignette, question, options, status")
+      .eq("id", draftId)
+      .maybeSingle();
+  }
   if (dr.error) throw new HttpError(500, dr.error.message);
   if (!dr.data) throw new HttpError(404, "draft not found");
   const draft = dr.data as DraftRow;
   if (draft.lecture_id !== lectureId) throw new HttpError(400, "draft of another lecture");
   if (draft.status !== "pending") throw new HttpError(409, "not pending");
   if (!draft.batch_id) throw new HttpError(404, "draft not found");
+  // A staged case is kept or removed whole; version 1 never rewrites one.
+  if (draft.series || draft.style === "steps") throw new HttpError(409, "not for steps");
+  await needTypes(sb, [draft.style]);
 
   const keyRes = await sb.rpc("study_draft_reword", keyed({ p_draft: draftId }));
   if (keyRes.error) throw new HttpError(REWORD_STATUS[keyRes.error.message] ?? 500, keyRes.error.message);
@@ -563,7 +638,7 @@ async function rewordContext(sb: SupabaseClient, lecture: Lecture, draft: DraftR
   const byId = new Map(((pts.data ?? []) as Array<{ id: string } & RequestPoint>).map((p) => [p.id, p]));
   const points = ids.map((id) => byId.get(id)).filter((p): p is { id: string } & RequestPoint => !!p);
   const claim = { part_idx: b.part_idx, heading: b.heading, slide_from: b.slide_from, slide_to: b.slide_to };
-  const [part, bank, pending] = await Promise.all([readPart(sb, lecture.id, claim), knownQuestions(sb, lecture.id), knownDrafts(sb, lecture.id)]);
+  const [part, bank, pending] = await Promise.all([readPart(sb, lecture.id, claim, lecture), knownQuestions(sb, lecture.id), knownDrafts(sb, lecture.id)]);
   return {
     claim,
     points,
@@ -581,7 +656,13 @@ async function rewordContext(sb: SupabaseClient, lecture: Lecture, draft: DraftR
 }
 
 /** The user text of a member's reword (and of the solver's rewrite after it). */
-function rewordUser(c: RewordCtx, draft: Pick<DraftRow, "style" | "points" | "vignette" | "question" | "options">, key: KeyRow, note: string, chose?: Verdict | null): string {
+function rewordUser(
+  c: RewordCtx,
+  draft: Pick<DraftRow, "style" | "points" | "vignette" | "question" | "options" | "form" | "layout">,
+  key: KeyRow,
+  note: string,
+  chose?: Verdict | null,
+): string {
   const numbers = draft.points.map((id) => c.points.findIndex((p) => p.id === id) + 1).filter((n) => n > 0);
   const request = rewriteRequest({
     heading: c.claim.heading,
@@ -597,6 +678,8 @@ function rewordUser(c: RewordCtx, draft: Pick<DraftRow, "style" | "points" | "vi
         question: draft.question,
         options: draft.options,
         answer: key.answer,
+        form: draft.form,
+        prompts: draft.layout?.kind === "match" ? draft.layout.prompts : undefined,
         takeaway: key.takeaway,
         chose: chose && chose.choice >= 0 ? chose.choice : null,
         ambiguous: chose ? chose.ambiguous : false,
@@ -605,6 +688,7 @@ function rewordUser(c: RewordCtx, draft: Pick<DraftRow, "style" | "points" | "vi
     note: chose === undefined ? note : undefined,
     blocks: c.part.blocks,
     figures: c.part.figures,
+    labelled: c.part.labelled,
     extras: { styles: [draft.style], difficulty: c.mode.difficulty, points: c.points, focus: c.mode.focus },
   });
   return c.mode.memberStyle ? `${styleExampleBlock(c.mode.memberStyle)}\n\n${request}` : request;
@@ -652,7 +736,7 @@ async function rewordDraft(o: {
       maxTokens: maxTokensFor(1),
       stopAt: o.stopAt,
       wrapper: QuestionSet,
-      item: Question,
+      item: QuestionIn,
       onStart,
       onItem: (q, _i, servedBy) => {
         if (got) return;
@@ -667,6 +751,9 @@ async function rewordDraft(o: {
           lectureText,
           styles: [o.draft.style],
           points: o.ctx.points,
+          ...typesCtx(o.lecture, o.ctx.part),
+          // A label is written again in the mode it had.
+          labelIndex: o.draft.form === "tap" ? 1 : 0,
         });
         if (!r.ok) {
           out.rejected += 1;
@@ -698,10 +785,16 @@ async function rewordDraft(o: {
     return data;
   };
 
+  const captions = new Map(o.ctx.part.figures.map((f) => [f.id, f.caption]));
   const solveOne = async (id: string, item: SaveItem): Promise<{ v: Verdict | null; state: string }> => {
+    // A label item is keyed by the picture's geometry: saved "ok", never solved.
+    if (solverFree(item)) {
+      o.write(JSON.stringify({ t: "check", id, state: "ok" } satisfies WriteLine) + "\n");
+      return { v: null, state: "ok" };
+    }
     let v: Verdict | null = null;
     if (o.stopAt - Date.now() >= SOLVER_MIN_MS) {
-      const items = [{ vignette: item.vignette, question: item.question, options: item.options, answer: item.answer }];
+      const items = [solverItemOf(item, captions)];
       try {
         const rid = await reserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "solver", ref: id, estimateUsd: solverEstimate(o.lecture, items) });
         const res = await solveQuestions({ client: o.client, lecture: o.lecture, items, ref: id, stopAt: o.stopAt, ledger: ledgerFor(rid) });
@@ -710,7 +803,8 @@ async function rewordDraft(o: {
         console.error(`solver ${id}: ${errorText(e)}`);
       }
     }
-    const { data, error } = await o.sb.rpc("study_draft_check", keyed({ p_draft: id, p_choice: v ? v.choice : null, p_ambiguous: v ? v.ambiguous : null }));
+    const call = checkCall(id, item, v);
+    const { data, error } = await o.sb.rpc(call.fn, keyed(call.args));
     // Removed or kept by a member while the solver read it: nothing more to do.
     if (error && DRAFT_GONE.has(error.message)) return { v, state: "gone" };
     const state = error || typeof data !== "string" ? (v ? (v.ok ? "ok" : "failed") : "unchecked") : data;
@@ -734,7 +828,15 @@ async function rewordDraft(o: {
     let again: { item: SaveItem; servedBy: string } | null = null;
     let againId: string | null = null;
     if (o.key.rewrites + 1 < AUTO_REWRITE_LIMIT && o.stopAt - Date.now() >= REWRITE_MIN_MS) {
-      const asDraft = { style: o.draft.style, points: first.item.points.map((n) => pointIds[n - 1]).filter(Boolean), vignette: first.item.vignette, question: first.item.question, options: first.item.options };
+      const asDraft = {
+        style: o.draft.style,
+        points: first.item.points.map((n) => pointIds[n - 1]).filter(Boolean),
+        vignette: first.item.vignette,
+        question: first.item.question,
+        options: first.item.options,
+        form: first.item.form,
+        layout: first.item.layout?.kind === "match" ? { kind: "match", prompts: first.item.layout.prompts } : null,
+      };
       const user = rewordUser(o.ctx, asDraft, { ...o.key, answer: first.item.answer, takeaway: first.item.takeaway }, "", check.v ?? { choice: -1, ambiguous: true, ok: false });
       try {
         const rid = await reserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "reword", ref: id, estimateUsd: estimateUsd(MODEL, system.reduce((n, b) => n + b.text.length, 0) + user.length, maxTokensFor(1)) });

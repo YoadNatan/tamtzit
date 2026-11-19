@@ -2,6 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type NumberedBlock, numberBlocks } from "../../shared/study/blocks.js";
+import { isSetForm, weightOf } from "../../shared/study/forms.js";
 import type { Difficulty, Style, WriteLine } from "../../shared/study/practice2.js";
 import { estimateUsd, reserve } from "./budget.js";
 import { figureList, type Figure } from "./cards.js";
@@ -22,8 +23,9 @@ import {
   styleExampleBlock,
   styleExamples,
 } from "./prompts/questions.js";
-import { casesFor, checkQuestion, type Known, Question, QuestionSet, type SaveItem, toDraftPublic, toPublic } from "./questions.js";
-import { solveQuestions, solverEstimate, type Verdict } from "./solver.js";
+import { labelledFigures, type LabelledFigure } from "./labels.js";
+import { casesFor, checkQuestion, type Ctx, type Known, QuestionIn, QuestionSet, type SaveItem, toDraftPublic, toPublic } from "./questions.js";
+import { solveQuestions, solverEstimate, type SolverItem, type Verdict } from "./solver.js";
 import {
   anthropic,
   deckText,
@@ -244,9 +246,14 @@ const missingTable = (e: { code?: string }) => e.code === "PGRST205" || e.code =
  *  the pictures it captioned in the claim's slides, and whether the claim's
  *  slides are the summary part's (a round planned in six-slide chunks has
  *  no paragraphs and no corrections). */
-export type PartText = { gen: number | null; inPart: boolean; blocks: NumberedBlock[]; figures: Figure[] };
+export type PartText = { gen: number | null; inPart: boolean; blocks: NumberedBlock[]; figures: Figure[]; labelled?: LabelledFigure[] };
 
-export async function readPart(sb: SupabaseClient, lectureId: string, claim: Pick<Claim, "part_idx" | "slide_from" | "slide_to">): Promise<PartText> {
+export async function readPart(
+  sb: SupabaseClient,
+  lectureId: string,
+  claim: Pick<Claim, "part_idx" | "slide_from" | "slide_to">,
+  lecture?: Pick<Lecture, "slides">,
+): Promise<PartText> {
   const sec = await sb
     .from("study_sections")
     .select("gen, slide_from, slide_to, markdown")
@@ -257,11 +264,14 @@ export async function readPart(sb: SupabaseClient, lectureId: string, claim: Pic
   const part = sec.data as { gen: number; slide_from: number; slide_to: number; markdown?: string | null } | null;
   if (!part || part.slide_to < claim.slide_from || part.slide_from > claim.slide_to) return { gen: null, inPart: false, blocks: [], figures: [] };
   const md = part.markdown ?? "";
+  const figures = md ? figureList([md], claim.slide_from, claim.slide_to) : [];
   return {
     gen: part.gen,
     inPart: true,
     blocks: md.trim() ? numberBlocks(md) : [],
-    figures: md ? figureList([md], claim.slide_from, claim.slide_to) : [],
+    figures,
+    // Question types: the part's pictures with label geometry (labels.ts), captioned where the summary captions them.
+    labelled: lecture ? labelledFigures(lecture.slides, claim.slide_from, claim.slide_to, new Map(figures.map((f) => [f.id, f.caption]))) : [],
   };
 }
 
@@ -324,6 +334,7 @@ export function questionsUser(o: {
     asked: askedFor(o.known, o.claim),
     blocks: o.part?.blocks,
     figures: o.part?.figures,
+    labelled: o.part?.labelled,
     extras: o.extras,
   });
   return [
@@ -334,8 +345,45 @@ export function questionsUser(o: {
   ];
 }
 
-/** max_tokens of a call for `want` questions (thinking included). */
-export const maxTokensFor = (want: number): number => 4_000 + 2_500 * want;
+/** max_tokens of a call for `want` questions (thinking included); with the
+ *  planned styles, their weight (a staged case writes 2-3 questions), never
+ *  less than `want` plain questions. */
+export const maxTokensFor = (want: number, styles?: readonly string[]): number => 4_000 + Math.ceil(2_500 * Math.max(want, styles ? weightOf(styles) : 0));
+
+/** The blind solver's view of an item: its public text, a set question's
+ *  form (and a match's prompts), an image item's caption; the key to judge
+ *  by stays on the server. */
+export function solverItemOf(item: SaveItem, captions: ReadonlyMap<string, string>): SolverItem {
+  const layout = item.layout;
+  return {
+    vignette: item.vignette,
+    question: item.question,
+    options: item.options,
+    answer: item.answer,
+    ...(isSetForm(item.form) ? { form: item.form, seq: item.seq } : {}),
+    ...(layout?.kind === "match" ? { prompts: layout.prompts } : {}),
+    ...(item.style === "image" && item.figure ? { caption: captions.get(item.figure) || "תמונה מהשקף" } : {}),
+  };
+}
+
+/** A label item never goes to the blind solver: the slide's geometry keys it. */
+export const solverFree = (item: Pick<SaveItem, "style">): boolean => item.style === "label";
+
+/** The verdict's call: study_draft_check_set for a set question, study_draft_check otherwise. */
+export function checkCall(id: string, item: Pick<SaveItem, "form">, v: Verdict | null): { fn: string; args: Record<string, unknown> } {
+  return isSetForm(item.form)
+    ? { fn: "study_draft_check_set", args: { p_draft: id, p_seq: v ? (v.seq ?? []) : null, p_ambiguous: v ? v.ambiguous : null } }
+    : { fn: "study_draft_check", args: { p_draft: id, p_choice: v ? v.choice : null, p_ambiguous: v ? v.ambiguous : null } };
+}
+
+/** The writer's checks' context for a part: the labelled pictures, the slides' text, whether the lecture is a PDF. */
+export function typesCtx(lecture: Pick<Lecture, "slides" | "source_kind">, part: Pick<PartText, "labelled"> | undefined): Pick<Ctx, "labelled" | "slideText" | "pdf"> {
+  return {
+    labelled: new Map((part?.labelled ?? []).map((f) => [f.id, { geo: f.geo }])),
+    slideText: new Map(lecture.slides.map((s) => [s.n, [s.title, ...s.lines].join(" ").toLowerCase()])),
+    pdf: lecture.source_kind === "pdf",
+  };
+}
 
 /** One call's worst case, which is what it reserves (budget.ts). */
 export function callEstimate(system: TextBlock[], user: TextBlock[], maxTokens: number): number {
@@ -359,7 +407,7 @@ export function questionsCall(o: Parameters<typeof questionsUser>[0] & { lecture
   return {
     system: questionsSystem(o.lecture, o.style),
     messages: [{ role: "user", content: user }],
-    maxTokens: maxTokensFor(o.want),
+    maxTokens: maxTokensFor(o.want, o.extras?.styles),
     effort: o.effort,
     schema: QUESTIONS_SCHEMA,
   };
@@ -426,8 +474,9 @@ export const AUTO_REWRITE_LIMIT = 2;
 export const DRAFT_GONE: ReadonlySet<string> = new Set(["not pending", "draft not found"]);
 
 /** One question that passed the checks in this run: its item, the model that
- *  wrote it, and its draft's id once saved (drafts mode). */
-type Fresh = { item: SaveItem; servedBy: string; draftId?: string };
+ *  wrote it, and its draft's id once saved (drafts mode). A staged case's
+ *  later steps ride on its step 1 (`more`, their draft ids in `moreIds`). */
+type Fresh = { item: SaveItem; servedBy: string; draftId?: string; more?: SaveItem[]; moreIds?: string[] };
 
 /** The body study_save_question / study_draft_save receive: the item, the
  *  model, and its points as the points' ids. */
@@ -473,8 +522,11 @@ export async function writeBatch(o: {
   const lectureSlides = new Set(o.lecture.slides.map((s) => s.n));
   const lectureText = deckText(o.lecture).toLowerCase();
   const blocks: NumberedBlock[] = o.part?.blocks ?? [];
-  const part: PartView = { blocks, figures: o.part?.figures ?? [] };
+  const part: PartView = { blocks, figures: o.part?.figures ?? [], labelled: o.part?.labelled ?? [] };
   const figures = new Set((o.part?.figures ?? []).map((f) => f.id));
+  const captions = new Map((o.part?.figures ?? []).map((f) => [f.id, f.caption]));
+  const types = typesCtx(o.lecture, o.part);
+  let labels = 0; // label items made so far (name and tap in turn)
   const d = o.drafts;
   const pointIds = d ? d.points.map((p) => p.id) : [];
   const effort: Effort = d ? effortFor(d.difficulty, o.claim.effort) : o.claim.effort;
@@ -505,6 +557,8 @@ export async function writeBatch(o: {
     lectureText,
     styles: d ? [...new Set(d.styles)] : undefined,
     points: d ? d.points : undefined,
+    ...types,
+    labelIndex: labels,
   });
   const note = (r: { warnings: string[] }) => r.warnings.forEach((w) => warned.set(w, (warned.get(w) ?? 0) + 1));
   const extras = (st: Style[]): RequestExtras | undefined => (d ? { styles: st, difficulty: d.difficulty, points: d.points, focus: d.focus } : undefined);
@@ -538,9 +592,27 @@ export async function writeBatch(o: {
   };
 
   /** Saves a checked question as a draft of the request (or as the new
-   *  version of `replaces`); its id, or null when the save failed. */
+   *  version of `replaces`); its id, or null when the save failed. A staged
+   *  case's later steps are saved after it, with its series. */
   const saveDraft = async (f: Fresh, replaces: { id: string; rewrites: number } | null): Promise<string | null> => {
-    const body = saveBody(f, pointIds);
+    const id = await saveOneDraft(f, f.item, replaces);
+    if (id && f.more?.length) {
+      f.moreIds = [];
+      for (const step of f.more) {
+        const sid = await saveOneDraft(f, step, null);
+        if (!sid) {
+          // A step that cannot be saved leaves the case incomplete: it goes whole.
+          await o.sb.rpc("study_draft_remove", { p_draft: id });
+          o.write(JSON.stringify({ t: "drop", id } satisfies WriteLine) + "\n");
+          return null;
+        }
+        f.moreIds.push(sid);
+      }
+    }
+    return id;
+  };
+  const saveOneDraft = async (f: Fresh, item: SaveItem, replaces: { id: string; rewrites: number } | null): Promise<string | null> => {
+    const body = saveBody({ ...f, item }, pointIds);
     const { data, error: e } = replaces
       ? await o.sb.rpc("study_draft_replace", keyed({ p_draft: replaces.id, p_q: body, p_auto: true }))
       : await o.sb.rpc("study_draft_save", keyed({ p_batch: o.batchId, p_q: body }));
@@ -554,12 +626,12 @@ export async function writeBatch(o: {
         requestId: d!.requestId,
         batchId: o.batchId,
         partIdx: o.claim.part_idx,
-        style: f.item.style ?? d!.styles[0],
+        style: item.style ?? d!.styles[0],
         points: body.points as string[],
         rewrites: replaces ? replaces.rewrites + 1 : 0,
         replaces: replaces?.id ?? null,
       },
-      f.item,
+      item,
     );
     o.write(JSON.stringify((replaces ? { ...line, replaces: replaces.id } : line) satisfies WriteLine) + "\n");
     return data;
@@ -568,14 +640,12 @@ export async function writeBatch(o: {
   /** Stores the solver's verdict on a draft ("check" line): the state the
    *  database judged. "gone": a member removed the draft while it was being
    *  checked (no line, never rewritten). */
-  const checkDraft = async (id: string, v: Verdict | null): Promise<"ok" | "failed" | "unchecked" | "gone"> => {
-    const { data, error: e } = await o.sb.rpc(
-      "study_draft_check",
-      keyed({ p_draft: id, p_choice: v ? v.choice : null, p_ambiguous: v ? v.ambiguous : null }),
-    );
+  const checkDraft = async (id: string, v: Verdict | null, item?: Pick<SaveItem, "form">): Promise<"ok" | "failed" | "unchecked" | "gone"> => {
+    const call = checkCall(id, item ?? { form: "one" }, v);
+    const { data, error: e } = await o.sb.rpc(call.fn, keyed(call.args));
     if (e && DRAFT_GONE.has(e.message)) return "gone";
     const state = e || typeof data !== "string" ? (v ? (v.ok ? "ok" : "failed") : "unchecked") : (data as "ok" | "failed" | "unchecked");
-    if (e) console.error(`study_draft_check ${id}: ${e.message}`);
+    if (e) console.error(`${call.fn} ${id}: ${e.message}`);
     o.write(JSON.stringify({ t: "check", id, state } satisfies WriteLine) + "\n");
     return state;
   };
@@ -586,7 +656,7 @@ export async function writeBatch(o: {
   const solve = async (fresh: Fresh[]): Promise<Array<Verdict | null>> => {
     if (!fresh.length) return [];
     if (timeLeft() < SOLVER_MIN_MS) return fresh.map(() => null);
-    const items = fresh.map((f) => ({ vignette: f.item.vignette, question: f.item.question, options: f.item.options, answer: f.item.answer }));
+    const items = fresh.map((f) => solverItemOf(f.item, captions));
     const rid = await reserveOr("solver", solverEstimate(o.lecture, items));
     if (rid === null) return fresh.map(() => null);
     try {
@@ -633,6 +703,9 @@ export async function writeBatch(o: {
             question: f.item.question,
             options: f.item.options,
             answer: f.item.answer,
+            form: f.item.form,
+            seq: f.item.seq,
+            prompts: f.item.layout?.kind === "match" ? f.item.layout.prompts : undefined,
             takeaway: f.item.takeaway,
             chose: v.choice >= 0 ? v.choice : null,
             ambiguous: v.ambiguous,
@@ -643,7 +716,10 @@ export async function writeBatch(o: {
         }),
       },
     ];
-    const maxTokens = maxTokensFor(failed.length);
+    const maxTokens = maxTokensFor(
+      failed.length,
+      failed.map(({ f }) => f.item.style ?? "case"),
+    );
     const rid = await reserveOr("practice", callEstimate(system, user, maxTokens));
     if (rid === null) return none;
     for (const { f } of failed) tried.add(f);
@@ -663,7 +739,7 @@ export async function writeBatch(o: {
         maxTokens,
         stopAt: o.stopAt,
         wrapper: QuestionSet,
-        item: Question,
+        item: QuestionIn,
         onItem: (q, _index, servedBy) => {
           const at = i++;
           if (at >= failed.length) return;
@@ -690,14 +766,31 @@ export async function writeBatch(o: {
 
   /** After a call: the solver over its questions, then one rewrite of those
    *  it got wrong, solved again. */
-  const verify = async (fresh: Fresh[]): Promise<void> => {
-    const verdicts = await solve(fresh);
+  const verify = async (all: Fresh[]): Promise<void> => {
+    // A label item is keyed by the geometry (its draft is already "ok"): never solved.
+    const fresh = all.filter((f) => !solverFree(f.item));
+    // A staged case: every step solved; one failed step rejects the case, never rewritten.
+    const staged = fresh.filter((f) => f.more?.length && f.moreIds?.length === f.more.length);
+    const steps = staged.flatMap((f) => f.more!.map((item, k) => ({ f, item, id: f.moreIds![k] })));
+    const single = fresh.filter((f) => !staged.includes(f) && !f.more?.length);
+    const verdicts = await solve([...single, ...staged, ...steps.map((s) => ({ item: s.item, servedBy: s.f.servedBy }))]);
+    // study_draft_reject takes a failed step and rejects its whole case: the first failed step of each.
+    const caseFailed = new Map<Fresh, string>();
+    for (let i = 0; i < staged.length; i++) {
+      const v = verdicts[single.length + i] ?? null;
+      if ((await checkDraft(staged[i].draftId!, v, staged[i].item)) === "failed" && !caseFailed.has(staged[i])) caseFailed.set(staged[i], staged[i].draftId!);
+    }
+    for (let i = 0; i < steps.length; i++) {
+      const v = verdicts[single.length + staged.length + i] ?? null;
+      if ((await checkDraft(steps[i].id, v, steps[i].item)) === "failed" && !caseFailed.has(steps[i].f)) caseFailed.set(steps[i].f, steps[i].id);
+    }
+    for (const id of caseFailed.values()) await rejectDraft(id);
     const failed: Array<{ f: Fresh; v: Verdict }> = [];
-    for (let i = 0; i < fresh.length; i++) {
-      const f = fresh[i];
+    for (let i = 0; i < single.length; i++) {
+      const f = single[i];
       const v = verdicts[i] ?? null;
       if (d) {
-        const state = await checkDraft(f.draftId!, v);
+        const state = await checkDraft(f.draftId!, v, f.item);
         if (state === "failed") failed.push({ f, v: v ?? { choice: -1, ambiguous: true, ok: false } });
       } else if (!v || v.ok) {
         await saveToBank(f);
@@ -722,7 +815,7 @@ export async function writeBatch(o: {
     for (let i = 0; i < ready.length; i++) {
       const v = second[i] ?? null;
       if (d) {
-        const state = await checkDraft(ready[i].f.draftId!, v);
+        const state = await checkDraft(ready[i].f.draftId!, v, ready[i].f.item);
         if (state === "failed") await rejectDraft(ready[i].f.draftId!);
       } else if (!v || v.ok) {
         await saveToBank(ready[i].f);
@@ -768,7 +861,7 @@ export async function writeBatch(o: {
         extras: extras(callStyles),
         memberStyle: d?.memberStyle ?? null,
       });
-      const maxTokens = maxTokensFor(want);
+      const maxTokens = maxTokensFor(want, d ? callStyles : undefined);
       let rid: number;
       if (call === 0 && o.reserved !== undefined) rid = o.reserved;
       else {
@@ -789,7 +882,7 @@ export async function writeBatch(o: {
         maxTokens,
         stopAt: o.stopAt,
         wrapper: QuestionSet,
-        item: Question,
+        item: QuestionIn,
         onStart: () => o.write('{"t":"start"}\n'),
         onItem: (q, _index, servedBy) => {
           const r = checkQuestion(q, ctxFor(known));
@@ -799,9 +892,12 @@ export async function writeBatch(o: {
             return;
           }
           note(r);
-          const f: Fresh = { item: r.item, servedBy };
+          const f: Fresh = { item: r.item, servedBy, ...(r.more?.length ? { more: r.more } : {}) };
           fresh.push(f);
-          known.push({ id: "new", part_idx: o.claim.part_idx, slides: r.item.slides, vignette: r.item.vignette, question: r.item.question, options: r.item.options, topic: r.item.topic, aspect: r.item.aspect });
+          if (r.item.style === "label") labels += 1;
+          for (const it of [r.item, ...(r.more ?? [])]) {
+            known.push({ id: "new", part_idx: o.claim.part_idx, slides: it.slides, vignette: it.vignette, question: it.question, options: it.options, topic: it.topic, aspect: it.aspect });
+          }
           if (d) {
             // A draft is saved as soon as it is checked: the group sees it at once.
             saving = saving.then(async () => {
@@ -980,7 +1076,8 @@ export async function questionsWriteOp(req: Request, body: AiBody, started: numb
     [known, style, part, drafts, pending] = await Promise.all([
       knownQuestions(sb, lectureId),
       courseStyle(sb, lecture),
-      readPart(sb, lectureId, claim),
+      // A request's batch also reads the pictures' labels (question types); a release-1 round never writes them.
+      readPart(sb, lectureId, claim, row.request_id ? lecture : undefined),
       row.request_id ? draftMode(sb, batchId, row) : Promise.resolve(undefined),
       row.request_id ? knownDrafts(sb, lectureId) : Promise.resolve([] as Known[]),
     ]);

@@ -22,8 +22,13 @@ export const SolverAnswer = z.object({
   id: z.string().describe("The question's label, q1, q2 …"),
   choice: z.number().int().describe("0-based index of the option the slides support"),
   ambiguous: z.boolean().describe("true when another option is also defensible from the slides"),
+  seq: z
+    .array(z.number().int())
+    .describe("A question with several parts: tf 1 or 0 per statement; match the option's index per prompt; order the steps' indexes in their order. An empty array for a one-answer question"),
 });
 export const SolverSet = z.object({ answers: z.array(SolverAnswer) });
+/** As the reply is read back: "seq" defaulted (a one-answer question's reply from before the question types). */
+const SolverAnswerIn = SolverAnswer.extend({ seq: z.array(z.number().int()).default([]) });
 export type SolverAnswer = z.infer<typeof SolverAnswer>;
 
 /** The schema sent: the addendum's JSON (cleanSchema drops only the SDK's integer bounds). */
@@ -33,12 +38,12 @@ export const SOLVER_EFFORT = "low" as const;
 export const solverMaxTokens = (n: number): number => 1_000 + 250 * n;
 
 /** A question the solver answers: its public text, and the key the server
- *  holds to judge the reply (never sent). */
-export type SolverItem = SolverText & { answer: number };
+ *  holds to judge the reply (never sent): the answer, or a set question's seq. */
+export type SolverItem = SolverText & { answer: number | null; seq?: readonly number[] | null };
 /** The solver's reply to one question: its choice (-1: none, or out of
  *  range), whether it found another option defensible, and whether that
- *  keeps the question. */
-export type Verdict = { choice: number; ambiguous: boolean; ok: boolean };
+ *  keeps the question; for a set question the order it gave. */
+export type Verdict = { choice: number; ambiguous: boolean; ok: boolean; seq?: number[] };
 
 type TextBlock = Anthropic.Beta.BetaTextBlockParam;
 export type SolverRequest = {
@@ -52,7 +57,14 @@ export type SolverRequest = {
  *  the questions as q1 … qN, without their keys. */
 export function solverCall(o: { lecture: Pick<Lecture, "lecturer" | "slides">; items: readonly SolverText[] }): SolverRequest {
   // Only the public text travels: whatever else an item carries stays here.
-  const items = o.items.map((it) => ({ vignette: it.vignette, question: it.question, options: [...it.options] }));
+  const items = o.items.map((it) => ({
+    vignette: it.vignette,
+    question: it.question,
+    options: [...it.options],
+    ...(it.form ? { form: it.form } : {}),
+    ...(it.prompts ? { prompts: [...it.prompts] } : {}),
+    ...(it.caption ? { caption: it.caption } : {}),
+  }));
   return {
     system: [
       { type: "text", text: SOLVER_SYSTEM },
@@ -76,7 +88,11 @@ export function solverEstimate(lecture: Pick<Lecture, "lecturer" | "slides">, it
 /** The verdict on each item, from the solver's answers (labels matched in
  *  any case; the first answer to a label counts). `complete` is false when
  *  the reply stopped early: an item it did not reach is not judged (null). */
-export function verdictsOf(items: readonly { answer: number; options: readonly string[] }[], answers: readonly SolverAnswer[], complete: boolean): Array<Verdict | null> {
+export function verdictsOf(
+  items: readonly { answer: number | null; options: readonly string[]; seq?: readonly number[] | null }[],
+  answers: readonly SolverAnswer[],
+  complete: boolean,
+): Array<Verdict | null> {
   const by = new Map<string, SolverAnswer>();
   for (const a of answers) {
     const id = a.id.trim().toLowerCase();
@@ -84,7 +100,13 @@ export function verdictsOf(items: readonly { answer: number; options: readonly s
   }
   return items.map((it, i) => {
     const a = by.get(`q${i + 1}`);
-    if (!a) return complete ? { choice: -1, ambiguous: true, ok: false } : null;
+    if (!a) return complete ? { choice: -1, ambiguous: true, ok: false, ...(it.seq ? { seq: [] } : {}) } : null;
+    if (it.seq) {
+      // A set question: its order must be the key's, element by element.
+      const seq = (a.seq ?? []).filter((v) => Number.isInteger(v));
+      const same = seq.length === it.seq.length && seq.every((v, k) => v === it.seq![k]);
+      return { choice: -1, ambiguous: a.ambiguous, ok: same && !a.ambiguous, seq };
+    }
     const inRange = Number.isInteger(a.choice) && a.choice >= 0 && a.choice < it.options.length;
     return { choice: inRange ? a.choice : -1, ambiguous: a.ambiguous, ok: inRange && a.choice === it.answer && !a.ambiguous };
   });
@@ -117,7 +139,7 @@ export async function solveQuestions<T extends SolverItem>(o: {
     maxTokens: call.max_tokens,
     stopAt: o.stopAt,
     wrapper: SolverSet,
-    item: SolverAnswer,
+    item: SolverAnswerIn,
     onItem: (a) => answers.push(a),
     ledger: async (s) => {
       costUsd += s.costUsd;

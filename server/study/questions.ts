@@ -1,6 +1,10 @@
 import { z } from "zod/v4";
 import type { NumberedBlock } from "../../shared/study/blocks.js";
+import type { FigureGeo } from "../../shared/study/figureGeo.js";
+import { normLabel } from "../../shared/study/figureGeo.js";
+import { type Form, isNewStyle, type Layout } from "../../shared/study/forms.js";
 import { type DraftOnLine, STYLES, type Style } from "../../shared/study/practice2.js";
+import { buildLabelItem, labelIndex, modeFor, pageCrop } from "./labels.js";
 import { normalize, similarity } from "./similar.js";
 import { tidyMarkdown } from "./study.js";
 
@@ -40,6 +44,10 @@ export const ASPECT_KEYS = [
   "diagnosis",
   "treatment",
   "prevention",
+  "anatomy",
+  "histology",
+  "physiology",
+  "imaging",
   "other",
 ] as const;
 export type Aspect = (typeof ASPECT_KEYS)[number];
@@ -48,13 +56,18 @@ export type Aspect = (typeof ASPECT_KEYS)[number];
  * `enum` into the description, so the API would not enforce it anyway); no
  * field that asks for reasoning (reasoning_extraction refusals). Counts are
  * checked in code: the API supports minItems 0 or 1 only. */
-export const QOption = z.object({
+/** An option's fields (a function: the stages reuse them, and one shared
+ *  instance would make the JSON schema a $ref, which the sent schema avoids). */
+const qOption = () =>
+  z.object({
   text: z
     .string()
     .describe(
       "The option in Hebrew, English names as the lecture writes them; the same kind of thing as the other options, parallel in form and close in length; no letter or number in front",
     ),
-  correct: z.boolean().describe("true for the one best answer only"),
+  correct: z
+    .boolean()
+    .describe("true for the one best answer only; for a true/false question (tf) true for each true statement; for an order question true for every step"),
   why: z
     .string()
     .describe(
@@ -66,15 +79,28 @@ export const QOption = z.object({
       "For a wrong option: one short Hebrew line beginning 'מתי כן:' saying when this option would be the answer according to this lecture; an empty string when the lecture gives no such case, and for the correct option",
     ),
   tag: z.string().describe("The drug, organism, stage or test this option names, in English exactly as the lecture writes it; an empty string when it names none"),
+  left: z.string().describe("For a match question: the prompt this option answers (the drug, structure or finding it is matched to); an empty string otherwise and for a match's one extra option"),
+});
+export const QOption = qOption();
+/** A staged case's later step (steps 2 and 3): what is new in the case, its question, its options, and its answer as a fact of the case. */
+export const QStage = z.object({
+  update: z.string().describe("One or two Hebrew sentences: what happens next in the case (a result, a change), without the answer to this step"),
+  question: z.string().describe("The step's lead-in: one Hebrew question ending with '?'"),
+  options: z.array(qOption()).describe("Exactly the number of options the request asks for, exactly one correct"),
+  resolved: z.string().describe("One Hebrew sentence stating this step's answer as a fact of the case, as the next step will read it"),
 });
 export const Question = z.object({
   topic: z.string().describe("The drug, organism, disease or process tested, in English exactly as the lecture writes it"),
   aspect: z
     .string()
     .describe(
-      "One key: mechanism, uses, pk, adverse, contra, interactions, resistance, dosing, classification, epidemiology, lifecycle, pathogenesis, clinical, diagnosis, treatment, prevention, other",
+      "One key: mechanism, uses, pk, adverse, contra, interactions, resistance, dosing, classification, epidemiology, lifecycle, pathogenesis, clinical, diagnosis, treatment, prevention, anatomy, histology, physiology, imaging, other",
     ),
-  style: z.string().describe("One key: case, mechanism, drug_choice, adverse_contra, compare, not_true, blank_table; one the request assigns, when it assigns styles"),
+  style: z
+    .string()
+    .describe(
+      "One key: case, mechanism, drug_choice, adverse_contra, compare, not_true, blank_table, image, label, steps, tf, match, order; one the request assigns, when it assigns styles",
+    ),
   points: z
     .array(z.number().int())
     .describe("The numbers of the request's points to know that the question tests, its main point first; an empty array when the request lists none"),
@@ -101,9 +127,22 @@ export const Question = z.object({
     .string()
     .describe("A picture id from the request's list (fig:20-1) when the question asks about what that picture shows and its labels do not give the answer away, or an empty string"),
   slides: z.array(z.number().int()).describe("Every slide number the question, its answer and its explanations rely on"),
+  resolved: z.string().describe("For a staged case (steps): one Hebrew sentence stating step 1's answer as a fact of the case; an empty string otherwise"),
+  stages: z.array(QStage).describe("For a staged case (steps): its steps 2 and 3 (one or two); an empty array otherwise"),
 });
 export const QuestionSet = z.object({ questions: z.array(Question) });
 export type Question = z.infer<typeof Question>;
+
+/** What the op reads back: the schema sent (every field required, so the
+ *  model always writes them), with the question types' fields defaulted
+ *  when absent (a reply from before them, a replayed test stream). */
+const QOptionIn = QOption.extend({ left: z.string().default("") });
+const QStageIn = QStage.extend({ options: z.array(QOptionIn) });
+export const QuestionIn = Question.extend({
+  options: z.array(QOptionIn),
+  resolved: z.string().default(""),
+  stages: z.array(QStageIn).default([]),
+});
 
 /** What study_save_question() receives as p_q (plus `model`): Q's end adds
  *  the paragraph (`para`, null when it could not be placed, with its first
@@ -116,7 +155,8 @@ export type SaveItem = {
   vignette: string;
   question: string;
   options: string[];
-  answer: number;
+  /** null for a set question (tf, match, order): its key is `seq`. */
+  answer: number | null;
   explanations: string[];
   takeaway: string;
   slides: number[];
@@ -133,6 +173,15 @@ export type SaveItem = {
    *  them to the points' ids). */
   style: Style | null;
   points: number[];
+  /** Question types (docs/study/question-types.md): the form ("one" for
+   *  every plain question), what the screen draws, a set question's key
+   *  (tf 1/0 per statement; match the option of each prompt; order the
+   *  option at each position), a staged case's series and step. */
+  form: Form;
+  layout: Layout | null;
+  seq: number[] | null;
+  series: string | null;
+  step: number | null;
 };
 /** A question that passed checkQuestion, as the blind solver and the save
  *  take it (§12.3.Q: CheckedQuestion). */
@@ -174,9 +223,20 @@ export type Ctx = {
   /** The points to know the request lists (their text, for placing a
    *  question whose "points" name none of them). */
   points?: readonly { text: string }[];
+  /** Question types: the part's pictures with label geometry (by id). */
+  labelled?: ReadonlyMap<string, { geo: FigureGeo }>;
+  /** The lecture's text of each slide, lower case (an image item on a PDF page must not show its answer printed). */
+  slideText?: ReadonlyMap<number, string>;
+  /** The lecture is a PDF (each picture is its whole page). */
+  pdf?: boolean;
+  /** How many label items this batch made before this one (name and tap alternate). */
+  labelIndex?: number;
+  /** A staged case's series id (tests pass a fixed one). */
+  newSeries?: () => string;
 };
 
-export type Checked = { ok: true; item: SaveItem; warnings: string[] } | { ok: false; reasons: string[] };
+/** `more`: a staged case's later steps, saved after `item` with its series. */
+export type Checked = { ok: true; item: SaveItem; warnings: string[]; more?: SaveItem[] } | { ok: false; reasons: string[] };
 
 /* ── Text helpers ── */
 
@@ -344,8 +404,40 @@ export function cryptoRandom(): number {
 
 /** Every check the schema cannot make (design-questions §3.5). Hard failures
  *  reject the item; fixes are applied silently; warnings are counted on the
- *  part (the op logs them, for calibrating the prompt). */
+ *  part (the op logs them, for calibrating the prompt). Question types
+ *  (docs/study/question-types.md) dispatch by style: a picture (image), a
+ *  label (label), a staged case (steps), true/false (tf), match and order
+ *  each have their checker; every other style is a plain question. A
+ *  release-1 round (no ctx.styles) takes none of the six. */
 export function checkQuestion(q: Question, ctx: Ctx): Checked {
+  const named = q.style.trim().toLowerCase();
+  if (!ctx.styles?.length) {
+    if (isNewStyle(named)) return { ok: false, reasons: ["style not allowed here"] };
+    return checkOne(q, ctx);
+  }
+  const warnings: string[] = [];
+  const style = styleOf(q, ctx, warnings);
+  const withWarnings = (r: Checked): Checked => (r.ok ? { ...r, warnings: [...warnings.filter((w) => !r.warnings.includes(w)), ...r.warnings] } : r);
+  switch (style) {
+    case "image":
+      return withWarnings(checkImage(q, ctx));
+    case "label":
+      return withWarnings(checkLabel(q, ctx));
+    case "tf":
+      return withWarnings(checkTf(q, ctx));
+    case "match":
+      return withWarnings(checkMatch(q, ctx));
+    case "order":
+      return withWarnings(checkOrder(q, ctx));
+    case "steps":
+      return withWarnings(checkSteps(q, ctx));
+    default:
+      return checkOne(q, ctx);
+  }
+}
+
+/** A plain one-answer question (the seven styles, and each step of a staged case, an image item before its picture checks). */
+export function checkOne(q: Question, ctx: Ctx, styleWanted?: Style): Checked {
   const reasons: string[] = [];
   const warnings: string[] = [];
   const texts = stripLabels(q.options.map((o) => tidy(o.text)));
@@ -357,7 +449,7 @@ export function checkQuestion(q: Question, ctx: Ctx): Checked {
     tag: cleanTag(o.tag, ctx.lectureText),
   }));
   let question = tidy(q.question);
-  const style = styleOf(q, ctx, warnings);
+  const style = styleWanted ?? styleOf(q, ctx, warnings);
   // A blank table keeps its rows, one a line; any other vignette is one line.
   const vignette = style === "blank_table" ? tidyLines(q.vignette) : tidy(q.vignette);
   const takeaway = tidy(q.takeaway);
@@ -453,6 +545,11 @@ export function checkQuestion(q: Question, ctx: Ctx): Checked {
       option_tags: ordered.map((o) => o.tag),
       style,
       points,
+      form: "one",
+      layout: null,
+      seq: null,
+      series: null,
+      step: null,
     },
   };
 }
@@ -566,13 +663,17 @@ export type PublicLine = {
     figure: string;
     option_tags: string[];
     style: Style | null;
+    form: Form;
+    layout: Layout | null;
+    series: string | null;
+    step: number | null;
   };
 };
 export function toPublic(id: string, partIdx: number, item: SaveItem): PublicLine {
-  const { kind, difficulty, vignette, question, options, slides, topic, aspect, para, teaser, figure, option_tags, style } = item;
+  const { kind, difficulty, vignette, question, options, slides, topic, aspect, para, teaser, figure, option_tags, style, form, layout, series, step } = item;
   return {
     t: "q",
-    q: { id, part_idx: partIdx, kind, difficulty, vignette, question, options, slides, topic, aspect, anchor: para, teaser, figure, option_tags, style },
+    q: { id, part_idx: partIdx, kind, difficulty, vignette, question, options, slides, topic, aspect, anchor: para, teaser, figure, option_tags, style, form, layout, series, step },
   };
 }
 
@@ -585,7 +686,7 @@ export function toDraftPublic(
   o: { id: string; requestId: string; batchId: string; partIdx: number; style: Style; points: string[]; rewrites: number; replaces: string | null },
   item: SaveItem,
 ): DraftLine {
-  const { kind, difficulty, vignette, question, options, slides, topic, aspect, para, teaser, figure, option_tags } = item;
+  const { kind, difficulty, vignette, question, options, slides, topic, aspect, para, teaser, figure, option_tags, form, layout, series, step } = item;
   return {
     t: "draft",
     d: {
@@ -610,6 +711,379 @@ export function toDraftPublic(
       check_state: "checking",
       rewrites: o.rewrites,
       replaces: o.replaces,
+      form,
+      layout,
+      series,
+      step,
     },
   };
+}
+
+/* ── Question types (docs/study/question-types.md) ──
+ * Each new type's checker. A set question (tf, match, order) stores the
+ * statements, the bank or the steps as its options and its key as `seq`;
+ * the server writes a lead-in when the writer gave none. A label item is
+ * built from the picture's geometry (labels.ts); a staged case is 2-3 plain
+ * one-answer rows sharing a series. */
+
+/** The lead-ins the server writes for a set question without one. */
+export const TF_LEAD = "אילו מהמשפטים נכונים?";
+export const MATCH_LEAD = "מה מתאים לכל אחד?";
+export const ORDER_LEAD = "מה הסדר הנכון?";
+const PROMPT_MAX = 120;
+const SET_TEXT_MAX = 220;
+const WHY_MAX = 450;
+const DUP_SET = 0.6;
+
+function shuffled<T>(items: readonly T[], random: () => number): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** A known question this set repeats: as many of its options as `ratio` of either list, or the same options. */
+function duplicateSet(options: readonly string[], known: readonly Known[], ratio: number): Known | null {
+  const mine = new Set(options.map(normalize));
+  for (const k of known) {
+    const shared = k.options.map(normalize).filter((o) => mine.has(o)).length;
+    if (shared / Math.max(mine.size, k.options.length) >= ratio) return k;
+  }
+  return null;
+}
+
+/** A writer's own lead-in when it is a Hebrew question; else the server's. */
+function leadIn(q: Question, fallback: string): string {
+  const own = tidy(q.question);
+  return own.endsWith("?") && HEBREW.test(own) && own.length >= 8 && own.length <= 400 && !NEGATIVE.test(own) ? own : fallback;
+}
+
+/** What every question has besides its options: slides, tags, takeaway, aspect, difficulty, points, paragraph, teaser. */
+function common(q: Question, ctx: Ctx, o: { vignette: string; question: string; whys: string[]; keyText: string }, reasons: string[], warnings: string[]) {
+  const takeaway = tidy(q.takeaway);
+  if (!takeaway) reasons.push("no takeaway");
+  const slides = [...new Set(q.slides)].sort((a, b) => a - b);
+  if (!slides.length) reasons.push("no slides");
+  if (slides.some((n) => !ctx.lectureSlides.has(n))) reasons.push("unknown slide");
+  if (!slides.some((n) => n >= ctx.from && n <= ctx.to)) reasons.push("outside the part");
+  if ([o.vignette, o.question, takeaway, ...o.whys].flatMap(tagSlides).some((n) => !ctx.lectureSlides.has(n))) reasons.push("tag names an unknown slide");
+  if (!tagSlides(takeaway).length) warnings.push("takeaway without a tag");
+  const aspect = ASPECT_KEYS.find((k) => k === q.aspect.trim().toLowerCase());
+  if (!aspect) warnings.push(`aspect "${q.aspect}" mapped to other`);
+  const difficulty = Math.min(3, Math.max(1, Math.round(q.difficulty))) as 1 | 2 | 3;
+  const blocks = ctx.blocks ?? [];
+  const para = blocks.length ? placePara(q.para, blocks, `${o.vignette} ${o.question} ${o.whys.join(" ")}`) : null;
+  const block = para === null ? undefined : blocks.find((b) => b.n === para);
+  const teaser = cleanTeaser(q.teaser, o.keyText);
+  const points = pointsOf(q, `${takeaway} ${o.question}`, ctx, warnings);
+  return { takeaway, slides, aspect: aspect ?? ("other" as Aspect), difficulty, para, quote: block ? block.text.slice(0, 80) : "", teaser, points };
+}
+
+/** נכון / לא נכון: 3-5 statements of one topic, both true and false ones,
+ *  each explained with a slide tag; stored shuffled, seq 1/0 per statement. */
+export function checkTf(q: Question, ctx: Ctx): Checked {
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+  const st = q.options.map((o) => ({ text: tidy(o.text).replace(HEBREW_LABEL, ""), correct: o.correct, why: tidy(o.why), when: cleanWhen(o.when, o.correct, ctx.lectureSlides) }));
+  if (st.length < 3 || st.length > 5) reasons.push(`tf with ${st.length} statements`);
+  const t = st.filter((x) => x.correct).length;
+  if (t === 0 || t === st.length) reasons.push("tf needs true and false statements");
+  if (st.some((x) => !x.text || x.text.length > SET_TEXT_MAX)) reasons.push("statement empty or long");
+  if (st.some((x) => BANNED_OPTION.test(x.text))) reasons.push("all/none of the above");
+  if (new Set(st.map((x) => normalize(x.text))).size !== st.length) reasons.push("two statements say the same");
+  if (st.some((x) => !x.why || x.why.length > WHY_MAX || !tagSlides(x.why).length)) reasons.push("a statement's explanation is empty, long or without a tag");
+  if (st.some((x) => NEGATIVE.test(x.text))) warnings.push("a negative word in a statement");
+  const vignette = q.case ? tidy(q.vignette) : "";
+  if (q.case && vignette.length < 60) reasons.push("case without a vignette");
+  const question = leadIn(q, TF_LEAD);
+  const c = common(q, ctx, { vignette, question, whys: st.map((x) => x.why), keyText: "" }, reasons, warnings);
+  if (!reasons.length) {
+    const dup = duplicateSet(
+      st.map((x) => x.text),
+      ctx.known,
+      DUP_SET,
+    );
+    if (dup) reasons.push(`duplicate of ${dup.id}`);
+  }
+  if (reasons.length) return { ok: false, reasons };
+  const ordered = shuffled(st, ctx.random ?? cryptoRandom);
+  return {
+    ok: true,
+    warnings,
+    item: {
+      kind: q.case ? "case" : "mcq",
+      difficulty: c.difficulty,
+      vignette,
+      question,
+      options: ordered.map((x) => x.text),
+      answer: null,
+      explanations: ordered.map((x) => x.why),
+      takeaway: c.takeaway,
+      slides: c.slides,
+      topic: tidy(q.topic).slice(0, 120),
+      aspect: c.aspect,
+      para: c.para,
+      quote: c.quote,
+      teaser: c.teaser,
+      figure: "",
+      whens: ordered.map((x) => x.when),
+      option_tags: [],
+      style: "tf",
+      points: c.points,
+      form: "tf",
+      layout: null,
+      seq: ordered.map((x) => (x.correct ? 1 : 0)),
+      series: null,
+      step: null,
+    },
+  };
+}
+
+/** התאמה: 3-5 pairs of one kind (each option's `left` is its prompt) and at
+ *  most one extra option; prompts and bank shuffled apart; seq[i] = the
+ *  bank's index for prompts[i]. */
+export function checkMatch(q: Question, ctx: Ctx): Checked {
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+  const opts = q.options.map((o) => ({ text: tidy(o.text).replace(HEBREW_LABEL, ""), left: tidy(o.left), why: tidy(o.why) }));
+  const pairs = opts.filter((o) => o.left);
+  const extra = opts.filter((o) => !o.left);
+  if (pairs.length < 3 || pairs.length > 5) reasons.push(`match with ${pairs.length} pairs`);
+  if (extra.length > 1) reasons.push("match with more than one extra option");
+  if (opts.some((o) => !o.text || o.text.length > PROMPT_MAX) || pairs.some((o) => o.left.length > PROMPT_MAX)) reasons.push("a match item empty or long");
+  if (new Set(pairs.map((o) => normalize(o.left))).size !== pairs.length) reasons.push("two prompts say the same");
+  if (new Set(opts.map((o) => normalize(o.text))).size !== opts.length) reasons.push("two options say the same");
+  if (pairs.some((o) => !o.why || o.why.length > WHY_MAX || !tagSlides(o.why).length)) reasons.push("a pair's explanation is empty, long or without a tag");
+  if (extra.some((o) => !o.why)) warnings.push("the extra option is not explained");
+  const question = leadIn(q, MATCH_LEAD);
+  const c = common(q, ctx, { vignette: "", question, whys: opts.map((o) => o.why), keyText: "" }, reasons, warnings);
+  if (!reasons.length) {
+    const dup = duplicateSet(
+      opts.map((o) => o.text),
+      ctx.known,
+      DUP_OPTIONS,
+    );
+    if (dup) reasons.push(`duplicate of ${dup.id}`);
+  }
+  if (reasons.length) return { ok: false, reasons };
+  const random = ctx.random ?? cryptoRandom;
+  const prompts = shuffled(
+    pairs.map((p) => p.left),
+    random,
+  );
+  const bank = shuffled(opts, random);
+  return {
+    ok: true,
+    warnings,
+    item: {
+      kind: "mcq",
+      difficulty: c.difficulty,
+      vignette: "",
+      question,
+      options: bank.map((o) => o.text),
+      answer: null,
+      explanations: bank.map((o) => o.why),
+      takeaway: c.takeaway,
+      slides: c.slides,
+      topic: tidy(q.topic).slice(0, 120),
+      aspect: c.aspect,
+      para: c.para,
+      quote: c.quote,
+      teaser: c.teaser,
+      figure: "",
+      whens: [],
+      option_tags: [],
+      style: "match",
+      points: c.points,
+      form: "match",
+      layout: { kind: "match", prompts },
+      seq: prompts.map((p) => bank.findIndex((b) => b.left === p)),
+      series: null,
+      step: null,
+    },
+  };
+}
+
+/** Numbers and ordinal words a step may begin with ("1.", "שלב 2:", "ראשית", "לבסוף"). */
+const ORDINAL = /^\s*(?:\(?\d{1,2}[.):]\s*|שלב\s+\d{1,2}\s*[.:)-]?\s*|(?:ראשית|ראשון|ראשונה|שני|שנייה|שלישי|שלישית|רביעי|רביעית|חמישי|חמישית|שישי|שישית|לבסוף|ולבסוף|בסוף|אחר כך|לאחר מכן|בהמשך|first|then|finally|next)\s*[,:-]?\s+)/i;
+export const stripOrdinal = (s: string) => {
+  let t = s;
+  for (let i = 0; i < 3 && ORDINAL.test(t); i++) t = t.replace(ORDINAL, "");
+  return t.trim();
+};
+
+/** סידור: 3-6 steps of one process, written in their order (numbers and
+ *  ordinal words stripped); stored shuffled and never already in order;
+ *  seq[pos] = the stored index of the step at pos. */
+export function checkOrder(q: Question, ctx: Ctx): Checked {
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+  const steps = q.options.map((o) => ({ text: stripOrdinal(tidy(o.text).replace(HEBREW_LABEL, "")), why: tidy(o.why) }));
+  if (steps.length < 3 || steps.length > 6) reasons.push(`order with ${steps.length} steps`);
+  if (steps.some((x) => !x.text || x.text.length > SET_TEXT_MAX)) reasons.push("a step empty or long");
+  if (new Set(steps.map((x) => normalize(x.text))).size !== steps.length) reasons.push("two steps say the same");
+  if (steps.some((x) => !x.why || x.why.length > WHY_MAX)) reasons.push("a step's explanation is empty or long");
+  if (steps.some((x) => !tagSlides(x.why).length)) warnings.push("a step's explanation without a tag");
+  const question = leadIn(q, ORDER_LEAD);
+  const c = common(q, ctx, { vignette: "", question, whys: steps.map((x) => x.why), keyText: "" }, reasons, warnings);
+  if (!reasons.length) {
+    const dup = duplicateSet(
+      steps.map((x) => x.text),
+      ctx.known,
+      DUP_OPTIONS,
+    );
+    if (dup) reasons.push(`duplicate of ${dup.id}`);
+  }
+  if (reasons.length) return { ok: false, reasons };
+  const random = ctx.random ?? cryptoRandom;
+  const idx = steps.map((_, i) => i);
+  let stored = shuffled(idx, random);
+  for (let k = 0; k < 20 && stored.every((v, i) => v === i); k++) stored = shuffled(idx, random);
+  if (stored.every((v, i) => v === i)) stored = [...idx.slice(1), idx[0]];
+  return {
+    ok: true,
+    warnings,
+    item: {
+      kind: "mcq",
+      difficulty: c.difficulty,
+      vignette: "",
+      question,
+      options: stored.map((i) => steps[i].text),
+      answer: null,
+      explanations: stored.map((i) => steps[i].why),
+      takeaway: c.takeaway,
+      slides: c.slides,
+      topic: tidy(q.topic).slice(0, 120),
+      aspect: c.aspect,
+      para: c.para,
+      quote: c.quote,
+      teaser: c.teaser,
+      figure: "",
+      whens: [],
+      option_tags: [],
+      style: "order",
+      points: c.points,
+      form: "order",
+      layout: null,
+      seq: idx.map((pos) => stored.indexOf(pos)),
+      series: null,
+      step: null,
+    },
+  };
+}
+
+/** שאלה על תמונה: a plain question about a captioned picture of the part.
+ *  On a PDF lecture without geometry the page must not print the answer;
+ *  with geometry the page is cropped to the diagram and its labels masked. */
+export function checkImage(q: Question, ctx: Ctx): Checked {
+  const r = checkOne(q, ctx, "image");
+  if (!r.ok) return r;
+  const fig = r.item.figure;
+  if (!fig) return { ok: false, reasons: ["image without a picture of the part"] };
+  const n = Number(/^fig:(\d+)-/.exec(fig)?.[1]);
+  const lab = ctx.labelled?.get(fig);
+  if (ctx.pdf && !lab && r.item.answer !== null) {
+    const key = normalize(r.item.options[r.item.answer] ?? "");
+    const page = normalize(ctx.slideText?.get(n) ?? "");
+    if (key.length >= 3 && page.includes(key)) return { ok: false, reasons: ["the answer is printed on the page"] };
+  }
+  const layout: Layout = { kind: "image", fig, ...(ctx.pdf && lab ? pageCrop(lab.geo) : {}) };
+  return { ...r, item: { ...r.item, layout } };
+}
+
+/** סימון על תמונה: the picture must have label geometry, the key must be
+ *  exactly one of its labels, every distractor a label of the picture or a
+ *  word of the lecture. The server writes the lead-in, numbers the pins and
+ *  the explanations (labels.ts); name or tap mode in turn. */
+export function checkLabel(q: Question, ctx: Ctx): Checked {
+  const fig = tidy(q.figure);
+  const lab = ctx.labelled?.get(fig);
+  if (!lab) return { ok: false, reasons: ["label without a labelled picture"] };
+  const keyOpt = q.options.find((o) => o.correct);
+  const target = keyOpt ? labelIndex(lab.geo, tidy(keyOpt.text)) : -1;
+  if (target < 0) return { ok: false, reasons: [target === -2 ? "the key matches two labels" : "the key is not a label of the picture"] };
+  const text = ctx.lectureText ?? "";
+  const prefer: number[] = [];
+  for (const o of q.options) {
+    if (o.correct) continue;
+    const i = labelIndex(lab.geo, tidy(o.text));
+    if (i >= 0) prefer.push(i);
+    else if (!text.includes(tidy(o.text).toLowerCase())) return { ok: false, reasons: ["a distractor is neither a label nor in the lecture"] };
+  }
+  // The plain checks on a neutral lead-in (the server writes the real one) and without stem duplicates.
+  const r = checkOne({ ...q, case: false, vignette: "", question: "מה מסומן בשרטוט?", figure: fig }, { ...ctx, known: [], figures: new Set([fig]) }, "label");
+  if (!r.ok) return r;
+  const keyName = normLabel(lab.geo.labels[target].t);
+  const dup = ctx.known.find(
+    (k) => normLabel(k.question).includes(keyName) && /^באיזה מספר מסומן/.test(k.question) || (/^מה מסומן במספר/.test(k.question) && k.options.some((x) => normLabel(x) === keyName) && duplicateSet(r.item.options, [k], DUP_OPTIONS)),
+  );
+  if (dup) return { ok: false, reasons: [`duplicate of ${dup.id}`] };
+  const mode = modeFor(ctx.labelIndex ?? 0, lab.geo.labels.length);
+  const built = buildLabelItem({
+    fig,
+    geo: lab.geo,
+    target,
+    mode,
+    options: r.item.options.map((t, i) => ({ text: t, correct: i === r.item.answer, why: r.item.explanations[i] })),
+    prefer,
+  });
+  return {
+    ...r,
+    item: {
+      ...r.item,
+      kind: "mcq",
+      vignette: "",
+      question: built.question,
+      options: built.options,
+      answer: built.answer,
+      explanations: built.explanations,
+      whens: mode === "tap" ? [] : r.item.whens,
+      option_tags: mode === "tap" ? [] : r.item.option_tags,
+      figure: fig,
+      form: built.form,
+      layout: built.layout,
+    },
+  };
+}
+
+const VIGNETTE_MAX = 2400;
+
+/** מקרה קליני בשלבים: a case and 1-2 later stages; every step a whole
+ *  one-answer question (its vignette the base story, the earlier steps'
+ *  updates and answers as facts, and its own update), sharing one series.
+ *  A step must not carry its own answer in its story. */
+export function checkSteps(q: Question, ctx: Ctx): Checked {
+  const warnings: string[] = [];
+  const stages = q.stages.slice(0, 2);
+  if (!stages.length) return { ok: false, reasons: ["a staged case needs 2-3 steps"] };
+  if (q.stages.length > 2) warnings.push("steps cut to 3");
+  const base = tidy(q.vignette);
+  if (base.length < 60) return { ok: false, reasons: ["case without a vignette"] };
+  const series = (ctx.newSeries ?? (() => crypto.randomUUID()))();
+  const of = (1 + stages.length) as 2 | 3;
+  const defs = [{ update: "", question: q.question, options: q.options, resolved: q.resolved }, ...stages];
+  const items: SaveItem[] = [];
+  let carried = base;
+  for (let k = 0; k < defs.length; k++) {
+    const def = defs[k];
+    const update = tidy(def.update);
+    if (k > 0 && !update) return { ok: false, reasons: [`step ${k + 1}: no update`] };
+    const vignette = k === 0 ? base : `${carried} ${update}`;
+    if (vignette.length > VIGNETTE_MAX) return { ok: false, reasons: [`step ${k + 1}: the case is too long`] };
+    const qk: Question = { ...q, case: true, vignette, question: def.question, options: def.options, teaser: k === 0 ? q.teaser : "", style: "steps", resolved: "", stages: [] };
+    const r = checkOne(qk, ctx, "steps");
+    if (!r.ok) return { ok: false, reasons: r.reasons.map((x) => `step ${k + 1}: ${x}`) };
+    r.warnings.forEach((w) => warnings.push(`step ${k + 1}: ${w}`));
+    const keyText = r.item.answer === null ? "" : r.item.options[r.item.answer];
+    const key = normalize(keyText);
+    if (key.length >= 3 && normalize(vignette).includes(key)) return { ok: false, reasons: [`step ${k + 1}: the case gives its answer`] };
+    const resolved = tidy(def.resolved);
+    if (!resolved && k < defs.length - 1) return { ok: false, reasons: [`step ${k + 1}: no resolved sentence for the next step`] };
+    if (resolved && key && !normalize(resolved).includes(key)) warnings.push(`step ${k + 1}: resolved does not name its answer`);
+    items.push({ ...r.item, kind: "case", series, step: k + 1, layout: { kind: "steps", of, lead: k === 0 ? 0 : carried.length } });
+    carried = k === 0 ? `${base} ${resolved}`.trim() : `${carried} ${update} ${resolved}`.trim();
+  }
+  return { ok: true, warnings, item: items[0], more: items.slice(1) };
 }

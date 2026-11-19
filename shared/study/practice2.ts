@@ -543,6 +543,9 @@ export type PlanAnswer = {
   points: { total: number; current: boolean; stale: number[]; busy: boolean };
   levels: Levels3;
   plan: { level: Level; total: number; parts: Plan["parts"]; batches: number };
+  /** Question types: what each part offers (by part_idx), and the types checked first for the chosen parts. Absent from an older server. */
+  facts?: Record<string, PartFacts>;
+  defaults?: Style[];
   estimate: {
     readUsd: number;
     questionsUsd: number;

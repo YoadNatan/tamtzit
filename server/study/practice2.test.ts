@@ -33,6 +33,8 @@ const USER = "33333333-0000-4000-8000-000000000003";
 const REQ = "66666666-0000-4000-8000-000000000001";
 const B_REQ = "44444444-0000-4000-8000-0000000000a1";
 const DRAFT = "77777777-0000-4000-8000-000000000001";
+/** A staged case's step (question types): never reworded. */
+const DRAFT_STEP = "77777777-0000-4000-8000-000000000002";
 const pid = (n: number) => `88888888-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 // ── The lecture: 24 slides in two written parts; slide 20 has a table ──
@@ -86,7 +88,7 @@ const state = (current: boolean[]) =>
   }));
 
 // ── Stand-in questions for part 1 (slides 13-24) ──
-const opt = (text: string, why: string, correct = false, when = "", tag = "") => ({ text, correct, why, when, tag });
+const opt = (text: string, why: string, correct = false, when = "", tag = "", left = "") => ({ text, correct, why, when, tag, left });
 const Q_CASE: Question = {
   topic: "Testoquine",
   aspect: "treatment",
@@ -108,6 +110,8 @@ const Q_CASE: Question = {
   teaser: "Testoquine נתקעה בוואקואולה",
   figure: "",
   slides: [15, 16, 17],
+  resolved: "",
+  stages: [],
 };
 const Q_MECH: Question = {
   ...Q_CASE,
@@ -169,6 +173,8 @@ let rewordRewrites = 0;
 /** Drafts a member removed while the solver read them: study_draft_check answers 'not pending'. */
 let goneDrafts = new Set<string>();
 let createRows: (body: Record<string, unknown>) => unknown[] = () => [];
+/** The request batch's styles (question types: a staged case). */
+let batchStyles: string[] = ["case", "mechanism"];
 
 const pause = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const readAll = (req: IncomingMessage) =>
@@ -221,7 +227,7 @@ const rest = createServer(async (req, res) => {
   if (p === "/rest/v1/rpc/study_settle") return send(res, 200, true);
   if (p === "/rest/v1/rpc/study_request_create") return createRefusal ? send(res, 400, pgError(createRefusal)) : send(res, 200, createRows(a));
   if (p === "/rest/v1/study_question_batches") {
-    return send(res, 200, eqOf(q, "id") === B_REQ ? [{ lecture_id: LECTURE, request_id: REQ, points: [pid(5), pid(6)], styles: ["case", "mechanism"], part_idx: 1, heading: "מנגנונים", slide_from: 13, slide_to: 24 }] : []);
+    return send(res, 200, eqOf(q, "id") === B_REQ ? [{ lecture_id: LECTURE, request_id: REQ, points: [pid(5), pid(6)], styles: batchStyles, part_idx: 1, heading: "מנגנונים", slide_from: 13, slide_to: 24 }] : []);
   }
   if (p === "/rest/v1/rpc/study_question_claim") {
     return send(res, 200, [{ lecture_id: LECTURE, round: 3, part_idx: 1, heading: "מנגנונים", slide_from: 13, slide_to: 24, wanted: 2, effort: "high" }]);
@@ -230,6 +236,9 @@ const rest = createServer(async (req, res) => {
     return send(res, 200, [{ id: REQ, difficulty: "hard", focus: "רק מה שבודקים לפני טיפול", style_note: "מקרה קצר עם גיל ומין, חמש אפשרויות.", style_example: "אישה בת 28 עם חום. מה הצעד הבא?" }]);
   }
   if (p === "/rest/v1/study_question_drafts") {
+    if (eqOf(q, "id") === DRAFT_STEP) {
+      return send(res, 200, [{ id: DRAFT_STEP, lecture_id: LECTURE, request_id: REQ, batch_id: B_REQ, part_idx: 1, style: "steps", points: [pid(5)], vignette: Q_CASE.vignette, question: Q_CASE.question, options: Q_CASE.options.map((o) => o.text), status: "pending", form: "one", layout: { kind: "steps", of: 2, lead: 0 }, series: "77777777-0000-4000-8000-0000000000ff" }]);
+    }
     if (eqOf(q, "id") === DRAFT) {
       return send(res, 200, [{ id: DRAFT, lecture_id: LECTURE, request_id: REQ, batch_id: B_REQ, part_idx: 1, style: "case", points: [pid(5)], vignette: Q_CASE.vignette, question: Q_CASE.question, options: Q_CASE.options.map((o) => o.text), status: "pending" }]);
     }
@@ -351,6 +360,7 @@ after(() => {
 });
 beforeEach(() => {
   log = [];
+  batchStyles = ["case", "mechanism"];
   schemaAnswer = { ...REQUIRED_SCHEMA, Q: 2 };
   claimRows = [];
   pointsState = state([true, true]);
@@ -1097,4 +1107,102 @@ test("reword: a version a member removes while the solver reads it is not rewrit
   );
   assert.equal(models(QUESTIONS_SYSTEM).length, 1);
   assert.equal(rpcs("study_draft_replace").length, 1);
+});
+
+// ═══ Question types (docs/study/question-types.md) ═══
+
+test("question types: plan answers each part's facts and the defaults, and weighs the estimate by the planned types", async () => {
+  const r = await call({ action: "plan" });
+  assert.equal(r.status, 200);
+  assert.deepEqual(Object.keys(r.json.facts).sort(), ["0", "1"]);
+  assert.equal(r.json.facts["1"].tables, true, "part 1's slide 20 has a table");
+  assert.ok(Array.isArray(r.json.defaults) && r.json.defaults[0] === "case" && r.json.defaults.includes("tf"));
+  const plain = r.json.estimate.questionsUsd;
+  const steps = await call({ action: "plan", options: { level: "full", styles: ["steps"] } });
+  assert.ok(steps.json.estimate.questionsUsd > plain, "a staged case weighs 2.5 questions");
+});
+
+test("question types: create with a new type answers 409 schema until the database has section X; then it plans them", async () => {
+  const no = await call({ action: "create", options: { styles: ["case", "tf"] } });
+  assert.deepEqual([no.status, no.json], [409, { error: "schema" }]);
+  assert.equal(rpcs("study_request_create").length, 0);
+  assert.equal((await call({ action: "create", options: { styles: ["case"] } })).status, 200, "plain types on an older database still work");
+  schemaAnswer = { ...REQUIRED_SCHEMA, Q: 3, X: 1 };
+  const ok = await call({ action: "create", options: { styles: ["case", "tf"] } });
+  assert.equal(ok.status, 200);
+  const last = args(rpcs("study_request_create").at(-1)!);
+  assert.deepEqual(last.p_request.styles, ["case", "tf"]);
+  assert.ok(last.p_batches.flatMap((b: { styles: string[] }) => b.styles).includes("tf"));
+});
+
+test("question types: a staged case is never reworded (409 not for steps), before anything is claimed or spent", async () => {
+  schemaAnswer = { ...REQUIRED_SCHEMA, Q: 3, X: 1 };
+  const r = await call({ action: "reword", draftId: DRAFT_STEP });
+  assert.deepEqual([r.status, r.json], [409, { error: "not for steps" }]);
+  assert.equal(rpcs("study_draft_reword").length + rpcs("study_reserve").length + models().length, 0);
+});
+
+const STAGED: Question = {
+  ...({} as Question),
+  topic: "Testoquine",
+  aspect: "treatment",
+  style: "steps",
+  points: [1],
+  takeaway: "Testoquine מצטברת בוואקואולה של הטפיל. [ש' 15]",
+  difficulty: 3,
+  case: true,
+  vignette: "גבר בן 40 חוזר מאי דמיוני עם חום של שלושה ימים. במשטח הדם נמצאו טפילים בתוך תאי הדם האדומים.",
+  question: "איזו תרופה מצטברת בוואקואולה של הטפיל?",
+  options: [
+    opt("Testoquine", "Testoquine מצטברת בוואקואולה של הטפיל. [ש' 15]", true),
+    opt("Mockaquine", "Mockaquine פועלת על ה-dormozoite בכבד. [ש' 5]"),
+    opt("Fictemisinins", "Fictemisinins ניתנות בשילוב בלבד. [ש' 20]"),
+    opt("Placebrin", "Placebrin לא נזכרת בהקשר הזה בשקפים. [ש' 16]"),
+    opt("Stubamide", "Stubamide לא נזכרת בהקשר הזה בשקפים. [ש' 17]"),
+  ],
+  para: 1,
+  teaser: "",
+  figure: "",
+  slides: [15, 16, 17, 20],
+  resolved: "הוחלט לתת Testoquine.",
+  stages: [
+    {
+      update: "אחרי יומיים החום חוזר.",
+      question: "מה ניתן בשילוב לפי השקפים?",
+      options: [
+        opt("Fictemisinins", "Fictemisinins ניתנות בשילוב בלבד. [ש' 20]", true),
+        opt("Mockaquine", "Mockaquine פועלת בכבד. [ש' 5]"),
+        opt("Placebrin", "לא נזכרת. [ש' 16]"),
+        opt("Stubamide", "לא נזכרת. [ש' 17]"),
+        opt("Examplomycin", "לא בהקשר הזה. [ש' 18]"),
+      ],
+      resolved: "ניתנו Fictemisinins בשילוב.",
+    },
+  ],
+};
+
+test("question types: a staged case is saved step by step in one series and counted once; a failed step rejects it whole, never rewritten", async () => {
+  batchStyles = ["steps", "mechanism"];
+  genReplies = [{ items: [STAGED, Q_MECH] }];
+  solverReplies = [{ ambiguous: [3] }];
+  const r = await write();
+  assert.equal(r.error, null);
+  const saves = rpcs("study_draft_save").map(args);
+  assert.deepEqual(
+    saves.map((s) => [s.p_q.style, s.p_q.step ?? null]),
+    [
+      ["steps", 1],
+      ["steps", 2],
+      ["mechanism", null],
+    ],
+  );
+  assert.equal(saves[0].p_q.series, saves[1].p_q.series);
+  assert.match(saves[1].p_q.vignette, /הוחלט לתת Testoquine\. אחרי יומיים החום חוזר\.$/);
+  // The solver read all three; step 2 was ambiguous: the case is rejected through that step, the plain question kept.
+  assert.equal(rpcs("study_draft_reject").length, 1);
+  assert.equal(args(rpcs("study_draft_reject")[0]).p_draft, r.lines.filter((l) => l.t === "draft")[1].d.id);
+  assert.ok(!models(QUESTIONS_SYSTEM).some((m) => userText(m).startsWith("Write again")), "no rewrite call for a staged case (a second call asks for the rest)");
+  assert.deepEqual([r.lines.at(-1)!.made, r.lines.at(-1)!.solverRejected], [1, 1], "the case counted once, then dropped");
+  // The writer's reservation scales with the case (2.5 questions): max_tokens of the call.
+  assert.equal((JSON.parse(models(QUESTIONS_SYSTEM)[0].body) as { max_tokens: number }).max_tokens, 4_000 + Math.ceil(2_500 * 3.5));
 });

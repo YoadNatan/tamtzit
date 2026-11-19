@@ -68,6 +68,12 @@ QUESTION STYLES
 - compare (השוואה): what tells apart two drugs, organisms or stages that the slides compare, or what they share; the options are statements of the same form.
 - not_true (׳מה לא נכון׳): a negative lead-in over a list the slides give, the negative word bold; exactly one option is false according to the slides, and it is the correct option; each "why" says why its option is true or false.
 - blank_table (טבלה ריקה): only on a table the slides show. The vignette is that table, its header and each row on a line of their own as "| … | … |", with exactly one cell written as "___"; the lead-in asks what belongs in that cell, the options are values of its column, and "case" is false.
+- image (שאלה על תמונה): a question about what a picture of the list shows (a structure, a stage, a finding), answered from its caption and the slides; "figure" is that picture's id. Never quote a label of the picture that gives the answer away.
+- label (סימון על תמונה): choose a picture from LABELLED PICTURES and one of its labels that names a structure, region or stage (not a number, an arrow word or a sentence). The correct option is that label exactly as listed; the wrong options are other labels of the same picture or structures of this lecture. "figure" is the picture's id. Write any lead-in: the server writes the real one ("מה מסומן במספר 3 בשרטוט?" or "באיזה מספר מסומן X?").
+- steps (מקרה קליני בשלבים): one clinical case answered in 2-3 dependent steps, for example diagnosis, then mechanism or test, then treatment. The vignette, lead-in and options are step 1; "resolved" states step 1's answer as a fact of the case. Each later step in "stages" adds "update" (what happens next, without the step's answer), its own lead-in and options, and "resolved" (its answer as a fact). Each step must be answerable from the case so far, and no step's story may contain its own answer. "case" is true.
+- tf (נכון / לא נכון): 3-5 statements about one topic, some true and some false according to the slides. Each option is a statement; "correct" is true for each true statement. Each "why" says why the statement is true or false. The lead-in may be "אילו מהמשפטים נכונים?".
+- match (התאמה): 3-5 pairs of the same kind (a drug and its target, a structure and its function, a finding and its disease). Each option is the answer side; its "left" is the item it matches. At most one more option with "left" "" as a distractor. Every "why" says why the pair matches.
+- order (סידור): 3-6 steps of one process (a pathway, a life cycle, the segments of the nephron in order, the steps of management), written in their correct order, first step first, with no numbers or ordinal words. "correct" is true for every step; each "why" says why the step sits where it does.
 
 EXPLANATIONS
 - For every option, "why" says in one or two sentences why it is the best answer, or why it is wrong for this question, using only the slides. For a wrong option, say what it is when the lecture says so (its class, its use, its stage), so the explanation teaches it too: "Praziquantel משמשת נגד Trematodes ו-Cestodes, ולא נגד ...".
@@ -79,9 +85,10 @@ EXPLANATIONS
 
 TAGS
 - "topic": the drug, organism, disease or process the question is about, in English exactly as the lecture writes it (Metronidazole, Plasmodium falciparum, Cutaneous leishmaniasis). One topic, not a list.
-- "aspect": the kind of fact tested, one key from this list: mechanism (מנגנון פעולה), uses (שימושים), pk (פרמקוקינטיקה), adverse (תופעות לוואי), contra (התוויות נגד וזהירות), interactions (אינטראקציות), resistance (עמידות), dosing (מתן ומינון), classification (סיווג ומורפולוגיה), epidemiology (אפידמיולוגיה והעברה), lifecycle (מחזור החיים), pathogenesis (פתוגנזה), clinical (תמונה קלינית), diagnosis (אבחנה), treatment (טיפול), prevention (מניעה), other.
+- "aspect": the kind of fact tested, one key from this list: mechanism (מנגנון פעולה), uses (שימושים), pk (פרמקוקינטיקה), adverse (תופעות לוואי), contra (התוויות נגד וזהירות), interactions (אינטראקציות), resistance (עמידות), dosing (מתן ומינון), classification (סיווג ומורפולוגיה), epidemiology (אפידמיולוגיה והעברה), lifecycle (מחזור החיים), pathogenesis (פתוגנזה), clinical (תמונה קלינית), diagnosis (אבחנה), treatment (טיפול), prevention (מניעה), anatomy (אנטומיה), histology (היסטולוגיה), physiology (פיזיולוגיה), imaging (הדמיה), other.
 - "difficulty": 1 = recall of one fact from one slide; 2 = understanding that connects two facts (a mechanism and its consequence, a drug and its stage); 3 = application: a case that needs two steps (recognize the organism or situation, then choose the drug, test or rule).
-- "style": the kind of question, one key from QUESTION STYLES: case, mechanism, drug_choice, adverse_contra, compare, not_true, blank_table. When the request assigns styles, every question has one of them.
+- "style": the kind of question, one key from QUESTION STYLES: case, mechanism, drug_choice, adverse_contra, compare, not_true, blank_table, image, label, steps, tf, match, order. When the request assigns styles, every question has one of them.
+- "left": "" except in a match question. "resolved" and "stages": "" and [] except in a staged case (steps).
 - "points": the numbers of the request's points to know that the question tests, its main point first (one to three); [] when the request lists none.
 - "slides": every slide number the question, its answer and its explanations rely on.
 - "tag": the drug, organism, stage or test the option names, in English exactly as the lecture writes it; "" when it names none.
@@ -113,6 +120,8 @@ export type PartView = {
   blocks?: ReadonlyArray<{ n: number; text: string }>;
   /** The pictures of these slides that the ready parts captioned. */
   figures?: ReadonlyArray<{ id: string; slide: number; caption: string }>;
+  /** Question types: the pictures with label geometry, their labels numbered. */
+  labelled?: ReadonlyArray<{ id: string; slide: number; caption: string; labels: ReadonlyArray<{ n: number; text: string }> }>;
 };
 
 /** A point to know as a request lists it (a batch of a practice 2.0 request). */
@@ -146,6 +155,13 @@ function partLines(o: PartView): string[] {
     figures.length
       ? `Pictures "figure" may name:\n${figures.map((f) => `- ${f.id} (שקף ${f.slide}): ${f.caption}`).join("\n")}`
       : 'There are no pictures for these slides: every "figure" is "".',
+    // Question types: only when a picture of these slides has its labels (the request otherwise reads as before).
+    ...((o.labelled ?? []).length
+      ? [
+          "LABELLED PICTURES (for label questions; the labels as the slide prints them):",
+          ...(o.labelled ?? []).map((f) => `- ${f.id} (שקף ${f.slide})${f.caption ? `: ${f.caption}` : ""}\n  labels: ${f.labels.map((l) => `${l.n}. ${l.text}`).join(" · ")}`),
+        ]
+      : []),
   ];
 }
 
@@ -230,7 +246,12 @@ export type RewriteItem = {
   vignette: string;
   question: string;
   options: string[];
-  answer: number;
+  /** null for a set question (its key is `seq`). */
+  answer: number | null;
+  /** Question types: a set question's form, key and (match) prompts. */
+  form?: string;
+  seq?: readonly number[] | null;
+  prompts?: readonly string[];
   takeaway: string;
   /** The solver's choice, or null; ambiguous when it found another option defensible. */
   chose: number | null;
@@ -238,6 +259,18 @@ export type RewriteItem = {
 };
 
 const LETTERS = ["א", "ב", "ג", "ד", "ה", "ו"];
+
+/** How a set question's key marks option k (true or false; the prompt it matches; its step). */
+function keyMark(it: RewriteItem, k: number): string {
+  if (!it.seq) return "";
+  if (it.form === "tf") return it.seq[k] === 1 ? " (true)" : " (false)";
+  if (it.form === "match") {
+    const at = it.seq.indexOf(k);
+    return at >= 0 ? ` (matches ${at + 1})` : " (extra)";
+  }
+  if (it.form === "order") return ` (step ${it.seq.indexOf(k) + 1})`;
+  return "";
+}
 
 /** Writing questions again (practice 2.0): "solver" for the server's
  *  automatic rewrite of questions the blind solver answered differently from
@@ -264,7 +297,8 @@ export function rewriteRequest(
       `Question ${i + 1} (${it.style ? `style: ${it.style}; ` : ""}points: ${it.points.length ? it.points.join(", ") : "none"}):`,
       ...(it.vignette ? [it.vignette] : []),
       it.question,
-      ...it.options.map((t, k) => `${LETTERS[k]}. ${t}${k === it.answer ? " (the key)" : ""}`),
+      ...(it.form === "match" && it.prompts ? [`Prompts: ${it.prompts.map((p, k) => `${k + 1}) ${p}`).join(" · ")}`] : []),
+      ...it.options.map((t, k) => `${LETTERS[k]}. ${t}${k === it.answer ? " (the key)" : ""}${keyMark(it, k)}`),
       `The fact it tests: ${it.takeaway}`,
       ...(o.reason === "solver"
         ? [

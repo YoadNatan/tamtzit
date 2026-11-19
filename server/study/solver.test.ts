@@ -84,8 +84,14 @@ test("QS-3: max_tokens 1,000 + 250 × N, effort low, and the addendum's schema",
             id: { type: "string", description: "The question's label, q1, q2 …" },
             choice: { type: "integer", description: "0-based index of the option the slides support" },
             ambiguous: { type: "boolean", description: "true when another option is also defensible from the slides" },
+            seq: {
+              type: "array",
+              description:
+                "A question with several parts: tf 1 or 0 per statement; match the option's index per prompt; order the steps' indexes in their order. An empty array for a one-answer question",
+              items: { type: "integer" },
+            },
           },
-          required: ["id", "choice", "ambiguous"],
+          required: ["id", "choice", "ambiguous", "seq"],
           additionalProperties: false,
         },
       },
@@ -176,4 +182,40 @@ test("QS-3: one call, settled through the caller's ledger as kind solver; kept, 
   const before = lastBody;
   assert.deepEqual(await solveQuestions({ client, lecture, items: [], stopAt: Date.now() + 60_000, ledger: async () => true }), { verdicts: [], kept: [], rejected: 0, costUsd: 0 });
   assert.equal(lastBody, before);
+});
+
+// ═══ Question types (docs/study/question-types.md) ═══
+
+test("question types: a set question is judged by its order; partly right is wrong; ambiguous is wrong", () => {
+  const sets = [
+    { answer: null, options: ["s1", "s2", "s3"], seq: [1, 0, 1] },
+    { answer: null, options: ["a", "b", "c", "d"], seq: [2, 0, 3] },
+  ];
+  const v = verdictsOf(
+    sets,
+    [
+      { id: "q1", choice: -1, ambiguous: false, seq: [1, 0, 1] },
+      { id: "q2", choice: -1, ambiguous: false, seq: [2, 3, 0] },
+    ],
+    true,
+  );
+  assert.deepEqual(v[0], { choice: -1, ambiguous: false, ok: true, seq: [1, 0, 1] });
+  assert.equal(v[1]?.ok, false);
+  assert.equal(verdictsOf([sets[0]], [{ id: "q1", choice: -1, ambiguous: true, seq: [1, 0, 1] }], true)[0]?.ok, false);
+  assert.deepEqual(verdictsOf([sets[0]], [], true)[0], { choice: -1, ambiguous: true, ok: false, seq: [] }, "a finished reply without it");
+});
+
+test("question types: the request names a set question's kind, a match's prompts, a picture by its caption; never a key", () => {
+  const text = solverRequest([
+    { vignette: "", question: "אילו מהמשפטים נכונים?", options: ["A is B", "C is D", "E is F"], form: "tf" },
+    { vignette: "", question: "מה מתאים לכל אחד?", options: ["x1", "x2", "x3"], form: "match", prompts: ["p1", "p2", "p3"] },
+    { vignette: "", question: "מה מראה התמונה?", options: ["n1", "n2"], caption: "חתך של נפרון" },
+  ]);
+  assert.ok(text.includes("q1 (TRUE/FALSE)") && text.includes("1) A is B"));
+  assert.ok(text.includes("q2 (MATCH)") && text.includes("Prompts:") && text.includes("1) p1") && text.includes("א. x1"));
+  assert.ok(text.includes("(בשאלה מוצגת תמונה: חתך של נפרון)"));
+  // solverCall passes only the public text (a set's key never travels).
+  const call = solverCall({ lecture, items: [{ vignette: "", question: "q?", options: ["a", "b", "c"], form: "order", answer: null, seq: [2, 0, 1] } as never] });
+  assert.ok(!JSON.stringify(call.messages).includes("seq") && !/\[2,0,1\]/.test(JSON.stringify(call.messages)));
+  assert.ok(SOLVER_SYSTEM.includes("ORDER") && SOLVER_SYSTEM.includes("MATCH") && SOLVER_SYSTEM.includes("TRUE/FALSE"));
 });

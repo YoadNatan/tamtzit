@@ -37,7 +37,7 @@ import { errorText, HttpError, keyed, type Lecture, MODEL } from "./study.js";
 export const PointItem = z.object({
   part: z.number().int().describe("The part's number as the request gives it"),
   para: z.number().int().describe("The number of the paragraph (¶) that states the point; never 0"),
-  kind: z.string().describe("One key: drug, mechanism, indication, adverse, contra, number"),
+  kind: z.string().describe("One key: drug, mechanism, indication, adverse, contra, number, structure, process, finding"),
   subject: z.string().describe("The drug, organism, disease or process it is about, in English exactly as the summary writes it; an empty string when none"),
   text: z.string().describe("The fact as one Hebrew sentence of at most 160 characters, without a slide tag"),
   slides: z.array(z.number().int()).describe("The slide numbers of the paragraph's tags that support it"),
@@ -80,7 +80,7 @@ const KEEP_ID = 0.55;
 const HEBREW = /[א-ת]/;
 
 /** One point as the model wrote it, checked: its part is a claimed one, its
- *  kind one of the six, its text a Hebrew sentence (slide tags removed), its
+ *  kind one of the nine, its text a Hebrew sentence (slide tags removed), its
  *  paragraph one of the part's (placed by similarity when the model's
  *  number is not), its slides real ones (the paragraph's tags when it gives
  *  none). */
