@@ -359,7 +359,15 @@ for (const file of files) {
   // Column lists kept in constants (LECTURE_COLUMNS…): every constant named *_COLUMNS is checked against its table.
   for (const [name, text] of Object.entries(consts)) {
     if (!name.endsWith("COLUMNS")) continue;
-    const table = name.startsWith("SECTION") ? "study_sections" : name.includes("LECTURE") ? "study_lectures" : name.startsWith("COMMENT") ? "study_comments" : null;
+    const table = name.startsWith("SECTION")
+      ? "study_sections"
+      : name.includes("LECTURE")
+        ? "study_lectures"
+        : name.startsWith("COMMENT")
+          ? "study_comments"
+          : name.startsWith("Q_")
+            ? "study_questions" // practice.ts: Q_COLUMNS and Q_TYPES_COLUMNS (qColumns() picks one at run time)
+            : null;
     if (table) checkSelect(file, table, text);
   }
 }

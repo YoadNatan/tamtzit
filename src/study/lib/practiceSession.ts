@@ -14,7 +14,11 @@
  * the stored order there.
  *
  * Types are structural: PublicQuestion (src/study/lib/practice.ts) has every
- * field SessionQuestion names, so this file imports nothing. */
+ * field SessionQuestion names. Question types (docs/study/question-types.md):
+ * a set question (tf, match, order) and a pin number to tap keep the stored
+ * order; a staged case's steps stay together and in order. */
+
+import { isSetForm, scoreSet, type SetForm, toShownSet, toStoredSet } from "../../../shared/study/forms";
 
 /** What study_answer_question records as the session's mode. */
 export type Mode = "lecture" | "course" | "mistakes" | "exam";
@@ -34,6 +38,12 @@ export type SessionQuestion = {
   /** Practice 2.0: the style (null for release 1's questions, read as a case or "other"). */
   kind?: "mcq" | "case";
   style?: string | null;
+  /** Question types: the form, a picture, a staged case's series and step. */
+  form?: string;
+  figure?: string;
+  layout?: { kind: string } | null;
+  series?: string | null;
+  step?: number | null;
   /** Any flag of any member puts the question last in its tier. */
   study_question_flags?: ReadonlyArray<{ user_id?: string }>;
 };
@@ -46,7 +56,18 @@ export type Mistake = { question_id: string; wrong_at: string };
  *  ask_id; the question itself when there is no other). */
 export type Again = { question_id: string; ask: string; wrong_at: string };
 /** What study_answer_question returns, in the stored order. */
-export type Feedback = { answer: number; explanations: string[]; takeaway: string; correct?: boolean; whens?: string[] };
+export type Feedback = {
+  answer: number;
+  explanations: string[];
+  takeaway: string;
+  correct?: boolean;
+  whens?: string[];
+  /** A set question: its key, the right count of the answer, its choices. */
+  seq?: number[];
+  right?: number;
+  total?: number;
+  choices?: number[] | null;
+};
 /** The bet before "לבדוק" (p_confidence): ניחוש 1 · נראה לי 2 · על בטוח 3. */
 export type Bet = 1 | 2 | 3;
 export const BETS: ReadonlyArray<{ bet: Bet; label: string }> = [
@@ -275,7 +296,32 @@ export function pickQueue(o: {
           (a, b) => (a.part_idx ?? Infinity) - (b.part_idx ?? Infinity) || (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0) || byId(a, b),
         )
       : bySignal(interleave(fresh, o.random));
-  return take([...flaggedLast(firstTier), ...flaggedLast(wrong), ...flaggedLast(right)].map((q) => q.id));
+  return take(keepSeries([...flaggedLast(firstTier), ...flaggedLast(wrong), ...flaggedLast(right)], scope.kind === "lecture" || scope.kind === "paragraph").map((q) => q.id));
+}
+
+/** A staged case's steps together, in step order, where its first step comes
+ *  (question types). In a lecture's session a later step never starts the
+ *  case: one whose step 1 is not in the queue is left out. Other scopes
+ *  (mistakes, a course) may ask a step alone: each row stands alone. */
+export function keepSeries<T extends Pick<SessionQuestion, "id" | "series" | "step">>(items: T[], startAtOne: boolean): T[] {
+  if (!items.some((q) => q.series)) return items;
+  const bySeries = new Map<string, T[]>();
+  for (const q of items) if (q.series) bySeries.set(q.series, [...(bySeries.get(q.series) ?? []), q]);
+  for (const list of bySeries.values()) list.sort((a, b) => (a.step ?? 1) - (b.step ?? 1));
+  const out: T[] = [];
+  const done = new Set<string>();
+  for (const q of items) {
+    if (!q.series) {
+      out.push(q);
+      continue;
+    }
+    if (done.has(q.series)) continue;
+    done.add(q.series);
+    const list = bySeries.get(q.series)!;
+    if (startAtOne && (list[0].step ?? 1) > 1) continue;
+    out.push(...list);
+  }
+  return out;
 }
 
 /* ── Each showing's option order (review UX-2) ── */
@@ -293,6 +339,13 @@ export function cryptoRandom(): number {
   const b = new Uint32Array(1);
   crypto.getRandomValues(b);
   return b[0] / 2 ** 32;
+}
+
+/** The order a question is shown in: a set question and a pin number to tap
+ *  keep the stored order (the server shuffled them once); every other a fresh one. */
+export function orderFor(q: Pick<SessionQuestion, "options" | "form">, random: () => number = cryptoRandom): number[] {
+  if (q.form && q.form !== "one") return q.options.map((_, i) => i);
+  return showOrder(q.options, random);
 }
 
 /** A fresh order for one showing: order[shown place] = stored index. All-numeric
@@ -317,7 +370,16 @@ export function toStored(order: readonly number[], shown: number | null): number
 
 /** The feedback as shown: the key's shown place and every explanation under
  *  its own option. */
-export function toShown(order: readonly number[], fb: Feedback): Feedback {
+export function toShown(order: readonly number[], fb: Feedback, form?: string): Feedback {
+  if (fb.seq && isSetForm(form)) {
+    return {
+      ...fb,
+      seq: toShownSet(form, order, fb.seq),
+      ...(fb.choices ? { choices: toShownSet(form, order, fb.choices) } : {}),
+      explanations: form === "tf" ? order.map((i) => fb.explanations[i] ?? "") : order.map((i) => fb.explanations[i] ?? ""),
+      ...(fb.whens ? { whens: order.map((i) => fb.whens?.[i] ?? "") } : {}),
+    };
+  }
   return {
     ...fb,
     answer: order.indexOf(fb.answer),
@@ -340,9 +402,11 @@ export function autopsyOrder(count: number, chosen: number | null | undefined, a
  *  15 characters a second plus 10 to choose, at least the setting, at most
  *  240. The characters are the case, the lead-in and the options, as the
  *  quiz counts them. */
-export function examSeconds(q: Pick<SessionQuestion, "vignette" | "question" | "options">, setting: number): number {
+export function examSeconds(q: Pick<SessionQuestion, "vignette" | "question" | "options"> & Partial<Pick<SessionQuestion, "form" | "figure" | "layout">>, setting: number): number {
   const chars = q.vignette.length + q.question.length + q.options.reduce((n, t) => n + t.length, 0);
-  return Math.min(240, Math.max(setting, Math.ceil(chars / 15) + 10));
+  // Question types: 4 s more for each element of a set, 12 s more to look at a picture.
+  const more = (isSetForm(q.form) ? 4 * q.options.length : 0) + ((q.figure ?? "") !== "" || q.layout ? 12 : 0);
+  return Math.min(240, Math.max(setting, Math.ceil(chars / 15) + 10 + more));
 }
 /** The setting "מצב מבחן" times by until the screen offers a choice: the spec
  *  gives the rule (study_quiz__seconds) but no practice setting. */
@@ -350,9 +414,11 @@ export const EXAM_SETTING_SECONDS = 60;
 
 /* ── The session ── */
 
-export type Result = { id: string; choice: number | null; correct: boolean; bet?: Bet | null };
+/** choice: the stored option (a one-answer question), the stored choices (a set question), or null ("לא יודעים"). */
+export type Result = { id: string; choice: number | number[] | null; correct: boolean; bet?: Bet | null };
 export type SessionState = {
-  v: 1;
+  /** 2 since the question types (a result's choice may be a list); 1 still loads. */
+  v: 1 | 2;
   key: string;
   mode: Mode;
   /** "מצב מבחן": feedback held to the end, a clock per question. */
@@ -377,7 +443,7 @@ export type SessionState = {
 export function startSession(o: {
   key: string;
   timed: boolean;
-  queue: Array<Pick<SessionQuestion, "id" | "vignette" | "question" | "options">>;
+  queue: Array<Pick<SessionQuestion, "id" | "vignette" | "question" | "options"> & Partial<Pick<SessionQuestion, "form" | "figure" | "layout">>>;
   now: number;
   setting?: number;
   random?: () => number;
@@ -387,12 +453,12 @@ export function startSession(o: {
   if (!scope) throw new Error("bad session");
   return {
     ...(o.pick ? { pick: o.pick } : {}),
-    v: 1,
+    v: 2,
     key: o.key,
     mode: modeOf(scope, o.timed),
     timed: o.timed,
     ids: o.queue.map((q) => q.id),
-    orders: o.queue.map((q) => showOrder(q.options, o.random)),
+    orders: o.queue.map((q) => orderFor(q, o.random)),
     seconds: o.queue.map((q) => (o.timed ? examSeconds(q, o.setting ?? EXAM_SETTING_SECONDS) : 0)),
     i: 0,
     shownAt: o.now,
@@ -421,12 +487,29 @@ export function answerArgs(s: SessionState, shown: number | null, now: number, b
   };
 }
 
+/** The arguments of study_answer_set for a set question: the choices as shown
+ *  (null: "לא יודעים") put back in the stored order. */
+export function setArgs(s: SessionState, form: SetForm, shown: number[] | null, now: number, bet: Bet | null = null) {
+  const id = currentId(s);
+  if (!id || answered(s)) throw new Error("no question");
+  return {
+    p_question: id,
+    p_choices: shown === null ? null : toStoredSet(form, s.orders[s.i], shown),
+    p_mode: s.mode,
+    p_ms: Math.min(3_600_000, Math.max(0, Math.round(now - s.shownAt))),
+    p_confidence: shown === null ? null : bet,
+  };
+}
+
+/** A set answer's verdict on this device (the server's is what counts): right of total, all or nothing. */
+export const setVerdict = (form: SetForm, seq: readonly number[], choices: readonly number[] | null) => scoreSet(form, seq, choices);
+
 /** The answer came back: recorded with its feedback (and the bet). In "מצב
  *  מבחן" the session moves on at once; otherwise the feedback shows until next(). */
-export function recordAnswer(s: SessionState, choice: number | null, fb: Feedback, now: number, bet: Bet | null = null): SessionState {
+export function recordAnswer(s: SessionState, choice: number | number[] | null, fb: Feedback, now: number, bet: Bet | null = null): SessionState {
   const id = currentId(s);
   if (!id || answered(s)) return s;
-  const results = [...s.results, { id, choice, correct: fb.correct ?? choice === fb.answer, bet }];
+  const results = [...s.results, { id, choice, correct: fb.correct ?? (typeof choice === "number" && choice === fb.answer), bet }];
   const out = { ...s, results, feedback: { ...s.feedback, [id]: fb } };
   return s.timed ? { ...out, i: s.i + 1, shownAt: now } : out;
 }
@@ -442,11 +525,11 @@ export function next(s: SessionState, now: number): SessionState {
 
 /** The feedback to show for a question, in its showing's order: right after
  *  the answer; in "מצב מבחן" only once the round is over, then every one. */
-export function visibleFeedback(s: SessionState, id: string): Feedback | null {
+export function visibleFeedback(s: SessionState, id: string, form?: string): Feedback | null {
   const fb = s.feedback[id];
   if (!fb) return null;
   if (s.timed && !isOver(s)) return null;
-  return toShown(s.orders[s.ids.indexOf(id)], fb);
+  return toShown(s.orders[s.ids.indexOf(id)], fb, form);
 }
 
 /** The score of the round so far. */
@@ -461,7 +544,7 @@ const isState = (x: unknown): x is SessionState => {
   const s = x as SessionState;
   return (
     !!s &&
-    s.v === 1 &&
+    (s.v === 1 || s.v === 2) &&
     Array.isArray(s.ids) &&
     Array.isArray(s.orders) &&
     s.orders.length === s.ids.length &&

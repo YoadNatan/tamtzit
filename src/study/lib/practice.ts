@@ -1,6 +1,8 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { Aspect, FlagReason } from "../../../shared/study/aspects";
+import type { Form, Layout } from "../../../shared/study/forms";
 import { postStudy, readLines, sb } from "./api";
+import { qColumns, visibleQuestions } from "./questionColumns";
 
 /* ── Practice questions: the data (package Q; spec §5.4, design-questions §4.1) ──
  *
@@ -53,14 +55,32 @@ export type PublicQuestion = {
   hidden_at: string | null;
   /** A correction of its part marked it (it waits for "עדיין נכון"). */
   stale_at: string | null;
-  /** Practice 2.0: one of the seven styles; null for release 1's questions. */
+  /** Practice 2.0: one of the seven styles (with the question types, thirteen); null for release 1's questions. */
   style: string | null;
+  /** Q's end: a picture of the lecture the question is about ("fig:N-K", "" none). */
+  figure?: string;
+  /** Question types (selected only with the flag; absent means a plain one-answer question). */
+  form?: Form;
+  layout?: Layout | null;
+  series?: string | null;
+  step?: number | null;
   study_question_flags?: Flag[];
 };
 
 /** The key and every option's explanation, in the stored order (study_answer_question),
  *  with "מתי כן" per option ("" for the key and where the lecture gives no case). */
-export type Feedback = { answer: number; explanations: string[]; takeaway: string; correct?: boolean; whens?: string[] };
+export type Feedback = {
+  answer: number;
+  explanations: string[];
+  takeaway: string;
+  correct?: boolean;
+  whens?: string[];
+  /** A set question (tf, match, order): its key (answer is -1), how many elements were right of how many, and the choices sent. */
+  seq?: number[];
+  right?: number;
+  total?: number;
+  choices?: number[] | null;
+};
 /** The bet before "לבדוק": ניחוש 1 · נראה לי 2 · על בטוח 3. */
 export type Bet = 1 | 2 | 3;
 
@@ -109,7 +129,7 @@ export type Mistake = { question_id: string; wrong_at: string };
 export type StreamedQuestion = Pick<PublicQuestion, "id" | "part_idx" | "kind" | "difficulty" | "vignette" | "question" | "options" | "slides" | "topic" | "aspect">;
 
 const FLAG_COLUMNS = "id, question_id, user_id, reason, note, created_at";
-const Q_COLUMNS = `id, group_id, lecture_id, exam_id, exam_no, ref_lecture, source, part_idx, kind, difficulty, vignette, question, options, slides, topic, aspect, has_key, created_by, created_at, retired_at, retired_by, retire_note, anchor, quote, part_gen, hidden_at, stale_at, style, study_question_flags(${FLAG_COLUMNS})`;
+export { qColumns, visibleQuestions } from "./questionColumns";
 const BATCH_COLUMNS = "id, lecture_id, round, part_idx, heading, slide_from, slide_to, wanted, status, made, rejected, error, attempts, created_at, updated_at, created_by, request_id";
 /** Ids per request: a URL stays well under PostgREST's limits. */
 const CHUNK = 50;
@@ -136,42 +156,46 @@ export const isActive = (q: Pick<PublicQuestion, "retired_at" | "has_key"> & Par
 
 /** A lecture's questions, retired ones included (P2 lists them), in part order. */
 export async function listLectureQuestions(lectureId: string): Promise<PublicQuestion[]> {
+  const columns = qColumns();
   const { data, error } = await client()
     .from("study_questions")
-    .select(Q_COLUMNS)
+    .select(columns)
     .eq("lecture_id", lectureId)
     .order("part_idx", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) fail(error);
-  return (data ?? []) as unknown as PublicQuestion[];
+  return visibleQuestions((data ?? []) as unknown as PublicQuestion[]);
 }
 
 export async function listQuestionsByIds(ids: string[]): Promise<PublicQuestion[]> {
   const out: PublicQuestion[] = [];
+  const columns = qColumns();
   for (const part of chunks([...new Set(ids)])) {
-    const { data, error } = await client().from("study_questions").select(Q_COLUMNS).in("id", part);
+    const { data, error } = await client().from("study_questions").select(columns).in("id", part);
     if (error) fail(error);
     out.push(...((data ?? []) as unknown as PublicQuestion[]));
   }
-  return out;
+  return visibleQuestions(out);
 }
 
 /** The questions of several lectures (a course session). */
 export async function listCourseQuestions(lectureIds: string[]): Promise<PublicQuestion[]> {
   const out: PublicQuestion[] = [];
+  const columns = qColumns();
   for (const part of chunks([...new Set(lectureIds)])) {
-    const { data, error } = await client().from("study_questions").select(Q_COLUMNS).in("lecture_id", part).order("created_at", { ascending: true });
+    const { data, error } = await client().from("study_questions").select(columns).in("lecture_id", part).order("created_at", { ascending: true });
     if (error) fail(error);
     out.push(...((data ?? []) as unknown as PublicQuestion[]));
   }
-  return out;
+  return visibleQuestions(out);
 }
 
 /** Every question of the group (a topic's session, t.<topic>). */
 export async function listGroupQuestions(groupId: string): Promise<PublicQuestion[]> {
-  const { data, error } = await client().from("study_questions").select(Q_COLUMNS).eq("group_id", groupId).order("created_at", { ascending: true });
+  const columns = qColumns();
+  const { data, error } = await client().from("study_questions").select(columns).eq("group_id", groupId).order("created_at", { ascending: true });
   if (error) fail(error);
-  return (data ?? []) as unknown as PublicQuestion[];
+  return visibleQuestions((data ?? []) as unknown as PublicQuestion[]);
 }
 
 /* ─────────────────────────── generation ─────────────────────────── */
@@ -249,6 +273,52 @@ export async function answerQuestion(id: string, choice: number | null, mode: Mo
     | undefined;
   if (!row) throw new Error("question not found");
   return { answer: Number(row.answer), explanations: row.explanations ?? [], takeaway: row.takeaway ?? "", correct: Boolean(row.correct), whens: row.whens ?? [] };
+}
+
+/** Answers a set question (tf, match, order; study_answer_set): `choices` in
+ *  the stored order (tf 1/0 per statement; match the option at each prompt;
+ *  order the option at each position), null for "לא יודעים", with the bet.
+ *  Correct only when every element is; the right count comes back to show. */
+export async function answerSet(id: string, choices: number[] | null, mode: Mode, ms: number, bet: Bet | null = null): Promise<Feedback> {
+  const { data, error } = await client().rpc("study_answer_set", {
+    p_question: id,
+    p_choices: choices,
+    p_mode: mode,
+    p_ms: Math.max(0, Math.min(3_600_000, Math.round(ms))),
+    p_confidence: bet,
+  });
+  if (error) fail(error);
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { seq: number[] | null; explanations: string[] | null; takeaway: string | null; correct: boolean; whens?: string[] | null; right_n: number; total: number }
+    | undefined;
+  if (!row) throw new Error("question not found");
+  return {
+    answer: -1,
+    seq: (row.seq ?? []).map(Number),
+    explanations: row.explanations ?? [],
+    takeaway: row.takeaway ?? "",
+    correct: Boolean(row.correct),
+    whens: row.whens ?? [],
+    right: Number(row.right_n),
+    total: Number(row.total),
+    choices,
+  };
+}
+
+/** The key, explanations and the caller's latest choices of set questions already answered. */
+export async function setFeedbackFor(ids: string[]): Promise<Record<string, Feedback>> {
+  const out: Record<string, Feedback> = {};
+  for (const part of chunks([...new Set(ids)])) {
+    const { data, error } = await client().rpc("study_question_set_feedback", { p_ids: part });
+    if (error) fail(error);
+    for (const r of (data ?? []) as Array<{ question_id: string; seq: number[] | null; explanations: string[] | null; takeaway: string | null; whens: string[] | null; choices: number[] | null }>) {
+      const seq = (r.seq ?? []).map(Number);
+      const choices = r.choices ? r.choices.map(Number) : null;
+      const right = choices ? seq.filter((v, i) => choices[i] === v).length : 0;
+      out[r.question_id] = { answer: -1, seq, explanations: r.explanations ?? [], takeaway: r.takeaway ?? "", whens: r.whens ?? [], choices, right, total: seq.length, correct: right === seq.length && seq.length > 0 };
+    }
+  }
+  return out;
 }
 
 /** The key and explanations of questions the caller has already answered. */

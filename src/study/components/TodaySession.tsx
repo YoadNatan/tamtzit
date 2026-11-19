@@ -7,8 +7,10 @@ import { getLecture, type Lecture } from "../lib/api";
 import { lootDone } from "../lib/boss";
 import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
-import { answerQuestion, listQuestionsByIds, type Feedback, type PublicQuestion } from "../lib/practice";
-import { showOrder, shownOptions, toShown, toStored, type Bet } from "../lib/practiceSession";
+import { isSetForm, toShownSet } from "../../../shared/study/forms";
+import { answerAny } from "../lib/answering";
+import { listQuestionsByIds, type Feedback, type PublicQuestion } from "../lib/practice";
+import { orderFor, shownOptions, toShown, type Bet } from "../lib/practiceSession";
 import { isolateLatin } from "../lib/rich";
 import type { Route } from "../lib/route";
 import { readMinutes, readPlan, savePlan, unclearDone, type DayPlan, type UnclearRow } from "../lib/today";
@@ -60,8 +62,10 @@ function TodayQuestion({ ctx, item, onDone }: { ctx: Ctx; item: QueueItem; onDon
   const [q, setQ] = useState<PublicQuestion | null | undefined>(undefined);
   const [order, setOrder] = useState<number[]>([]);
   const [picked, setPicked] = useState<number | null>(null);
+  /** A set question's answer so far (question types). */
+  const [pickedSet, setPickedSet] = useState<Array<number | null>>([]);
   const [bet, setBet] = useState<Bet | null>(null);
-  const [chosen, setChosen] = useState<number | null | undefined>(undefined);
+  const [chosen, setChosen] = useState<number | number[] | null | undefined>(undefined);
   const [fb, setFb] = useState<Feedback | null>(null);
   const [busy, setBusy] = useState(false);
   const [t0] = useState(() => Date.now());
@@ -75,7 +79,10 @@ function TodayQuestion({ ctx, item, onDone }: { ctx: Ctx; item: QueueItem; onDon
         // A question that left practice (hidden, retired, marked) is skipped.
         const ok = x && !x.retired_at && !x.hidden_at && !x.stale_at && x.has_key;
         setQ(ok ? x : null);
-        if (ok) setOrder(showOrder(x.options));
+        if (ok) {
+          setOrder(orderFor(x));
+          setPickedSet(Array.from({ length: x.layout?.kind === "match" ? x.layout.prompts.length : x.options.length }, () => null));
+        }
       })
       .catch(() => alive && setQ(null));
     return () => {
@@ -94,12 +101,15 @@ function TodayQuestion({ ctx, item, onDone }: { ctx: Ctx; item: QueueItem; onDon
         </StickyActions>
       </>
     );
-  const check = async (shown: number | null) => {
+  const set = flags.qtypes && isSetForm(q.form) ? q.form : null;
+  const ready = set ? pickedSet.length > 0 && pickedSet.every((v) => v !== null) : picked !== null;
+  const check = async (shown: number | number[] | null) => {
     setBusy(true);
     try {
-      const got = await answerQuestion(q.id, toStored(order, shown), "mistakes", Date.now() - t0, shown === null ? null : bet);
-      setFb(toShown(order, got));
-      setChosen(shown);
+      // Any question type: a set question's choices, or one option (answering.ts).
+      const got = await answerAny(q, order, shown, "mistakes", Date.now() - t0, bet);
+      setFb(toShown(order, got.feedback, q.form));
+      setChosen(Array.isArray(got.choice) && set ? toShownSet(set, order, got.choice) : shown);
     } catch (e) {
       ctx.say(errText(e) || "התשובה לא נשמרה. כדאי לבדוק את החיבור ולנסות שוב.");
     } finally {
@@ -126,6 +136,8 @@ function TodayQuestion({ ctx, item, onDone }: { ctx: Ctx; item: QueueItem; onDon
       <PracticeQuestion
         q={{ ...q, options: order.length === q.options.length ? shownOptions(q.options, order) : q.options }}
         picked={picked}
+        pickedSet={pickedSet}
+        onPickSet={(v) => !fb && setPickedSet(v)}
         bet={bet}
         chosen={chosen}
         feedback={fb}
@@ -145,7 +157,12 @@ function TodayQuestion({ ctx, item, onDone }: { ctx: Ctx; item: QueueItem; onDon
             להמשיך
           </button>
         ) : (
-          <button type="button" className="a-btn primary wide" disabled={busy || picked === null || bet === null} onClick={() => void check(picked)}>
+          <button
+            type="button"
+            className="a-btn primary wide"
+            disabled={busy || !ready || bet === null}
+            onClick={() => void check(set ? pickedSet.map((v) => v ?? 0) : picked)}
+          >
             לבדוק
           </button>
         )}

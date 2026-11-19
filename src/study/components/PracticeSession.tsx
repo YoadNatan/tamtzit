@@ -26,6 +26,8 @@ import {
   type PublicQuestion,
 } from "../lib/practice";
 import * as S from "../lib/practiceSession";
+import { answerAny } from "../lib/answering";
+import { isSetForm, toShownSet } from "../../../shared/study/forms";
 import { getSignals, pulseReady } from "../lib/pulse";
 import { shortName } from "../lib/questionText";
 import { myDangerDue, myRewordings } from "../lib/progress";
@@ -145,6 +147,8 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
   const [phase, setPhase] = useState<"loading" | "ready" | "empty" | "error">("loading");
   const [sending, setSending] = useState(false);
   const [picked, setPicked] = useState<number | null>(null);
+  /** A set question's answer so far (shown order). */
+  const [pickedSet, setPickedSet] = useState<Array<number | null>>([]);
   const [bet, setBet] = useState<S.Bet | null>(null);
   const [flagFor, setFlagFor] = useState<string | null>(null);
   const [slide, setSlide] = useState<{ l: string; n: number } | null>(null);
@@ -236,10 +240,14 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
   const over = s ? S.isOver(s) : false;
 
   // A new question: nothing picked, no bet.
+  const slots = q ? (q.layout?.kind === "match" ? q.layout.prompts.length : q.options.length) : 0;
   useEffect(() => {
     setPicked(null);
+    setPickedSet(Array.from({ length: slots }, () => null));
     setBet(null);
-  }, [id, s?.i]);
+  }, [id, s?.i, slots]);
+  const setForm = q && flags.qtypes && isSetForm(q.form) ? q.form : null;
+  const ready = setForm ? pickedSet.length > 0 && pickedSet.every((v) => v !== null) : picked !== null;
 
   // A question that is gone (its lecture deleted) is skipped.
   useEffect(() => {
@@ -293,21 +301,30 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     else ctx.go(parent, { replace: true });
   }, [scope, ctx]);
 
-  /** Answers the question on screen with the option shown at `shown` (null: "לא יודעים"), with the bet. */
+  /** Answers the question on screen with the option shown at `shown` (a set
+   *  question: its shown choices; null: "לא יודעים"), with the bet. */
   const choose = useCallback(
-    async (shown: number | null, withBet: S.Bet | null) => {
+    async (shown: number | number[] | null, withBet: S.Bet | null) => {
       const cur = sRef.current;
       if (!cur || sending || S.isOver(cur) || S.answered(cur)) return;
       const qid = S.currentId(cur);
       if (!qid) return;
-      const args = S.answerArgs(cur, shown, Date.now(), withBet);
+      const qq = data?.byId[qid];
+      const ms = Date.now() - cur.shownAt;
       setSending(true);
       try {
-        const fb = await answerQuestion(args.p_question, args.p_choice, args.p_mode, args.p_ms, args.p_confidence);
+        const bet = shown === null ? null : withBet;
+        const { feedback: fb, choice } =
+          flags.qtypes && qq && isSetForm(qq.form)
+            ? await answerAny(qq, cur.orders[cur.i], shown, cur.mode, ms, bet)
+            : await (async () => {
+                const args = S.answerArgs(cur, typeof shown === "number" ? shown : null, Date.now(), withBet);
+                return { feedback: await answerQuestion(args.p_question, args.p_choice, args.p_mode, args.p_ms, args.p_confidence), choice: args.p_choice };
+              })();
         const now = S.currentId(sRef.current ?? cur) === qid ? (sRef.current ?? cur) : cur;
-        save(S.recordAnswer(now, args.p_choice, fb, Date.now(), args.p_confidence));
+        save(S.recordAnswer(now, choice, fb, Date.now(), bet));
         if (withBet !== null) guideMark("bet"); // the guide's first step "לענות על שאלה ולהמר" (nothing without VITE_STUDY_GUIDE)
-        if (!(fb.correct ?? args.p_choice === fb.answer))
+        if (!(fb.correct ?? choice === fb.answer))
           setData((d) => (d ? { ...d, mistakes: [...d.mistakes.filter((m) => m.question_id !== qid), { question_id: qid, wrong_at: new Date().toISOString() }] } : d));
       } catch (e) {
         const code = codeOf(e);
@@ -320,12 +337,12 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         setSending(false);
       }
     },
-    [sending, save, ctx],
+    [sending, save, ctx, data],
   );
   const check = useCallback(() => {
-    if (picked === null || bet === null) return;
-    void choose(picked, bet);
-  }, [picked, bet, choose]);
+    if (!ready || bet === null) return;
+    void choose(setForm ? pickedSet.map((v) => v ?? 0) : picked, bet);
+  }, [picked, pickedSet, setForm, ready, bet, choose]);
 
   const goNext = useCallback(() => {
     const cur = sRef.current;
@@ -355,7 +372,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
       if (flagFor || slide || e.altKey || e.ctrlKey || e.metaKey) return;
       const t = e.target as HTMLElement | null;
       if (t && t.closest("input, textarea, select, [contenteditable=true]")) return;
-      if (/^[1-6]$/.test(e.key) && q && !answeredNow && !sending) {
+      if (/^[1-6]$/.test(e.key) && q && !setForm && !answeredNow && !sending) {
         const i = Number(e.key) - 1;
         if (i < q.options.length) {
           e.preventDefault();
@@ -365,7 +382,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         if (answeredNow) {
           e.preventDefault();
           goNext();
-        } else if (picked !== null && bet !== null) {
+        } else if (ready && bet !== null) {
           e.preventDefault();
           check();
         }
@@ -373,7 +390,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [flagFor, slide, q, answeredNow, sending, goNext, check, picked, bet]);
+  }, [flagFor, slide, q, answeredNow, sending, goNext, check, ready, setForm, bet]);
 
   const openSlide = (n: number, lectureId: string | null) => {
     if (!lectureId) return;
@@ -465,8 +482,21 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     const sameLength = order.length === qq.options.length;
     const shown = sameLength ? S.shownOptions(qq.options, order) : qq.options;
     const result = s.results.find((r) => r.id === qq.id);
-    const fb: Feedback | null = read || !s.timed ? (sameLength ? S.visibleFeedback(s, qq.id) : (s.feedback[qq.id] ?? null)) : null;
-    const chosen = result ? (result.choice === null ? null : sameLength ? order.indexOf(result.choice) : result.choice) : undefined;
+    const fb: Feedback | null = read || !s.timed ? (sameLength ? S.visibleFeedback(s, qq.id, qq.form) : (s.feedback[qq.id] ?? null)) : null;
+    const chosen = result
+      ? result.choice === null
+        ? null
+        : Array.isArray(result.choice)
+          ? isSetForm(qq.form)
+            ? toShownSet(qq.form, order, result.choice)
+            : result.choice
+          : sameLength
+            ? order.indexOf(result.choice)
+            : result.choice
+      : undefined;
+    // A staged case: the step before this one answered just now folds the story so far.
+    const prevStep = i > 0 ? data.byId[s.ids[i - 1]] : undefined;
+    const stepFolded = Boolean(qq.series && prevStep && prevStep.series === qq.series && s.results.some((r) => r.id === prevStep.id));
     let note: string | undefined;
     // Q-2: the question this one stands in for (asked in another wording).
     const origin = data.again.find((a) => a.ask === qq.id && a.question_id !== qq.id)?.question_id ?? (data.again.some((a) => a.question_id === qq.id) ? qq.id : null);
@@ -490,6 +520,9 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         q={{ ...qq, options: shown }}
         position={{ index: i + 1, total }}
         picked={read ? undefined : picked}
+        pickedSet={read ? undefined : pickedSet}
+        onPickSet={read ? undefined : setPickedSet}
+        stepFolded={stepFolded}
         bet={read ? undefined : bet}
         chosen={chosen}
         feedback={fb}
@@ -707,7 +740,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
   }
 
   /* ── A question, then its autopsy ── */
-  const shownFb = q && !s.timed ? S.visibleFeedback(s, q.id) : null;
+  const shownFb = q && !s.timed ? S.visibleFeedback(s, q.id, q.form) : null;
   const last = s.i >= total - 1;
   return (
     <main className={`practice-session${shownFb ? " has-feedback" : ""}`}>
@@ -749,7 +782,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
               </button>
             </>
           ) : (
-            <button type="button" className="a-btn primary wide" disabled={picked === null || bet === null || sending} onClick={check}>
+            <button type="button" className="a-btn primary wide" disabled={!ready || bet === null || sending} onClick={check}>
               {sending ? "בודקים…" : "לבדוק"}
             </button>
           )}

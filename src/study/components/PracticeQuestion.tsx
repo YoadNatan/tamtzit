@@ -1,9 +1,17 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { isSetForm, type Layout } from "../../../shared/study/forms";
 import { STYLE_HE, type Style } from "../../../shared/study/practice2";
+import { flags as buildFlags } from "../lib/flags";
 import type { Feedback, Flag, PublicQuestion } from "../lib/practice";
 import { autopsyOrder, betLabel, BETS, type Bet } from "../lib/practiceSession";
 import { richText, slideTag } from "../lib/rich";
 import { flagLine, LETTERS } from "../lib/questionText";
+
+/* The question types' pieces load with the first question that needs them. */
+const QuestionFigure = lazy(() => import("./QuestionTypes").then((m) => ({ default: m.QuestionFigure })));
+const TfAnswer = lazy(() => import("./QuestionTypes").then((m) => ({ default: m.TfAnswer })));
+const MatchAnswer = lazy(() => import("./QuestionTypes").then((m) => ({ default: m.MatchAnswer })));
+const OrderAnswer = lazy(() => import("./QuestionTypes").then((m) => ({ default: m.OrderAnswer })));
 
 /* ── A practice question, as approved (proposal/mockups/practice.html) ──
  *
@@ -19,13 +27,29 @@ import { flagLine, LETTERS } from "../lib/questionText";
  * arrive in the showing's order, the feedback mapped to it. */
 
 export type PracticeQuestionProps = {
-  q: Pick<PublicQuestion, "id" | "kind" | "vignette" | "question" | "options" | "slides"> & { style?: string | null; study_question_flags?: Flag[] };
+  q: Pick<PublicQuestion, "id" | "kind" | "vignette" | "question" | "options" | "slides"> & {
+    style?: string | null;
+    study_question_flags?: Flag[];
+    /** Question types: the form, the picture and what is drawn, a staged case's step; the group and lecture find the picture. */
+    form?: string;
+    figure?: string;
+    layout?: Layout | null;
+    series?: string | null;
+    step?: number | null;
+    group_id?: string;
+    lecture_id?: string | null;
+  };
   position?: { index: number; total: number };
   /** Before the answer: the option picked (shown place), and the bet. */
   picked?: number | null;
+  /** A set question (tf, match, order): its answer so far (shown order), and its change. */
+  pickedSet?: Array<number | null>;
+  onPickSet?: (v: Array<number | null>) => void;
+  /** A staged case: the step before this one was just answered here (the story so far starts folded). */
+  stepFolded?: boolean;
   bet?: Bet | null;
-  /** After the answer: the choice (null: "לא יודעים") and the feedback, in shown order. */
-  chosen?: number | null;
+  /** After the answer: the choice (null: "לא יודעים"; a list for a set question) and the feedback, in shown order. */
+  chosen?: number | number[] | null;
   feedback: Feedback | null;
   /** The bet the answer was sent with (the verdict says it). */
   answeredBet?: Bet | null;
@@ -58,13 +82,18 @@ function slidesText(slides: readonly number[]): string {
   return s.join(", ");
 }
 
-/** The verdict's chip: "נכון · ׳על בטוח׳", "טעות · ׳נראה לי׳", "בלי תשובה". */
-export function verdictOf(chosen: number | null | undefined, fb: Feedback, bet?: Bet | null): { text: string; tone: "ok" | "bad" | "plain" } {
+/** The verdict's chip: "נכון · ׳על בטוח׳", "טעות · ׳נראה לי׳", "בלי תשובה";
+ *  a set question's wrong answer also says how much was right ("✗ טעות · 3 מתוך 4"). */
+export function verdictOf(chosen: number | number[] | null | undefined, fb: Feedback, bet?: Bet | null): { text: string; tone: "ok" | "bad" | "plain" } {
   if (chosen === null || chosen === undefined) return { text: "בלי תשובה", tone: "plain" };
   const right = fb.correct ?? chosen === fb.answer;
   const b = betLabel(bet);
-  return { text: `${right ? "✓ נכון" : "✗ טעות"}${b ? ` · ׳${b}׳` : ""}`, tone: right ? "ok" : "bad" };
+  const part = Array.isArray(chosen) && !right && fb.total ? ` · ${fb.right ?? 0} מתוך ${fb.total}` : "";
+  return { text: `${right ? "✓ נכון" : "✗ טעות"}${part}${b ? ` · ׳${b}׳` : ""}`, tone: right ? "ok" : "bad" };
 }
+
+/** A tap item's pin names, read from its explanations after the answer ("3 הוא Loop of Henle. …"). */
+const pinNames = (fb: Feedback): string[] => fb.explanations.map((e) => /^\d+ הוא (.+?)\.(?:\s|$)/.exec(e.trim())?.[1] ?? "");
 
 export default function PracticeQuestion(p: PracticeQuestionProps) {
   const { q, feedback: fb } = p;
@@ -105,10 +134,16 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
   };
 
   const based = slidesText(q.slides);
+  const form = buildFlags.qtypes ? (q.form ?? "one") : "one";
+  const set = isSetForm(form);
+  const tap = form === "tap";
+  const steps = q.layout?.kind === "steps" ? q.layout : null;
+  const picture = buildFlags.qtypes && (q.layout?.kind === "label" || q.layout?.kind === "image" || (q.style === "image" && Boolean(q.figure)));
   const meta = (
     <div className="a-row between pq-meta">
       <span className="a-row pq-chips">
         <span className="a-chip pq-style">{styleName(q)}</span>
+        {steps && q.step ? <span className="a-chip pq-step">{`שלב ${q.step} מתוך ${steps.of}`}</span> : null}
         {flags.length ? (
           <button type="button" className="a-chip warn pq-flagged" aria-expanded={showFlags} onClick={() => setShowFlags((v) => !v)}>
             סומנה כבעייתית
@@ -133,18 +168,46 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
         ))}
       </ul>
     ) : null;
+  // A staged case's later step: the story so far folded ("המקרה עד כאן"), what is new shown.
+  const lead = steps && (q.step ?? 1) > 1 ? Math.min(steps.lead, q.vignette.length) : 0;
   const stem = (
     <>
-      {q.vignette.trim() ? (
+      {lead > 0 ? (
+        <details className="pq-sofar" open={!p.stepFolded}>
+          <summary className="a-small">המקרה עד כאן</summary>
+          <p className="a-para pq-vignette" dir="rtl">
+            {richText(q.vignette.slice(0, lead).trim(), "v0")}
+          </p>
+        </details>
+      ) : null}
+      {q.vignette.slice(lead).trim() ? (
         <p className="a-para pq-vignette" dir="rtl">
-          {richText(q.vignette, "v")}
+          {richText(q.vignette.slice(lead).trim(), "v")}
         </p>
       ) : null}
-      <p className="a-q pq-lead" dir="rtl">
+      <p className="a-q pq-lead" id={`lead-${q.id}`} dir="rtl">
         {richText(q.question, "l")}
       </p>
     </>
   );
+  const figure = (answered: { right: number; chosen: number | null; names?: string[] } | null) =>
+    picture ? (
+      <Suspense fallback={<div className="qf-stage qf-wait-box" aria-hidden="true" />}>
+        <QuestionFigure
+          groupId={q.group_id ?? ""}
+          lectureId={q.lecture_id ?? null}
+          figure={q.figure ?? ""}
+          layout={q.layout}
+          picked={tap ? (p.picked ?? null) : undefined}
+          onPick={tap && !answered ? p.onPick : undefined}
+          answered={answered}
+          disabled={p.busy}
+          labelledBy={`lead-${q.id}`}
+        />
+      </Suspense>
+    ) : null;
+  const SetAnswer = form === "tf" ? TfAnswer : form === "match" ? MatchAnswer : OrderAnswer;
+  const prompts = q.layout?.kind === "match" ? q.layout.prompts : undefined;
 
   if (!fb) {
     return (
@@ -152,7 +215,20 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
         {meta}
         {showFlags ? flagList(flags) : null}
         {stem}
-        <div ref={options} className="a-opts pq-options" role="radiogroup" aria-label="תשובות" onKeyDown={onKey}>
+        {figure(null)}
+        {set ? (
+          <Suspense fallback={<p className="a-small a-muted">רגע…</p>}>
+            <SetAnswer
+              qid={q.id}
+              options={q.options}
+              prompts={prompts}
+              value={p.pickedSet ?? q.options.map(() => null)}
+              onChange={p.onPickSet}
+              disabled={p.busy}
+            />
+          </Suspense>
+        ) : (
+        <div ref={options} className="a-opts pq-options" role="radiogroup" aria-label={tap ? "מספרים" : "תשובות"} onKeyDown={onKey}>
           {q.options.map((text, i) => (
             <button
               key={i}
@@ -166,11 +242,12 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
             >
               <span className="l">{LETTERS[i]}</span>
               <span className="pq-text" dir="rtl">
-                {richText(text, `o${i}-`)}
+                {tap ? `מספר ${text}` : richText(text, `o${i}-`)}
               </span>
             </button>
           ))}
         </div>
+        )}
         {p.noBet ? null : (
           <section className="a-card flat pq-bet" aria-labelledby={`bet-${q.id}`}>
             <div className="a-row between">
@@ -202,7 +279,34 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
 
   const chosen = p.chosen;
   const v = verdictOf(chosen, fb, p.answeredBet);
-  const order = autopsyOrder(q.options.length, chosen, fb.answer);
+  if (set) {
+    return (
+      <article className="pq is-answered" onClick={onClick} aria-label={p.position ? `שאלה ${p.position.index} מתוך ${p.position.total}` : undefined}>
+        <div className="a-row between pq-verdict" aria-live="polite">
+          <h2 ref={head} tabIndex={-1} className={`a-chip ${v.tone === "plain" ? "" : v.tone}`.trim()}>
+            {v.text}
+          </h2>
+          <span className="a-row">
+            {p.note ? <span className="a-small a-muted pq-note">{p.note}</span> : null}
+            <span className="a-chip">רק לך</span>
+          </span>
+        </div>
+        {meta}
+        {stem}
+        <Suspense fallback={<p className="a-small a-muted">רגע…</p>}>
+          <SetAnswer qid={q.id} options={q.options} prompts={prompts} value={[]} feedback={{ ...fb, choices: Array.isArray(chosen) ? chosen : null }} />
+        </Suspense>
+        {fb.takeaway.trim() ? (
+          <aside className="a-callout quiet pq-take" aria-label="מה לזכור" dir="rtl">
+            <b>מה לזכור:</b> {richText(fb.takeaway, "t-", { tags: "link" })}
+          </aside>
+        ) : null}
+        {flagList(others)}
+      </article>
+    );
+  }
+  const one = typeof chosen === "number" ? chosen : null;
+  const order = autopsyOrder(q.options.length, one, fb.answer);
   const why = fb.explanations ?? [];
   const whens = fb.whens ?? [];
   // An uncovered past-exam item repeats one sentence in every why: shown once (review UX-22).
@@ -220,10 +324,11 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
       </div>
       {meta}
       {stem}
+      {figure({ right: fb.answer, chosen: one, names: tap ? pinNames(fb) : undefined })}
       <ol className="a-opts pq-autopsy" aria-label="התשובות וההסברים">
         {order.map((i) => {
           const right = i === fb.answer;
-          const mine = chosen === i;
+          const mine = one === i;
           const w = oneWhy === null ? (why[i] ?? "").trim() : "";
           const when = right ? "" : (whens[i] ?? "").trim();
           const mark = right ? (mine ? "✓ התשובה הנכונה · הבחירה שלך." : "✓ התשובה הנכונה.") : mine ? "✗ הבחירה שלך." : "";
@@ -231,7 +336,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
             <li key={i} className={`a-opt${right ? " correct" : mine ? " wrong" : ""}${mine ? " picked" : ""}`} data-shown={i}>
               <span className="l">{LETTERS[i]}</span>
               <span className="pq-text" dir="rtl">
-                {richText(q.options[i], `o${i}-`)}
+                {tap ? `מספר ${q.options[i]}` : richText(q.options[i], `o${i}-`)}
               </span>
               {mark || w || when ? (
                 <span className="x" dir="rtl">

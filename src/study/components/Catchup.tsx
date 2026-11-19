@@ -4,7 +4,8 @@ import type { ScreenProps } from "../features/types";
 import { getSections, type Section } from "../lib/api";
 import { flags } from "../lib/flags";
 import { catchupDone, catchupEmpty, catchupOf, meetingWords, myMissed, slideRange, type CatchupPack } from "../lib/meeting";
-import { answerQuestion, listQuestionsByIds, type Bet, type Feedback, type PublicQuestion } from "../lib/practice";
+import { answerAny } from "../lib/answering";
+import { listQuestionsByIds, type Bet, type Feedback, type PublicQuestion } from "../lib/practice";
 import { isolateLatin, richText } from "../lib/rich";
 import { Icon } from "./Icon";
 import PracticeQuestion from "./PracticeQuestion";
@@ -156,7 +157,8 @@ export default function CatchupScreen({ route, ctx }: ScreenProps<"catchup">) {
       if (picked === null) return;
       setBusy(true);
       try {
-        setFb(await answerQuestion(q.id, picked, "lecture", Date.now() - t0, bet));
+        // answering.ts, as every screen (the catch-up asks text questions only: section M 3).
+        setFb((await answerAny(q, q.options.map((_, k) => k), picked, "lecture", Date.now() - t0, bet)).feedback);
       } catch (e) {
         setError(meetingWords(e));
       } finally {
