@@ -47,12 +47,12 @@ npm run dev                  # http://localhost:5173/
 - דגלי שחרור `VITE_STUDY_*`: הרשימה ב-[`.env.example`](.env.example).
   רק ב-Production, ואחרי שינוי Redeploy.
 
-## קובץ ה-SQL ואיך מריצים אותו (7 חלקים)
+## קובץ ה-SQL ואיך מריצים אותו (8 חלקים)
 
 כל מסד הנתונים של האפליקציה הוא קובץ אחד:
 [`supabase/study-schema.sql`](supabase/study-schema.sql). אפשר להריץ אותו שוב
 בבטחה. הוא גדול מדי (כ-0.9 MB) להדבקה אחת ב-SQL Editor של Supabase, ולכן הוא
-מחולק לשבעה קבצים ב-[`supabase/parts/`](supabase/parts/):
+מחולק לשמונה קבצים ב-[`supabase/parts/`](supabase/parts/):
 
 1. Supabase → **SQL Editor** → New query.
 2. לפתוח את `supabase/parts/1.sql` ב-GitHub → **Copy raw file** → להדביק → **Run**.
@@ -60,8 +60,11 @@ npm run dev                  # http://localhost:5173/
 4. אותו דבר עם `2.sql`, `3.sql` וכן הלאה, **לפי הסדר**, עד `8.sql`.
 5. לבדוק: `select public.study_schema();` ו-`/api/study/health` עם `"schemaOk":true`.
 
-החלקים הם הקובץ עצמו, חתוך רק בין הסעיפים שלו, כך ששבעה חלקים לפי הסדר עושים
+החלקים הם הקובץ עצמו, חתוך רק בין הסעיפים שלו, כך ששמונה חלקים לפי הסדר עושים
 בדיוק מה שהקובץ כולו עושה. שגיאה בחלק מסוים: לתקן ולהריץ שוב מאותו חלק.
+**כל הרצה ממשיכה עד `8.sql`**, גם כשמריצים שוב רק חלק מוקדם: חלק 8 (סעיף S)
+מצמצם שתי הרשאות שהחלקים הקודמים פותחים (העלאה לתיקיית `exams/` ושינוי ישיר
+של מצב מבחן), והן נשארות פתוחות עד שחלק 8 רץ שוב.
 אחרי כל שינוי בקובץ: `npm run sql:parts` (בדיקת היחידה נכשלת אם החלקים לא
 מעודכנים). מריצים את ה-SQL **לפני** שהקוד החדש עולה.
 
@@ -192,7 +195,10 @@ between its sections (`tools/sql-parts.mjs`):
 Running the eight in order does exactly what running the whole file does
 (checked on a local Postgres, fresh and over an existing schema, with the
 full behaviour test). If one part fails, fix the cause and run again from
-that part. After editing the schema, run `npm run sql:parts`; a unit test
+that part. **Every run goes on through `8.sql`**, also when only an earlier
+part is run again: part 8 (section S) narrows two permissions the earlier
+parts open (an upload into an `exams/` folder, and a member updating an
+exam's status directly), and they stay open until part 8 runs again. After editing the schema, run `npm run sql:parts`; a unit test
 fails while the parts are stale, or while one is over 170 KB (the SQL Editor's
 limit). Run the SQL **before** the code that needs
 it deploys: until then `/api/study/health` says `"schemaOk":false`.
@@ -297,8 +303,9 @@ All local: no real Supabase project, no live site, no API key.
   `createdb studytest`, then `psql -d studytest -f` each of
   `supabase/tests/stubs.sql`, `supabase/tests/board-schema.sql`,
   `supabase/study-schema.sql`, `supabase/tests/study.sql`; no line may say
-  `FAIL`. `bash supabase/tests/writing-concurrency.sh` and
-  `bash supabase/tests/quiz-concurrency.sh` race psql sessions.
+  `FAIL`. `bash supabase/tests/writing-concurrency.sh`,
+  `bash supabase/tests/quiz-concurrency.sh` and
+  `bash supabase/tests/exam-concurrency.sh` race psql sessions.
 - `npm run build` must stay free of chunk-size warnings with the entry chunk
   (`dist/assets/main-*.js`) under 400 kB; React and the Supabase client have
   chunks of their own. `npm run test:bundle` builds in memory with every

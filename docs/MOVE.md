@@ -137,6 +137,12 @@ select id, status_code, error_msg, created from net._http_response order by id d
   מהמאגר הזה משנה גם את מה שהכתובת הישנה רואה, ושם health עלול לומר
   `schemaOk:false`. לפני שינוי SQL ראשון כאן: להקפיא את הכתובת הישנה או
   להפנות אותה לחדשה.
+- כל הרצה של ה-SQL ממשיכה עד `supabase/parts/8.sql`, גם כשמריצים שוב רק חלק
+  מוקדם: חלק 8 (סעיף S) מצמצם שתי הרשאות שהחלקים הקודמים פותחים, והן נשארות
+  פתוחות עד שחלק 8 רץ שוב. לפני ההרצה הראשונה של חלק 8 עם מבחנים קודמים
+  (S 2): `select exam_id, exam_no from study_questions where exam_id is not null
+  and exam_no is not null group by 1, 2 having count(*) > 1` צריך להחזיר אפס
+  שורות (האינדקס הייחודי של חלק 8 נעצר על כפילות).
 - **מה שמחזיק את מסד הנתונים ער נשאר במאגר הישן.** Supabase בחינם משהה פרויקט
   אחרי בערך שבוע בלי תנועה. היום מעיר אותו כל יום `.github/workflows/keepalive.yml`
   במאגר `delo-logo-review`, והוא לא הועתק לכאן. לפני שמארכבים את המאגר הישן או
@@ -244,7 +250,13 @@ main one until a move link exists, and move then.
 budget (`study_usage`). `supabase/study-schema.sql` serves both: running a
 new version from this repo changes what the old address sees too, and its
 health may turn `schemaOk:false`. Freeze or redirect the old address before
-the first SQL change made here. **The database's keep-alive stays in the old
+the first SQL change made here. Every SQL run goes on through
+`supabase/parts/8.sql`, also when only an earlier part is run again: part 8
+(section S) narrows two permissions the earlier parts open, and they stay
+open until it runs again. Before part 8 first runs with past exams (S 2),
+`select exam_id, exam_no from study_questions where exam_id is not null and
+exam_no is not null group by 1, 2 having count(*) > 1` must return no row
+(part 8's unique index stops on a duplicate). **The database's keep-alive stays in the old
 repository**: Supabase's free tier pauses a project after about a week with
 no traffic, and today `.github/workflows/keepalive.yml` in `delo-logo-review`
 pings it daily; it was not copied here. Before that repository is archived

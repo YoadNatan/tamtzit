@@ -127,30 +127,40 @@ The server's part is built (phase 2, part A); the screens use these words.
 | An item left out of a score (no key, or a suggested key it is not sure of) | לא נספרה |
 | An item that needs a look (badly read, or no key) | לבדיקה |
 | A key a member marked | סומנה ע״י נועה: ג׳ · לבטל |
-| Copying an exam's questions | להעתיק את השאלות; while it runs: מעתיקים עמודים 9–12 מתוך 28… |
+| Copying an exam's questions | להעתיק את השאלות; while it runs: מעתיקים עמודים 9–12 מתוך 28…; before any unit reads: עמודים 1–4 בתור…; the key sheet: קוראים את דף התשובות… |
 | The upload's button | להעלות ולהעתיק את השאלות · כ-$1.40 (the usual price; no sentence about where the exam goes, decision 1) |
 | Pages that were not read | עמודים 13–16 לא נקראו · לנסות שוב; one page: לקרוא שוב את עמוד 7 |
 | What was found | נמצאו 98 שאלות · 91 עם תשובה · 7 לבדיקה; open questions: 2 שאלות פתוחות דולגו. |
+| A number another page already had (not saved) | 3 שאלות לא נשמרו: המספר שלהן כבר הופיע בעמוד אחר. (one: שאלה אחת לא נשמרה: …) |
+| A question the key sheet cancelled | 2 שאלות בוטלו לפי דף התשובות, ולא נכללות. (one: שאלה אחת בוטלה …, ולא נכללת.) |
+| A key sheet with a column per version | בדף התשובות יש כמה נוסחים של המבחן, ולא ברור איזה מהם שלו. אפשר לסמן את התשובות ביד. |
+| Who uploaded an exam | הועלה ע״י נועה |
+| The upload's pages as pictures | לצלם דפים (the camera or the phone's photos); the button: + להוסיף דפים, then + להוסיף עוד; the strip's arrows: → earlier, ← later |
+| The key sheet apart | דף התשובות: לבחור את דף התשובות; chosen again: קובץ אחר / תמונות אחרות; להסיר |
+| The year of an exam (needed) | צריך לכתוב את השנה של המבחן, למשל 2025. (no greyed year in the field: it reads as filled) |
+| A page beside an item, opened whole | לפתוח את העמוד כולו (the picture's name for a screen reader) |
 | A badly read item | לא נקראה טוב · לתקן טקסט |
-| Leaving an exam out of the course's picture | לא לכלול בחישוב הנושאים |
+| Leaving an exam out of the course's picture | לא לכלול בחישוב הנושאים; under it: המבחן נשאר לתרגול. הוא לא ייכנס לחישוב הנושאים של הקורס, ולא ישמש כדוגמה לסגנון של שאלות חדשות. |
 | The limit of a day | אפשר להתחיל עד 3 מבחנים ביום. מתחדש בחצות. |
 | Back to one past exam | → למבחן הקודם |
 | Back to the simulation's setup | → לסימולציה |
 | Practising one past exam | לתרגל את המבחן (its own order, its options as printed); from the course page: לתרגל מבחן קודם |
 | The simulation's lengths, short first | קצר · 20 שאלות · 36 דקות; חצי · 50 שאלות; מלא (the whole exam) |
-| Only questions not seen yet | רק שאלות שעוד לא ראיתי (on by default) |
+| Questions not seen yet first | קודם שאלות שעוד לא ראיתי (on by default; never "רק": the setup fills with seen ones when the unseen run out; not offered for the whole exam) |
 | The simulation's clock | נשארו 1:42:10 (one clock for the whole simulation; it goes on while the phone is locked) |
-| Where the student is | שאלה 37 מתוך 100 |
+| Where the student is | שאלה 37 מתוך 100; the result numbers its rows the same way, the exam's own number beside: שאלה 37 במבחן |
 | Coming back to a question | לסמן לחזרה; once marked: מסומנת לחזרה |
 | Every question at a glance | מפת השאלות: ענית · לחזרה · בלי תשובה |
 | Submitting | להגיש; before it: להגיש עכשיו? נשארו 6 שאלות בלי תשובה. |
 | Submitted by the clock | הזמן נגמר, והסימולציה הוגשה. |
-| The result | 71 מתוך 97 נכונות; 3 שאלות עם תשובה מוצעת · 3 לא נספרו |
+| The result | 71 מתוך 97 נכונות; 3 שאלות עם תשובה מוצעת · 3 לא נספרו; the time in words: זמן: 12 דקות מתוך 36 דקות, זמן: שעתיים ו-41 דקות מתוך 3 שעות, זמן: פחות מדקה מתוך 30 דקות (never "0:01" beside "דקות") |
 | A mistake in the result | בחרת א׳, הנכונה ג׳; a blank: לא ענית. הנכונה ג׳ |
 | Practising a simulation's mistakes | רק הטעויות; the session's title: הטעויות מהסימולציה |
 | A simulation left open | יש סימולציה שעוד לא הוגשה · להמשיך |
-| Confirming a suggested key | לאשר; another: לסמן תשובה אחרת; none yet: לסמן תשובה |
-| A change of a key in the log | נועה: ג׳ במקום א׳ · נועה: אישור של ב׳ · נועה: ביטול (no gendered verbs) |
+| Confirming a suggested key | לאשר; another: לסמן תשובה אחרת; none yet: לסמן תשובה; done: התשובה ג׳ אושרה. (a true/false or match item: התשובה המוצעת אושרה.) |
+| A true/false or match item without a key | בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד. |
+| An undo the key moved past | התשובה השתנתה מאז, אז אי אפשר לבטל. אפשר לסמן את התשובה הנכונה. |
+| A change of a key in the log | נועה: ג׳ במקום א׳ · נועה: אישור של ב׳ · נועה: אישור התשובה המוצעת · נועה: ביטול (חזרה לתשובה המוצעת) (no gendered verbs) |
 | The reading while the server works | אפשר לסגור את הטלפון. ההעתקה ממשיכה בלעדיו. |
 | The reading when the phone copies (no server writer) | הטלפון מעתיק את הדפים. כדאי להשאיר את המסך פתוח. |
 
