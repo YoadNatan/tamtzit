@@ -3,6 +3,7 @@ import { CardsHubCard } from "../features/cards";
 import type { ScreenProps } from "../features/types";
 import { listLectures, type LectureRow } from "../lib/api";
 import { flags } from "../lib/flags";
+import { courseKey } from "../../../shared/study/courseKey";
 import { openBatches, practiceOverview, watchPractice, type Overview } from "../lib/practice";
 import { Head, Loading, RouteLink } from "./Shell";
 
@@ -54,12 +55,18 @@ export default function PracticeHome({ ctx }: ScreenProps<"practice">) {
 
   const byLecture = useMemo(() => new Map(overview.filter((o) => o.lecture_id).map((o) => [o.lecture_id as string, o])), [overview]);
   const courses = useMemo(() => {
-    const map = new Map<string, LectureRow[]>();
+    // With VITE_STUDY_COURSES a course is grouped by its key, as the course
+    // page and s=c.<course> match it ("Micro" and "micro" are one heading,
+    // named as first written); without it, by the exact text, as before.
+    const map = new Map<string, { name: string; list: LectureRow[] }>();
     for (const l of lectures ?? []) {
-      const key = l.course.trim() || "בלי קורס";
-      map.set(key, [...(map.get(key) ?? []), l]);
+      const name = l.course.trim() || "בלי קורס";
+      const key = flags.courses && l.course.trim() ? `k:${courseKey(l.course)}` : name;
+      const g = map.get(key) ?? { name, list: [] };
+      g.list.push(l);
+      map.set(key, g);
     }
-    return [...map.entries()];
+    return [...map.values()].map((g) => [g.name, g.list] as const);
   }, [lectures]);
 
   return (

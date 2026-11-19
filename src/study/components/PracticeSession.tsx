@@ -7,6 +7,7 @@ import { paragraphPractice, practiceable } from "../lib/anchorTab";
 import { getLecture, getSections, lectureTitles, listLectures, partTitles, type Lecture } from "../lib/api";
 import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
+import { courseKey } from "../../../shared/study/courseKey";
 import { guideMark } from "../lib/guideMark";
 import {
   answerQuestion,
@@ -100,9 +101,11 @@ async function scopeQuestions(scope: S.Scope, groupId: string): Promise<PublicQu
       return listLectureQuestions(scope.lecture);
     case "course": {
       const lectures = await listLectures(groupId);
-      // A course's text as section S matches it (lower(btrim())): the course page's "(184)" counts the same lectures.
-      const key = scope.course.trim().toLowerCase();
-      return listCourseQuestions(lectures.filter((l) => l.course.trim().toLowerCase() === key).map((l) => l.id));
+      // With VITE_STUDY_COURSES, a course's text as section S matches it
+      // (courseKey): the course page's "(184)" counts the same lectures, and
+      // "תרגול" groups them so. Without it, the exact text, as before.
+      const same = flags.courses ? (c: string) => courseKey(c) === courseKey(scope.course) : (c: string) => c.trim() === scope.course;
+      return listCourseQuestions(lectures.filter((l) => same(l.course)).map((l) => l.id));
     }
     case "topic":
       return listGroupQuestions(groupId);

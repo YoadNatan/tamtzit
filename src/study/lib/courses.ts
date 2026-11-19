@@ -1,3 +1,4 @@
+import { courseKey as sharedCourseKey } from "../../../shared/study/courseKey";
 import { postStudy, readLines, sb } from "./api";
 
 /* ── Courses: the data (sources.md, phase 1; section S 1) ──
@@ -49,8 +50,8 @@ export type CourseOverview = {
   questions: number;
 };
 
-/** The key a course is matched by: its text, trimmed, in lower case (the SQL's lower(btrim())). */
-export const courseKey = (name: string) => name.trim().toLowerCase();
+/** The key a course is matched by (shared/study/courseKey.ts, the SQL's study_private.course_key). */
+export const courseKey = (name: string) => sharedCourseKey(name);
 
 /** Every course of the group, by name. */
 export async function coursesOf(groupId: string): Promise<CourseRow[]> {
@@ -110,7 +111,7 @@ export type CourseTurn = { q: string; u: string; a: string; sig: string; at: str
 
 /** POST /api/study/ai { op: "ask", scope: "course" } and its NDJSON lines; throws Error(code). */
 export async function askCourseStream(
-  body: { courseId: string; question: string; history: Array<{ u: string; a: string; sig: string }> },
+  body: { courseId: string; question: string; history: Array<{ u: string; a: string; sig: string; lectures?: Array<{ n: number; id: string }> }> },
   onLine: (l: CourseAskLine) => void,
   signal?: AbortSignal,
 ): Promise<void> {
