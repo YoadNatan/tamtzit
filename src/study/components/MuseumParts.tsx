@@ -49,14 +49,14 @@ export function MuseumCardBody({ ctx }: { ctx: Ctx }) {
   return (
     <section className="a-stack museum-card" aria-labelledby="museum-card-h">
       <div className="a-sec">
-        <h2 id="museum-card-h">מוזיאון המלכודות</h2>
+        <h2 id="museum-card-h">טעויות נפוצות</h2>
         {meter.state === "open" && meter.exhibits > 0 ? <span className="a-chip fun">{meter.exhibits}</span> : null}
       </div>
       <RouteLink to={{ v: "museum" }} go={ctx.go} className="a-li row-link">
         <div className="pulse-card-line">
           {top ? (
             <b className="museum-card-claim">
-              מוצג מס׳ {top.exhibit_no}: {isolateLatin(claimOf(top), `mc${top.trap_id}`)}
+              טעות מס׳ {top.exhibit_no}: {isolateLatin(claimOf(top), `mc${top.trap_id}`)}
             </b>
           ) : null}
           <span className={top ? "m" : undefined}>{isolateLatin(line, "mcl")}</span>
@@ -66,8 +66,8 @@ export function MuseumCardBody({ ctx }: { ctx: Ctx }) {
   );
 }
 
-/** The one chip on a trap card (review F-11): "חיסון · ממוזיאון המלכודות"
- *  with "מוצג מס׳ n" for a museum exhibit's card, else "מלכודת של הקבוצה".
+/** The one chip on a trap card (review F-11): "טעות נפוצה · לחזרה"
+ *  with "טעות מס׳ n" for a museum exhibit's card, else "טעות נפוצה בקבוצה".
  *  With `why`, museum.html s2's "למה זה כאן?" under a vaccine. */
 export function TrapBadgeBody({ ctx, cardId, why }: { ctx: Ctx; cardId: string; why?: boolean }) {
   const [k, setK] = useState<TrapCardKind | null>(null);
@@ -123,7 +123,7 @@ export function ExhibitBody({ ctx, lectureId, onShown }: { ctx: Ctx; lectureId: 
     <aside className="a-card flat museum-opening" aria-labelledby={`mo-${e.trap_id}`}>
       <div className="a-row between">
         <b className="a-small" id={`mo-${e.trap_id}`}>
-          פותחים במוצג מהמוזיאון
+          פותחים בטעות נפוצה
         </b>
         <span className="a-chip group">30 שניות</span>
       </div>

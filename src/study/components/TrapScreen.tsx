@@ -11,13 +11,13 @@ import { isolateLatin, richText } from "../lib/rich";
 import { BackLink, Head, Loading, RouteLink, StickyActions } from "./Shell";
 import "../styles/extras.css";
 
-/* ── P11 "להוסיף מלכודת משלי" (package E; spec §12.6.E) ──
+/* ── P11 "להוסיף שאלה משלי" (package E; spec §12.6.E) ──
  *
  * ?v=trap&l=<lecture>&at=<part>.<anchor> (from N's "תרגול" tab or a
  * lecture's practice), d=<draft> to fix one. The paragraph quoted; "מקרה (לא
- * חובה)", "השאלה", 4-5 options with "הנכונה", "מה המלכודת? (לא חובה)", the
+ * חובה)", "השאלה", 4-5 options with "הנכונה", "מה מבלבל בה? (לא חובה)", the
  * slide chips (the paragraph's own tags first); "לבדוק מול השקפים · כ-$0.03"
- * → "בודקים מול השקפים…" → "המלכודת נכנסה לבנק של כולם. השם שלך יופיע
+ * → "בודקים מול השקפים…" → "השאלה נכנסה לבנק של כולם. השם שלך יופיע
  * אחרי שתישאל במבחן קבוצתי." or the problem and "לתקן". Without a paragraph
  * the member picks the part. The meter (decision 3) is the author's own:
  * her traps in the bank, the ones a live quiz already named, the ones to
@@ -106,7 +106,7 @@ export default function TrapScreen({ route, ctx }: ScreenProps<"trap">) {
   if (error) {
     return (
       <main className="trap-screen">
-        <Head back={back} title="מלכודת משלי" />
+        <Head back={back} title="שאלה משלי" />
         <p className="a-error" role="alert">
           {error}
         </p>
@@ -181,12 +181,12 @@ export default function TrapScreen({ route, ctx }: ScreenProps<"trap">) {
         back={back}
         title={
           <>
-            מלכודת משלי · <bdi>{lecture.title}</bdi>
+            שאלה משלי · <bdi>{lecture.title}</bdi>
           </>
         }
       />
       <p className="ph-sub trap-meter">
-        <span>{meter.line || "עוד אין מלכודת שלך בבנק"}</span>
+        <span>{meter.line || "עוד אין שאלה שלך בבנק"}</span>
         <span className="a-chip">רק לך</span>
       </p>
       {meter.next ? <p className="a-small a-muted trap-next">{meter.next}</p> : null}
@@ -196,10 +196,10 @@ export default function TrapScreen({ route, ctx }: ScreenProps<"trap">) {
           <h2 id="trap-done-h" className="a-h2" tabIndex={-1} ref={top as RefObject<HTMLHeadingElement>}>
             <span className="a-chip ok">✓ נבדקה מול השקפים</span>
           </h2>
-          <p className="a-para">המלכודת נכנסה לבנק של כולם. השם שלך יופיע אחרי שתישאל במבחן קבוצתי.</p>
+          <p className="a-para">השאלה נכנסה לבנק של כולם. השם שלך יופיע אחרי שתישאל במבחן קבוצתי.</p>
           <div className="a-row">
             <button type="button" className="a-btn" onClick={fresh}>
-              עוד מלכודת
+              עוד שאלה
             </button>
             <RouteLink to={{ v: "practice", l: lectureId }} go={ctx.go} className="a-btn ghost">
               לתרגול של ההרצאה
@@ -299,7 +299,7 @@ export default function TrapScreen({ route, ctx }: ScreenProps<"trap">) {
             ) : null}
           </fieldset>
           <label className="a-field">
-            <span>מה המלכודת? (לא חובה)</span>
+            <span>מה מבלבל בה? (לא חובה)</span>
             <input className="a-input" value={note} maxLength={TRAPS.NOTE_MAX} disabled={!editable} onChange={(e) => setNote(e.target.value)} placeholder="למשל: רוב האנשים בוחרים ECG" dir="rtl" />
           </label>
           <div className="a-stack">
@@ -331,7 +331,7 @@ export default function TrapScreen({ route, ctx }: ScreenProps<"trap">) {
       {here.length ? (
         <section className="a-stack trap-mine" aria-labelledby="trap-mine-h">
           <div className="a-sec">
-            <h2 id="trap-mine-h">המלכודות שלי בהרצאה</h2>
+            <h2 id="trap-mine-h">השאלות שלי בהרצאה</h2>
             <span className="a-chip">רק לך</span>
           </div>
           <ul className="a-list">

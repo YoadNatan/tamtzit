@@ -255,9 +255,9 @@ begin
   else
     v_name := course;
   end if;
-  v_name := left('ההידרה של ' || coalesce(v_name, 'הקורס'), 160);
+  v_name := left(coalesce(v_name, 'הקורס'), 160);
   qid := public.study_quiz_create(p_group, 'boss', lec, planned, coalesce(p_seconds, 45), 'all');
-  update public.study_quizzes z set title = left('קרב הבוס · ' || v_name, 200) where z.id = qid;
+  update public.study_quizzes z set title = left('אתגר קבוצתי · ' || v_name, 200) where z.id = qid;
   insert into public.study_boss_battles (quiz_id, group_id, name, lecture_ids, heads, rounds, planned, revenge_of)
   values (qid, p_group, v_name, lec, v_heads, rounds, planned, p_revenge);
   return qid;
@@ -636,6 +636,17 @@ insert into study_private.schema_sections (section, version) values ('H', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- H 3: a battle asks one-answer questions only (boss_askable), a picture's with more time.
 insert into study_private.schema_sections (section, version) values ('H', 3)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- H 4 (plain copy, docs/study/COPY.md): a battle is 'אתגר קבוצתי · {course}'
+-- (was 'קרב הבוס · ההידרה של {course}'); battles opened before are said the
+-- new way too (both updates are no-ops once done, so the file stays re-runnable).
+update public.study_boss_battles set name = substr(name, char_length('ההידרה של ') + 1)
+ where name like 'ההידרה של %';
+update public.study_quizzes set title = 'אתגר קבוצתי · ' || substr(title, char_length('קרב הבוס · ההידרה של ') + 1)
+ where mode = 'boss' and title like 'קרב הבוס · ההידרה של %';
+update public.study_quizzes set title = 'אתגר קבוצתי · ' || substr(title, char_length('קרב הבוס · ') + 1)
+ where mode = 'boss' and title like 'קרב הבוס · %';
+insert into study_private.schema_sections (section, version) values ('H', 4)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION H ════
 

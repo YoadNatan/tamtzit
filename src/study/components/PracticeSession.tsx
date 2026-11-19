@@ -506,7 +506,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         const said = S.mistakeNote({ wrongAt: m?.wrong_at ?? null, wrongHere: false, now: Date.now(), day: studyDay });
         if (said === "tomorrow") note = "השאלה תחזור מחר, כדי לבדוק שזה נשאר";
         if (said === "cleared") note = "יצאה מרשימת הטעויות";
-        if (origin && data.danger.has(origin)) note = "ברשימת הסכנה עד פעמיים נכון ׳על בטוח׳, בימים שונים";
+        if (origin && data.danger.has(origin)) note = "חוזרת אליך עד פעמיים נכון ׳על בטוח׳, בימים שונים";
       } else {
         // Another question on the same paragraph is what "בניסוח אחר" will ask (study_my_rewordings).
         const other = qq.anchor !== null && Object.values(data.byId).some((x) => x.id !== qq.id && isActive(x) && x.lecture_id === qq.lecture_id && x.part_idx === qq.part_idx && x.anchor === qq.anchor);
@@ -542,7 +542,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
               </span>
             ) : null}
             {origin && origin !== qq.id ? <span className="a-chip busy pq-again">בניסוח אחר</span> : null}
-            {/* E: a member's trap ("מלכודת של חבר בקבוצה"), named once a live quiz unmasked it. */}
+            {/* E: a member's trap ("שאלה של מישהו מהקבוצה"), named once a live quiz unmasked it. */}
             <TrapChip ctx={ctx} questionId={qq.id} source={qq.source} />
           </>
         }

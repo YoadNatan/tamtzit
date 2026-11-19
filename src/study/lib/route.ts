@@ -565,7 +565,7 @@ export const BACK_LABEL: Record<string, string> = {
   cards: "→ לכרטיסיות",
   ask: "→ לשאלה",
   plan: "→ לתוכנית",
-  marathon: "→ למרתון",
+  marathon: "→ לערב הלמידה",
   wall: "→ לקיר",
   library: "→ לספרייה",
   group: "→ יחד",

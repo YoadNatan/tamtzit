@@ -176,7 +176,7 @@ const SMALL = { width: 360, height: 640 };
       const ids = await page.locator(".g-step").evaluateAll((els) => els.map((e) => e.dataset.step));
       check("guide1: the library is the home, with the card after its actions", (await page.locator("main.library .lib-actions + .g-steps").count()) === 1, path0(page));
       check("guide1: only the steps whose features are on", ids.every((id) => ["S1", "S2", "S4", "S6"].includes(id)) && ids.includes("S1"), ids.join(","));
-      const OFF = /מבחן קבוצתי|כולנו נגד|פגישה|התור|״היום״|אסוציאציה|קיר|תיקון|״לשאול״|דופק|הבוס|מוזיאון/;
+      const OFF = /מבחן קבוצתי|כולנו נגד|פגישה|התור|״היום״|אסוציאציה|קיר|תיקון|״לשאול״|מה קשה לקבוצה|אתגר קבוצתי|טעויות נפוצות/;
       const cardText = await page.locator(".g-steps").innerText();
       check("guide1: the card names nothing that is off", !OFF.test(cardText), cardText);
       await shot(page, "guide1-card");

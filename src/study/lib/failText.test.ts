@@ -24,6 +24,11 @@ import { BOSS_NOT_COUNTED, failShort, failText, hasText, INTERNAL_CODES, isInter
 
 const root = process.cwd();
 const read = (p: string) => readFileSync(join(root, p), "utf8");
+/** The plain copy pass (docs/study/COPY.md) rewords some of the spec's sentences:
+ *  its table "| where | the spec said | now |", as a map from the old to the new. */
+const COPY_NOW = new Map(
+  [...readFileSync(join(process.cwd(), "docs", "study", "COPY.md"), "utf8").matchAll(/^\| [^|]+ \| "([^"]+)" \| "([^"]+)" \|$/gm)].map((m) => [m[1], m[2]] as const),
+);
 const ADDENDUM_SQL = join("docs", "study", "spec", "addendum", "sql");
 const addendumFiles = readdirSync(join(root, ADDENDUM_SQL))
   .filter((f) => f.endsWith(".sql"))
@@ -226,11 +231,12 @@ test("§12.7.4's own rows are failText's, word for word", () => {
   for (const r of rows) {
     if (r.code === "no heads") {
       // "the fun design's line, plus for a member the pulse does not count: "…""
-      assert.equal(`"${BOSS_NOT_COUNTED}"`, /"([^"]+)"/.exec(r.text)?.[0], "no heads: the second line");
+      const said = /"([^"]+)"/.exec(r.text)?.[1] ?? "";
+      assert.equal(BOSS_NOT_COUNTED, COPY_NOW.get(said) ?? said, "no heads: the second line (as docs/study/COPY.md says it now)");
       assert.ok(hasText("no heads", "boss"), "no heads: the fun design's line");
       continue;
     }
-    assert.equal(failText(r.code, r.area), r.text, `${r.area}:${r.code}`);
+    assert.equal(failText(r.code, r.area), COPY_NOW.get(r.text) ?? r.text, `${r.area}:${r.code}`);
   }
   // The internal row: "`is reader`, `bad mode`, `checked` (wall, plan), `forbidden` (study_ask_to_group with an attempt)".
   assert.ok(isInternal("is reader") && isInternal("bad mode") && isInternal("checked", "wall") && isInternal("checked", "plan"));
@@ -292,7 +298,7 @@ test("the area decides, then the code, then the area's fallback (§6.3)", () => 
   assert.equal(failText("lecture not found", "plan"), "אחת ההרצאות כבר לא קיימת. כדאי לרענן.");
   assert.equal(failText("lecture not found"), "ההרצאה הזו נמחקה או לא נמצאה. אפשר לבדוק ב״נמחקו לאחרונה״.");
   assert.equal(failText("not signed in"), "הכניסה במכשיר הזה פגה. צריך להצטרף מחדש עם קוד הקבוצה.", "without flags.account");
-  assert.equal(failText("conflict", "marathon"), "המרתון השתנה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");
+  assert.equal(failText("conflict", "marathon"), "ערב הלמידה השתנה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");
   // §12's areas
   assert.equal(failText("conflict", "meeting"), "הפגישה השתנתה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");
   assert.equal(failText("conflict", "plan"), "התוכנית השתנתה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");

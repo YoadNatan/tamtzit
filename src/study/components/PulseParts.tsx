@@ -14,7 +14,7 @@ import { RouteLink } from "./Shell";
 
 type CardData = { meter: Meter; rows: PulseRow[]; titles: Record<string, string> };
 
-/** P-11 "דופק הקבוצה" on "יחד": up to three lectures with hot topics; below
+/** P-11 "מה קשה לקבוצה" on "יחד": up to three lectures with hot topics; below
  *  the floor, the meter (decision 3); hidden while the switch is off or the
  *  member is out. */
 export function PulseCardBody({ ctx }: { ctx: Ctx }) {
@@ -46,14 +46,14 @@ export function PulseCardBody({ ctx }: { ctx: Ctx }) {
       else if (rows.length) lines.push({ key: "c", to: { v: "pulse" }, text: "הכול יושב טוב" });
       else {
         const close = meter.lectures.filter((m) => m.need != null).sort((a, b) => (a.need ?? 9) - (b.need ?? 9))[0];
-        lines.push({ key: "m", to: close ? { v: "pulse", l: close.lecture_id } : { v: "pulse" }, title: close ? titles[close.lecture_id] ?? "" : undefined, text: close ? needLine(close.need ?? PULSE.FLOOR) : `עוד אין דופק. הוא מופיע כשלפחות ${PULSE.FLOOR} מכם מתרגלים הרצאה.` });
+        lines.push({ key: "m", to: close ? { v: "pulse", l: close.lecture_id } : { v: "pulse" }, title: close ? titles[close.lecture_id] ?? "" : undefined, text: close ? needLine(close.need ?? PULSE.FLOOR) : `עוד אין מספיק תשובות. זה מופיע כשלפחות ${PULSE.FLOOR} מכם מתרגלים הרצאה.` });
       }
     }
   }
   return (
     <section className="a-stack pulse-card" aria-labelledby="pulse-card-h">
       <div className="a-sec">
-        <h2 id="pulse-card-h">דופק הקבוצה</h2>
+        <h2 id="pulse-card-h">מה קשה לקבוצה</h2>
         {meter.state === "open" && rows.length ? <span className="a-small a-muted">עודכן הלילה</span> : null}
       </div>
       <ul className="a-list">
@@ -76,7 +76,7 @@ export function PulseCardBody({ ctx }: { ctx: Ctx }) {
   );
 }
 
-/** P-12 "לא לכלול אותי בדופק" under "שלי" → הגדרות. */
+/** P-12 "לא לכלול אותי בספירה" under "שלי" → הגדרות. */
 export function PulseSettingBody({ ctx }: { ctx: Ctx }) {
   const [out, setOut] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
@@ -96,7 +96,7 @@ export function PulseSettingBody({ ctx }: { ctx: Ctx }) {
     setOut(next); // at once: the box follows the tap, and goes back if the write fails
     try {
       await setOptOut(ctx.group.id, next);
-      ctx.say(next ? "יצאת מהספירה. מהלילה הבא התשובות שלך לא נספרות, והדופק לא מוצג לך." : "חזרת לספירה. הדופק יחזור אחרי הספירה של הלילה.");
+      ctx.say(next ? "יצאת מהספירה. מהלילה הבא התשובות שלך לא נספרות, ו״מה קשה לקבוצה״ לא מוצג לך." : "חזרת לספירה. ״מה קשה לקבוצה״ יחזור אחרי הספירה של הלילה.");
     } catch {
       setOut(!next);
       ctx.say("ההגדרה לא נשמרה. כדאי לבדוק את החיבור.");
@@ -107,7 +107,7 @@ export function PulseSettingBody({ ctx }: { ctx: Ctx }) {
   return (
     <label className="a-li setting-row setting-check pulse-setting">
       <span className="a-stack">
-        <span>לא לכלול אותי בדופק</span>
+        <span>לא לכלול אותי בספירה</span>
         <small className="a-small a-muted">{SETTING_LINE}</small>
       </span>
       <input type="checkbox" checked={out} disabled={busy} onChange={(e) => void change(e.target.checked)} />

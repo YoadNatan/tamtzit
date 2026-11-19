@@ -14,7 +14,7 @@ import "../styles/var.css";
  * A lecture's corrections (who corrected, who approved, the source; "ביטול"
  * only on a paragraph's latest correction, never on an undo: §12.3.K's
  * undoable()), the VAR verdicts (both sides, the outcome, the certainty)
- * and "כרטיס צהוב לשקף": slips in the deck itself (slide 28 repeats Quinine,
+ * and "טעות בשקף": slips in the deck itself (slide 28 repeats Quinine,
  * slide 29 says "pyridine"), each undone or put back in one tap. Newest
  * first, live. "כל שינוי ביומן: עם מקור, היסטוריה וביטול בלחיצה." */
 
@@ -93,7 +93,7 @@ export default function LogScreen({ route, ctx }: ScreenProps<"log">) {
           <Loading />
         )
       ) : log.length === 0 ? (
-        <p className="a-small a-muted">עוד אין ביומן תיקונים, פסיקות או כרטיסים צהובים לשקפים.</p>
+        <p className="a-small a-muted">עוד אין ביומן תיקונים, הכרעות או טעויות בשקפים.</p>
       ) : (
         <ul className="a-list v-log-list" aria-label="יומן התיקונים">
           {log.map((e) =>
@@ -123,7 +123,7 @@ export default function LogScreen({ route, ctx }: ScreenProps<"log">) {
             ) : e.kind === "verdict" ? (
               <VerdictRow key={e.id} e={e} go={ctx.go} />
             ) : (
-              <SlideRow key={e.id} e={e} onToggle={(remove) => void run(() => removeSlideFlag(e.id, remove), remove ? "הכרטיס הצהוב לשקף הוסר." : "הכרטיס הצהוב לשקף חזר.")} />
+              <SlideRow key={e.id} e={e} onToggle={(remove) => void run(() => removeSlideFlag(e.id, remove), remove ? "הסימון ׳טעות בשקף׳ הוסר." : "הסימון ׳טעות בשקף׳ חזר.")} />
             ),
           )}
         </ul>
@@ -148,7 +148,7 @@ export default function LogScreen({ route, ctx }: ScreenProps<"log">) {
       ) : (
         <StickyActions>
           <button className="a-btn primary wide" onClick={() => setFlagging(true)}>
-            כרטיס צהוב לשקף
+            טעות בשקף
           </button>
         </StickyActions>
       )}
@@ -156,14 +156,14 @@ export default function LogScreen({ route, ctx }: ScreenProps<"log">) {
   );
 }
 
-/** "פסיקת VAR: …" with both sides and the outcome (corrections.html s3). */
+/** "הכרעה מול השקפים: …" with both sides and the outcome (corrections.html s3). */
 function VerdictRow({ e, go }: { e: LogVerdict; go: ScreenProps<"log">["ctx"]["go"] }) {
   const c = e.certainty ? CERTAINTY[e.certainty] : null;
   return (
     <li className="a-li v-log-row">
       <div>
         <b>
-          פסיקת <bdi dir="ltr">VAR</bdi>
+          הכרעה מול השקפים
           {e.state === "overridden" ? " · בהרצאה נאמר אחרת" : e.state === "judged" ? " · מחכה להחלטה" : ""}
         </b>
         <span className="m">
@@ -173,7 +173,7 @@ function VerdictRow({ e, go }: { e: LogVerdict; go: ScreenProps<"log">["ctx"]["g
         {e.state === "overridden" && e.decision_note ? <span className="m">{`בהרצאה: `}{vText(e.decision_note, `ln${e.id}`)}</span> : null}
         <span className="a-row v-log-acts">
           <RouteLink to={{ v: "dispute", d: e.id }} go={go} className="a-link">
-            לכרטיס הצהוב
+            למחלוקת
           </RouteLink>
         </span>
       </div>
@@ -182,9 +182,9 @@ function VerdictRow({ e, go }: { e: LogVerdict; go: ScreenProps<"log">["ctx"]["g
   );
 }
 
-/** "כרטיס צהוב לשקף 28": the deck's own slip; removed in one tap, or put back. */
+/** "טעות בשקף 28": the deck's own slip; removed in one tap, or put back. */
 function SlideRow({ e, onToggle }: { e: LogSlide; onToggle: (remove: boolean) => void }) {
-  const head = e.slides.length === 1 ? `כרטיס צהוב לשקף ${e.slides[0]}` : `כרטיס צהוב לשקפים ${e.slides.join(", ")}`;
+  const head = e.slides.length === 1 ? `טעות בשקף ${e.slides[0]}` : `טעות בשקפים ${e.slides.join(", ")}`;
   return (
     <li className={`a-li v-log-row${e.removed ? " removed" : ""}`}>
       <div>
@@ -203,7 +203,7 @@ function SlideRow({ e, onToggle }: { e: LogSlide; onToggle: (remove: boolean) =>
   );
 }
 
-/** "כרטיס צהוב לשקף": which slides (1-4) and what is wrong on them (5-300 characters). */
+/** "טעות בשקף": which slides (1-4) and what is wrong on them (5-300 characters). */
 function SlideFlagForm({ last, onSend, onCancel }: { last: number; onSend: (slides: number[], note: string) => Promise<void>; onCancel: () => void }) {
   const [spec, setSpec] = useState("");
   const [note, setNote] = useState("");
@@ -211,8 +211,8 @@ function SlideFlagForm({ last, onSend, onCancel }: { last: number; onSend: (slid
   const slides = [...new Set(spec.split(/[\s,]+/).filter(Boolean).map(Number))].filter((n) => Number.isInteger(n) && n >= 1 && (!last || n <= last));
   const bad = spec.trim() !== "" && (slides.length === 0 || slides.length > 4);
   return (
-    <section className="a-card flat a-stack v-flag-form" aria-label="כרטיס צהוב לשקף">
-      <b>כרטיס צהוב לשקף</b>
+    <section className="a-card flat a-stack v-flag-form" aria-label="טעות בשקף">
+      <b>טעות בשקף</b>
       <p className="a-small a-muted">טעות בשקפים עצמם: היא נשמרת ביומן של ההרצאה, והסיכום לא משתנה.</p>
       <label className="a-field">
         <span>{last ? `שקף (1-${last}; עד 4, בפסיקים)` : "שקף (עד 4, בפסיקים)"}</span>

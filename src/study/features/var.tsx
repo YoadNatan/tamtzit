@@ -51,7 +51,7 @@ function useLectureDisputes(lectureId: string | null): DisputeRow[] {
   return rows;
 }
 
-/** V's additions to the lecture: under a paragraph, the pinned "פסיקת VAR"
+/** V's additions to the lecture: under a paragraph, the pinned "הכרעה מול השקפים"
  *  box (after "לקבל") or the chip of its open yellow card; in the action
  *  row, "יומן התיקונים". */
 export function useLectureV(lc: LectureCtx): LectureExt {

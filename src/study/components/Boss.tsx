@@ -10,13 +10,13 @@ import { quizErrorText } from "../lib/quiz";
 import { isolateLatin } from "../lib/rich";
 import { BackLink, Head, Loading, RouteLink, StickyActions } from "./Shell";
 
-/* ── קרב הבוס: a new battle (?v=boss, ?v=boss&new=1, ?v=boss&l=; package H,
+/* ── אתגר קבוצתי: a new battle (?v=boss, ?v=boss&new=1, ?v=boss&l=; package H,
  * H-1; boss.html, the fun design B1) ──
  *
  * The lectures to fight on (every lecture, or one), the heads a battle on
  * them would have now (2-4 of the pulse's hot topics and the museum's
- * exhibits), decision 3's meter ("3 מתוך 8 נושאים חמים · עוד כ-20 תשובות
- * לנושא הבא"), the seconds a question, and "לפתוח את הקרב": Z's lobby of
+ * exhibits), decision 3's meter ("3 מתוך 8 נושאים קשים · עוד כ-20 תשובות
+ * לנושא הבא"), the seconds a question, and "לפתוח את האתגר": Z's lobby of
  * a quiz in mode "boss" (?v=quiz&q=). With fewer than two heads the screen
  * stays open with the meter and practice beside it, never a dead end. A lost
  * battle's revenge round opens from the next study day. */
@@ -69,7 +69,7 @@ export default function BossScreen({ route, ctx }: ScreenProps<"boss">) {
 
   const head = (
     <>
-      <Head back={<BackLink go={ctx.go} fallback={{ v: "group" }} />} title="קרב הבוס">
+      <Head back={<BackLink go={ctx.go} fallback={{ v: "group" }} />} title="אתגר קבוצתי">
         {open && open.state === "open" && headsChip(open.heads.length) ? <span className="a-chip fun">{headsChip(open.heads.length)}</span> : null}
       </Head>
       <p className="ph-sub">
@@ -99,7 +99,7 @@ export default function BossScreen({ route, ctx }: ScreenProps<"boss">) {
       {open?.state === "off" ? <p className="a-card flat a-muted boss-state">{failText("off", "boss")}</p> : null}
       {open?.state === "out" ? (
         <div className="a-card flat boss-state">
-          <p>התשובות שלך לא נספרות בדופק, ולכן גם ראשי הבוס לא מוצגים. אפשר לחזור לספירה ב׳שלי׳.</p>
+          <p>התשובות שלך לא נספרות, ולכן גם הנושאים של האתגר לא מוצגים לך. אפשר לחזור לספירה ב׳שלי׳.</p>
           <RouteLink to={{ v: "me" }} go={ctx.go} className="a-btn small">
             לשלי
           </RouteLink>
@@ -116,7 +116,7 @@ export default function BossScreen({ route, ctx }: ScreenProps<"boss">) {
         <>
           <section className="a-stack" aria-labelledby="boss-on-h">
             <div className="a-sec">
-              <h2 id="boss-on-h">על מה נלחמים</h2>
+              <h2 id="boss-on-h">על אילו הרצאות</h2>
             </div>
             <div className="a-wrap boss-lectures" role="radiogroup" aria-label="ההרצאות">
               <button type="button" role="radio" aria-checked={pick === null} className={`a-chip${pick === null ? " fun" : ""}`} onClick={() => setPick(null)}>
@@ -132,8 +132,8 @@ export default function BossScreen({ route, ctx }: ScreenProps<"boss">) {
 
           <section className="a-stack" aria-labelledby="boss-heads-h">
             <div className="a-sec">
-              <h2 id="boss-heads-h">הראשים</h2>
-              <span className="a-small a-muted">עד {BOSS.MAX_HEADS}, מהדופק ומהמוזיאון</span>
+              <h2 id="boss-heads-h">הנושאים</h2>
+              <span className="a-small a-muted">עד {BOSS.MAX_HEADS}, מ״מה קשה לקבוצה״ ומהטעויות הנפוצות</span>
             </div>
             {open.heads.length ? (
               <ul className="a-wrap boss-heads">
@@ -165,13 +165,13 @@ export default function BossScreen({ route, ctx }: ScreenProps<"boss">) {
           {revenge ? (
             <section className="a-card flat boss-revenge" aria-labelledby="boss-rev-h">
               <div className="a-row between">
-                <b id="boss-rev-h">סבב נקמה</b>
+                <b id="boss-rev-h">סבב חוזר</b>
                 <span className={`a-chip ${revenge.open ? "warn" : ""}`.trim()}>{revenge.open ? "פתוח" : "נפתח מחר"}</span>
               </div>
               <p className="a-small">{isolateLatin(`${revenge.name}: ${revenge.heads?.join(" · ") ?? ""}`, "rv")}</p>
               {revenge.open ? (
                 <button type="button" className="a-btn" disabled={busy} onClick={() => void start(revenge.battle)}>
-                  לסבב הנקמה
+                  לסבב החוזר
                 </button>
               ) : null}
             </section>
@@ -201,7 +201,7 @@ export default function BossScreen({ route, ctx }: ScreenProps<"boss">) {
       {open?.state === "open" ? (
         <StickyActions>
           <button type="button" className="a-btn primary wide" disabled={!canStart || busy} onClick={() => void start()}>
-            {busy ? "פותחים…" : "לפתוח את הקרב"}
+            {busy ? "פותחים…" : "לפתוח את האתגר"}
           </button>
         </StickyActions>
       ) : null}

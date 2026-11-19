@@ -4,7 +4,7 @@ import { isolateLatin } from "../lib/rich";
 import { CERTAINTY, type Verdict } from "../lib/var";
 import "../styles/var.css";
 
-/* ── "פסיקת VAR" (package V; corrections.html s2) ──
+/* ── "הכרעה מול השקפים" (package V; corrections.html s2) ──
  * The verdict as the approved card draws it: its certainty chip ("ודאות:
  * פרשנות"), what the slides say ("כתוב בשקף", each quote with its slides),
  * what is interpretation ("פרשנות"), and "כדאי לשמוע בהקלטה" when the
@@ -43,10 +43,10 @@ export function SlideTagOf({ slides }: { slides: number[] }) {
 export default function VerdictCard({ verdict, id }: { verdict: Verdict; id: string }) {
   const c = CERTAINTY[verdict.certainty] ?? CERTAINTY.unclear;
   return (
-    <section className="a-card v-verdict" aria-label="פסיקת VAR">
+    <section className="a-card v-verdict" aria-label="הכרעה מול השקפים">
       <div className="a-row between">
         <b>
-          פסיקת <bdi dir="ltr">VAR</bdi>
+          הכרעה מול השקפים
         </b>
         <span className={`a-chip ${c.chip}`.trim()}>{c.label}</span>
       </div>
@@ -74,7 +74,7 @@ export function AfterAccept({ verdict, id, done }: { verdict: Verdict; id: strin
         <b className="a-small">{done ? "התקבלה" : "אחרי ׳לקבל׳"}</b>
         {verdict.trap ? <span className="a-chip group">לתור של כולם</span> : null}
       </div>
-      <p className="a-small a-muted">{verdict.trap ? (done ? "הפסיקה ננעצה בסיכום, ונוסף כרטיס מלכודת:" : "הפסיקה ננעצת בסיכום, ונוסף כרטיס מלכודת:") : done ? "הפסיקה ננעצה בסיכום." : "הפסיקה ננעצת בסיכום."}</p>
+      <p className="a-small a-muted">{verdict.trap ? (done ? "ההכרעה הוצמדה לסיכום, ונוסף כרטיס על הטעות:" : "ההכרעה תוצמד לסיכום, ויתווסף כרטיס על הטעות:") : done ? "ההכרעה הוצמדה לסיכום." : "ההכרעה תוצמד לסיכום."}</p>
       {verdict.trap ? (
         <p className="a-small">
           <b>{vText(verdict.trap.front, `tf${id}`)}</b> {vText(verdict.trap.back.replace(/\s*\[ש['׳][^\]]*\]\s*/g, " ").trim(), `tb${id}`)} <SlideTagOf slides={verdict.trap.slides} />

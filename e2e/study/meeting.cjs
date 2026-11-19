@@ -12,7 +12,7 @@
 //      planned ahead, M 2); "יחד" shows the band "הקבוצה היום · HH:MM · ש׳ 1-5"
 //      with no reader line;
 //   2  M-2: four members guess before the reading (no key on any phone);
-//   3  "3 לקפה": Noa opens it, two join, three questions stacked with
+//   3  "שאלות פתיחה": Noa opens it, two join, three questions stacked with
 //      "1/3"…, each reveal a word ("רובכם צדקו"), never a number; the agenda's
 //      lines (today's reading, the open question sent from yesterday);
 //   4  Shoham reads aloud ("להתחיל להקריא"), Noa, Maya and Itai follow;
@@ -248,9 +248,9 @@ const israel = (ms) => {
       check("2 a guess is never an answer (study_answers untouched)", !P.answers.some((a) => [Q[3].id, Q[4].id].includes(a.question_id)));
       await shot(noaG, "meeting-03-guess");
 
-      /* ── 3. "3 לקפה": Noa opens it, Maya and Itai join; three stacked questions, a word per reveal ── */
+      /* ── 3. "שאלות פתיחה": Noa opens it, Maya and Itai join; three stacked questions, a word per reveal ── */
       const noa = noaG;
-      await noa.getByRole("button", { name: "לפתוח 3 לקפה" }).click();
+      await noa.getByRole("button", { name: "לפתוח את שאלות הפתיחה" }).click();
       await noa.locator(".m-inline").waitFor({ timeout: 10000 });
       for (const who of ["מאיה", "איתי"]) {
         const page = guessers[who];
@@ -269,7 +269,7 @@ const israel = (ms) => {
           await cur.locator(".a-opt").nth(i === 2 ? 1 : 0).click();
           if (round === 0 && i === 0) {
             const head = norm(await noa.locator(".ph-head").innerText());
-            check("3 the opening's head: 3 לקפה · בפרקים הקודמים with 1/3", head.includes("3 לקפה · בפרקים הקודמים") && head.includes("1/3"), head);
+            check("3 the opening's head: שאלות פתיחה · מה קראנו בפעם הקודמת with 1/3", head.includes("שאלות פתיחה · מה קראנו בפעם הקודמת") && head.includes("1/3"), head);
             await shot(noa, "meeting-04-coffee");
           }
           await cur.locator(".m-bets").getByRole("button", { name: "נראה לי" }).click();

@@ -2,21 +2,21 @@
 // members in the fixture lecture, with Yoad's decisions 1 and 3 of 17 Nov
 // 2026 (no accounts: a member of a week is counted; the museum opens with
 // whatever it has, with a meter, never a dead end).
-//   1. שוהם, counted last night: "מוזיאון המלכודות" on "יחד" with the newest
+//   1. שוהם, counted last night: "טעויות נפוצות" on "יחד" with the newest
 //      exhibit and the meter; the museum: the head with the course and the
 //      number of exhibits, "רק טעויות ׳על בטוח׳ של לפחות 3 מכם · בלי שמות",
 //      the newest exhibit as a card (number, "חדש", the claim, the plaque's
-//      line, "האמת:", "מה בלבל:", slides), "עוד במוזיאון" with "עוד נופלים",
-//      "עדיין תלוי" and "בפנסיה" last, the meter "4 מוצגים · עוד 2 הימורי
-//      ׳על בטוח׳ שגויים למוצג הבא", the footer; no member's name and no count
+//      line, "האמת:", "מה בלבל:", slides), "עוד טעויות נפוצות" with "עוד טועים בה",
+//      "עדיין פתוחה" and "נסגרה" last, the meter "4 טעויות נפוצות · עוד 2 הימורי
+//      ׳על בטוח׳ שגויים לטעות הנפוצה הבאה", the footer; no member's name and no count
 //      of people anywhere.
 //   2. Decision 3: an empty museum is an empty state with its meter and
-//      "לתרגל"; an exhibit found tonight says "מוצג חדש נפתח מחר"; a group
+//      "לתרגל"; an exhibit found tonight says "טעות נפוצה חדשה נפתחת מחר"; a group
 //      below 3 counted members says "עוד אדם אחד וזה נפתח".
 //   3. רוני joined two days ago: not counted, so no exhibit; the days left.
 //   4. נועה is out: the out line, no card on "יחד".
-//   5. The trap card's one chip in C's review: "חיסון · ממוזיאון המלכודות"
-//      with "מוצג מס׳ 4", and "למה זה כאן?" on its back (with CARDS_REVIEW).
+//   5. The trap card's one chip in C's review: "טעות נפוצה · לחזרה"
+//      with "טעות מס׳ 4", and "למה זה כאן?" on its back (with CARDS_REVIEW).
 //   6. The meeting opens with one exhibit (MU4), marked shown once.
 //   7. The switch 'pulse' off: "התכונה הזו כבויה כרגע בשרת." and no card.
 // Without the flag it checks that nothing of U-3 shows and no call of it is made.
@@ -38,7 +38,7 @@ if (!dist || !out) {
 fs.mkdirSync(out, { recursive: true });
 const flags = flagSetOf();
 const MEMBERS = ["שוהם", "נועה", "איתי", "מאיה", "דניאל", "רוני"];
-const NAMES = new RegExp(`((?<!לפחות )\\d+ (מכם|אנשים|חברים|תרגלו|טעו))|${MEMBERS.join("|")}`);
+const NAMES = new RegExp(`((?<!לפחות )\\d+ (מכם|אנשים|חברים|תרגלו|טעו)(?![א-ת]))|${MEMBERS.join("|")}`);
 
 (async () => {
   const mock = await createMock({ dist, flags: flags.set, members: MEMBERS });
@@ -74,7 +74,7 @@ const NAMES = new RegExp(`((?<!לפחות )\\d+ (מכם|אנשים|חברים|ת
       const s = await open("שוהם", "/?v=group");
       await s.locator("main").first().waitFor({ timeout: 15000 });
       await s.waitForTimeout(600);
-      expect((await s.getByRole("heading", { name: "מוזיאון המלכודות" }).count()) === 0, "no \"מוזיאון המלכודות\" on \"יחד\"");
+      expect((await s.getByRole("heading", { name: "טעויות נפוצות" }).count()) === 0, "no \"טעויות נפוצות\" on \"יחד\"");
       await go(s, "/?v=museum");
       await s.waitForURL((u) => !u.search.includes("v=museum"), { timeout: 15000 });
       expect(!new URL(s.url()).search.includes("museum"), "?v=museum leads elsewhere");
@@ -105,29 +105,29 @@ const NAMES = new RegExp(`((?<!לפחות )\\d+ (מכם|אנשים|חברים|ת
       await card.waitFor({ timeout: 15000 });
       const cardText = await card.innerText();
       steps.card = cardText.replace(/\n/g, " | ");
-      expect(/מוזיאון המלכודות/.test(cardText) && /מוצג מס׳ 4: ׳ב-proximal tubule׳/.test(cardText) && /4 מוצגים · עוד 2 הימורי ׳על בטוח׳ שגויים למוצג הבא/.test(cardText), "the card: the newest exhibit and the meter");
+      expect(/טעויות נפוצות/.test(cardText) && /טעות מס׳ 4: ׳ב-proximal tubule׳/.test(cardText) && /4 טעויות נפוצות · עוד 2 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה/.test(cardText), "the card: the newest exhibit and the meter");
       await card.scrollIntoViewIfNeeded();
       await shot(s, "h5-museum-card");
       await card.locator("a").first().click();
       await s.waitForURL((u) => u.search.includes("v=museum"), { timeout: 15000 });
       await s.locator(".museum-feature").waitFor({ timeout: 15000 });
       const h1 = await s.locator("h1").first().innerText();
-      expect(h1 === (course ? `מוזיאון המלכודות · ${course}` : "מוזיאון המלכודות"), `the head (${h1})`);
+      expect(h1 === (course ? `טעויות נפוצות · ${course}` : "טעויות נפוצות"), `the head (${h1})`);
       expect((await s.locator(".ph-head .a-chip.fun").innerText()) === "4", "the number of exhibits in the head");
       const sub = await s.locator(".ph-sub").first().innerText();
       expect(/רק טעויות ׳על בטוח׳ של לפחות 3 מכם/.test(sub) && /בלי שמות/.test(sub), "the line under the head");
       const feat = await s.locator(".museum-feature").innerText();
       steps.feature = feat.replace(/\n/g, " | ");
-      expect(/מוצג מס׳ 4/.test(feat) && /חדש/.test(feat) && /׳ב-proximal tubule׳/.test(feat), "the newest exhibit: its number, \"חדש\", the claim");
-      expect(/אמנים: כמה מכם\. חומרים: ביטחון עצמי, שקף 6\./.test(feat), "the plaque's line from the exhibit's own slide (the op is deferred)");
+      expect(/טעות מס׳ 4/.test(feat) && /חדש/.test(feat) && /׳ב-proximal tubule׳/.test(feat), "the newest exhibit: its number, \"חדש\", the claim");
+      expect(/כמה מכם בחרו בזה ׳על בטוח׳ · שקף 6\./.test(feat), "the plaque's line from the exhibit's own slide (the op is deferred)");
       expect(/האמת: ב-thick ascending limb, על NKCC2/.test(feat) && /ש׳ 6,7/.test(feat) && /מה בלבל: Acetazolamide/.test(feat), "\"האמת:\" with its slides, \"מה בלבל:\"");
       const more = await s.locator(".museum-list li").allInnerTexts();
       steps.more = more.map((r) => r.replace(/\n/g, " | "));
-      expect(more.length === 3 && /עוד נופלים/.test(more[0]) && /עדיין תלוי/.test(more[1]) && /בפנסיה/.test(more[2]), "\"עוד במוזיאון\": falling, hanging, retired last");
-      expect((await s.getByRole("heading", { name: "עוד במוזיאון" }).count()) === 1 && (await s.getByText("פנסיה: כולם צודקים ביומיים שונים").count()) === 1, "the section and its line");
+      expect(more.length === 3 && /עוד טועים בה/.test(more[0]) && /עדיין פתוחה/.test(more[1]) && /נסגרה/.test(more[2]), "\"עוד טעויות נפוצות\": falling, hanging, retired last");
+      expect((await s.getByRole("heading", { name: "עוד טעויות נפוצות" }).count()) === 1 && (await s.getByText("נסגרו: כולם ענו נכון ביומיים שונים").count()) === 1, "the section and its line");
       const meter = await s.locator(".museum-meter").innerText();
-      expect(/4 מוצגים · עוד 2 הימורי ׳על בטוח׳ שגויים למוצג הבא/.test(meter), "decision 3's meter under the exhibits");
-      expect((await s.getByText("מוצג נפתח רק למחרת, כדי שאי אפשר יהיה לנחש מי.").count()) === 1, "the footer");
+      expect(/4 טעויות נפוצות · עוד 2 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה/.test(meter), "decision 3's meter under the exhibits");
+      expect((await s.getByText("טעות חדשה מופיעה רק למחרת, כדי שאי אפשר יהיה לנחש מי.").count()) === 1, "the footer");
       const text = await s.locator("main").innerText();
       expect(!NAMES.test(text), "no member's name and no count of people");
       await shot(s, "h5-museum");
@@ -139,26 +139,26 @@ const NAMES = new RegExp(`((?<!לפחות )\\d+ (מכם|אנשים|חברים|ת
       await go(s, "/?v=museum");
       await s.locator(".museum-meter").waitFor({ timeout: 15000 });
       const empty = await s.locator("main").innerText();
-      expect(/מוצג נולד כש-3 מכם בוחרים ׳על בטוח׳ באותה תשובה שגויה/.test(empty) && /אין עדיין מוצגים · עוד הימור ׳על בטוח׳ שגוי אחד למוצג הבא/.test(empty), "empty: what makes an exhibit, and the meter");
+      expect(/טעות נכנסת לכאן כש-3 מכם בוחרים ׳על בטוח׳ באותה תשובה שגויה/.test(empty) && /עוד אין טעויות נפוצות · עוד הימור ׳על בטוח׳ שגוי אחד לטעות הנפוצה הבאה/.test(empty), "empty: what makes an exhibit, and the meter");
       expect((await s.locator(".museum-meter").getByRole("link", { name: "לתרגל" }).count()) === (flags.questions ? 1 : 0), "never a dead end: practice beside it");
       expect((await s.locator(".ph-head .a-chip.fun").count()) === 0, "no \"0\" chip in the head of an empty museum");
       await shot(s, "h5-museum-empty");
       M.soon = 1;
       await go(s, "/?v=museum");
       await s.locator(".museum-meter").waitFor({ timeout: 15000 });
-      expect(/אין עדיין מוצגים · מוצג חדש נפתח מחר/.test(await s.locator(".museum-meter").innerText()), "found tonight: \"מוצג חדש נפתח מחר\"");
+      expect(/עוד אין טעויות נפוצות · טעות נפוצה חדשה נפתחת מחר/.test(await s.locator(".museum-meter").innerText()), "found tonight: \"טעות נפוצה חדשה נפתחת מחר\"");
       M.soon = 0;
       P.groupNeed = 1;
       await go(s, "/?v=museum");
       await s.locator(".museum-meter").waitFor({ timeout: 15000 });
-      expect(/המוזיאון נפתח מ-3 מתרגלים: עוד אדם אחד וזה נפתח\./.test(await s.locator(".museum-meter").innerText()), "a group below the floor: its meter");
+      expect(/הטעויות הנפוצות נפתחות מ-3 מתרגלים: עוד אדם אחד וזה נפתח\./.test(await s.locator(".museum-meter").innerText()), "a group below the floor: its meter");
       P.groupNeed = 0;
       M.exhibits = kept;
       M.need = 2;
 
       /* ── 3. רוני: not counted yet ── */
       const r = await open("רוני", "/?v=museum");
-      await r.getByText(/המוזיאון ייפתח לך בעוד 5 ימים\./).waitFor({ timeout: 15000 });
+      await r.getByText(/הן ייפתחו לך בעוד 5 ימים\./).waitFor({ timeout: 15000 });
       expect((await r.locator(".museum-feature, .museum-list").count()) === 0, "רוני: no exhibit before a night counts him");
       expect(!M.calls.some((c) => c.fn === "study_museum" && c.who === id("רוני")), "רוני's phone never asks for the exhibits");
       await shot(r, "h5-museum-waiting");
@@ -166,7 +166,7 @@ const NAMES = new RegExp(`((?<!לפחות )\\d+ (מכם|אנשים|חברים|ת
       /* ── 4. נועה is out ── */
       P.out.add(id("נועה"));
       const n = await open("נועה", "/?v=museum");
-      await n.getByText(/ולכן גם המוזיאון לא מוצג/).waitFor({ timeout: 15000 });
+      await n.getByText(/ולכן גם הטעויות הנפוצות לא מוצגות לך/).waitFor({ timeout: 15000 });
       await go(n, "/?v=group");
       await n.getByRole("heading", { name: "שאלות פתוחות" }).waitFor({ timeout: 15000 });
       await n.waitForTimeout(800);
@@ -176,15 +176,15 @@ const NAMES = new RegExp(`((?<!לפחות )\\d+ (מכם|אנשים|חברים|ת
       /* ── 5. the trap card's chip in C's review ── */
       if (flags.cardsReview) {
         const part = db.sections.find((x) => x.lecture_id === L)?.idx ?? 0;
-        const c = cardsPlugin.trapCard(db, { lecture_id: L, part_idx: part, front: "Furosemide: איפה היא פועלת?", back: "ב-thick ascending limb, על NKCC2", extra: "המלכודת: ב-proximal tubule", slides: [6] });
+        const c = cardsPlugin.trapCard(db, { lecture_id: L, part_idx: part, front: "Furosemide: איפה היא פועלת?", back: "ב-thick ascending limb, על NKCC2", extra: "טעות נפוצה: ב-proximal tubule", slides: [6] });
         M.traps = [{ card_id: c.id, trap_id: M.exhibits[0].trap_id, lecture_id: L, exhibit_no: 4, kind: "museum" }];
         db.cardsMock.settings.set(id("שוהם"), { new_per_day: 20, retention: 0.9, home: "app" });
         await go(s, `/?v=cards&s=l.${L}`);
         await s.getByRole("button", { name: "להציג תשובה" }).waitFor({ timeout: 15000 });
-        await s.locator(".card-top").first().getByText("חיסון · ממוזיאון המלכודות").waitFor({ timeout: 10000 }).catch(() => undefined);
+        await s.locator(".card-top").first().getByText("טעות נפוצה · לחזרה").waitFor({ timeout: 10000 }).catch(() => undefined);
         const top = await s.locator(".card-top").first().innerText();
         steps.badge = top.replace(/\n/g, " | ");
-        expect(/חיסון · ממוזיאון המלכודות/.test(top) && /מוצג מס׳ 4/.test(top), `the vaccine's one chip (${steps.badge})`);
+        expect(/טעות נפוצה · לחזרה/.test(top) && /טעות מס׳ 4/.test(top), `the vaccine's one chip (${steps.badge})`);
         await s.getByRole("button", { name: "להציג תשובה" }).click();
         await s.locator(".museum-why").waitFor({ timeout: 15000 });
         expect(/למה זה כאן\?/.test(await s.locator(".museum-why").innerText()), "\"למה זה כאן?\" on its back");
@@ -204,7 +204,7 @@ const NAMES = new RegExp(`((?<!לפחות )\\d+ (מכם|אנשים|חברים|ת
         const ex = s.locator(".museum-opening");
         await ex.waitFor({ timeout: 15000 });
         const exText = await ex.innerText();
-        expect(/פותחים במוצג מהמוזיאון/.test(exText) && /30 שניות/.test(exText) && /׳ב-proximal tubule׳/.test(exText), "MU4: the meeting opens with the newest exhibit, 30 seconds");
+        expect(/פותחים בטעות נפוצה/.test(exText) && /30 שניות/.test(exText) && /׳ב-proximal tubule׳/.test(exText), "MU4: the meeting opens with the newest exhibit, 30 seconds");
         await ex.scrollIntoViewIfNeeded();
         await shot(s, "h5-museum-meeting");
         await ex.getByRole("button", { name: "ממשיכים בהקראה" }).click();

@@ -2,8 +2,8 @@
 // s3) on the shared mock, with Yoad's decision 3 of 17 Nov 2026 (the extras
 // open early, each with what there is and a meter, never a dead end):
 //   1. שוהם's lecture practice: "טבלה ריקה" lists the fixture's three tables
-//      (slides 8, 19, 20) with "3 טבלאות בשקפים של ההרצאה"; "מלכודת משלי"
-//      with "רק לך", its meter and "להוסיף מלכודת משלי".
+//      (slides 8, 19, 20) with "3 טבלאות בשקפים של ההרצאה"; "שאלה משלי"
+//      with "רק לך", its meter and "להוסיף שאלה משלי".
 //   2. The blank table of slide 19: "טבלה ריקה · {title}", "1/2", "הטבלה
 //      משקף 19, מהזיכרון · שורה אחר שורה"; the column's chips fill the "?"
 //      cell; a right row says so; a wrong one strikes the cell, says "טעות
@@ -17,11 +17,11 @@
 //      chips from its tags; a lead-in without "?" is caught before any call;
 //      "לבדוק מול השקפים · כ-$0.03" → "בודקים מול השקפים…" → "המלכודת נכנסה
 //      לבנק של כולם…"; one reservation; in the bank with no author and no
-//      created_by; the meter "מלכודת אחת שלך בבנק".
+//      created_by; the meter "שאלה אחת שלך בבנק".
 //   5. A second trap the check rejects: the problem and "לתקן"; fixed, the
 //      same draft passes (no new draft).
-//   6. N's "תרגול" tab on ¶1.3 has "להוסיף מלכודת משלי".
-//   7. נועה: none of שוהם's drafts; practice shows "מלכודת של חבר בקבוצה"
+//   6. N's "תרגול" tab on ¶1.3 has "להוסיף שאלה משלי".
+//   7. נועה: none of שוהם's drafts; practice shows "שאלה של מישהו מהקבוצה"
 //      and answering never names the author (review SEC-7); after a live
 //      quiz's reveal (the mock's stand-in for study_quiz__revealed) it says
 //      "נכתבה ע״י שוהם · נבדקה מול השקפים"; שוהם's meter counts it.
@@ -101,7 +101,7 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
       const s = await open("שוהם", `/?v=practice&l=${L}`);
       await s.waitForTimeout(1200);
       expect((await s.getByRole("heading", { name: "טבלה ריקה" }).count()) === 0, "no \"טבלה ריקה\" in a lecture's practice");
-      expect((await s.getByRole("heading", { name: "מלכודת משלי" }).count()) === 0, "no \"מלכודת משלי\" in a lecture's practice");
+      expect((await s.getByRole("heading", { name: "שאלה משלי" }).count()) === 0, "no \"שאלה משלי\" in a lecture's practice");
       await go(s, `/?v=trap&l=${L}&at=1.3`);
       await s.waitForURL((u) => !u.search.includes("v=trap"), { timeout: 15000 });
       expect(true, "?v=trap leads elsewhere");
@@ -121,8 +121,8 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
       expect(rows.length === 3 && /ש׳ 8 · 2 שורות/.test(rows[0]) && /ש׳ 19/.test(rows[1]) && /ש׳ 20/.test(rows[2]), "the tables of slides 8, 19 and 20, with their rows");
       const traps = s.locator(".extras-traps");
       await traps.locator(".trap-next").waitFor({ timeout: 15000 });
-      expect(/רק לך/.test(await traps.innerText()), "\"מלכודת משלי\" is marked \"רק לך\"");
-      expect(norm(await traps.locator(".trap-next").innerText()) === "מלכודת שעוברת את הבדיקה נכנסת לבנק של כולם, בלי שם.", "the trap meter with nothing yet: what a trap does, not a lock");
+      expect(/רק לך/.test(await traps.innerText()), "\"שאלה משלי\" is marked \"רק לך\"");
+      expect(norm(await traps.locator(".trap-next").innerText()) === "שאלה שעוברת את הבדיקה נכנסת לבנק של כולם, בלי שם.", "the trap meter with nothing yet: what a trap does, not a lock");
       await blank.scrollIntoViewIfNeeded();
       await shot(s, "e-01-lecture-extras");
 
@@ -214,12 +214,12 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
       const pressed = await s.locator('.trap-form [aria-pressed="true"]').allInnerTexts();
       steps.slides = pressed.map(norm);
       expect(pressed.length >= 1, "the paragraph's own slide is chosen");
-      expect(norm(await s.locator(".ph-sub").first().innerText()).startsWith("עוד אין מלכודת שלך בבנק"), "the meter under the head");
+      expect(norm(await s.locator(".ph-sub").first().innerText()).startsWith("עוד אין שאלה שלך בבנק"), "the meter under the head");
       await s.getByLabel("השאלה").fill("מה Furosemide מעכבת בלולאה העולה");
       const answers = ["NKCC2", "ENaC", "NCC", "ROMK"];
       for (let i = 0; i < 4; i++) await s.getByLabel(`תשובה ${"אבגד"[i]}`).fill(answers[i]);
       await s.locator(".trap-key input").first().check();
-      await s.getByLabel("מה המלכודת? (לא חובה)").fill("רוב האנשים בוחרים NCC");
+      await s.getByLabel("מה מבלבל בה? (לא חובה)").fill("רוב האנשים בוחרים NCC");
       await s.getByLabel("מקרה (לא חובה)").fill("גבר בן 60 עם בצקת ריאות.");
       await s.evaluate(() => window.scrollTo(0, 0));
       await shot(s, "e-06-trap-form");
@@ -232,17 +232,17 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
       await s.getByRole("button", { name: "בודקים מול השקפים…" }).waitFor({ timeout: 5000 });
       expect(true, "\"בודקים מול השקפים…\" while it checks");
       await s.locator(".trap-done").waitFor({ timeout: 15000 });
-      expect(/המלכודת נכנסה לבנק של כולם\. השם שלך יופיע אחרי שתישאל במבחן קבוצתי\./.test(await s.locator(".trap-done").innerText()), "passed: \"המלכודת נכנסה לבנק של כולם…\"");
+      expect(/השאלה נכנסה לבנק של כולם\. השם שלך יופיע אחרי שתישאל במבחן קבוצתי\./.test(await s.locator(".trap-done").innerText()), "passed: \"המלכודת נכנסה לבנק של כולם…\"");
       const q1 = db.practice.questions.find((q) => q.source === "member");
       expect(E.reserved === 1 && q1 && q1.created_by === null && q1.author_id === null && q1.anchor === 3 && q1.part_idx === 1, "one check; in the bank with no author and no created_by, on ¶1.3");
-      await s.locator(".trap-meter").getByText("מלכודת אחת שלך בבנק").waitFor({ timeout: 10000 });
-      expect(true, "the meter: \"מלכודת אחת שלך בבנק\"");
+      await s.locator(".trap-meter").getByText("שאלה אחת שלך בבנק").waitFor({ timeout: 10000 });
+      expect(true, "the meter: \"שאלה אחת שלך בבנק\"");
       await s.evaluate(() => window.scrollTo(0, 0));
       await shot(s, "e-07-trap-ok");
 
       /* ── 5. a trap the check rejects, then fixed ── */
       E.verdict = () => ({ problem: "לפי ש׳ 6 Furosemide פועלת בלולאה העולה העבה, לא באבובית המכונסת." });
-      await s.getByRole("button", { name: "עוד מלכודת" }).click();
+      await s.getByRole("button", { name: "עוד שאלה" }).click();
       await s.getByLabel("השאלה").fill("איפה Furosemide פועלת?");
       const wrongOpts = ["באבובית המכונסת", "בלולאה העולה העבה", "באבובית הדיסטלית", "בגלומרולוס"];
       for (let i = 0; i < 4; i++) await s.getByLabel(`תשובה ${"אבגד"[i]}`).fill(wrongOpts[i]);
@@ -271,12 +271,12 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
         await row.locator(".n-chips button").first().click();
         const sheet = s.getByRole("dialog", { name: "מה יושב על הפסקה" });
         await sheet.getByRole("tab", { name: /^תרגול/ }).click();
-        const add = sheet.getByRole("link", { name: "להוסיף מלכודת משלי" });
+        const add = sheet.getByRole("link", { name: "להוסיף שאלה משלי" });
         await add.waitFor({ timeout: 10000 });
         await shot(s, "e-09-anchor-tab");
         await add.click();
         await s.waitForURL((u) => u.searchParams.get("v") === "trap" && u.searchParams.get("at") === "1.3", { timeout: 15000 });
-        expect(true, "N's \"תרגול\" tab opens \"להוסיף מלכודת משלי\" on its paragraph");
+        expect(true, "N's \"תרגול\" tab opens \"להוסיף שאלה משלי\" on its paragraph");
       }
 
       /* ── 7. נועה: no draft of another, the trap in practice, named only by a live quiz ── */
@@ -286,7 +286,7 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
       await go(n, `/?v=practice&s=l.${L}&n=all`);
       const chip = n.locator(".trap-chip");
       await chip.first().waitFor({ timeout: 15000 });
-      expect(norm(await chip.first().innerText()) === "מלכודת של חבר בקבוצה", "practice: \"מלכודת של חבר בקבוצה\"");
+      expect(norm(await chip.first().innerText()) === "שאלה של מישהו מהקבוצה", "practice: \"שאלה של מישהו מהקבוצה\"");
       await shot(n, "e-10-practice-chip");
       await n.locator(".pq-options button.a-opt").first().click();
       await n.locator(".pq-bets").getByRole("radio", { name: "ניחוש", exact: true }).click();
@@ -301,7 +301,7 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
       await shot(n, "e-11-practice-named");
       await go(s, `/?v=practice&l=${L}`);
       await s.locator(".extras-traps .trap-meter").waitFor({ timeout: 15000 });
-      expect(norm(await s.locator(".extras-traps .trap-meter").innerText()) === "2 מלכודות שלך בבנק · כולן כבר עם השם שלך", "שוהם's meter counts what the quiz named");
+      expect(norm(await s.locator(".extras-traps .trap-meter").innerText()) === "2 שאלות שלך בבנק · כולן כבר עם השם שלך", "שוהם's meter counts what the quiz named");
       await s.locator(".extras-traps").scrollIntoViewIfNeeded();
       await shot(s, "e-12-trap-meter");
 
@@ -310,7 +310,7 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
         E.drafts.push({ id: `e5d10000-0000-4000-8000-${String(i).padStart(12, "0")}`, user_id: id("איתי"), group_id: db.group.id, lecture_id: L, part_idx: 1, anchor: null, quote: "", vignette: "", question: `שאלה ${i}?`, options: ["א", "ב", "ג", "ד"], answer: 0, note: "", slides: [6], state: "ok", problem: "", question_id: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
       const it = await open("איתי", `/?v=trap&l=${L}`);
       await it.locator(".trap-next").waitFor({ timeout: 15000 });
-      expect(/להיום נגמרו המלכודות החדשות; מחר אפשר שוב\./.test(await it.locator(".trap-next").innerText()), "the day's ten: the meter says so");
+      expect(/להיום נגמרו השאלות החדשות; מחר אפשר שוב\./.test(await it.locator(".trap-next").innerText()), "the day's ten: the meter says so");
       expect(await it.getByRole("button", { name: /^לבדוק מול השקפים/ }).isDisabled(), "and the check waits for tomorrow");
       steps.calls = [...new Set(E.calls.map((c) => c.fn))];
     }

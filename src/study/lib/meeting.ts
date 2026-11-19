@@ -287,7 +287,7 @@ export function dayText(ms: number): string {
   return new Date(studyDay(ms) * 86_400_000).toISOString().slice(0, 10);
 }
 
-/** "רובכם צדקו" · "הקבוצה חלוקה" · "רובכם טעו": "3 לקפה"'s word for a round
+/** "רובכם צדקו" · "הקבוצה חלוקה" · "רובכם טעו": "שאלות פתיחה"'s word for a round
  *  (Z's majority from 3 answers), null below 3. */
 export function coffeeChip(m: "most_right" | "split" | "most_wrong" | null | undefined): { text: string; tone: "ok" | "warn" | "bad" } | null {
   if (m === "most_right") return { text: "רובכם צדקו", tone: "ok" };

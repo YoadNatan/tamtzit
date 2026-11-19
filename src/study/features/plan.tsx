@@ -40,8 +40,8 @@ export function PlanCard({ ctx }: { ctx: Ctx }) {
   if (!flags.groupPlan || p === undefined) return null;
   if (!p)
     return (
-      <section className="a-card flat pl-card" aria-label="תוכנית המרתון">
-        <b>תוכנית המרתון</b>
+      <section className="a-card flat pl-card" aria-label="תוכנית עד המבחן">
+        <b>תוכנית עד המבחן</b>
         <p className="a-small a-muted">עוד אין תוכנית. מזינים את מבחן הבלוק פעם אחת, והתוכנית נבנית לבד.</p>
         <RouteLink to={{ v: "plan", edit: true }} go={ctx.go} className="a-btn small">
           לבנות תוכנית
@@ -49,9 +49,9 @@ export function PlanCard({ ctx }: { ctx: Ctx }) {
       </section>
     );
   return (
-    <section className="a-card flat pl-card" aria-label="תוכנית המרתון">
+    <section className="a-card flat pl-card" aria-label="תוכנית עד המבחן">
       <div className="a-row between">
-        <b dir="rtl">מרתון · {p.title}</b>
+        <b dir="rtl">תוכנית · {p.title}</b>
         <RouteLink to={{ v: "plan" }} go={ctx.go} className="a-btn small">
           לתוכנית
         </RouteLink>
@@ -65,7 +65,7 @@ export function PlanCard({ ctx }: { ctx: Ctx }) {
   );
 }
 
-/** "המסלול שלך במרתון" on "שלי", or null without a plan. */
+/** "המסלול שלך בתוכנית" on "שלי", or null without a plan. */
 export function MyLaneRows({ ctx }: { ctx: Ctx }) {
   const p = usePlan(ctx, flags.groupPlan);
   if (!flags.groupPlan || !p) return null;
@@ -73,7 +73,7 @@ export function MyLaneRows({ ctx }: { ctx: Ctx }) {
     <nav className="a-list links-card pl-me" aria-label="המסלול שלך">
       <RouteLink to={{ v: "plan", lane: "mine" }} go={ctx.go} className="a-li row-link">
         <div>
-          <b>המסלול שלך במרתון</b>
+          <b>המסלול שלך בתוכנית</b>
           <span className="m">רק לך: מה שחוזר אליך היום, לצד המסלול של הקבוצה</span>
         </div>
       </RouteLink>

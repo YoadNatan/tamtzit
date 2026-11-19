@@ -56,9 +56,9 @@ export function bossOf(state: unknown): BossState | null {
 
 const count = (n: number, one: string, many: (n: number) => string) => (n === 1 ? one : many(n));
 
-/** Decision 3's meter: "3 מתוך 8 נושאים חמים · עוד כ-20 תשובות לנושא הבא". */
+/** Decision 3's meter: "3 מתוך 8 נושאים קשים · עוד כ-20 תשובות לנושא הבא". */
 export function bossMeterLine(o: Pick<BossOpen, "hot" | "topics" | "answers_next">): string {
-  const head = `${o.hot} מתוך ${o.topics} נושאים חמים`;
+  const head = `${o.hot} מתוך ${o.topics} נושאים קשים`;
   if (o.answers_next == null) return head;
   return `${head} · ${count(o.answers_next, "עוד תשובה אחת לנושא הבא", (n) => `עוד כ-${n} תשובות לנושא הבא`)}`;
 }
@@ -67,13 +67,13 @@ export function bossMeterLine(o: Pick<BossOpen, "hot" | "topics" | "answers_next
 export function headsNeedLine(hot: number): string {
   const need = Math.max(0, BOSS.MIN_HEADS - hot);
   if (!need) return "";
-  return need === 1 ? "הקרב נפתח משני נושאים חמים: עוד נושא אחד." : `הקרב נפתח משני נושאים חמים: עוד ${need} נושאים.`;
+  return need === 1 ? "האתגר נפתח משני נושאים קשים: עוד נושא אחד." : `האתגר נפתח משני נושאים קשים: עוד ${need} נושאים.`;
 }
 
 /** The meter's bar, on the same counts as the line above it (review UI-2):
  *  below the floor, the counted members against FLOOR (as the pulse's and
  *  the museum's bars); otherwise the hot topics against the topics weighed,
- *  "3 מתוך 8 נושאים חמים" fills 3/8. Its label is the line's own numbers. */
+ *  "3 מתוך 8 נושאים קשים" fills 3/8. Its label is the line's own numbers. */
 export function bossBar(o: Pick<BossOpen, "hot" | "topics" | "answers_next" | "group_need">): { pct: number; label: string } {
   const need = Math.max(0, Math.min(FLOOR, o.group_need ?? 0));
   if (need > 0) return { pct: Math.round((100 * (FLOOR - need)) / FLOOR), label: `${FLOOR - need} מתוך ${FLOOR} נספרים` };
@@ -81,51 +81,51 @@ export function bossBar(o: Pick<BossOpen, "hot" | "topics" | "answers_next" | "g
   return { pct, label: bossMeterLine(o) };
 }
 
-/** The heads' chip: "ראש אחד", "3 ראשים"; none at 0 (review UI-4). */
+/** The heads' chip: "נושא אחד", "3 נושאים"; none at 0 (review UI-4). */
 export function headsChip(n: number): string {
-  return n <= 0 ? "" : n === 1 ? "ראש אחד" : `${n} ראשים`;
+  return n <= 0 ? "" : n === 1 ? "נושא אחד" : `${n} נושאים`;
 }
 
 /** boss.html's lines. */
-export const SUB_LINE = `כל ראש: נושא שלפחות ${FLOOR} מכם מתקשים בו`;
-export const NO_HEADS_LINE = `עוד אין נושא חם. ראש של הבוס הוא נושא שלפחות ${FLOOR} מכם מתקשים בו, והדופק מתעדכן בלילה.`;
-export const RULE_LINE = "תשובה נכונה מורידה לבוס חיים. טעות עולה לקבוצה, אף פעם לא לאדם אחד.";
-export const LOST_LINE = "ואם מפסידים? למחרת נפתח ׳סבב נקמה׳, בלי מסך הפסד.";
-export const PLAYERS_LINE = `קרב צריך לפחות ${BOSS.PLAYERS} משתתפים: מתחת לזה כל פגיעה הייתה מגלה מי טעה.`;
+export const SUB_LINE = `באתגר רק נושאים שלפחות ${FLOOR} מכם מתקשים בהם`;
+export const NO_HEADS_LINE = `עוד אין נושא קשה. האתגר בנוי מנושאים שלפחות ${FLOOR} מכם מתקשים בהם, וזה מתעדכן בלילה.`;
+export const RULE_LINE = "תשובה נכונה מקרבת לסגירת הנושא. טעות מורידה נקודות לקבוצה, אף פעם לא לאדם אחד.";
+export const LOST_LINE = "ואם לא מצליחים? למחרת נפתח ׳סבב חוזר׳, בלי מסך הפסד.";
+export const PLAYERS_LINE = `אתגר צריך לפחות ${BOSS.PLAYERS} משתתפים: עם פחות, כל טעות הייתה מגלה מי טעה.`;
 
-/** "ראש 3/4": the head on screen. */
+/** "נושא 3/4": the head on screen. */
 export function headChip(b: Pick<BossState, "head" | "heads">): string {
-  return b.head == null ? headsChip(b.heads.length) : `ראש ${b.head + 1}/${b.heads.length}`;
+  return b.head == null ? headsChip(b.heads.length) : `נושא ${b.head + 1}/${b.heads.length}`;
 }
 
 /** The head's relapse line on the HUD. */
 export function relapseLine(name: string): string {
-  return `${name} חוזר לחיים (relapse) עד שעונים נכון.`;
+  return `${name} חוזר עד שעונים נכון.`;
 }
 /** The trap round's callout. */
 export function trapLine(name: string): string {
-  return `${name} מנסה מלכודת: אם חצי מהתשובות נופלות בה, הקבוצה מאבדת ${BOSS.TRAP_HP} HP.`;
+  return `${name}: אם חצי מכם בוחרים באותה תשובה שגויה, הקבוצה מאבדת ${BOSS.TRAP_HP} נקודות.`;
 }
 
-/** A moment of the battle, without names (boss.html s2's "רגעי הקרב"). */
+/** A moment of the battle, without names (boss.html s2's "רגעים מהאתגר"). */
 export function momentText(m: Moment): { title: string; chip: string; tone: string; line: string } | null {
   const h = m.head ?? "";
   switch (m.t) {
     case "trap":
-      return { title: `המלכודת של ${h}`, chip: `−${Math.abs(m.hp ?? BOSS.TRAP_HP)} HP`, tone: "bad", line: `עלתה לקבוצה ${Math.abs(m.hp ?? BOSS.TRAP_HP)} HP.` };
+      return { title: `טעות נפוצה: ${h}`, chip: `−${Math.abs(m.hp ?? BOSS.TRAP_HP)}`, tone: "bad", line: `עלתה לקבוצה ${Math.abs(m.hp ?? BOSS.TRAP_HP)} נקודות.` };
     case "relapse":
-      return { title: `${h} חזר לחיים`, chip: "relapse", tone: "warn", line: "השאלה המרכזית שלו חזרה לסבב נוסף." };
+      return { title: `${h} חזר`, chip: "חוזר", tone: "warn", line: "השאלה המרכזית שלו חזרה לסבב נוסף." };
     case "down":
       return {
-        title: `${h} נפל`,
+        title: `${h} נסגר`,
         chip: "✓",
         tone: "ok",
         line: m.relapses ? count(m.relapses, "אחרי שחזר פעם אחת.", (n) => (n === 2 ? "אחרי שחזר פעמיים." : `אחרי שחזר ${n} פעמים.`)) : "בלי לחזור.",
       };
     case "last":
-      return { title: `המכה האחרונה: ${h}`, chip: "ניצחון", tone: "ok", line: "כל הראשים נפלו." };
+      return { title: `הנושא האחרון: ${h}`, chip: "ניצחון", tone: "ok", line: "כל הנושאים נסגרו." };
     case "fall":
-      return { title: "הקבוצה נשארה בלי HP", chip: "0 HP", tone: "bad", line: "הקרב נגמר כאן. מחר נפתח ׳סבב נקמה׳." };
+      return { title: "לקבוצה נגמרו הנקודות", chip: "0 נקודות", tone: "bad", line: "האתגר נגמר כאן. מחר נפתח ׳סבב חוזר׳." };
   }
   return null;
 }
@@ -138,9 +138,9 @@ export function lootDay(daysAhead: number): string {
   return `בעוד ${daysAhead} ימים`;
 }
 
-/** "השלל שלך: 4 טעויות, 3 ימים". */
+/** "לחזרה שלך: 4 טעויות, 3 ימים". */
 export function lootTitle(mistakes: number, days: number): string {
-  return `השלל שלך: ${count(mistakes, "טעות אחת", (n) => `${n} טעויות`)}, ${count(days, "יום אחד", (n) => `${n} ימים`)}`;
+  return `לחזרה שלך: ${count(mistakes, "טעות אחת", (n) => `${n} טעויות`)}, ${count(days, "יום אחד", (n) => `${n} ימים`)}`;
 }
 
 /** The loot by day: each day's topics, a topic's count beside it ("×2"). */
@@ -175,9 +175,9 @@ export function studyDayIso(now = Date.now()): string {
 /** P-14 for the boss (decision 1: a week in the group, no account). */
 export function waitingLine(daysLeft: number): string {
   const when = daysLeft <= 1 ? "מחר" : daysLeft === 2 ? "בעוד יומיים" : `בעוד ${daysLeft} ימים`;
-  return `הקרב נבנה מהדופק, והדופק מוצג למי שנספרים בו: שבוע בקבוצה, והספירה בלילה. הראשים ייפתחו לך ${when}.`;
+  return `האתגר נבנה מ״מה קשה לקבוצה״, שמוצג למי שנספרים בו: שבוע בקבוצה, והספירה בלילה. הנושאים ייפתחו לך ${when}.`;
 }
 /** A group below the floor: the pulse's own meter. */
 export function groupNeedLine(need: number): string {
-  return need <= 1 ? `הבוס נבנה מ-${FLOOR} מתרגלים: עוד אדם אחד וזה נפתח.` : `הבוס נבנה מ-${FLOOR} מתרגלים: עוד ${need} אנשים וזה נפתח.`;
+  return need <= 1 ? `האתגר נבנה מ-${FLOOR} מתרגלים: עוד אדם אחד וזה נפתח.` : `האתגר נבנה מ-${FLOOR} מתרגלים: עוד ${need} אנשים וזה נפתח.`;
 }

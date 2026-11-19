@@ -186,7 +186,7 @@ module.exports = {
           if (heads.length < BOSS.MIN_HEADS) return refuse("no heads");
           const ls = lectures.map((l) => db.lectures.find((x) => x.id === l));
           const courses = [...new Set(ls.map((l) => (l.course || "").trim()))];
-          name = `ההידרה של ${ls.length === 1 || courses.length !== 1 || !courses[0] ? ls[0].title : courses[0]}`;
+          name = `${ls.length === 1 || courses.length !== 1 || !courses[0] ? ls[0].title : courses[0]}`;
         }
         if (Z.quizzes.some((x) => x.group_id === db.group.id && ["lobby", "question", "reveal"].includes(x.state))) return refuse("quiz open");
         const k = heads.length;
@@ -196,7 +196,7 @@ module.exports = {
         if (rounds.length < 3) return refuse("no heads");
         const t = iso(Date.now());
         const q = {
-          id: hex("7b100000", ++B.seq), group_id: db.group.id, mode: "boss", title: `קרב הבוס · ${name}`, lecture_ids: lectures, kinds: "all", n_wanted: rounds.length, seconds: body.p_seconds ?? 45,
+          id: hex("7b100000", ++B.seq), group_id: db.group.id, mode: "boss", title: `אתגר קבוצתי · ${name}`, lecture_ids: lectures, kinds: "all", n_wanted: rounds.length, seconds: body.p_seconds ?? 45,
           state: "lobby", idx: -1, n_total: 0, opens_at: null, closes_at: null, answered_n: 0, players_n: 1, version: 1, host_id: me, created_by: me, created_at: t, started_at: null, ended_at: null, updated_at: t,
           preset: "free", meeting_id: null, part_from: null, part_to: null, vote: 1, stage: "final", argue_until: null,
         };

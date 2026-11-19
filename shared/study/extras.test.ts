@@ -50,31 +50,31 @@ test("trapMeter: nothing yet says what a trap does, not a lock", () => {
     toFix: 0,
     leftToday: 10,
     line: "",
-    next: "מלכודת שעוברת את הבדיקה נכנסת לבנק של כולם, בלי שם.",
+    next: "שאלה שעוברת את הבדיקה נכנסת לבנק של כולם, בלי שם.",
   });
 });
 
 test("trapMeter: in the bank, named by a live quiz, waiting for one, to fix, and what is left today", () => {
   const one = trapMeter([t("ok", 3 * day)], NOW);
-  assert.equal(one.line, "מלכודת אחת שלך בבנק");
+  assert.equal(one.line, "שאלה אחת שלך בבנק");
   assert.equal(one.next, "השם יופיע אחרי שתישאל במבחן קבוצתי.");
   const mixed = trapMeter([t("ok", 3 * day, true), t("ok", 2 * day), t("ok", 2 * day), t("rejected", 3600_000), t("draft", 7200_000)], NOW);
   assert.deepEqual([mixed.inBank, mixed.named, mixed.waiting, mixed.toFix, mixed.leftToday], [3, 1, 2, 1, 8]);
-  assert.equal(mixed.line, "3 מלכודות שלך בבנק · אחת כבר עם השם שלך · אחת מחכה לתיקון");
-  assert.equal(mixed.next, "2 עוד מחכות למבחן קבוצתי, ואז יופיע השם. נשארו היום 8 מלכודות חדשות.");
+  assert.equal(mixed.line, "3 שאלות שלך בבנק · אחת כבר עם השם שלך · אחת מחכה לתיקון");
+  assert.equal(mixed.next, "2 עוד מחכות למבחן קבוצתי, ואז יופיע השם. נשארו היום 8 שאלות חדשות.");
   const all = trapMeter([t("ok", 3 * day, true), t("ok", 4 * day, true)], NOW);
-  assert.equal(all.line, "2 מלכודות שלך בבנק · כולן כבר עם השם שלך");
+  assert.equal(all.line, "2 שאלות שלך בבנק · כולן כבר עם השם שלך");
   assert.equal(all.next, "", "nothing more to wait for, and nothing written today");
   const fix = trapMeter([t("rejected", 3 * day), t("rejected", 3 * day)], NOW);
-  assert.equal(fix.line, "2 מלכודות שלך מחכות לתיקון");
+  assert.equal(fix.line, "2 שאלות שלך מחכות לתיקון");
 });
 
 test("trapMeter: the day's ten new drafts, counted from her own rows of the last 24 hours", () => {
   const ten = Array.from({ length: 10 }, (_, i) => t("draft", i * 3600_000));
   assert.equal(trapMeter(ten, NOW).leftToday, 0);
-  assert.equal(trapMeter(ten, NOW).next, "מלכודת שעוברת את הבדיקה נכנסת לבנק של כולם, בלי שם. להיום נגמרו המלכודות החדשות; מחר אפשר שוב.");
+  assert.equal(trapMeter(ten, NOW).next, "שאלה שעוברת את הבדיקה נכנסת לבנק של כולם, בלי שם. להיום נגמרו השאלות החדשות; מחר אפשר שוב.");
   assert.equal(trapMeter([...ten.slice(1), t("draft", day + 1)], NOW).leftToday, 1, "a draft older than a day no longer counts");
-  assert.match(trapMeter(ten.slice(0, 9), NOW).next, /נשארו היום מלכודת חדשה אחת\./);
+  assert.match(trapMeter(ten.slice(0, 9), NOW).next, /נשארו היום שאלה חדשה אחת\./);
 });
 
 test("blankMeter: tables here, else the empty state with what is needed and where the group's other tables are", () => {

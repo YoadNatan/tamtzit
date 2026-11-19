@@ -25,7 +25,7 @@ export type RecentQuiz = {
 };
 
 /** The mode's name on every screen (§12.0.4: the approved names). */
-export const MODE_NAME: Record<Mode, string> = { coop: "כולנו נגד המבחן", race: "מירוץ", boss: "קרב הבוס" };
+export const MODE_NAME: Record<Mode, string> = { coop: "כולנו נגד המבחן", race: "מירוץ", boss: "אתגר קבוצתי" };
 
 /** "שוהם, נועה +3": the first two names and how many more. */
 export function namesLine(names: readonly string[]): string {

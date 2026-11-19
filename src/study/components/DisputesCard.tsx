@@ -9,7 +9,7 @@ import UpdateCard from "./UpdateCard";
 import { vText } from "./VerdictCard";
 import "../styles/var.css";
 
-/* ── "כרטיסים צהובים" on "יחד" (package V; §12.2.3's DisputesCard) ──
+/* ── "מחלוקות" on "יחד" (package V; §12.2.3's DisputesCard) ──
  * The group's yellow cards that are open or wait for a decision, newest
  * first, live; each opens its card. Until Today ships (T's queue hands each
  * "עדכון" to UpdateCard), the member's own unseen updates show here first,
@@ -59,7 +59,7 @@ export default function DisputesCard({ ctx }: { ctx: Ctx }) {
       {shown.length ? (
         <section className="v-disputes" aria-labelledby="v-disputes-h">
           <div className="a-sec">
-            <h2 id="v-disputes-h">כרטיסים צהובים</h2>
+            <h2 id="v-disputes-h">מחלוקות</h2>
             <span className="a-small a-muted">גיבוי בלי שמות</span>
           </div>
           <div className="a-list">
@@ -72,7 +72,7 @@ export default function DisputesCard({ ctx }: { ctx: Ctx }) {
                     <bdi>{titles[d.lecture_id]}</bdi> · {timeAgo(d.updated_at)}
                   </span>
                 </div>
-                <span className="a-chip warn">{d.state === "judged" ? "יש פסיקה" : "פתוח"}</span>
+                <span className="a-chip warn">{d.state === "judged" ? "יש הכרעה" : "פתוחה"}</span>
               </RouteLink>
             ))}
           </div>

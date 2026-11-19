@@ -39,9 +39,9 @@ export type ExhibitState = "new" | "falling" | "hanging" | "retired";
 /** The exhibit's chip (museum.html): the word is the chip, never colour alone. */
 export const STATE_CHIP: Record<ExhibitState, { text: string; tone: string }> = {
   new: { text: "חדש", tone: "busy" },
-  falling: { text: "עוד נופלים", tone: "warn" },
-  hanging: { text: "עדיין תלוי", tone: "" },
-  retired: { text: "בפנסיה", tone: "ok" },
+  falling: { text: "עוד טועים בה", tone: "warn" },
+  hanging: { text: "עדיין פתוחה", tone: "" },
+  retired: { text: "נסגרה", tone: "ok" },
 };
 
 /** study_museum_meter() (decision 3). */
@@ -53,21 +53,21 @@ export type MuseumMeter =
 
 const count = (n: number, one: string, many: (n: number) => string) => (n === 1 ? one : many(n));
 
-/** "2 מוצגים" · "מוצג אחד" · "אין עדיין מוצגים". */
+/** "2 טעויות נפוצות" · "טעות נפוצה אחת" · "עוד אין טעויות נפוצות". */
 export function exhibitsWord(n: number): string {
-  return n <= 0 ? "אין עדיין מוצגים" : count(n, "מוצג אחד", (k) => `${k} מוצגים`);
+  return n <= 0 ? "עוד אין טעויות נפוצות" : count(n, "טעות נפוצה אחת", (k) => `${k} טעויות נפוצות`);
 }
 
 /** How many more wrong "על בטוח" bets the closest candidate needs. */
 export function betsNeedWord(need: number): string {
-  return need <= 1 ? "עוד הימור ׳על בטוח׳ שגוי אחד למוצג הבא" : `עוד ${need} הימורי ׳על בטוח׳ שגויים למוצג הבא`;
+  return need <= 1 ? "עוד הימור ׳על בטוח׳ שגוי אחד לטעות הנפוצה הבאה" : `עוד ${need} הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה`;
 }
 
-/** Decision 3's meter line: "2 מוצגים · עוד 4 הימורי ׳על בטוח׳ שגויים למוצג הבא",
+/** Decision 3's meter line: "2 טעויות נפוצות · עוד 4 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה",
  *  or, when an exhibit was found and opens tomorrow, that instead of the bets. */
 export function museumMeterLine(m: Extract<MuseumMeter, { state: "open" }>): string {
   const head = exhibitsWord(m.exhibits);
-  if (m.soon > 0) return `${head} · ${count(m.soon, "מוצג חדש נפתח מחר", (k) => `${k} מוצגים חדשים נפתחים מחר`)}`;
+  if (m.soon > 0) return `${head} · ${count(m.soon, "טעות נפוצה חדשה נפתחת מחר", (k) => `${k} טעויות נפוצות חדשות נפתחות מחר`)}`;
   return `${head} · ${betsNeedWord(m.need)}`;
 }
 
@@ -87,15 +87,15 @@ export function groupNeedPct(need: number): number {
 
 /** The group itself is below the floor (fewer than 3 counted members). */
 export function museumGroupNeedLine(need: number): string {
-  return need <= 1 ? `המוזיאון נפתח מ-${MUSEUM.FLOOR} מתרגלים: עוד אדם אחד וזה נפתח.` : `המוזיאון נפתח מ-${MUSEUM.FLOOR} מתרגלים: עוד ${need} אנשים וזה נפתח.`;
+  return need <= 1 ? `הטעויות הנפוצות נפתחות מ-${MUSEUM.FLOOR} מתרגלים: עוד אדם אחד וזה נפתח.` : `הטעויות הנפוצות נפתחות מ-${MUSEUM.FLOOR} מתרגלים: עוד ${need} אנשים וזה נפתח.`;
 }
 
 /** The empty museum: what makes an exhibit (never a dead end: the meter and practice beside it). */
-export const EMPTY_LINE = `מוצג נולד כש-${MUSEUM.FLOOR} מכם בוחרים ׳על בטוח׳ באותה תשובה שגויה. המוזיאון מתעדכן בלילה.`;
+export const EMPTY_LINE = `טעות נכנסת לכאן כש-${MUSEUM.FLOOR} מכם בוחרים ׳על בטוח׳ באותה תשובה שגויה. הרשימה מתעדכנת בלילה.`;
 /** museum.html's sub line and footer. */
 export const SUB_LINE = `רק טעויות ׳על בטוח׳ של לפחות ${MUSEUM.FLOOR} מכם`;
-export const FOOT_LINE = "מוצג נפתח רק למחרת, כדי שאי אפשר יהיה לנחש מי.";
-export const RETIRE_LINE = "פנסיה: כולם צודקים ביומיים שונים";
+export const FOOT_LINE = "טעות חדשה מופיעה רק למחרת, כדי שאי אפשר יהיה לנחש מי.";
+export const RETIRE_LINE = "נסגרו: כולם ענו נכון ביומיים שונים";
 
 /** The exhibit's claim, as the plaque says it, or the trap option itself in quotes. */
 export function claimOf(e: Pick<Exhibit, "plaque" | "claim">): string {
@@ -103,11 +103,11 @@ export function claimOf(e: Pick<Exhibit, "plaque" | "claim">): string {
 }
 
 /** The plaque's line: Claude's, when the op wrote one; else the museum's own,
- *  from the exhibit's first slide ("אמנים: כמה מכם. חומרים: ביטחון עצמי, שקף 27."). */
+ *  from the exhibit's first slide ("כמה מכם בחרו בזה ׳על בטוח׳ · שקף 27."). */
 export function plaqueLine(e: Pick<Exhibit, "plaque" | "slides">): string {
   if (e.plaque?.line) return e.plaque.line;
   const s = e.slides[0];
-  return s ? `אמנים: כמה מכם. חומרים: ביטחון עצמי, שקף ${s}.` : "אמנים: כמה מכם. חומרים: ביטחון עצמי.";
+  return s ? `כמה מכם בחרו בזה ׳על בטוח׳ · שקף ${s}.` : "כמה מכם בחרו בזה ׳על בטוח׳.";
 }
 
 /** The museum's title: one lecture's, or the exhibits' one course, else none. */
@@ -119,19 +119,19 @@ export function museumTitle(exhibits: readonly Pick<Exhibit, "course" | "lecture
 
 /** The one chip on a trap card (C's review, Today; review F-11). */
 export type TrapCardKind = { kind: "trap" | "museum"; exhibit_no: number | null };
-export const TRAP_CHIP = "מלכודת של הקבוצה";
+export const TRAP_CHIP = "טעות נפוצה בקבוצה";
 export function badgeText(k: TrapCardKind): { chip: string; tone: string; aside: string } {
-  if (k.kind === "museum" && k.exhibit_no) return { chip: "חיסון · ממוזיאון המלכודות", tone: "fun", aside: `מוצג מס׳ ${k.exhibit_no}` };
+  if (k.kind === "museum" && k.exhibit_no) return { chip: "טעות נפוצה · לחזרה", tone: "fun", aside: `טעות מס׳ ${k.exhibit_no}` };
   return { chip: TRAP_CHIP, tone: "group", aside: "" };
 }
 /** museum.html s2's "למה זה כאן?". */
 export const VACCINE_WHY =
-  "כמה מכם נפלו בזה ׳על בטוח׳, אז החיסון מגיע לכולם, גם אם לא נפלת בו. הוא יוצא לפנסיה כשכל הקבוצה עונה נכון ביומיים שונים.";
+  "כמה מכם טעו בזה ׳על בטוח׳, אז הכרטיס מגיע לכולם, גם אם לא טעית בזה. הוא יוצא מהחזרות כשכל הקבוצה עונה נכון ביומיים שונים.";
 
 /** P-8's line, for the museum: an opted-out member reads no exhibit (reading is reciprocal, review SEC-8). */
-export const OUT_LINE = "התשובות שלך לא נספרות בדופק, ולכן גם המוזיאון לא מוצג. אפשר לחזור לספירה ב׳שלי׳, והמוזיאון יחזור אחרי הספירה של הלילה.";
+export const OUT_LINE = "התשובות שלך לא נספרות, ולכן גם הטעויות הנפוצות לא מוצגות לך. אפשר לחזור לספירה ב׳שלי׳, והן יחזרו אחרי הספירה של הלילה.";
 /** P-14 with its meter, for the museum (decision 1: a week in the group, no account). */
 export function waitingLine(daysLeft: number): string {
   const when = daysLeft <= 1 ? "מחר" : daysLeft === 2 ? "בעוד יומיים" : `בעוד ${daysLeft} ימים`;
-  return `המוזיאון מוצג למי שנספרים בדופק: שבוע בקבוצה, והספירה בלילה. המוזיאון ייפתח לך ${when}.`;
+  return `הטעויות הנפוצות מוצגות למי שנספרים: שבוע בקבוצה, והספירה בלילה. הן ייפתחו לך ${when}.`;
 }

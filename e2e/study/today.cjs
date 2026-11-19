@@ -6,7 +6,7 @@
 //      the rows of her cut in the table's order with their chips and an
 //      example ("עדכון בסיכום", "1 מהמבחן הקבוצתי · טעית אתמול", "פסקה שסימנת
 //      ׳לא ברור׳ · מהפגישה", "N כרטיסים · הגיע הזמן"), "להתחיל · n דק׳", the
-//      flame "להבה 4/7" and its line, and "בקבוצה": איתי's open question.
+//      flame "ימי למידה 4/7" and its line, and "בקבוצה": איתי's open question.
 //      The danger row shows only with VITE_STUDY_PROGRESS ("all", "w5").
 //      With release 8's set ("w5", wave 5's integration) two more rows come
 //      from the other packages: Q-2's "טעות אחת בניסוח אחר" (A2's counts:
@@ -208,8 +208,8 @@ const dayOf = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusal
       expect(JSON.stringify(kinds) === JSON.stringify(want), `the rows in the table's order: ${kinds.join(", ")} (expect ${want.join(", ")})`);
       expect(steps.rows[0].includes("עדכון בסיכום") && steps.rows[0].includes("תוקן אחרי שלמדת"), "the update's row");
       expect(steps.rows[1].includes("1 מהמבחן הקבוצתי") && steps.rows[1].includes("טעית אתמול") && steps.rows[1].includes("Furosemide: איזה טרנספורטר") && /ש׳ 6/.test(steps.rows[1]), "the quiz return: its chip, its question and slide");
-      if (progress) expect(steps.rows[2].includes("1 מרשימת הסכנה, בניסוח חדש") && steps.rows[2].includes("על בטוח") && steps.rows[2].includes("איזה אנזים מעכבת"), "the danger row in its other wording (progress)");
-      else expect(!steps.rows.some((r) => r.includes("מרשימת הסכנה")), "no danger row without progress");
+      if (progress) expect(steps.rows[2].includes("1 מטעויות ׳על בטוח׳, בניסוח חדש") && steps.rows[2].includes("על בטוח") && steps.rows[2].includes("איזה אנזים מעכבת"), "the danger row in its other wording (progress)");
+      else expect(!steps.rows.some((r) => r.includes("מטעויות ׳על בטוח׳")), "no danger row without progress");
       if (again) {
         const againRow = steps.rows.find((r) => r.startsWith("again"));
         expect(againRow.includes("טעות אחת בניסוח אחר") && againRow.includes("בניסוח אחר"), `Q-2's row from A2's counts: ${againRow}`);
@@ -230,7 +230,7 @@ const dayOf = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusal
       // 30 + 75 + 90 + 13 × 30 + 75 = 660 s (+ 75 with the danger row, + 75 with Q-2's, + 180 with U-2's topic).
       const fullSeconds = 660 + (progress ? 75 : 0) + (again ? 75 : 0) + (pulse ? 180 : 0);
       expect(startText === `להתחיל · ${Math.ceil(fullSeconds / 60)} דק׳`, `"${startText}"`);
-      expect((await noa.locator(".t-flame").innerText()).trim() === "להבה 4/7", "the flame 4/7");
+      expect((await noa.locator(".t-flame").innerText()).trim() === "ימי למידה 4/7", "the flame 4/7");
       await noa.locator(".t-flame").click();
       expect((await noa.locator(".t-flame-line").innerText()).includes("4 מתוך 7 הימים האחרונים") && (await noa.locator(".t-flame-line").innerText()).includes("גלוי רק לך"), "the flame's line, private");
       await noa.locator(".t-flame").click();
@@ -383,7 +383,7 @@ const dayOf = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusal
       expect((await dana.locator('.t-row[data-kind="card"]').count()) === 0, "her home is Anki: no cards row (C6)");
       const danaBodies = T.bodies.filter((b) => b.who === id("דנה")).map((b) => b.body).join(" ");
       expect(!danaBodies.includes(Q[0].id) && !danaBodies.includes(Q[2].id) && !danaBodies.includes("היפוקלמיה"), "none of נועה's rows reach דנה");
-      expect((await dana.locator(".t-flame").innerText()).trim() === "להבה 0/7", "her own flame");
+      expect((await dana.locator(".t-flame").innerText()).trim() === "ימי למידה 0/7", "her own flame");
       await shot(dana, "today-9-missed");
       await dana.locator(".t-missed").click();
       await dana.locator(".m-catchup").waitFor({ timeout: 15000 });

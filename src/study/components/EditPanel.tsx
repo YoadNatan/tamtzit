@@ -302,7 +302,7 @@ export default function EditPanel({ lc, spot }: { lc: LectureCtx; spot: Spot }) 
         <div className="a-row sheet-actions">
           {flags.var && !disputing ? (
             <button className="a-btn" onClick={() => setDisputing(true)}>
-              לא מסכימים: כרטיס צהוב
+              לא מסכימים
             </button>
           ) : null}
           <button className="a-btn primary wide" onClick={() => setEditing({})}>
@@ -474,7 +474,7 @@ function ProposalView({
           {p.state === "pending" ? (
             <span className="a-chip warn">ממתין לאישור</span>
           ) : p.state === "disputed" ? (
-            <span className="a-chip warn">כרטיס צהוב</span>
+            <span className="a-chip warn">מחלוקת</span>
           ) : p.state === "conflict" ? (
             <span className="a-chip bad">לא נשמר</span>
           ) : null}
@@ -536,7 +536,7 @@ function ProposalView({
       <div className="a-row sheet-actions k-foot">
         {flags.var && p.state === "pending" && !mine && !disputing ? (
           <button className="a-btn" onClick={() => setDisputing(true)}>
-            לא מסכימים: כרטיס צהוב
+            לא מסכימים
           </button>
         ) : null}
         {p.state === "pending" && !mine ? (
@@ -566,10 +566,10 @@ function ProposalView({
   );
 }
 
-/** "לא מסכימים: כרטיס צהוב": a claim in one line with 1-4 slides opens V's
+/** "לא מסכימים": a claim in one line with 1-4 slides opens V's
  *  yellow card on the paragraph, holding the proposal when there is one
  *  (section V, with VAR); without one, the card is about the paragraph as
- *  it reads ("כרטיס צהוב על הפסקה"). */
+ *  it reads ("מחלוקת על הפסקה"). */
 function DisputeForm({ lc, spot, proposal: p, text, onClose }: { lc: LectureCtx; spot: Spot; proposal?: Proposal; text?: string; onClose: () => void }) {
   const offered = [...new Set([...(p?.source_kind === "slide" ? p.source_slides : []), ...citedSlides(p ? p.before_text : (text ?? ""))])].slice(0, 8);
   const [claim, setClaim] = useState("");
@@ -614,7 +614,7 @@ function DisputeForm({ lc, spot, proposal: p, text, onClose }: { lc: LectureCtx;
       ) : null}
       <div className="a-row sheet-actions">
         <button className="a-btn" disabled={busy || claim.trim().length < 5 || !slides.length} onClick={() => void open()}>
-          לפתוח כרטיס צהוב
+          לפתוח מחלוקת
         </button>
         <button className="a-btn ghost" onClick={onClose}>
           ביטול

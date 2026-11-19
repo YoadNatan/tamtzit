@@ -33,7 +33,7 @@ import "../styles/plan.css";
 /* ── The group's marathon plan (?v=plan; package G; plan.html s1, spec
  *    §12.6.G; Yoad's decision 3 of 17 Nov 2026) ──
  *
- * One day of the plan: the head "מרתון · {title}" with "יום {d}/{n}", the
+ * One day of the plan: the head "ערב למידה · {title}" with "יום {d}/{n}", the
  * phase and the exam under it; the marathon meter ("ק״מ 21 ✓ כל הסיכומים
  * נקראו" · "ק״מ 42: המבחן") with decision 3's line "התוכנית מדייקת ככל
  * שמתרגלים: N מתוך M הרצאות עם נתונים" and how far the next lecture is;
@@ -145,7 +145,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
   if (error && !data)
     return (
       <main className="plan">
-        <Head title="תוכנית המרתון" />
+        <Head title="תוכנית עד המבחן" />
         <p className="a-error" role="alert">
           {error}
         </p>
@@ -157,7 +157,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
   if (!data)
     return (
       <main className="plan">
-        <Head title="תוכנית המרתון" />
+        <Head title="תוכנית עד המבחן" />
         <Loading />
       </main>
     );
@@ -165,7 +165,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
   if (!plan || phaseOn(plan, today) === "after")
     return (
       <main className="plan">
-        <Head title="תוכנית המרתון" />
+        <Head title="תוכנית עד המבחן" />
         <section className="a-card dashed empty pl-empty">
           <Icon name="cal" size={22} />
           <p className="a-para">{plan ? "המבחן של התוכנית הזו עבר. אפשר לבנות תוכנית למבחן הבא." : "עוד אין תוכנית. מזינים את מבחן הבלוק פעם אחת, והתוכנית נבנית לבד."}</p>
@@ -200,7 +200,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
     <>
       <Head back={route.lane === "mine" ? <BackLink go={ctx.go} fallback={{ v: "me" }} /> : undefined}>
         <h1 className="t">
-          {route.lane === "mine" ? "המסלול שלך" : <>מרתון · {isolateLatin(plan.title, "pt")}</>}
+          {route.lane === "mine" ? "המסלול שלך" : <>תוכנית · {isolateLatin(plan.title, "pt")}</>}
         </h1>
         {day ? <span className="a-chip">{`יום ${day.n}/${day.total}`}</span> : null}
       </Head>
@@ -295,7 +295,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
       )}
       {saved ? (
         <RouteLink to={{ v: "marathon", m: saved.id }} go={ctx.go} className="a-btn ghost small pl-open-day">
-          ליום הזה כמרתון
+          לערב הלמידה של היום הזה
         </RouteLink>
       ) : null}
 

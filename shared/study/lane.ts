@@ -190,7 +190,7 @@ export function buildLane(plan: GroupPlan, facts: Record<string, LectureFact>, m
         runs.push([r, { k: "quiz", l: u.l, n: LANE.QUIZ_N, min: LANE.QUIZ_MIN }]);
       }
       if (!runs.length) return;
-      day.blocks = [{ k: "intro", min: LANE.INTRO_MIN, title: "פתיחה: 3 לקפה" }, ...withBreaks(runs)];
+      day.blocks = [{ k: "intro", min: LANE.INTRO_MIN, title: "שאלות פתיחה" }, ...withBreaks(runs)];
       fill(day.blocks, day.minutes, weights);
     });
   }
@@ -221,7 +221,7 @@ export function buildLane(plan: GroupPlan, facts: Record<string, LectureFact>, m
       });
       runs.unshift([{ k: "free", min: LANE.PAST_EXAMS_MIN, title: "שחזורים" }]);
       runs.push([{ k: "questions", min: LANE.QUESTIONS_MIN, title: "מה שלא ישב טוב" }]);
-      day.blocks = [{ k: "intro", min: LANE.INTRO_MIN, title: "פתיחה: 3 לקפה" }, ...withBreaks(runs)];
+      day.blocks = [{ k: "intro", min: LANE.INTRO_MIN, title: "שאלות פתיחה" }, ...withBreaks(runs)];
       if (weights.size) fill(day.blocks, day.minutes, weights);
     });
   }
@@ -233,7 +233,7 @@ export function buildLane(plan: GroupPlan, facts: Record<string, LectureFact>, m
     const day = byDay.get(next)!;
     const moved = m.blocks.filter((b) => b.k === "read" || b.k === "quiz" || b.k === "questions").map((b) => ({ ...b, moved: true }));
     if (!moved.length) continue;
-    const head = day.blocks[0]?.k === "intro" ? [day.blocks[0]] : [{ k: "intro" as const, min: LANE.INTRO_MIN, title: "פתיחה: 3 לקפה" }];
+    const head = day.blocks[0]?.k === "intro" ? [day.blocks[0]] : [{ k: "intro" as const, min: LANE.INTRO_MIN, title: "שאלות פתיחה" }];
     const rest = day.blocks[0]?.k === "intro" ? day.blocks.slice(1) : day.blocks;
     day.blocks = [...head, ...moved, ...(rest.length ? [{ k: "break" as const, min: LANE.BREAK_MIN }, ...rest] : [])];
     day.movedFrom = m.day;
@@ -514,7 +514,7 @@ export function marathonAgenda(lectures: readonly Pick<LectureFact, "id" | "part
     return [r, { k: "quiz", l: l.id, n: LANE.QUIZ_N, min: LANE.QUIZ_MIN }];
   });
   if (!runs.length) return [];
-  const blocks: Block[] = [{ k: "intro", min: LANE.INTRO_MIN, title: "פתיחה: 3 לקפה" }, ...withBreaks(runs)];
+  const blocks: Block[] = [{ k: "intro", min: LANE.INTRO_MIN, title: "שאלות פתיחה" }, ...withBreaks(runs)];
   fill(blocks, minutes, weights);
   return blocks.slice(0, LANE.MAX_STEPS);
 }

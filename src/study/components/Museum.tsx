@@ -26,14 +26,14 @@ import { getMuseum, getMuseumMeter } from "../lib/museum";
 import { isolateLatin } from "../lib/rich";
 import { BackLink, Head, Loading, RouteLink } from "./Shell";
 
-/* ── מוזיאון המלכודות (?v=museum, ?v=museum&l=; package U, U-3; mockup
+/* ── טעויות נפוצות (?v=museum, ?v=museum&l=; package U, U-3; mockup
  * museum.html screen 1, the fun design §5.5's M-1 … M-12) ──
  *
- * The head "מוזיאון המלכודות · {course}" with the number of exhibits; the
+ * The head "טעויות נפוצות · {course}" with the number of exhibits; the
  * line "רק טעויות ׳על בטוח׳ של לפחות 3 מכם · בלי שמות"; the newest exhibit
  * still hanging as a card (its number and state, the claim, the plaque, the
  * truth and what confused, each with its slides); "עוד במוזיאון" with the
- * rest, retired ones last ("בפנסיה"); the footer "מוצג נפתח רק למחרת".
+ * rest, retired ones last ("נסגרה"); the footer "מוצג נפתח רק למחרת".
  *
  * Decision 3 (17 Nov 2026): the museum opens with whatever it has. Under the
  * exhibits (or in place of them) the meter says, from the night's counts,
@@ -85,7 +85,7 @@ export default function MuseumScreen({ route, ctx }: ScreenProps<"museum">) {
   const head = (
     <>
       <Head back={<BackLink go={ctx.go} fallback={{ v: "group" }} />}>
-        <h1 className="t">{named ? <>מוזיאון המלכודות · {isolateLatin(named, "mt")}</> : "מוזיאון המלכודות"}</h1>
+        <h1 className="t">{named ? <>טעויות נפוצות · {isolateLatin(named, "mt")}</> : "טעויות נפוצות"}</h1>
         {data && data.meter.state === "open" && exhibits.length > 0 ? (
           <span className="a-chip fun" aria-label={`${exhibits.length} מוצגים`}>
             {exhibits.length}
@@ -174,7 +174,7 @@ export default function MuseumScreen({ route, ctx }: ScreenProps<"museum">) {
       {rest.length ? (
         <section className="a-stack" aria-labelledby="museum-more-h">
           <div className="a-sec">
-            <h2 id="museum-more-h">{feature ? "עוד במוזיאון" : "במוזיאון"}</h2>
+            <h2 id="museum-more-h">{feature ? "עוד טעויות נפוצות" : "כל הטעויות"}</h2>
             <span className="a-small a-muted">{RETIRE_LINE}</span>
           </div>
           <ul className="a-list museum-list">
@@ -211,7 +211,7 @@ function FeatureCard({ e }: { e: Exhibit }) {
   return (
     <article className="a-card museum-feature" aria-labelledby={`ex-${e.trap_id}`}>
       <div className="a-row between">
-        <span className="a-chip fun">מוצג מס׳ {e.exhibit_no}</span>
+        <span className="a-chip fun">טעות מס׳ {e.exhibit_no}</span>
         <StateChip e={e} />
       </div>
       <p className="a-small a-muted museum-stem">

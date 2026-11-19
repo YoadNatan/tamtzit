@@ -222,7 +222,7 @@ export default function LectureView({ route, ctx }: ScreenProps<"lecture">) {
     };
   }, [lectureId, refresh, patchSection]);
 
-  const back = <BackLink go={ctx.go} fallback={route.mk ? { v: "marathon", m: route.mk } : { v: "library" }} label={route.mk ? "→ למרתון" : undefined} />;
+  const back = <BackLink go={ctx.go} fallback={route.mk ? { v: "marathon", m: route.mk } : { v: "library" }} label={route.mk ? "→ לערב הלמידה" : undefined} />;
 
   if (!lecture) {
     return (

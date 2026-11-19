@@ -2771,7 +2771,7 @@ set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
 do $$ begin perform public.study_quiz_record(current_setting('t.gid')::uuid); raise notice 'ZA12b. FAIL: a stranger read the record';
 exception when others then raise notice 'ZA12b. %: members only (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
 reset role;
-select 'ZA13. the hold is gone after the end: ' || count(*) || ' keys held (expect 0); the registry: ' || (public.study_schema() ->> 'Z') || ' (expect 3)'
+select 'ZA13. the hold is gone after the end: ' || count(*) || ' keys held (expect 0); the registry: ' || (public.study_schema() ->> 'Z') || ' (expect 4)'
   from public.study_question_keys where held_until > now();
 update public.study_questions set stale_at = null where id = '3c2a0000-0000-4000-8000-000000000004';
 
@@ -4956,7 +4956,7 @@ set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
 select public.study_withdraw_edit(current_setting('t.pm')::uuid) is null as w \gset
 set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
 
--- ═════════ M8-M9 · the opening ("3 לקפה") and the closing quiz (decision 7) ═════════
+-- ═════════ M8-M9 · the opening ("שאלות פתיחה") and the closing quiz (decision 7) ═════════
 reset role;
 update public.study_quizzes set created_at = created_at - interval '1 day'
  where group_id = :'gid' and preset in ('coffee', 'end');
@@ -4964,7 +4964,7 @@ set role authenticated;
 set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
 select set_config('t.cq', public.study_meeting_quiz(current_setting('t.m')::uuid, 'coffee')::text, false) is not null as c \gset
 select mtest.m_is('M8. the opening', preset || ', ' || title || ', ' || mode || ', ' || n_wanted || ' questions, ' || seconds || ' s',
-       'coffee, 3 לקפה, coop, 3 questions, 45 s') from public.study_quizzes where id = current_setting('t.cq')::uuid;
+       'coffee, שאלות פתיחה, coop, 3 questions, 45 s') from public.study_quizzes where id = current_setting('t.cq')::uuid;
 set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
 select public.study_quiz_join(current_setting('t.cq')::uuid) is null as j \gset
 set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
@@ -6068,7 +6068,7 @@ select pg_temp.ux('U5j', 'a member writes no count: ' || not exists (
          select 1 from information_schema.role_table_grants
           where grantee in ('authenticated', 'anon') and table_name like 'study_pulse_%' and table_name <> 'study_pulse_optout'
             and privilege_type in ('INSERT', 'UPDATE', 'DELETE')), 'a member writes no count: true');
-select pg_temp.ux('U-reg', public.study_schema() ->> 'U', '3');   -- U-3 (traps and the museum) raised it to 2; the question types to 3
+select pg_temp.ux('U-reg', public.study_schema() ->> 'U', '4');   -- U-3 (traps and the museum) raised it to 2; the question types to 3; plain copy to 4
 
 -- ═════════ MU · U-3: traps and the museum (section U at 2; decision 3's meter) ═════════
 -- On the nights above: q6's option 1 (three counted members, 9 days ago) became a trap the night of
@@ -6088,7 +6088,7 @@ select pg_temp.ux('MU1a', (select string_agg('q' || right(t.question_id::text, 1
        'q1 trap true true open, q5 trap true true open, q6 trap true true open');
 select pg_temp.ux('MU1b', (select c.back || ' · ' || c.extra from public.study_traps t join public.study_cards c on c.id = t.card_id
                             where t.question_id = '75200000-0000-4000-8000-000000000005'),
-       'טיפול, בשילוב עם Doxycycline או Clindamycin · המלכודת: מניעת מלריה · הסבר א');
+       'טיפול, בשילוב עם Doxycycline או Clindamycin · טעות נפוצה: מניעת מלריה · הסבר א');
 set role authenticated;
 set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
 select pg_temp.ux('MU1c', (select string_agg(exhibit_no || ' ' || state || ' ' || stem || ' ׳' || claim || '׳ → ' || truth || ' · ' || confused
@@ -6649,7 +6649,7 @@ select pg_temp.hx('HB0a', study_private.boss_min_heads() || '/' || study_private
                          || '/' || study_private.boss_hit_pct() || '/' || study_private.boss_loot_days(), '2/4/3/3/20/2/80/3');
 select pg_temp.hx('HB0b', (select string_agg(right(question_id::text, 1) || '/' || option || ' ' || state || coalesce(' #' || exhibit_no, ''), ', ' order by question_id)
                            from public.study_traps where lecture_id = :'hl1'), '1/3 open, 3/2 open #1, 5/0 open');
-select pg_temp.hx('HB0c', study_private.boss_hooks_ok()::text || ' · H ' || (public.study_schema() ->> 'H'), 'true · H 3');
+select pg_temp.hx('HB0c', study_private.boss_hooks_ok()::text || ' · H ' || (public.study_schema() ->> 'H'), 'true · H 4');
 
 -- ═════════ H1 · the card's heads and decision 3's meter ═════════
 set role authenticated;
@@ -6690,7 +6690,7 @@ exception when others then raise notice 'HB1f. %: (%)', case when sqlerrm = 'lec
 select set_config('t.bq', public.study_boss_create(:'hgid', array[:'hl1']::uuid[], 45)::text, false) is not null as bq \gset
 reset role;
 select pg_temp.hx('HB2', (select mode || ' · ' || title || ' · ' || n_wanted from public.study_quizzes where id = current_setting('t.bq')::uuid),
-       'boss · קרב הבוס · ההידרה של Malaria · 5');
+       'boss · אתגר קבוצתי · Malaria · 5');
 select pg_temp.hx('HB2a', (select string_agg((h ->> 'name') || ' ' || (h ->> 'max') || ' HP, ' || jsonb_array_length(h -> 'qs') || 'q'
                                             || coalesce(', trap q' || right(h ->> 'trap_q', 1) || '/' || (h ->> 'trap_opt'), '') || ' ' || (h -> 'slides')::text, ' · ' order by o)
                             from public.study_boss_battles b, jsonb_array_elements(b.heads) with ordinality as x(h, o)
@@ -6896,7 +6896,7 @@ reset role;
 select pg_temp.hx('HB6h', (select string_agg(column_name, ',' order by column_name) from information_schema.column_privileges
                             where grantee = 'authenticated' and table_schema = 'public' and table_name = 'study_boss_battles' and privilege_type = 'SELECT'),
                   'created_at,ended_at,group_id,id,lecture_ids,name,outcome,planned,quiz_id,revenge_of,team_hp');
-select pg_temp.hx('H-reg', public.study_schema() ->> 'H', '3');
+select pg_temp.hx('H-reg', public.study_schema() ->> 'H', '4');
 
 -- Clean-up for the sections after this one: the lecture takes its parts,
 -- questions, answers, quizzes' rounds, traps and pulse rows; the battles go
@@ -7198,7 +7198,7 @@ select gtest.is_('GS1i. a stranger reads no plan', count(*)::text, '0') from pub
 set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000001';
 select id as gd, version as gdv from public.study_group_plan_day(:'gp', current_date + 9, null, 'יום 1 · סבב משותף',
   (current_date + 9) + time '09:00', 180, array[:'gl1'::uuid],
-  jsonb_build_array(jsonb_build_object('k', 'intro', 'min', 5, 'title', 'פתיחה: 3 לקפה'),
+  jsonb_build_array(jsonb_build_object('k', 'intro', 'min', 5, 'title', 'שאלות פתיחה'),
                     jsonb_build_object('k', 'read', 'l', :'gl1', 'from', 0, 'to', 0, 'min', 50),
                     jsonb_build_object('k', 'quiz', 'l', :'gl1', 'n', 5, 'min', 10),
                     jsonb_build_object('k', 'break', 'min', 10),
@@ -8226,9 +8226,9 @@ select xtest.is_('X1p3. the form check by name', xtest.err(format('update public
   'new row for relation "study_questions" violates check constraint "study_questions_form_x"');
 select xtest.is_('X1p4. a step without a series', xtest.err(format('update public.study_questions set step = 1 where id = %L', :'xold')),
   'new row for relation "study_questions" violates check constraint "study_questions_step_x"');
-select xtest.is_('X1-reg. the registry: Q 3, X 1, and Z, M, H, U, C at 3',
+select xtest.is_('X1-reg. the registry: Q 3, X 1, M and C at 3, and Z, H, U at 4 (plain copy)',
   (select string_agg(k || ' ' || (public.study_schema() ->> k), ', ' order by k) from unnest(array['C','H','M','Q','U','X','Z']) k),
-  'C 3, H 3, M 3, Q 3, U 3, X 1, Z 3');
+  'C 3, H 4, M 3, Q 3, U 4, X 1, Z 4');
 
 -- The fixtures go.
 delete from public.study_quizzes where id = 'e7500000-0000-4000-8000-000000000001';

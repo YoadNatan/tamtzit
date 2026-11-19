@@ -45,7 +45,7 @@ export async function getSignals(groupId: string): Promise<Map<string, number>> 
   return new Map(rows.map((r) => [r.question_id, SIGNAL_WEIGHT[r.signal] ?? 0]));
 }
 
-/** "לא לכלול אותי בדופק": the member's own row (owner-only). */
+/** "לא לכלול אותי בספירה": the member's own row (owner-only). */
 export async function getOptOut(groupId: string): Promise<boolean> {
   const rows = await run<Array<{ group_id: string }>>(db().from("study_pulse_optout").select("group_id").eq("group_id", groupId));
   return rows.length > 0;

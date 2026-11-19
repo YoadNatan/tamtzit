@@ -13,7 +13,7 @@ import "../styles/extras.css";
  * "טבלה ריקה": the lecture's slides with a table to fill, each a way in
  * (?v=practice&s=b.<lecture>.<slide>), and the meter: how many tables there
  * are, and where the group's other tables are when this lecture has none
- * (the empty state, never a dead end). "מלכודת משלי": the author's own meter
+ * (the empty state, never a dead end). "שאלה משלי": the author's own meter
  * (in the bank, named, waiting for a live quiz, to fix) and "להוסיף מלכודת
  * משלי". Each part with its flag. */
 
@@ -82,7 +82,7 @@ export default function ExtrasCard({ ctx, lectureId, slides }: { ctx: Ctx; lectu
       {flags.traps ? (
         <section className="a-card extras-traps" aria-labelledby="traps-h">
           <div className="a-sec">
-            <h2 id="traps-h">מלכודת משלי</h2>
+            <h2 id="traps-h">שאלה משלי</h2>
             <span className="a-chip">רק לך</span>
           </div>
           {traps ? (
@@ -94,7 +94,7 @@ export default function ExtrasCard({ ctx, lectureId, slides }: { ctx: Ctx; lectu
             <p className="a-small a-muted">טוען…</p>
           )}
           <RouteLink to={{ v: "trap", l: lectureId }} go={ctx.go} className="a-btn add-trap">
-            להוסיף מלכודת משלי
+            להוסיף שאלה משלי
           </RouteLink>
         </section>
       ) : null}

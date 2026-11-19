@@ -44,16 +44,16 @@ test("the thresholds: the app's constants are section H's (one place, read by bo
 });
 
 test("decision 3: the boss's meter, from the counts", () => {
-  assert.equal(bossMeterLine({ hot: 3, topics: 8, answers_next: 20 }), "3 מתוך 8 נושאים חמים · עוד כ-20 תשובות לנושא הבא", "Yoad's approved example");
-  assert.equal(bossMeterLine({ hot: 1, topics: 5, answers_next: 1 }), "1 מתוך 5 נושאים חמים · עוד תשובה אחת לנושא הבא");
-  assert.equal(bossMeterLine({ hot: 4, topics: 4, answers_next: null }), "4 מתוך 4 נושאים חמים", "every topic weighed: no next");
-  assert.equal(headsNeedLine(0), "הקרב נפתח משני נושאים חמים: עוד 2 נושאים.");
-  assert.equal(headsNeedLine(1), "הקרב נפתח משני נושאים חמים: עוד נושא אחד.");
+  assert.equal(bossMeterLine({ hot: 3, topics: 8, answers_next: 20 }), "3 מתוך 8 נושאים קשים · עוד כ-20 תשובות לנושא הבא", "Yoad's approved example");
+  assert.equal(bossMeterLine({ hot: 1, topics: 5, answers_next: 1 }), "1 מתוך 5 נושאים קשים · עוד תשובה אחת לנושא הבא");
+  assert.equal(bossMeterLine({ hot: 4, topics: 4, answers_next: null }), "4 מתוך 4 נושאים קשים", "every topic weighed: no next");
+  assert.equal(headsNeedLine(0), "האתגר נפתח משני נושאים קשים: עוד 2 נושאים.");
+  assert.equal(headsNeedLine(1), "האתגר נפתח משני נושאים קשים: עוד נושא אחד.");
   assert.equal(headsNeedLine(2), "");
 });
 
 test("the meter's bar says what its line says (review UI-2)", () => {
-  // Yoad's example: "3 מתוך 8 נושאים חמים" fills 3/8, and the bar's label is the line.
+  // Yoad's example: "3 מתוך 8 נושאים קשים" fills 3/8, and the bar's label is the line.
   const open = { hot: 3, topics: 8, answers_next: 20, group_need: 0 };
   assert.deepEqual(bossBar(open), { pct: 38, label: bossMeterLine(open) });
   for (const [hot, topics] of [[1, 8], [0, 5], [4, 4], [2, 3], [7, 12]]) {
@@ -69,14 +69,14 @@ test("the meter's bar says what its line says (review UI-2)", () => {
 });
 
 test("the battle's words: heads, moments without names, the loot's days", () => {
-  assert.equal(headChip({ head: 2, heads: [{}, {}, {}, {}] as never }), "ראש 3/4");
-  assert.equal(headChip({ head: null, heads: [{}, {}] as never }), "2 ראשים");
+  assert.equal(headChip({ head: 2, heads: [{}, {}, {}, {}] as never }), "נושא 3/4");
+  assert.equal(headChip({ head: null, heads: [{}, {}] as never }), "2 נושאים");
   // The count reads as Hebrew counts do (review UI-4): no "0 ראשים", no "1 ראשים".
   assert.equal(headsChip(0), "");
-  assert.equal(headsChip(1), "ראש אחד");
-  assert.equal(headsChip(3), "3 ראשים");
-  assert.equal(headChip({ head: null, heads: [{}] as never }), "ראש אחד");
-  assert.deepEqual(momentText({ t: "trap", head: "Primaquine", hp: -20 }), { title: "המלכודת של Primaquine", chip: "−20 HP", tone: "bad", line: "עלתה לקבוצה 20 HP." });
+  assert.equal(headsChip(1), "נושא אחד");
+  assert.equal(headsChip(3), "3 נושאים");
+  assert.equal(headChip({ head: null, heads: [{}] as never }), "נושא אחד");
+  assert.deepEqual(momentText({ t: "trap", head: "Primaquine", hp: -20 }), { title: "טעות נפוצה: Primaquine", chip: "−20", tone: "bad", line: "עלתה לקבוצה 20 נקודות." });
   assert.equal(momentText({ t: "down", head: "Hypnozoite", relapses: 2 })?.line, "אחרי שחזר פעמיים.");
   assert.equal(momentText({ t: "down", head: "Hypnozoite", relapses: 0 })?.line, "בלי לחזור.");
   for (const t of ["trap", "relapse", "down", "last", "fall"] as const) {
@@ -86,8 +86,8 @@ test("the battle's words: heads, moments without names, the loot's days", () => 
   assert.equal(lootDay(1), "מחר");
   assert.equal(lootDay(2), "מחרתיים");
   assert.equal(lootDay(3), "בעוד 3 ימים");
-  assert.equal(lootTitle(4, 3), "השלל שלך: 4 טעויות, 3 ימים");
-  assert.equal(lootTitle(1, 1), "השלל שלך: טעות אחת, יום אחד");
+  assert.equal(lootTitle(4, 3), "לחזרה שלך: 4 טעויות, 3 ימים");
+  assert.equal(lootTitle(1, 1), "לחזרה שלך: טעות אחת, יום אחד");
   const days = lootDays(
     [
       { question_id: "a", topic: "איזו תרופה על איזה שלב", question: "q", slides: [23], due_on: "2026-11-18" },

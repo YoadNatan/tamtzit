@@ -42,7 +42,7 @@ export const PULSE = {
 export const MUSEUM = {
   /** Members who chose the same wrong option before it is a trap; "על בטוח" for an exhibit (the privacy floor). */
   FLOOR,
-  /** Retired ("בפנסיה") when everyone active answered right on this many different study days. */
+  /** Retired ("נסגרה") when everyone active answered right on this many different study days. */
   RETIRE_DAYS: 2,
   /** "Everyone active" means members with practice in this many days. */
   ACTIVE_DAYS: 14,
@@ -128,7 +128,7 @@ export const BLANK = {
 export const READINESS_MIN = 20;
 /** PR5: calibration shows a percentage from this many "על בטוח" first-answers-a-day (60 days). */
 export const CALIBRATION_MIN = 20;
-/** PR4: an aspect gets a bucket (חם · פושר · יושב טוב) from this many questions answered. */
+/** PR4: an aspect gets a bucket (קשה · בינוני · יושב טוב) from this many questions answered. */
 export const ASPECT_MIN = 4;
 /** PR3: the danger list's second return, this many days after the first right "על בטוח". */
 export const DANGER_SECOND_DAYS = 3;

@@ -35,7 +35,7 @@ import "../styles/today.css";
  * meeting (M's band); a meeting this member missed with its catch-up
  * ("פגישה שפספסת · …", "השלמה · {n} דק׳", M-2); "התור שלי" with "רק לך",
  * the minute chips 10 · 20 · 45 (per device), the cut's rows grouped with
- * their chips and an example, "להתחיל · {n} דק׳" and the flame ("להבה 4/7",
+ * their chips and an example, "להתחיל · {n} דק׳" and the flame ("ימי למידה 4/7",
  * its line on a tap); "בקבוצה": the newest open question that is not hers;
  * T-2's "הקבוצה צריכה אותך" (opt-in; its meter when nothing waits) and,
  * from two days before the plan's exam, the exam-eve view's card (package

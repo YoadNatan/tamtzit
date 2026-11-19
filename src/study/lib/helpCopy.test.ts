@@ -15,6 +15,12 @@ import { helpRows, privacyLines } from "./helpCopy";
  * checks the built bundle for the same three strings. */
 
 const root = process.cwd();
+/** The plain copy pass (docs/study/COPY.md) rewords some of the spec's sentences:
+ *  its table "| where | the spec said | now |", as a map from the old to the new. */
+const COPY_NOW = new Map(
+  [...readFileSync(join(process.cwd(), "docs", "study", "COPY.md"), "utf8").matchAll(/^\| [^|]+ \| "([^"]+)" \| "([^"]+)" \|$/gm)].map((m) => [m[1], m[2]] as const),
+);
+
 const FORBIDDEN = ["מבחן חי", "תחרותי", "נקודות על תשובה נכונה ומהירה"];
 
 function files(dir: string, out: string[] = []): string[] {
@@ -78,23 +84,23 @@ const HELP: Array<[string, (f: Flags) => boolean]> = [
   ["תגובות ושאלות", () => true],
   ["מה יושב על הפסקה", (f) => f.anchor],
   ["תיקון בסיכום", (f) => f.corrections],
-  ["כרטיס צהוב ו-VAR", (f) => f.var],
+  ["מחלוקות", (f) => f.var],
   ["סימון קריאה", () => true],
   ["תרגול", (f) => f.practice],
   ["סוגי שאלות", (f) => f.qtypes], // question types (docs/study/question-types.md)
   ["מבחנים קודמים", (f) => f.exams],
-  ["מלכודת משלי", (f) => f.traps],
+  ["שאלה משלי", (f) => f.traps],
   ["טבלה ריקה", (f) => f.blankTable], // package E, P10 (decision 3: usable early)
   ["מבחן קבוצתי", (f) => f.quiz],
-  ["קרב הבוס", (f) => f.boss],
+  ["אתגר קבוצתי", (f) => f.boss],
   ["כרטיסיות", (f) => f.cards],
   ["לשאול את החומר", (f) => f.ask],
   ["קיר האסוציאציות", (f) => f.wall],
-  ["דופק הקבוצה", (f) => f.pulse],
-  ["מוזיאון המלכודות", (f) => f.museum],
+  ["מה קשה לקבוצה", (f) => f.pulse],
+  ["טעויות נפוצות", (f) => f.museum],
   ["ההתקדמות שלי", (f) => f.progress],
-  ["מרתוני למידה", (f) => f.marathons],
-  ["תוכנית המרתון", (f) => f.groupPlan],
+  ["ערבי למידה", (f) => f.marathons],
+  ["תוכנית עד המבחן", (f) => f.groupPlan],
   ["שמירת החשבון", (f) => f.account],
   ["הקלטות", (f) => f.recordings],
   ["PDF ושיתוף", () => true],
@@ -115,16 +121,16 @@ const PRIVACY: Array<[string, (f: Flags) => boolean]> = [
   ["מי רואה מה בקבוצה:", () => true],
   ["ספירה בלי שמות:", (f) => f.pulse],
   ["בפגישה:", (f) => f.meeting],
-  ["כרטיס צהוב:", (f) => f.var],
+  ["מחלוקות:", (f) => f.var],
   ["קיר האסוציאציות:", (f) => f.wall],
   ["היום:", (f) => f.today],
   ["בתרגול:", (f) => f.practice],
   ["בכרטיסיות:", (f) => f.cards],
   ["מתחת לפסקה:", (f) => f.anchor],
   ["בהתקדמות:", (f) => f.progress],
-  ["מלכודת משלי:", (f) => f.traps],
+  ["שאלה משלי:", (f) => f.traps],
   ["טבלה ריקה:", (f) => f.blankTable], // package E, P10
-  ["תוכנית המרתון:", (f) => f.groupPlan],
+  ["תוכנית עד המבחן:", (f) => f.groupPlan],
   ["ההזמנה:", () => true],
   ["ניהול האפליקציה:", () => true],
   ["כשמשתפים:", () => true],
@@ -172,7 +178,8 @@ test("§12.7.5's sentences, word for word, shown with their flag and only with i
     const quotes = [...line.matchAll(/"([^"]+)"/g)]
       .map((m) => m[1].replace(/^…/, ""))
       .filter((q) => /[א-ת]/.test(q) && q.length > 12)
-      .map((q) => replaced.get(q) ?? q);
+      .map((q) => replaced.get(q) ?? q)
+      .map((q) => COPY_NOW.get(q) ?? q);
     assert.ok(quotes.length >= 1, `(${flag}) has its sentences`);
     for (const q of quotes) {
       assert.ok(shown(every).includes(q), `(${flag}) shown with every flag: ${q}`);
@@ -182,6 +189,8 @@ test("§12.7.5's sentences, word for word, shown with their flag and only with i
     }
   }
   for (const old of replaced.keys()) assert.ok(!shown(every).includes(old), `the addendum's wording a decision replaced is gone: ${old}`);
+  assert.ok(COPY_NOW.size >= 3, "docs/study/COPY.md's table");
+  for (const old of COPY_NOW.keys()) assert.ok(!shown(every).includes(old), `the wording the plain copy replaced is gone: ${old}`);
 });
 
 test("the contradicted lines are gone: the race scores the bet, and a correction waits for a second approval", () => {
@@ -201,7 +210,7 @@ test("the gating rule: before release 8 no row promises in-app review's private 
     assert.ok(!text.includes("להיכנס לתור שלך"), "the queue waits for Today");
   }
   const r8 = shown(flagSet(R8));
-  assert.ok(r8.includes("טעות שלך בתרגול או במבחן הקבוצתי הופכת לכרטיס פרטי, עם הנתיחה בגב.") && r8.includes("כשמסמנים שנענתה, התשובה יכולה להיכנס לתור שלך ככרטיס."));
+  assert.ok(r8.includes("טעות שלך בתרגול או במבחן הקבוצתי הופכת לכרטיס פרטי, עם ההסבר בגב.") && r8.includes("כשמסמנים שנענתה, התשובה יכולה להיכנס לתור שלך ככרטיס."));
 });
 
 test("every line is gender-neutral (§6.0 rule 1) and names the services in <bdi> (rule 3)", () => {
@@ -247,7 +256,7 @@ test("release 1: help and the privacy note are the spec's §6.2 for practice and
   assert.equal(rows.find((r) => r.title === "תרגול")?.text, specRow("תרגול").replace(/ \*\(progress\)\*.*$/, ""));
   assert.equal(rows.find((r) => r.title === "כרטיסיות")?.text, specRow("כרטיסיות").replace(/, \*\(cards review\)\*.*$/, "."));
   const text = shown(f, R1_ENDS);
-  for (const ahead of ["הימור", "הנתיחה", "מתי כן", "שני דגלים", "חלק אחרי חלק", "החפיסה שלך", "כרטיס פרטי", "Batch", "אוטומטית", "מבחן קבוצתי", "מבחן חי"]) {
+  for (const ahead of ["הימור", "למה מה שבחרת", "מתי כן", "שני דגלים", "חלק אחרי חלק", "החפיסה שלך", "כרטיס פרטי", "Batch", "אוטומטית", "מבחן קבוצתי", "מבחן חי"]) {
     assert.ok(!text.includes(ahead), `release 1 says nothing of: ${ahead}`);
   }
   // With progress on and still no end, the spec's mistakes sentence joins the practice row.
@@ -259,7 +268,7 @@ test("release 1: help and the privacy note are the spec's §6.2 for practice and
  * none of Q's, C's or B's ends, and no meeting. The quiz's help row and its
  * privacy sentence say what section Z does: the bet, the argument and the
  * second vote, the race scored by the bet, counts only from 3; nothing of
- * "3 לקפה" (section M) or of a trap card (C's end). ── */
+ * "שאלות פתיחה" (section M) or of a trap card (C's end). ── */
 /** Release 2's build, as it shipped: Q's end, none of C's or B's. */
 const R2_ENDS: Ends = { Q: true, C: false, B: false };
 
@@ -283,10 +292,10 @@ test("release 2: the quiz's help row and privacy sentence, without the meeting's
   const group = privacyLines(f, "ספק המייל", R2_ENDS).find((l) => l.key === "group")?.text ?? "";
   assert.ok(group.includes("כשעונים פחות משלושה רואים רק כמה ענו, ומבחן של פחות משלושה לא מציג ציון לקבוצה."), group);
   const text = shown(f, R2_ENDS);
-  for (const later of ["3 לקפה", "כרטיס מלכודת", "הפגישה היומית", "מבחן חי", "תחרותי"]) assert.ok(!text.includes(later), `release 2 says nothing of: ${later}`);
+  for (const later of ["שאלות פתיחה", "כרטיס ׳טעות נפוצה׳", "הפגישה היומית", "מבחן חי", "תחרותי"]) assert.ok(!text.includes(later), `release 2 says nothing of: ${later}`);
   // The two sentences come back with what they describe.
-  assert.ok(shown(flagSet([...R1, "QUIZ", "MEETING"]), R2_ENDS).includes("ב״3 לקפה״ רואים רק אם רוב הקבוצה צדקה."));
-  assert.ok(shown(f, ALL_ENDS).includes("כרטיס מלכודת נוצר רק כשלפחות 3 בחרו באותה תשובה, ונפתח למחרת."));
+  assert.ok(shown(flagSet([...R1, "QUIZ", "MEETING"]), R2_ENDS).includes("בשאלות הפתיחה רואים רק אם רוב הקבוצה צדקה."));
+  assert.ok(shown(f, ALL_ENDS).includes("כרטיס ׳טעות נפוצה׳ נוצר רק כשלפחות 3 בחרו באותה תשובה, ונפתח למחרת."));
 });
 
 test("W2: every release says that taps at once count once, that deleting stops the writing, and that no phone changes a part directly", () => {
@@ -313,9 +322,9 @@ test("C's end: the cards' help row, the privacy note's cards line and the quiz's
   assert.ok(cards.includes("מוסיפים לחפיסה שלך חלק אחרי חלק, ועד 20 כרטיסים חדשים ביום."), cards);
   assert.ok(!cards.includes("כרטיס פרטי") && !cards.includes("בית אחד לחזרות"), "no private card or home while review is off");
   assert.equal(privacyLines(f, "ספק המייל").find((l) => l.key === "cards")?.text, "החפיסה שלך, הכרטיסים הפרטיים מהטעויות והזיכרון של כל כרטיס גלויים רק לך.");
-  assert.ok(shown(f, ENDS).includes("כרטיס מלכודת נוצר רק כשלפחות 3 בחרו באותה תשובה, ונפתח למחרת."));
+  assert.ok(shown(f, ENDS).includes("כרטיס ׳טעות נפוצה׳ נוצר רק כשלפחות 3 בחרו באותה תשובה, ונפתח למחרת."));
   const review = helpRows(flagSet([...R1, "QUIZ", "CARDS_REVIEW"]), W).find((r) => r.title === "כרטיסיות")?.text ?? "";
-  assert.ok(review.includes("טעות שלך בתרגול או במבחן הקבוצתי הופכת לכרטיס פרטי, עם הנתיחה בגב. בוחרים בית אחד לחזרות: האפליקציה או Anki."), review);
+  assert.ok(review.includes("טעות שלך בתרגול או במבחן הקבוצתי הופכת לכרטיס פרטי, עם ההסבר בגב. בוחרים בית אחד לחזרות: האפליקציה או Anki."), review);
   for (const notYet of ["שאלות שנכתבות מראש", "כתיבה מראש:"]) assert.ok(!shown(f, ENDS).includes(notYet), `nothing of section B: ${notYet}`);
 });
 
@@ -344,12 +353,12 @@ test("T-1: Today's help names only the rows the build queues (each waits for its
   const all = today(["QUESTIONS", "PRACTICE", "QUIZ", "MEETING", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "VAR", "PROGRESS", "TODAY"]);
   assert.equal(
     all,
-    "המסך הראשון: הפגישה של היום, ומתחת ״התור שלי״ לפי הזמן שיש (10, 20 או 45 דקות): כרטיסים שהגיע זמנם, טעויות מהמבחן הקבוצתי, טעות ׳על בטוח׳ בניסוח חדש, פסקאות שסימנת ׳לא ברור׳ ועדכונים בסיכום. מה שלא נכנס עובר למחר. הלהבה נדלקת ב-4 מתוך 7 ימים. הכול גלוי רק לך.",
+    "המסך הראשון: הפגישה של היום, ומתחת ״התור שלי״ לפי הזמן שיש (10, 20 או 45 דקות): כרטיסים שהגיע זמנם, טעויות מהמבחן הקבוצתי, טעות ׳על בטוח׳ בניסוח חדש, פסקאות שסימנת ׳לא ברור׳ ועדכונים בסיכום. מה שלא נכנס עובר למחר. מ-4 ימי למידה מתוך 7 יש סימון. הכול גלוי רק לך.",
   );
   // Production's set with Today and the review: cards only, no meeting, no quiz.
   assert.equal(
     today(["QUESTIONS", "PRACTICE", "CARDS", "CARDS_REVIEW", "TODAY"]),
-    "המסך הראשון: ״התור שלי״ לפי הזמן שיש (10, 20 או 45 דקות): כרטיסים שהגיע זמנם. מה שלא נכנס עובר למחר. הלהבה נדלקת ב-4 מתוך 7 ימים. הכול גלוי רק לך.",
+    "המסך הראשון: ״התור שלי״ לפי הזמן שיש (10, 20 או 45 דקות): כרטיסים שהגיע זמנם. מה שלא נכנס עובר למחר. מ-4 ימי למידה מתוך 7 יש סימון. הכול גלוי רק לך.",
   );
   assert.equal(today(["CARDS"]), "", "no Today, no row");
 });

@@ -504,7 +504,7 @@ export default function Quiz({ quizId, ctx }: ScreenProps<"quiz"> & { quizId: st
               <BackLink go={ctx.go} fallback={{ v: "group" }} />
             )
           }
-          title={race ? "מירוץ" : z.mode === "boss" ? "קרב הבוס" : "מבחן קבוצתי"}
+          title={race ? "מירוץ" : z.mode === "boss" ? "אתגר קבוצתי" : "מבחן קבוצתי"}
         >
           <span className="a-chip busy">{z.n_wanted} שאלות</span>
         </Head>
@@ -836,7 +836,7 @@ export default function Quiz({ quizId, ctx }: ScreenProps<"quiz"> & { quizId: st
           headline,
           foldWhy: race,
           noDontKnow: true,
-          optionExtra: (i) => (r?.trap === i ? <span className="a-chip bad quiz-trap">המלכודת של הסבב</span> : null),
+          optionExtra: (i) => (r?.trap === i ? <span className="a-chip bad quiz-trap">הטעות הנפוצה בסבב</span> : null),
           onFlag: playing && q ? () => setSheet({ kind: "flag", qid: q.id }) : undefined,
         },
       )}

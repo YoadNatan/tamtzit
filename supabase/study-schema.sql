@@ -5818,7 +5818,7 @@ begin
   select case when count(distinct btrim(l.course)) = 1 then min(btrim(l.course)) end into course
     from public.study_lectures l where l.id = any (lec);
   if p_preset = 'coffee' then
-    t := '3 לקפה';
+    t := 'שאלות פתיחה';
   elsif p_preset = 'stop' then
     select 'עצירה: ' || coalesce(nullif(btrim(s.title), ''), l.title) into t
       from public.study_lectures l left join public.study_sections s on s.lecture_id = l.id and s.idx = p_part_from
@@ -6248,6 +6248,12 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 -- only (a set question, a pin number to tap, a staged case's later step
 -- never come), and a question with a picture gets about 12 s more.
 insert into study_private.schema_sections (section, version) values ('Z', 3)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- Z 4 (plain copy, docs/study/COPY.md): the meeting's opening is called
+-- 'שאלות פתיחה' (was '3 לקפה'); quizzes opened before keep their rows, with
+-- the title said the new way.
+update public.study_quizzes set title = 'שאלות פתיחה' where preset = 'coffee' and title = '3 לקפה';
+insert into study_private.schema_sections (section, version) values ('Z', 4)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION Z ════
 
@@ -12555,7 +12561,7 @@ begin
        end;
   if char_length(f) > 400 then f := left(btrim(q.question), 399) || '…'; end if;
   b := left(btrim(q.options[k.answer + 1]), 300);
-  e := left('המלכודת: ' || btrim(q.options[t.option + 1])
+  e := left('טעות נפוצה: ' || btrim(q.options[t.option + 1])
             || coalesce(' · ' || nullif(btrim(k.explanations[t.option + 1]), ''), ''), 500);
   cid := study_private.trap_card(q.lecture_id, q.part_idx, (to_jsonb(q) ->> 'anchor')::int, coalesce(to_jsonb(q) ->> 'quote', ''),
                                  f, b, e, coalesce(q.slides[1:12], '{}'), 'q:' || q.id::text || ':' || t.option::text);
@@ -12879,6 +12885,11 @@ insert into study_private.schema_sections (section, version) values ('U', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- U 3: no trap of a question with a picture or of a set question (question types).
 insert into study_private.schema_sections (section, version) values ('U', 3)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- U 4 (plain copy, docs/study/COPY.md): a common wrong answer's card says
+-- 'טעות נפוצה: ' (was 'המלכודת: '). Cards made before keep their text: a card
+-- is the group's content, and rewriting it would touch every deck's history.
+insert into study_private.schema_sections (section, version) values ('U', 4)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION U ════
 
@@ -13915,9 +13926,9 @@ begin
   else
     v_name := course;
   end if;
-  v_name := left('ההידרה של ' || coalesce(v_name, 'הקורס'), 160);
+  v_name := left(coalesce(v_name, 'הקורס'), 160);
   qid := public.study_quiz_create(p_group, 'boss', lec, planned, coalesce(p_seconds, 45), 'all');
-  update public.study_quizzes z set title = left('קרב הבוס · ' || v_name, 200) where z.id = qid;
+  update public.study_quizzes z set title = left('אתגר קבוצתי · ' || v_name, 200) where z.id = qid;
   insert into public.study_boss_battles (quiz_id, group_id, name, lecture_ids, heads, rounds, planned, revenge_of)
   values (qid, p_group, v_name, lec, v_heads, rounds, planned, p_revenge);
   return qid;
@@ -14296,6 +14307,17 @@ insert into study_private.schema_sections (section, version) values ('H', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- H 3: a battle asks one-answer questions only (boss_askable), a picture's with more time.
 insert into study_private.schema_sections (section, version) values ('H', 3)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- H 4 (plain copy, docs/study/COPY.md): a battle is 'אתגר קבוצתי · {course}'
+-- (was 'קרב הבוס · ההידרה של {course}'); battles opened before are said the
+-- new way too (both updates are no-ops once done, so the file stays re-runnable).
+update public.study_boss_battles set name = substr(name, char_length('ההידרה של ') + 1)
+ where name like 'ההידרה של %';
+update public.study_quizzes set title = 'אתגר קבוצתי · ' || substr(title, char_length('קרב הבוס · ההידרה של ') + 1)
+ where mode = 'boss' and title like 'קרב הבוס · ההידרה של %';
+update public.study_quizzes set title = 'אתגר קבוצתי · ' || substr(title, char_length('קרב הבוס · ') + 1)
+ where mode = 'boss' and title like 'קרב הבוס · %';
+insert into study_private.schema_sections (section, version) values ('H', 4)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION H ════
 

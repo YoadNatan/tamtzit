@@ -101,7 +101,7 @@ export default function PlanSetup({
   const steps = Array.from({ length: rounds }, (_, i) => i + 1);
   return (
     <main className="plan pl-setup">
-      <Head back={<BackLink go={ctx.go} fallback={{ v: "plan" }} label={plan ? "→ למרתון" : undefined} />} title="תוכנית עד המבחן" />
+      <Head back={<BackLink go={ctx.go} fallback={{ v: "plan" }} label={plan ? "→ לתוכנית" : undefined} />} title="תוכנית עד המבחן" />
       <section className="a-card flat pl-exam">
         <div className="a-row between">
           <span className="a-row">

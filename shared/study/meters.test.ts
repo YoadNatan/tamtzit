@@ -112,10 +112,10 @@ test("the thresholds are defined here only: no other module keeps a copy", () =>
 });
 
 test("the meters Yoad approved, from real counts", () => {
-  assert.equal(bossMeterLine({ hot: 3, topics: 8, answers_next: 20 }), "3 מתוך 8 נושאים חמים · עוד כ-20 תשובות לנושא הבא");
+  assert.equal(bossMeterLine({ hot: 3, topics: 8, answers_next: 20 }), "3 מתוך 8 נושאים קשים · עוד כ-20 תשובות לנושא הבא");
   assert.equal(
     museumMeterLine({ state: "open", floor: FLOOR, cutoff: "2026-11-17", group_need: 0, exhibits: 2, retired: 0, soon: 0, traps: 2, need: 4 }),
-    "2 מוצגים · עוד 4 הימורי ׳על בטוח׳ שגויים למוצג הבא",
+    "2 טעויות נפוצות · עוד 4 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה",
   );
   const row = (i: number, ready: boolean): MeterRow => ({
     lecture_id: `l${i}`,

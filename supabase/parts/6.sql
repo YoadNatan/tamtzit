@@ -1431,7 +1431,7 @@ begin
        end;
   if char_length(f) > 400 then f := left(btrim(q.question), 399) || '…'; end if;
   b := left(btrim(q.options[k.answer + 1]), 300);
-  e := left('המלכודת: ' || btrim(q.options[t.option + 1])
+  e := left('טעות נפוצה: ' || btrim(q.options[t.option + 1])
             || coalesce(' · ' || nullif(btrim(k.explanations[t.option + 1]), ''), ''), 500);
   cid := study_private.trap_card(q.lecture_id, q.part_idx, (to_jsonb(q) ->> 'anchor')::int, coalesce(to_jsonb(q) ->> 'quote', ''),
                                  f, b, e, coalesce(q.slides[1:12], '{}'), 'q:' || q.id::text || ':' || t.option::text);
@@ -1755,6 +1755,11 @@ insert into study_private.schema_sections (section, version) values ('U', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- U 3: no trap of a question with a picture or of a set question (question types).
 insert into study_private.schema_sections (section, version) values ('U', 3)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- U 4 (plain copy, docs/study/COPY.md): a common wrong answer's card says
+-- 'טעות נפוצה: ' (was 'המלכודת: '). Cards made before keep their text: a card
+-- is the group's content, and rewriting it would touch every deck's history.
+insert into study_private.schema_sections (section, version) values ('U', 4)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION U ════
 

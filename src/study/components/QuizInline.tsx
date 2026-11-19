@@ -10,7 +10,7 @@ import { Icon } from "./Icon";
 /* ── A quiz stacked inside the meeting screen (Z's QuizInline, as section M's
  * opening needs it; meeting.html s1) ──
  *
- * "3 לקפה": three questions on the earlier meetings' parts, 45 s each,
+ * "שאלות פתיחה": three questions on the earlier meetings' parts, 45 s each,
  * co-op, answered alone with the bet. The page shows them stacked:
  * answered ones fold to one line (the right answer, the slide and the
  * majority chip, "רובכם צדקו" · "הקבוצה חלוקה" · "רובכם טעו": a word, never a
@@ -108,7 +108,7 @@ export default function QuizInline({ ctx, quizId, onState }: { ctx: Ctx; quizId:
   }
 
   if (view.v === "ended" || view.v === "cancelled") {
-    return <div className="a-stack m-inline">{done.length ? done.map(line) : <p className="a-small a-muted">3 לקפה הסתיים.</p>}</div>;
+    return <div className="a-stack m-inline">{done.length ? done.map(line) : <p className="a-small a-muted">שאלות הפתיחה הסתיימו.</p>}</div>;
   }
 
   const q = r?.q ?? null;

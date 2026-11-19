@@ -46,11 +46,11 @@ export function MarathonsCard({ ctx }: { ctx: Ctx }) {
   }, [ctx.group.id, on]);
   if (!on || next === undefined) return null;
   return (
-    <section className="a-card flat pl-card" aria-label="מרתונים">
+    <section className="a-card flat pl-card" aria-label="ערבי למידה">
       <div className="a-row between">
-        <b dir="rtl">{next ? `מרתון · ${next.title}` : "מרתונים"}</b>
+        <b dir="rtl">{next ? `ערב למידה · ${next.title}` : "ערבי למידה"}</b>
         <RouteLink to={next ? { v: "marathon", m: next.id } : { v: "marathon", isNew: true }} go={ctx.go} className="a-btn small">
-          {next ? "למרתון" : "מרתון חדש"}
+          {next ? "לערב הלמידה" : "ערב למידה חדש"}
         </RouteLink>
       </div>
       <p className="a-small a-muted">{next ? `${next.line} · ${next.inN} בפנים` : "קובעים ערב למידה, בוחרים הרצאות, ומסמנים מי בפנים."}</p>
@@ -108,7 +108,7 @@ export function MeRows({ ctx }: { ctx: Ctx }) {
         <RouteLink to={{ v: "practice", s: `r.${ctx.group.id}` }} go={ctx.go} className="a-li row-link pr-me-again">
           <div>
             <b>חוזרות היום בניסוח אחר</b>
-            <span className="m">מרשימת הסכנה ומהטעויות של ימים קודמים</span>
+            <span className="m">מטעויות ׳על בטוח׳ ומטעויות של ימים קודמים</span>
           </div>
           <span className="a-chip busy">{again}</span>
         </RouteLink>

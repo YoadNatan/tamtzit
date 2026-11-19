@@ -15,7 +15,7 @@ import { FLOOR, PULSE } from "./meters";
 export { PULSE };
 
 export type Bucket = "hot" | "warm" | "cool";
-export const BUCKET_HE: Record<Bucket, string> = { hot: "חם", warm: "פושר", cool: "יושב טוב" };
+export const BUCKET_HE: Record<Bucket, string> = { hot: "קשה", warm: "בינוני", cool: "יושב טוב" };
 /** The chip's look per bucket (never colour alone: the word is the chip). */
 export const BUCKET_CHIP: Record<Bucket, string> = { hot: "warn", warm: "", cool: "ok" };
 export const BUCKETS: Bucket[] = ["hot", "warm", "cool"];
@@ -79,7 +79,7 @@ export function sections<T extends { bucket: Bucket }>(rows: readonly T[]): Arra
 export function lectureLine(rows: readonly PulseRow[]): string {
   const hot = rows.filter((r) => r.bucket === "hot").map((r) => r.topic);
   const uniq = [...new Set(hot)];
-  return uniq.length ? `נקודות חמות: ${uniq.slice(0, 2).join(", ")}` : "הכול יושב טוב";
+  return uniq.length ? `קשה לקבוצה: ${uniq.slice(0, 2).join(", ")}` : "הכול יושב טוב";
 }
 
 /** Decision 3's meter line: how many more people open the next row. */
@@ -98,22 +98,22 @@ export function lectureMeterLine(m: LectureMeter | undefined): string {
 
 /** The group is below the floor: how many more counted members open it. */
 export function groupNeedLine(need: number): string {
-  return need <= 1 ? `הדופק נפתח מ-${FLOOR} מתרגלים: עוד אדם אחד וזה נפתח.` : `הדופק נפתח מ-${FLOOR} מתרגלים: עוד ${need} אנשים וזה נפתח.`;
+  return need <= 1 ? `״מה קשה לקבוצה״ נפתח מ-${FLOOR} מתרגלים: עוד אדם אחד וזה נפתח.` : `״מה קשה לקבוצה״ נפתח מ-${FLOOR} מתרגלים: עוד ${need} אנשים וזה נפתח.`;
 }
 
 /** P-14 with its meter: a member the night has not counted yet. */
 export function waitingLine(daysLeft: number): string {
   const when = daysLeft <= 1 ? "מחר" : daysLeft === 2 ? "בעוד יומיים" : `בעוד ${daysLeft} ימים`;
-  return `הדופק מוצג למי שנספרים בו: שבוע בקבוצה, והספירה בלילה. הדופק ייפתח לך ${when}.`;
+  return `״מה קשה לקבוצה״ מוצג למי שנספרים בו: שבוע בקבוצה, והספירה בלילה. הוא ייפתח לך ${when}.`;
 }
 
 /** P-8's opted-out line (§12.5.U's version). */
-export const OUT_LINE = "התשובות שלך לא נספרות בדופק, ולכן גם הדופק לא מוצג. אפשר לחזור לספירה ב׳שלי׳, והדופק יחזור אחרי הספירה של הלילה.";
+export const OUT_LINE = "התשובות שלך לא נספרות, ולכן גם ״מה קשה לקבוצה״ לא מוצג לך. אפשר לחזור לספירה ב׳שלי׳, והוא יחזור אחרי הספירה של הלילה.";
 /** P-9: a lecture with no row yet. */
-export const EMPTY_LINE = `עוד אין דופק להרצאה הזו. הוא מופיע כשלפחות ${FLOOR} מכם מתרגלים אותה, ומתעדכן בלילה.`;
+export const EMPTY_LINE = `בהרצאה הזו עוד אין מספיק תשובות. זה מופיע כשלפחות ${FLOOR} מכם מתרגלים אותה, ומתעדכן בלילה.`;
 /** P-12, with §12.5.U's last sentence. */
 export const SETTING_LINE =
-  "התשובות, ההימורים, השכחות וסימוני ׳לא ברור׳ שלך לא ייספרו בדופק, ב׳דרושה אסוציאציה׳ ובבחירת השאלות, מהלילה הבא. אפשר לחזור בכל רגע. מי שיוצאים מהספירה לא רואים את הדופק.";
+  "התשובות, ההימורים, השכחות וסימוני ׳לא ברור׳ שלך לא ייספרו ב״מה קשה לקבוצה״, ב׳דרושה אסוציאציה׳ ובבחירת השאלות, מהלילה הבא. אפשר לחזור בכל רגע. מי שיוצאים מהספירה לא רואים את ״מה קשה לקבוצה״.";
 
 /** P-7's opening: tomorrow's meeting, or the next one. */
 export function briefHead(nextMeetingDay: string | null, today: string): string {

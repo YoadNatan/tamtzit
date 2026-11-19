@@ -129,9 +129,9 @@ test("the flame: lit from 4 of the last 7, its words", () => {
   assert.equal(FLAME_WINDOW, 7);
   assert.equal(flameLit(3), false);
   assert.equal(flameLit(4), true);
-  assert.equal(flameChip(4), "להבה 4/7");
-  assert.equal(flameChip(9), "להבה 7/7", "never more than the window");
-  assert.equal(flameLine(4), "4 מתוך 7 הימים האחרונים. 4 ימים מדליקים אותה, ויום אחד בלי לא מכבה אותה. גלוי רק לך.");
+  assert.equal(flameChip(4), "ימי למידה 4/7");
+  assert.equal(flameChip(9), "ימי למידה 7/7", "never more than the window");
+  assert.equal(flameLine(4), "למדת 4 מתוך 7 הימים האחרונים. מ-4 ימים זה מסומן, ויום אחד בלי לימוד לא מוחק את זה. גלוי רק לך.");
 });
 
 test("the lines of התור שלי, in today.html s1's words", () => {
@@ -149,7 +149,7 @@ test("the lines of התור שלי, in today.html s1's words", () => {
     lines.map((l) => `${l.label} | ${l.chip}`),
     [
       "2 מהמבחן הקבוצתי | טעית אתמול",
-      "1 מרשימת הסכנה, בניסוח חדש | על בטוח",
+      "1 מטעויות ׳על בטוח׳, בניסוח חדש | על בטוח",
       "פסקה שסימנת ׳לא ברור׳ | מהפגישה",
       "7 כרטיסים | הגיע הזמן",
       "1 מהמבחן הקבוצתי | טעית לפני 3 ימים",

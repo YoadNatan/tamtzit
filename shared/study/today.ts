@@ -33,7 +33,7 @@ export type QueueItem = {
   example?: string;
   /** The slides the example cites ("ש׳ 17"). */
   slides?: number[];
-  /** A trap card ("מלכודת של הקבוצה" instead of "הגיע הזמן"). */
+  /** A trap card ("טעות נפוצה בקבוצה" instead of "הגיע הזמן"). */
   trap?: boolean;
   /** The danger row asked in another wording. */
   otherWording?: boolean;
@@ -50,7 +50,7 @@ export const ROWS: ReadonlyArray<{ kind: Kind; step?: 1 | 2; flag: KindFlag; sec
   { kind: "unclear", flag: "meeting", seconds: 90, chip: "מהפגישה", tone: "group" },
   { kind: "card", flag: "cardsReview", seconds: 30, chip: "הגיע הזמן", tone: "busy" },
   { kind: "quiz", step: 2, flag: "quiz", seconds: 75, chip: "טעית לפני 3 ימים", tone: "bad" },
-  { kind: "loot", flag: "boss", seconds: 75, chip: "מהקרב", tone: "fun" },
+  { kind: "loot", flag: "boss", seconds: 75, chip: "מהאתגר", tone: "fun" },
   { kind: "practice", flag: "pulse", seconds: 180, chip: "חלש אצלך, ולא אצל הקבוצה", tone: "warn" },
   { kind: "lane", flag: "groupPlan", seconds: 0, chip: "מהמסלול שלך", tone: "busy" },
 ];
@@ -58,7 +58,7 @@ export const ROWS: ReadonlyArray<{ kind: Kind; step?: 1 | 2; flag: KindFlag; sec
 /** A case question takes longer (the table's "75 s (case 120)"). */
 export const CASE_SECONDS = 120;
 /** The trap card's chip (one chip: U's CardBadge words, review F-11). */
-export const TRAP_CHIP = "מלכודת של הקבוצה";
+export const TRAP_CHIP = "טעות נפוצה בקבוצה";
 
 /** The minute chips, "10 · 20 דק׳ · 45" (per device). */
 export const MINUTES = [10, 20, 45] as const;
@@ -127,7 +127,7 @@ export function rowLabel(kind: Kind, n: number, o: { otherWording?: boolean; top
     case "quiz":
       return `${n} מהמבחן הקבוצתי`;
     case "danger":
-      return o.otherWording ? `${n} מרשימת הסכנה, בניסוח חדש` : `${n} מרשימת הסכנה`;
+      return o.otherWording ? `${n} מטעויות ׳על בטוח׳, בניסוח חדש` : `${n} מטעויות ׳על בטוח׳`;
     case "again":
       return count(n, "טעות אחת בניסוח אחר", (k) => `${k} טעויות בניסוח אחר`);
     case "unclear":
@@ -135,7 +135,7 @@ export function rowLabel(kind: Kind, n: number, o: { otherWording?: boolean; top
     case "update":
       return count(n, "עדכון בסיכום", (k) => `${k} עדכונים בסיכום`);
     case "loot":
-      return count(n, "שאלה אחת מהקרב", (k) => `${k} שאלות מהקרב`);
+      return count(n, "שאלה אחת מהאתגר", (k) => `${k} שאלות מהאתגר`);
     case "practice":
       return o.topic ? `תרגול קצר · ${o.topic}` : "תרגול קצר";
     case "lane":
@@ -170,13 +170,13 @@ export function rowLines(items: readonly QueueItem[]): RowLine[] {
   return out;
 }
 
-/** The flame's chip and line ("להבה 4/7"; T5: private, never reset by one missed day). */
+/** The flame's chip and line ("ימי למידה 4/7"; T5: private, never reset by one missed day). */
 export function flameChip(days: number): string {
-  return `להבה ${Math.max(0, Math.min(FLAME_WINDOW, days))}/${FLAME_WINDOW}`;
+  return `ימי למידה ${Math.max(0, Math.min(FLAME_WINDOW, days))}/${FLAME_WINDOW}`;
 }
 export function flameLine(days: number): string {
   const d = Math.max(0, Math.min(FLAME_WINDOW, days));
-  return `${d} מתוך ${FLAME_WINDOW} הימים האחרונים. ${FLAME_LIT} ימים מדליקים אותה, ויום אחד בלי לא מכבה אותה. גלוי רק לך.`;
+  return `למדת ${d} מתוך ${FLAME_WINDOW} הימים האחרונים. מ-${FLAME_LIT} ימים זה מסומן, ויום אחד בלי לימוד לא מוחק את זה. גלוי רק לך.`;
 }
 export const flameLit = (days: number): boolean => days >= FLAME_LIT;
 

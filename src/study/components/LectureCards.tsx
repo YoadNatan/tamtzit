@@ -398,7 +398,7 @@ export default function LectureCards({ lectureId, ctx }: { lectureId: string; ct
                 {frontText(c, `r${c.id}`)}
               </span>
               <span className="a-wrap card-chips">
-                {c.source === "trap" ? <span className="a-chip warn">מלכודת של הקבוצה</span> : null}
+                {c.source === "trap" ? <span className="a-chip warn">טעות נפוצה בקבוצה</span> : null}
                 {c.stale_at ? <span className="a-chip warn">בבדיקה אחרי תיקון בפסקה</span> : null}
                 {c.kind === "cloze" ? <span className="a-chip">השלמה</span> : null}
                 {c.slides.length ? (

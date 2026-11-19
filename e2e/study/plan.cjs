@@ -8,10 +8,10 @@
 //      הלמידה · כ-10 שעות ביום", "כל הרצאה חוזרת 3 פעמים", "כולם יכולים
 //      לערוך, ועל כל שינוי יש שם."; saving saves the next days as
 //      marathons of the plan (PL2), never a past day.
-//   2. The day (s1): "מרתון · {title}" and "יום 2/21", the marathon meter,
+//   2. The day (s1): "תוכנית · {title}" and "יום 2/21", the marathon meter,
 //      decision 3's meter "התוכנית מדייקת ככל שמתרגלים: 0 מתוך 3 הרצאות
 //      עם נתונים" with "עוד כ-20 תשובות ועוד 3 אנשים להרצאה הבאה",
-//      "המסלול הקבוצתי" with "שינוי אחרון: נועה", "פתיחה: 3 לקפה", "המסלול
+//      "המסלול הקבוצתי" with "שינוי אחרון: נועה", "שאלות פתיחה", "המסלול
 //      שלך" with "רק לך". The group practises: the meter counts a lecture
 //      with data only from 20 answers of 3 members, and says how far the
 //      next is ("עוד כ-12 תשובות ועוד אדם אחד להרצאה הבאה").
@@ -173,7 +173,7 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400
       expect(days.length >= 5 && days.length <= 7 && days.every((d) => d.plan_day >= today && d.plan_day < addDays(today, 7)), `the next days saved as marathons of the plan, none in the past (${days.map((d) => d.plan_day).join(", ")})`);
       expect(days.every((d) => d.agenda[0].k === "intro" && d.agenda.some((b) => b.k === "read") && d.minutes >= 30 && d.minutes <= 720), "each with its run-of-show");
       const head = await text(noa, ".ph-head");
-      expect(head.includes("מרתון · מבחן בלוק פתוגן-מאכסן") && head.includes("יום 2/21"), `the head: ${head}`);
+      expect(head.includes("תוכנית · מבחן בלוק פתוגן-מאכסן") && head.includes("יום 2/21"), `the head: ${head}`);
       expect((await text(noa, ".ph-sub")).includes("סבב משותף"), "the shared pass");
       const km = await text(noa, ".pl-km");
       expect(km.includes("ק״מ 21") && km.includes("כל הסיכומים נקראו") && km.includes("ק״מ 42: המבחן"), `the marathon meter: ${km}`);
@@ -181,7 +181,7 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400
       expect(km.includes("עוד כ-20 תשובות ועוד 3 אנשים להרצאה הבאה"), "and how far the next lecture is");
       expect((await text(noa, "main.plan")).includes("שינוי אחרון: נועה"), "the last change's name");
       const rows = await noa.locator(".pl-day:not(.pl-mine) .pl-row").count();
-      expect(rows >= 3 && (await text(noa, ".pl-day")).includes("פתיחה: 3 לקפה"), "the day's blocks, from the opening");
+      expect(rows >= 3 && (await text(noa, ".pl-day")).includes("שאלות פתיחה"), "the day's blocks, from the opening");
       expect((await text(noa, ".pl-day")).includes("הקראה ומבחן קבוצתי, 5 שאלות"), "read and quiz as one row");
       expect(!/מאחר|באיחור/.test(await text(noa, "main.plan")), "never \"מאחרים\"");
 
@@ -205,7 +205,7 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400
       /* ── 3. Yesterday did not finish: the block moved, the two prices ── */
       G.marathons.push({
         id: hex("9d800000", 1), group_id: db.group.id, title: "יום 1/21", starts_at: ago(60 * 30), minutes: 180, place: "", note: "", lecture_ids: [L], state: "live", step: 1, version: 3,
-        agenda: [{ k: "intro", min: 5, title: "פתיחה: 3 לקפה" }, { k: "read", l: L, from: 0, to: 0, min: 50 }, { k: "quiz", l: L, n: 5, min: 10 }, { k: "break", min: 10 }, { k: "read", l: L, from: 1, to: 1, min: 50 }, { k: "quiz", l: L, n: 5, min: 10 }],
+        agenda: [{ k: "intro", min: 5, title: "שאלות פתיחה" }, { k: "read", l: L, from: 0, to: 0, min: 50 }, { k: "quiz", l: L, n: 5, min: 10 }, { k: "break", min: 10 }, { k: "read", l: L, from: 1, to: 1, min: 50 }, { k: "quiz", l: L, n: 5, min: 10 }],
         created_by: id("שוהם"), updated_by: id("שוהם"), created_at: ago(60 * 40), updated_at: ago(60 * 30), plan_id: plan.id, plan_day: addDays(today, -1),
       });
       await noa.reload();
@@ -331,7 +331,7 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400
       await shot(n3, "marathon-1-list");
       await n3.locator("main.plan .a-list .a-li").first().click();
       await n3.locator("main.plan .pl-day").waitFor({ timeout: 15000 });
-      expect((await text(n3, ".ph-head")).startsWith("→") || (await text(n3, ".ph-head")).includes("מרתון ·"), "one marathon");
+      expect((await text(n3, ".ph-head")).startsWith("→") || (await text(n3, ".ph-head")).includes("ערב למידה ·"), "one marathon");
       const mid = new URL(n3.url()).searchParams.get("m");
       await n3.getByRole("radio", { name: "אולי" }).click();
       await n3.waitForTimeout(400);
@@ -355,7 +355,7 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400
       await n3.goto(`${mock.base}/?v=group`);
       await n3.locator(".pl-card").waitFor({ timeout: 20000 });
       const pc = await text(n3, ".pl-card");
-      expect(pc.includes("מרתון · מבחן בלוק פתוגן-מאכסן") && pc.includes("לתוכנית"), `the plan's card on "יחד": ${pc}`);
+      expect(pc.includes("תוכנית · מבחן בלוק פתוגן-מאכסן") && pc.includes("לתוכנית"), `the plan's card on "יחד": ${pc}`);
       expect((await n3.locator(".pl-card", { hasText: "מרתונים" }).count()) === 0, "the plan's card stands for the marathons");
     }
     steps.unmocked = mock.problems.filter((p) => p.startsWith("unmocked"));

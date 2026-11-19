@@ -64,7 +64,7 @@ export type PracticeQuestionProps = {
   chips?: ReactNode;
   /** A line beside the verdict ("השאלה תחזור מחר…"). */
   note?: ReactNode;
-  /** "רשימת הסכנה" is promised only where progress shows it. */
+  /** "טעויות ׳על בטוח׳" is promised only where progress shows it. */
   dangerList?: boolean;
   /** No bet (a question timed out, or one reviewed at the end). */
   noBet?: boolean;
@@ -264,7 +264,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
               ))}
             </div>
             <p className="a-small a-muted">
-              {p.dangerList ? "טעות ׳על בטוח׳ נכנסת לרשימת הסכנה. " : ""}התשובה וההימור נשמרים רק אצלך.
+              {p.dangerList ? "טעות ׳על בטוח׳ חוזרת אליך בניסוח אחר. " : ""}התשובה וההימור נשמרים רק אצלך.
             </p>
           </section>
         )}

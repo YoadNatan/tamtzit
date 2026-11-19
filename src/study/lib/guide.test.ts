@@ -140,7 +140,7 @@ test("never a step, a walk, a mini-guide, a how-to or a hint for a feature that 
     if (!f.today) assert.ok(!steps.includes("S5"), `${name}: S5`);
     if (!f.meeting && !f.quiz) assert.ok(!steps.includes("S7"), `${name}: S7`);
     if (!f.quiz) assert.ok(!/מבחן קבוצתי|כולנו נגד/.test(text), `${name}: the quiz`);
-    if (!f.meeting) assert.ok(!/פגישה|3 לקפה/.test(text), `${name}: the meeting`);
+    if (!f.meeting) assert.ok(!/פגישה|שאלות פתיחה/.test(text), `${name}: the meeting`);
     if (!f.corrections) assert.ok(!text.includes("תיקון"), `${name}: corrections`);
     if (!f.wall) assert.ok(!/אסוציאציה|קיר/.test(text), `${name}: the wall`);
     if (!f.ask) assert.ok(!text.includes("״לשאול״") && !text.includes(", לשאול"), `${name}: ask`);
@@ -148,9 +148,9 @@ test("never a step, a walk, a mini-guide, a how-to or a hint for a feature that 
     if (!f.cards) assert.ok(!text.includes("כרטיסיות"), `${name}: cards`);
     if (!f.practice) assert.ok(!/על בטוח|הימור|סבב חדש/.test(text), `${name}: practice 2.0`);
     if (!f.questions) assert.ok(!/לתרגל|תרגול/.test(text), `${name}: practice`);
-    if (!f.pulse) assert.ok(!text.includes("דופק"), `${name}: the pulse`);
-    if (!f.boss) assert.ok(!text.includes("הבוס"), `${name}: the boss`);
-    if (!f.museum) assert.ok(!text.includes("מוזיאון"), `${name}: the museum`);
+    if (!f.pulse) assert.ok(!text.includes("מה קשה לקבוצה"), `${name}: the pulse`);
+    if (!f.boss) assert.ok(!text.includes("אתגר קבוצתי"), `${name}: the boss`);
+    if (!f.museum) assert.ok(!text.includes("טעויות נפוצות"), `${name}: the museum`);
     for (const h of hintFlags(f)) assert.equal(f[h as keyof Flags], true, `${name}: a hint for ${h}`);
     // Every route a guide opens is one this build allows (no replaced screen, no notice).
     const routes: Route[] = [

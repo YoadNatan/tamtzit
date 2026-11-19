@@ -48,9 +48,9 @@ test("decision 3: the meter's words, from the counts", () => {
   assert.equal(lectureMeterLine({ lecture_id: "l", open: 2, waiting: 3, need: 2 }), "2 מתוך 5 נושאים פתוחים · עוד 2 אנשים לנושא הבא");
   assert.equal(lectureMeterLine({ lecture_id: "l", open: 4, waiting: 0, need: null }), "", "nothing waits: no meter");
   assert.equal(lectureMeterLine(undefined), "");
-  assert.equal(groupNeedLine(1), "הדופק נפתח מ-3 מתרגלים: עוד אדם אחד וזה נפתח.");
-  assert.equal(groupNeedLine(3), "הדופק נפתח מ-3 מתרגלים: עוד 3 אנשים וזה נפתח.");
-  assert.match(waitingLine(1), /הדופק ייפתח לך מחר\.$/);
+  assert.equal(groupNeedLine(1), "״מה קשה לקבוצה״ נפתח מ-3 מתרגלים: עוד אדם אחד וזה נפתח.");
+  assert.equal(groupNeedLine(3), "״מה קשה לקבוצה״ נפתח מ-3 מתרגלים: עוד 3 אנשים וזה נפתח.");
+  assert.match(waitingLine(1), /הוא ייפתח לך מחר\.$/);
   assert.match(waitingLine(2), /בעוד יומיים\.$/);
   assert.match(waitingLine(5), /בעוד 5 ימים\.$/);
   assert.ok(!/חשבון/.test(waitingLine(5)), "decision 1: no saved account in P-14");
@@ -85,7 +85,7 @@ test("P-3 … P-6: the group's rows with the member's own, one closed hole at mo
   );
   assert.deepEqual(sections(m).map((s) => [s.bucket, s.rows.length]), [["hot", 1], ["warm", 1], ["cool", 2]]);
   assert.deepEqual(sections([row("A", "uses", "cool")]).map((s) => s.bucket), ["cool"], "only non-empty sections");
-  assert.equal(lectureLine(group), "נקודות חמות: Miltefosine");
+  assert.equal(lectureLine(group), "קשה לקבוצה: Miltefosine");
   assert.equal(lectureLine([row("A", "uses", "cool")]), "הכול יושב טוב");
   assert.equal(pulseLabel("Primaquine", "contra"), "Primaquine · התוויות נגד וזהירות");
   assert.equal(pulseLabel("Primaquine", "other"), "Primaquine");

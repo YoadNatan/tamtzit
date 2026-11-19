@@ -31,16 +31,16 @@ import { Icon } from "./Icon";
 import { BackLink, Head, Loading, RouteLink } from "./Shell";
 import SlideSheet from "./SlideSheet";
 
-/* ── דופק הקבוצה (?v=pulse, ?v=pulse&l=; package U, U-2; progress-pulse.html
+/* ── מה קשה לקבוצה (?v=pulse, ?v=pulse&l=; package U, U-2; progress-pulse.html
  * screen 2, the fun design §5.5 and its copy P-1 … P-14) ──
  *
- * One lecture: the head "דופק הקבוצה · {title}" and the line under it; the
- * sections חם · פושר · יושב טוב (only non-empty ones), the first one's header
+ * One lecture: the head "מה קשה לקבוצה · {title}" and the line under it; the
+ * sections קשה · בינוני · יושב טוב (only non-empty ones), the first one's header
  * carrying "אצלך" and "רק לך"; a row is "{topic} · {aspect}" with its slide
  * tag, the member's own chip on the left, "רק אצלך חם, אז זה נכנס לתור
  * האישי" or (one row at most) "החור שנסגר השבוע"; a tap practises the topic.
  * Then "מחר בפגישה:" (or "בפגישה הבאה:") and the footer. Every lecture (no
- * l): one row a lecture, "נקודות חמות: …" or "הכול יושב טוב".
+ * l): one row a lecture, "קשה לקבוצה: …" or "הכול יושב טוב".
  *
  * Decision 3 (17 Nov 2026): below the floor the screen never ends in a lock.
  * It shows the meter from the night's counts (study_pulse_meter: "עוד אדם
@@ -106,7 +106,7 @@ export default function PulseScreen({ route, ctx }: ScreenProps<"pulse">) {
   const head = (
     <>
       <Head back={<BackLink go={ctx.go} fallback={route.l ? { v: "pulse" } : { v: "group" }} />}>
-        <h1 className="t">{title ? <>דופק הקבוצה · {isolateLatin(title, "pt")}</> : "דופק הקבוצה"}</h1>
+        <h1 className="t">{title ? <>מה קשה לקבוצה · {isolateLatin(title, "pt")}</> : "מה קשה לקבוצה"}</h1>
       </Head>
       <p className="ph-sub">
         <span>מתעדכן בלילה</span>
@@ -260,7 +260,7 @@ function LectureBody({
         <aside className="a-callout pulse-brief">
           <b>{briefHead(data.nextMeeting, today)}</b> {brief.hot ? (
             <>
-              הנקודה החמה ׳<TopicLabel topic={brief.hot.topic} aspect={brief.hot.aspect} />׳
+              הנושא הקשה ׳<TopicLabel topic={brief.hot.topic} aspect={brief.hot.aspect} />׳
             </>
           ) : null}
           {brief.hot && brief.question ? ", ובמבחן הקבוצתי " : brief.question ? "במבחן הקבוצתי " : null}
@@ -300,7 +300,7 @@ function PulseLine({ row, to, go, onSlide }: { row: MergedRow; to: Route | null;
             </>
           ) : null}
         </b>
-        {row.alone ? <span className="m">רק אצלך חם, אז זה נכנס לתור האישי</span> : null}
+        {row.alone ? <span className="m">קשה רק לך, אז זה נכנס לתור האישי</span> : null}
         {row.closedNote ? (
           <span className="m">
             <Icon name="award" size={11} /> החור שנסגר השבוע
@@ -321,7 +321,7 @@ function LectureList({ ctx, data, titles }: { ctx: ScreenProps<"pulse">["ctx"]; 
   if (!ids.length && !waiting.length)
     return (
       <>
-        <p className="a-card dashed empty">עוד אין דופק. הוא מופיע בכל הרצאה שלפחות {PULSE.FLOOR} מכם מתרגלים, ומתעדכן בלילה.</p>
+        <p className="a-card dashed empty">עוד אין מספיק תשובות. זה מופיע בכל הרצאה שלפחות {PULSE.FLOOR} מכם מתרגלים, ומתעדכן בלילה.</p>
         {meter && meter.group_need > 0 ? <p className="a-small a-muted">{groupNeedLine(meter.group_need)}</p> : null}
       </>
     );

@@ -102,10 +102,10 @@ test("G-2: the lane covers every study day, the shared pass reads every part onc
   const read = lane.filter((d) => d.phase === "shared").flatMap((d) => d.blocks.filter((b) => b.k === "read"));
   const parts = read.flatMap((b) => Array.from({ length: b.to! - b.from! + 1 }, (_, i) => `${b.l}${b.from! + i}`));
   assert.deepEqual(parts, ["a0", "a1", "a2", "a3", "b0", "b1", "b2", "c0", "c1", "c2", "c3", "c4"]);
-  // Each read is followed by its 5-question quiz; each day opens with "פתיחה: 3 לקפה".
+  // Each read is followed by its 5-question quiz; each day opens with "שאלות פתיחה".
   for (const d of lane.filter((x) => x.blocks.length)) {
     assert.equal(d.blocks[0].k, "intro");
-    assert.equal(d.blocks[0].title, "פתיחה: 3 לקפה");
+    assert.equal(d.blocks[0].title, "שאלות פתיחה");
     d.blocks.forEach((b, i) => b.k === "read" && assert.deepEqual([d.blocks[i + 1].k, d.blocks[i + 1].l, d.blocks[i + 1].n], ["quiz", b.l, LANE.QUIZ_N]));
     assert.ok(d.blocks.length <= LANE.MAX_STEPS && d.blocks.every((b) => b.min >= 1 && b.min <= LANE.MAX_BLOCK_MIN));
     assert.ok(marathonMinutes(d) >= 30 && marathonMinutes(d) <= LANE.MAX_DAY_MIN);

@@ -13,7 +13,7 @@ import "../styles/meeting.css";
  * study_meeting_band(): today's meetings, else the next one within 14 days.
  * A planned one: "הקבוצה היום · 09:00" with the slide range, the title and,
  * with M-2, "ניחוש לפני · 2 שאלות" (no reader is planned ahead: whoever taps
- * "להקריא לקבוצה" reads); a live one: "הקראה עכשיו: שוהם" and "לעקוב"; "3 לקפה" or the closing quiz while open; over: "הפגישה
+ * "להקריא לקבוצה" reads); a live one: "הקראה עכשיו: שוהם" and "לעקוב"; "שאלות פתיחה" or the closing quiz while open; over: "הפגישה
  * של היום הסתיימה". The card adds "לקבוע את הפגישה הבאה", and with M-2 a
  * meeting this member missed ("פגישה שפספסת", catch-up: decision 1 opens it
  * without an account). Live through the meetings' channel and the group's
@@ -87,7 +87,7 @@ export function BandItem({ ctx, m }: { ctx: Ctx; m: BandMeeting }) {
       ) : null}
       {quizOpen(m.coffee) ? (
         <RouteLink to={{ v: "meeting", m: m.id }} go={ctx.go} className="a-btn small m-band-quiz">
-          3 לקפה פתוח
+          שאלות הפתיחה פתוחות
         </RouteLink>
       ) : quizOpen(m.closing) && m.closing ? (
         <RouteLink to={{ v: "quiz", q: m.closing.id }} go={ctx.go} className="a-btn small m-band-quiz">

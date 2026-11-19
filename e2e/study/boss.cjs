@@ -2,19 +2,19 @@
 // members in the fixture lecture, with Yoad's decisions 1 and 3 of 17 Nov
 // 2026 (no accounts: a member of a week is counted; the boss opens early,
 // with a meter, never a dead end).
-//   1. שוהם, counted last night: "קרב הבוס" on "יחד" with the heads and the
-//      meter "3 מתוך 8 נושאים חמים · עוד כ-20 תשובות לנושא הבא".
+//   1. שוהם, counted last night: "אתגר קבוצתי" on "יחד" with the heads and the
+//      meter "3 מתוך 8 נושאים קשים · עוד כ-20 תשובות לנושא הבא".
 //   2. The new battle's screen: the lectures, the heads, the meter, the
-//      seconds, "לפתוח את הקרב".
+//      seconds, "לפתוח את האתגר".
 //   3. Decision 3: one hot topic is not a battle yet: the screen stays open
-//      with "הקרב נפתח משני נושאים חמים: עוד נושא אחד." and "לתרגל".
+//      with "האתגר נפתח משני נושאים קשים: עוד נושא אחד." and "לתרגל".
 //   4. רוני joined two days ago: no heads, the days left.
 //   5. The battle: Z's lobby in mode "boss" with the HUD; "להתחיל" with two
-//      players answers "לקרב בוס צריך לפחות 3 משתתפים."; with three, the
+//      players answers "לאתגר קבוצתי צריך לפחות 3 משתתפים."; with three, the
 //      rounds in head order: a head falls at 80% right, the trap's −20 when
 //      half fall for it, a relapse, the win; the HUD shows both HP bars and a
 //      chip a head; nothing names a player.
-//   6. The end: "הבוס הובס!", the moments without names, her own loot with
+//   6. The end: "עברתם את האתגר!", the moments without names, her own loot with
 //      "לתוכנית שלי"; the loot reaches Today ("מהקרב") on its day.
 //   7. A lost battle's revenge round opens from the next study day.
 //   8. The switch 'pulse' off: "התכונה הזו כבויה כרגע בשרת." and no card.
@@ -81,7 +81,7 @@ const until = async (fn, ms, what) => {
       const s = await open("שוהם", "/?v=group");
       await s.locator("main").first().waitFor({ timeout: 15000 });
       await s.waitForTimeout(600);
-      expect((await s.getByRole("heading", { name: "קרב הבוס" }).count()) === 0, "no \"קרב הבוס\" on \"יחד\"");
+      expect((await s.getByRole("heading", { name: "אתגר קבוצתי" }).count()) === 0, "no \"אתגר קבוצתי\" on \"יחד\"");
       await go(s, "/?v=boss&new=1");
       await s.waitForURL((u) => !u.search.includes("v=boss"), { timeout: 15000 });
       expect(!new URL(s.url()).search.includes("boss"), "?v=boss leads elsewhere");
@@ -125,8 +125,8 @@ const until = async (fn, ms, what) => {
       await card.waitFor({ timeout: 15000 });
       const cardText = await card.innerText();
       steps.card = cardText.replace(/\n/g, " | ");
-      expect(/קרב הבוס/.test(cardText) && /3 ראשים/.test(cardText) && /Furosemide · Thiazides · Spironolactone/.test(cardText), "the card: the heads");
-      expect(/3 מתוך 8 נושאים חמים · עוד כ-20 תשובות לנושא הבא/.test(cardText), "the card: decision 3's meter, Yoad's example");
+      expect(/אתגר קבוצתי/.test(cardText) && /3 נושאים/.test(cardText) && /Furosemide · Thiazides · Spironolactone/.test(cardText), "the card: the heads");
+      expect(/3 מתוך 8 נושאים קשים · עוד כ-20 תשובות לנושא הבא/.test(cardText), "the card: decision 3's meter, Yoad's example");
       await card.scrollIntoViewIfNeeded();
       await shot(s, "h5-boss-card");
 
@@ -134,20 +134,20 @@ const until = async (fn, ms, what) => {
       await card.locator("a").first().click();
       await s.waitForURL((u) => u.search.includes("v=boss"), { timeout: 15000 });
       await s.locator(".boss-meter").waitFor({ timeout: 15000 });
-      expect((await s.locator("h1").first().innerText()) === "קרב הבוס", "the head");
-      expect((await s.locator(".ph-sub").first().innerText()).includes("כל ראש: נושא שלפחות 3 מכם מתקשים בו"), "boss.html's line under the head");
+      expect((await s.locator("h1").first().innerText()) === "אתגר קבוצתי", "the head");
+      expect((await s.locator(".ph-sub").first().innerText()).includes("באתגר רק נושאים שלפחות 3 מכם מתקשים בהם"), "boss.html's line under the head");
       expect((await s.locator(".boss-heads li").allInnerTexts()).join(",") === "Furosemide,Thiazides,Spironolactone", "the heads, in order");
-      expect(/3 מתוך 8 נושאים חמים · עוד כ-20 תשובות לנושא הבא/.test(await s.locator(".boss-meter").innerText()), "the meter beside them");
+      expect(/3 מתוך 8 נושאים קשים · עוד כ-20 תשובות לנושא הבא/.test(await s.locator(".boss-meter").innerText()), "the meter beside them");
       // Review UI-2: the bar fills what its line says (3 of 8), and its label is the line.
       const bar = async () =>
         (await s.waitForTimeout(400), s).locator(".boss-meter .a-bar").evaluate((el) => ({ label: el.getAttribute("aria-label"), pct: Math.round((100 * el.querySelector("i").getBoundingClientRect().width) / el.getBoundingClientRect().width) }));
       const b3 = await bar();
       steps.bar3 = b3;
-      expect(Math.abs(b3.pct - 38) <= 2 && /^3 מתוך 8 נושאים חמים/.test(b3.label || ""), "the bar is 3/8 under \"3 מתוך 8\", with the line as its label");
+      expect(Math.abs(b3.pct - 38) <= 2 && /^3 מתוך 8 נושאים קשים/.test(b3.label || ""), "the bar is 3/8 under \"3 מתוך 8\", with the line as its label");
       expect((await s.getByRole("radio", { name: "כל ההרצאות" }).getAttribute("aria-checked")) === "true", "every lecture by default");
-      expect((await s.getByText("קרב צריך לפחות 3 משתתפים").count()) === 1, "three players, said before the lobby");
-      const startBtn = s.locator(PRIMARY, { hasText: "לפתוח את הקרב" });
-      expect(await startBtn.isEnabled(), "\"לפתוח את הקרב\" with three heads");
+      expect((await s.getByText("אתגר צריך לפחות 3 משתתפים").count()) === 1, "three players, said before the lobby");
+      const startBtn = s.locator(PRIMARY, { hasText: "לפתוח את האתגר" });
+      expect(await startBtn.isEnabled(), "\"לפתוח את האתגר\" with three heads");
       await shot(s, "h5-boss-setup");
 
       /* ── 3. decision 3: one hot topic ── */
@@ -158,12 +158,12 @@ const until = async (fn, ms, what) => {
       await go(s, "/?v=boss&new=1");
       await s.locator(".boss-meter").waitFor({ timeout: 15000 });
       const m1 = await s.locator(".boss-meter").innerText();
-      expect(/1 מתוך 8 נושאים חמים · עוד כ-6 תשובות לנושא הבא/.test(m1) && /הקרב נפתח משני נושאים חמים: עוד נושא אחד\./.test(m1), "one head: the meter and what the battle still needs");
-      expect(await s.locator(PRIMARY, { hasText: "לפתוח את הקרב" }).isDisabled(), "no battle from one head");
+      expect(/1 מתוך 8 נושאים קשים · עוד כ-6 תשובות לנושא הבא/.test(m1) && /האתגר נפתח משני נושאים קשים: עוד נושא אחד\./.test(m1), "one head: the meter and what the battle still needs");
+      expect(await s.locator(PRIMARY, { hasText: "לפתוח את האתגר" }).isDisabled(), "no battle from one head");
       const b1 = await bar();
       steps.bar1 = b1;
-      expect(Math.abs(b1.pct - 13) <= 2 && /^1 מתוך 8 נושאים חמים/.test(b1.label || ""), "one head: the bar is 1/8");
-      expect((await s.locator(".a-chip", { hasText: "ראש אחד" }).count()) >= 1 && !(await s.locator("main").innerText()).includes("1 ראשים"), "the chip: \"ראש אחד\", never \"1 ראשים\"");
+      expect(Math.abs(b1.pct - 13) <= 2 && /^1 מתוך 8 נושאים קשים/.test(b1.label || ""), "one head: the bar is 1/8");
+      expect((await s.locator(".a-chip", { hasText: "נושא אחד" }).count()) >= 1 && !(await s.locator("main").innerText()).includes("1 נושאים"), "the chip: \"נושא אחד\", never \"1 נושאים\"");
       expect((await s.locator(".boss-meter").getByRole("link", { name: "לתרגל" }).count()) === 1, "never a dead end: practice beside it");
       await shot(s, "h5-boss-meter");
       B.heads = keep;
@@ -172,23 +172,23 @@ const until = async (fn, ms, what) => {
 
       /* ── 4. רוני: not counted yet ── */
       const r = await open("רוני", "/?v=boss&new=1");
-      await r.getByText(/הראשים ייפתחו לך בעוד 5 ימים\./).waitFor({ timeout: 15000 });
+      await r.getByText(/הנושאים ייפתחו לך בעוד 5 ימים\./).waitFor({ timeout: 15000 });
       expect((await r.locator(".boss-heads").count()) === 0, "רוני: no heads before a night counts him");
       await shot(r, "h5-boss-waiting");
 
       /* ── 5. the battle ── */
       await go(s, "/?v=boss&new=1");
-      await s.locator(PRIMARY, { hasText: "לפתוח את הקרב" }).click();
+      await s.locator(PRIMARY, { hasText: "לפתוח את האתגר" }).click();
       await s.waitForURL((u) => u.search.includes("v=quiz") && u.search.includes("q="), { timeout: 15000 });
       const q = Z.quizzes[Z.quizzes.length - 1];
-      expect(q.mode === "boss" && q.title === `קרב הבוס · ההידרה של ${db.lectures.find((l) => l.id === L).title}`, `a quiz in mode "boss" (${q.title})`);
+      expect(q.mode === "boss" && q.title === `אתגר קבוצתי · ${db.lectures.find((l) => l.id === L).title}`, `a quiz in mode "boss" (${q.title})`);
       await s.locator(".boss-hud").waitFor({ timeout: 15000 });
-      expect((await s.locator("h1").first().innerText()) === "קרב הבוס", "the lobby says \"קרב הבוס\"");
+      expect((await s.locator("h1").first().innerText()) === "אתגר קבוצתי", "the lobby says \"אתגר קבוצתי\"");
       const lobbyHud = await s.locator(".boss-hud").innerText();
-      expect(/הקבוצה/.test(lobbyHud) && /100/.test(lobbyHud) && /3 ראשים/.test(lobbyHud), "the HUD in the lobby: both bars, three heads");
+      expect(/הקבוצה/.test(lobbyHud) && /100/.test(lobbyHud) && /3 נושאים/.test(lobbyHud), "the HUD in the lobby: both bars, three heads");
       await s.locator(PRIMARY, { hasText: "להתחיל" }).click();
-      await s.getByText("לקרב בוס צריך לפחות 3 משתתפים.").waitFor({ timeout: 15000 });
-      expect(true, "two players: \"לקרב בוס צריך לפחות 3 משתתפים.\"");
+      await s.getByText("לאתגר קבוצתי צריך לפחות 3 משתתפים.").waitFor({ timeout: 15000 });
+      expect(true, "two players: \"לאתגר קבוצתי צריך לפחות 3 משתתפים.\"");
       const others = [id("איתי"), id("מאיה")];
       for (const u of others) Z.players.push({ quiz_id: q.id, user_id: u, joined_at: Date.now(), joined_idx: -1, seen_at: Date.now(), left_at: null, score: 0, correct_n: 0, answered_n: 0, ms_total: 0 });
       q.players_n = 3;
@@ -222,7 +222,7 @@ const until = async (fn, ms, what) => {
       await play(k(), [k(), k()]);
       expect(hud().heads[0].down && hud().team_hp === 100, "round 1: Furosemide falls at 100% right, the team untouched");
       const reveal1 = await s.locator(".boss-hud").innerText();
-      expect(/−34 HP לבוס/.test(reveal1) && /הקבוצה לא נפגעה/.test(reveal1), `the reveal says what it did (${reveal1.replace(/\n/g, " | ")})`);
+      expect(/−34 לאתגר/.test(reveal1) && /הקבוצה לא איבדה נקודות/.test(reveal1), `the reveal says what it did (${reveal1.replace(/\n/g, " | ")})`);
       await shot(s, "h5-boss-reveal");
       await next();
       // Round 2 · Thiazides 1/2: all right: half its hit points.
@@ -237,9 +237,9 @@ const until = async (fn, ms, what) => {
       // Round 4 · Spironolactone's trap: both others fall for it (−20).
       await until(async () => q.state === "question" && q.idx === 3, 15000, "round 4");
       await s.locator(".boss-hud .a-callout.warn").waitFor({ timeout: 15000 });
-      expect(/Spironolactone מנסה מלכודת/.test(await s.locator(".boss-hud .a-callout.warn").innerText()), "the trap round's callout");
+      expect(/Spironolactone: אם חצי מכם בוחרים באותה תשובה שגויה/.test(await s.locator(".boss-hud .a-callout.warn").innerText()), "the trap round's callout");
       expect((await s.locator(".boss-heads li[aria-current]").innerText()).includes("Spironolactone"), "the head on screen is marked");
-      expect((await s.locator(".boss-hud").innerText()).includes("ראש 3/3"), "\"ראש 3/3\"");
+      expect((await s.locator(".boss-hud").innerText()).includes("נושא 3/3"), "\"נושא 3/3\"");
       await s.locator("button.quiz-opt").first().waitFor({ timeout: 15000 });
       await until(async () => s.locator("button.quiz-opt").first().isEnabled(), 15000, "the trap round's options");
       await shot(s, "h5-boss-hud");
@@ -263,12 +263,12 @@ const until = async (fn, ms, what) => {
       await s.locator(".boss-result").waitFor({ timeout: 15000 });
       const end = await s.locator("main").innerText();
       steps.end = end.replace(/\n/g, " | ").slice(0, 600);
-      expect(/הבוס הובס!/.test(end) && /הקבוצה סיימה עם \d+ HP מתוך 100\./.test(end) && /ניצחון/.test(end), "\"הבוס הובס!\" and the team's HP");
-      expect(/רגעי הקרב/.test(end) && /של הקבוצה, בלי שמות/.test(end) && /המלכודת של Spironolactone/.test(end) && /Spironolactone חזר לחיים/.test(end), "the moments: the trap, the relapse, without names");
+      expect(/עברתם את האתגר!/.test(end) && /לקבוצה נשארו \d+ נקודות מתוך 100\./.test(end) && /ניצחון/.test(end), "\"עברתם את האתגר!\" and the team's HP");
+      expect(/רגעים מהאתגר/.test(end) && /של הקבוצה, בלי שמות/.test(end) && /טעות נפוצה: Spironolactone/.test(end) && /Spironolactone חזר/.test(end), "the moments: the trap, the relapse, without names");
       const moments = await s.locator(".boss-moment").allInnerTexts();
       expect(!moments.some((t) => OTHERS.test(t) || /שוהם/.test(t)), "no moment names anyone");
       const lootText = await s.locator(".boss-loot").innerText();
-      expect(/השלל שלך: טעות אחת, יום אחד/.test(lootText) && /מחר · /.test(lootText) && /רק לך/.test(lootText), `her own loot: one mistake, tomorrow (${lootText.replace(/\n/g, " | ")})`);
+      expect(/לחזרה שלך: טעות אחת, יום אחד/.test(lootText) && /מחר · /.test(lootText) && /רק לך/.test(lootText), `her own loot: one mistake, tomorrow (${lootText.replace(/\n/g, " | ")})`);
       await shot(s, "h5-boss-end");
       await s.getByRole("button", { name: "לתוכנית שלי" }).click();
       await until(async () => B.loot.length === 1, 10000, "the loot saved");
@@ -276,9 +276,9 @@ const until = async (fn, ms, what) => {
       if (flags.today) {
         B.loot[0].due_on = new Date(Date.now() + 2 * 3_600_000 - 4 * 3_600_000).toISOString().slice(0, 10);
         await go(s, "/");
-        const row = s.locator(".today, main").getByText("שאלה אחת מהקרב");
+        const row = s.locator(".today, main").getByText("שאלה אחת מהאתגר");
         await row.first().waitFor({ timeout: 15000 });
-        expect(true, "Today: \"שאלה אחת מהקרב\" on its day");
+        expect(true, "Today: \"שאלה אחת מהאתגר\" on its day");
         await shot(s, "h5-boss-today");
       }
 
@@ -292,9 +292,9 @@ const until = async (fn, ms, what) => {
       await go(s, "/?v=boss&new=1");
       const rev = s.locator(".boss-revenge");
       await rev.waitFor({ timeout: 15000 });
-      expect(/סבב נקמה/.test(await rev.innerText()) && /Thiazides · Spironolactone/.test(await rev.innerText()) && /פתוח/.test(await rev.innerText()), "the revenge round: the heads still standing, open");
+      expect(/סבב חוזר/.test(await rev.innerText()) && /Thiazides · Spironolactone/.test(await rev.innerText()) && /פתוח/.test(await rev.innerText()), "the revenge round: the heads still standing, open");
       await shot(s, "h5-boss-revenge");
-      await rev.getByRole("button", { name: "לסבב הנקמה" }).click();
+      await rev.getByRole("button", { name: "לסבב החוזר" }).click();
       await s.waitForURL((u) => u.search.includes("v=quiz"), { timeout: 15000 });
       const rq = Z.quizzes[Z.quizzes.length - 1];
       expect(B.battles[B.battles.length - 1].revenge_of === "7b200000-0000-4000-8000-000000000099" && B.battles[B.battles.length - 1].heads.length === 2, "the revenge battle: the two heads left, at full HP");

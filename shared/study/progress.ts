@@ -86,7 +86,7 @@ export function dueChip(dueDay: string, today: string): string {
 export const dueToday = (rows: readonly DangerRow[], today: string): DangerRow[] => rows.filter((r) => r.due_day <= today);
 
 /** An aspect's bucket as the chip says it. */
-export const BUCKET_TEXT = { hot: "חם", warm: "פושר", cool: "יושב טוב" } as const;
+export const BUCKET_TEXT = { hot: "קשה", warm: "בינוני", cool: "יושב טוב" } as const;
 export const BUCKET_CHIP = { hot: "warn", warm: "", cool: "ok" } as const;
 
 /** The aspect meter: the aspect nearest to a bucket and how many more
@@ -113,8 +113,8 @@ export function calibrationPick(rows: readonly CalibrationRow[]): { row: Calibra
 export function progressLine(c: ProgressCounts | null): string {
   if (!c || c.answers === 0) return `עוד אין תשובות. טווח מוכנות מופיע מ-${READINESS_MIN} תשובות לנושא.`;
   const parts: string[] = [`${count(c.answers, "תשובה אחת", "תשובות")} ב-28 הימים האחרונים`];
-  if (c.danger_due) parts.push(`${c.danger_due === 1 ? "אחת" : c.danger_due} ברשימת הסכנה להיום`);
-  else if (c.danger) parts.push(`${c.danger} ברשימת הסכנה`);
+  if (c.danger_due) parts.push(c.danger_due === 1 ? "טעות ׳על בטוח׳ אחת להיום" : `${c.danger_due} טעויות ׳על בטוח׳ להיום`);
+  else if (c.danger) parts.push(c.danger === 1 ? "טעות ׳על בטוח׳ אחת" : `${c.danger} טעויות ׳על בטוח׳`);
   return parts.join(" · ");
 }
 

@@ -28,7 +28,7 @@ export const ORIGIN_WORDS: Record<NonNullable<Card["origin"]>, string> = {
  *  the group's deck, the group's trap card, or a private card from one's own
  *  mistake. */
 export function CardBadge({ card }: { card: Pick<Card, "source" | "origin"> }) {
-  if (card.source === "trap") return <span className="a-chip warn card-badge">מלכודת של הקבוצה</span>;
+  if (card.source === "trap") return <span className="a-chip warn card-badge">טעות נפוצה בקבוצה</span>;
   if (card.source === "mine") return <span className="a-chip card-badge">{card.origin ? `מטעות שלך · ${ORIGIN_WORDS[card.origin]}` : "מטעות שלך"}</span>;
   return <span className="a-chip group card-badge">מהחפיסה של הקבוצה</span>;
 }

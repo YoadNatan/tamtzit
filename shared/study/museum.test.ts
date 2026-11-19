@@ -35,36 +35,36 @@ test("the thresholds: the app's constants are section U's (one place, read by bo
 test("decision 3: the museum's meter, from the counts", () => {
   const m = (o: Partial<{ exhibits: number; soon: number; need: number; retired: number }>) =>
     ({ state: "open", floor: 3, cutoff: "c", group_need: 0, exhibits: 0, retired: 0, soon: 0, traps: 0, need: 3, ...o }) as const;
-  assert.equal(museumMeterLine(m({ exhibits: 2, need: 1 })), "2 מוצגים · עוד הימור ׳על בטוח׳ שגוי אחד למוצג הבא");
-  assert.equal(museumMeterLine(m({ exhibits: 2, need: 2 })), "2 מוצגים · עוד 2 הימורי ׳על בטוח׳ שגויים למוצג הבא");
-  assert.equal(museumMeterLine(m({ exhibits: 1, need: 3 })), "מוצג אחד · עוד 3 הימורי ׳על בטוח׳ שגויים למוצג הבא");
-  assert.equal(museumMeterLine(m({ exhibits: 0, need: 3 })), "אין עדיין מוצגים · עוד 3 הימורי ׳על בטוח׳ שגויים למוצג הבא");
-  assert.equal(museumMeterLine(m({ exhibits: 2, soon: 1, need: 2 })), "2 מוצגים · מוצג חדש נפתח מחר", "found tonight: it opens tomorrow, never today (so nobody can guess who)");
-  assert.equal(museumMeterLine(m({ exhibits: 0, soon: 2 })), "אין עדיין מוצגים · 2 מוצגים חדשים נפתחים מחר");
+  assert.equal(museumMeterLine(m({ exhibits: 2, need: 1 })), "2 טעויות נפוצות · עוד הימור ׳על בטוח׳ שגוי אחד לטעות הנפוצה הבאה");
+  assert.equal(museumMeterLine(m({ exhibits: 2, need: 2 })), "2 טעויות נפוצות · עוד 2 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה");
+  assert.equal(museumMeterLine(m({ exhibits: 1, need: 3 })), "טעות נפוצה אחת · עוד 3 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה");
+  assert.equal(museumMeterLine(m({ exhibits: 0, need: 3 })), "עוד אין טעויות נפוצות · עוד 3 הימורי ׳על בטוח׳ שגויים לטעות הנפוצה הבאה");
+  assert.equal(museumMeterLine(m({ exhibits: 2, soon: 1, need: 2 })), "2 טעויות נפוצות · טעות נפוצה חדשה נפתחת מחר", "found tonight: it opens tomorrow, never today (so nobody can guess who)");
+  assert.equal(museumMeterLine(m({ exhibits: 0, soon: 2 })), "עוד אין טעויות נפוצות · 2 טעויות נפוצות חדשות נפתחות מחר");
   assert.equal(meterPct(m({ need: 3 })), 0);
   assert.equal(meterPct(m({ need: 1 })), 67);
   assert.equal(meterPct(m({ soon: 1 })), 100);
-  assert.equal(museumGroupNeedLine(1), "המוזיאון נפתח מ-3 מתרגלים: עוד אדם אחד וזה נפתח.");
-  assert.equal(museumGroupNeedLine(2), "המוזיאון נפתח מ-3 מתרגלים: עוד 2 אנשים וזה נפתח.");
-  assert.equal(exhibitsWord(1), "מוצג אחד");
-  assert.equal(betsNeedWord(0), "עוד הימור ׳על בטוח׳ שגוי אחד למוצג הבא", "never zero: a candidate at the floor is an exhibit already");
+  assert.equal(museumGroupNeedLine(1), "הטעויות הנפוצות נפתחות מ-3 מתרגלים: עוד אדם אחד וזה נפתח.");
+  assert.equal(museumGroupNeedLine(2), "הטעויות הנפוצות נפתחות מ-3 מתרגלים: עוד 2 אנשים וזה נפתח.");
+  assert.equal(exhibitsWord(1), "טעות נפוצה אחת");
+  assert.equal(betsNeedWord(0), "עוד הימור ׳על בטוח׳ שגוי אחד לטעות הנפוצה הבאה", "never zero: a candidate at the floor is an exhibit already");
 });
 
 test("an exhibit's words: the plaque when the op wrote one, the exhibit's own text otherwise", () => {
   assert.equal(claimOf({ plaque: null, claim: " מניעת מלריה " }), "׳מניעת מלריה׳");
   assert.equal(claimOf({ plaque: { claim: "Quinine משמשת למניעת מלריה", line: "x" }, claim: "מניעת מלריה" }), "׳Quinine משמשת למניעת מלריה׳");
-  assert.equal(plaqueLine({ plaque: null, slides: [27, 33] }), "אמנים: כמה מכם. חומרים: ביטחון עצמי, שקף 27.");
-  assert.equal(plaqueLine({ plaque: null, slides: [] }), "אמנים: כמה מכם. חומרים: ביטחון עצמי.");
+  assert.equal(plaqueLine({ plaque: null, slides: [27, 33] }), "כמה מכם בחרו בזה ׳על בטוח׳ · שקף 27.");
+  assert.equal(plaqueLine({ plaque: null, slides: [] }), "כמה מכם בחרו בזה ׳על בטוח׳.");
   assert.equal(plaqueLine({ plaque: { claim: "c", line: "שלט" }, slides: [1] }), "שלט");
   assert.equal(museumTitle([{ course: "Anti parasite", lecture_title: "a" }, { course: "Anti parasite ", lecture_title: "b" }]), "Anti parasite");
   assert.equal(museumTitle([{ course: "A", lecture_title: "a" }, { course: "B", lecture_title: "b" }]), "");
   assert.equal(museumTitle([], "Malaria"), "Malaria");
-  assert.deepEqual(Object.values(STATE_CHIP).map((c) => c.text), ["חדש", "עוד נופלים", "עדיין תלוי", "בפנסיה"], "museum.html's four words");
+  assert.deepEqual(Object.values(STATE_CHIP).map((c) => c.text), ["חדש", "עוד טועים בה", "עדיין פתוחה", "נסגרה"], "museum.html's four words");
 });
 
 test("the one chip on a trap card (review F-11)", () => {
-  assert.deepEqual(badgeText({ kind: "trap", exhibit_no: null }), { chip: "מלכודת של הקבוצה", tone: "group", aside: "" });
-  assert.deepEqual(badgeText({ kind: "museum", exhibit_no: 3 }), { chip: "חיסון · ממוזיאון המלכודות", tone: "fun", aside: "מוצג מס׳ 3" });
+  assert.deepEqual(badgeText({ kind: "trap", exhibit_no: null }), { chip: "טעות נפוצה בקבוצה", tone: "group", aside: "" });
+  assert.deepEqual(badgeText({ kind: "museum", exhibit_no: 3 }), { chip: "טעות נפוצה · לחזרה", tone: "fun", aside: "טעות מס׳ 3" });
 });
 
 test("below the floor the bar counts against the floor itself, as its line does (review UI-5)", () => {

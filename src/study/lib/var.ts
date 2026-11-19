@@ -103,7 +103,7 @@ export async function disputeRow(id: string): Promise<DisputeRow | null> {
   return (data as DisputeRow | null) ?? null;
 }
 
-/** "לא מסכימים: כרטיס צהוב", from a paragraph or from a waiting correction
+/** "לא מסכימים", from a paragraph or from a waiting correction
  *  (which then waits for the card). The opener's claim is side a. */
 export async function openDispute(p: { lectureId: string; part: number; anchor: number; quote: string; claim: string; slides: number[]; proposalId?: string | null }): Promise<string> {
   const { data, error } = await client().rpc("study_dispute_open", {
@@ -146,7 +146,7 @@ export async function decide(id: string, decision: "accept" | "override", note =
   return data ? String(data) : null;
 }
 
-/** "ביטול הכרטיס הצהוב" (the opener, while it is open). */
+/** "לבטל את המחלוקת" (the opener, while it is open). */
 export async function closeDispute(id: string): Promise<void> {
   const { error } = await client().rpc("study_dispute_close", { p_dispute: id });
   if (error) fail(error);
@@ -256,7 +256,7 @@ export async function lectureLog(lectureId: string): Promise<LogEntry[]> {
   return (data ?? []) as LogEntry[];
 }
 
-/** "כרטיס צהוב לשקף": a slip in the deck itself (1-4 slides, a note of 5-300 characters). */
+/** "טעות בשקף": a slip in the deck itself (1-4 slides, a note of 5-300 characters). */
 export async function flagSlide(lectureId: string, slides: number[], note: string): Promise<string> {
   const { data, error } = await client().rpc("study_slide_flag", { p_lecture: lectureId, p_slides: slides, p_note: note });
   if (error) fail(error);
@@ -301,7 +301,7 @@ export function backingView(s: Pick<DisputeState, "backing_open" | "backers" | "
   | { kind: "hidden"; line: string } {
   if (s.backing_open) {
     const n = s.backers === 0 ? "עוד אין גיבויים" : s.backers === 1 ? "גיבוי אחד" : `${s.backers} גיבו`;
-    return { kind: "open", line: `${n} · הגיבוי יוצג אחרי ה-VAR, מ-3` };
+    return { kind: "open", line: `${n} · הגיבוי יוצג אחרי הבדיקה, מ-3` };
   }
   if (s.backs) return { kind: "bars", a: s.backs.a, b: s.backs.b };
   return { kind: "hidden", line: "הגיבוי יוצג מ-3" };

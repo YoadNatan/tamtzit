@@ -91,8 +91,8 @@ test("\"שלי\"'s lines say what there is, from the counts", () => {
   const c = (o: Partial<ProgressCounts>): ProgressCounts => ({ answers: 0, parts: 0, parts_ranged: 0, sure: 0, sure_right: 0, danger: 0, danger_due: 0, mistakes: 0, rewordings_due: 0, again_due: 0, ...o });
   assert.equal(progressLine(null), "עוד אין תשובות. טווח מוכנות מופיע מ-20 תשובות לנושא.");
   assert.equal(progressLine(c({ answers: 1 })), "תשובה אחת ב-28 הימים האחרונים");
-  assert.equal(progressLine(c({ answers: 34, danger: 3, danger_due: 1 })), "34 תשובות ב-28 הימים האחרונים · אחת ברשימת הסכנה להיום");
-  assert.equal(progressLine(c({ answers: 34, danger: 3 })), "34 תשובות ב-28 הימים האחרונים · 3 ברשימת הסכנה");
+  assert.equal(progressLine(c({ answers: 34, danger: 3, danger_due: 1 })), "34 תשובות ב-28 הימים האחרונים · טעות ׳על בטוח׳ אחת להיום");
+  assert.equal(progressLine(c({ answers: 34, danger: 3 })), "34 תשובות ב-28 הימים האחרונים · 3 טעויות ׳על בטוח׳");
   assert.equal(mistakesLine(c({})), "אין כרגע טעויות פתוחות.");
   assert.equal(mistakesLine(c({ mistakes: 1 })), "טעות פתוחה אחת");
   assert.equal(mistakesLine(c({ mistakes: 5, rewordings_due: 2 })), "5 טעויות פתוחות · 2 חוזרות היום בניסוח אחר");

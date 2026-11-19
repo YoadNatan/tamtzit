@@ -277,7 +277,7 @@ export async function fixCheck(proposalId: string): Promise<{ ok: boolean; note:
   return { ok: Boolean(body.ok), note: String(body.note ?? "") };
 }
 
-/** "לא מסכימים: כרטיס צהוב" (section V's study_dispute_open, with the waiting
+/** "לא מסכימים" (section V's study_dispute_open, with the waiting
  *  proposal, which then waits for the card's verdict, or on the paragraph
  *  itself with none). */
 export async function openDispute(p: { lectureId: string; part: number; anchor: number; quote: string; claim: string; slides: number[]; proposalId: string | null }): Promise<string> {

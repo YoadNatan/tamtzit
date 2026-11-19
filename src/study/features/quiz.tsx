@@ -14,8 +14,8 @@ import type { Ctx, ScreenProps } from "./types";
  * chunk (review F-8); the banner's line and the card on "יחד" stay here,
  * small, and read the group's quiz through one shared store.
  *
- * QuizInline is section M's opening ("3 לקפה", stacked in the meeting
- * screen); the presets "3 לקפה" and "עצירה" are opened only from M's
+ * QuizInline is section M's opening ("שאלות פתיחה", stacked in the meeting
+ * screen); the presets "שאלות פתיחה" and "עצירה" are opened only from M's
  * screens. Left for packages that are not built yet: a boss battle (mode "boss", section H) renders H's BossHud and
  * BossEnd in the room, which are empty until H. */
 
@@ -49,7 +49,7 @@ export function QuizCard({ ctx }: { ctx: Ctx }) {
 
 const Inline = lazy(() => import("../components/QuizInline"));
 
-/** A quiz inside another screen (M's meeting: "3 לקפה"), stacked in the
+/** A quiz inside another screen (M's meeting: "שאלות פתיחה"), stacked in the
  *  page: answered rounds folded with the majority word, the current one
  *  open with the bet (components/QuizInline, built by package M on Z's
  *  engine, useQuiz). */

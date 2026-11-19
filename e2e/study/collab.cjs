@@ -120,7 +120,7 @@ const PLACE_MS = 40_000;
       await pending.click(); // the chip re-renders as the store reloads: click retries until it holds
       await shoham.locator(".k-proposal").waitFor({ timeout: 10000 });
       steps.tabs = await shoham.locator(".k-tabs [role=tab]").allInnerTexts();
-      if (!varOn && (await shoham.getByRole("button", { name: "לא מסכימים: כרטיס צהוב" }).count())) throw new Error("the yellow card shows without VAR");
+      if (!varOn && (await shoham.getByRole("button", { name: "לא מסכימים" }).count())) throw new Error("the yellow card shows without VAR");
       await shoham.getByRole("button", { name: /לבדוק מול השקף/ }).click();
       await shoham.locator(".k-check").waitFor({ timeout: 10000 });
       steps.fixCheck = (await shoham.locator(".k-check").innerText()).trim();

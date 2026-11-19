@@ -1556,7 +1556,7 @@ begin
   select case when count(distinct btrim(l.course)) = 1 then min(btrim(l.course)) end into course
     from public.study_lectures l where l.id = any (lec);
   if p_preset = 'coffee' then
-    t := '3 לקפה';
+    t := 'שאלות פתיחה';
   elsif p_preset = 'stop' then
     select 'עצירה: ' || coalesce(nullif(btrim(s.title), ''), l.title) into t
       from public.study_lectures l left join public.study_sections s on s.lecture_id = l.id and s.idx = p_part_from
@@ -1986,5 +1986,11 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 -- only (a set question, a pin number to tap, a staged case's later step
 -- never come), and a question with a picture gets about 12 s more.
 insert into study_private.schema_sections (section, version) values ('Z', 3)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- Z 4 (plain copy, docs/study/COPY.md): the meeting's opening is called
+-- 'שאלות פתיחה' (was '3 לקפה'); quizzes opened before keep their rows, with
+-- the title said the new way.
+update public.study_quizzes set title = 'שאלות פתיחה' where preset = 'coffee' and title = '3 לקפה';
+insert into study_private.schema_sections (section, version) values ('Z', 4)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION Z ════

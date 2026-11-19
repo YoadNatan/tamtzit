@@ -171,7 +171,7 @@ const NOTICES = ["התכונה הזו עוד לא פתוחה.", "״הטעויו�
       expect(dueNow === 1 && counts.again === 2 && againDue === 2, `the fixture: D1 due, D1 and M1 again (${dueNow}, ${counts.again}, ${againDue})`);
       await noa.locator(".pr-me-progress .m", { hasText: "תשובות" }).waitFor({ timeout: 15000 });
       steps.me = (await rows.locator(".a-li").allInnerTexts()).map(norm);
-      expect(steps.me[0].includes(`${counts.answers} תשובות ב-28 הימים האחרונים`) && steps.me[0].includes(`${dueNow === 1 ? "אחת" : dueNow} ברשימת הסכנה להיום`), `"ההתקדמות שלי": ${steps.me[0]}`);
+      expect(steps.me[0].includes(`${counts.answers} תשובות ב-28 הימים האחרונים`) && steps.me[0].includes(dueNow === 1 ? "טעות ׳על בטוח׳ אחת להיום" : `${dueNow} טעויות ׳על בטוח׳ להיום`), `"ההתקדמות שלי": ${steps.me[0]}`);
       expect(steps.me[1].startsWith("הטעויות שלי") && steps.me[1].includes(`${counts.mistakes} טעויות פתוחות`), `"הטעויות שלי" with its count: ${steps.me[1]}`);
       expect(steps.me[2] && steps.me[2].includes("חוזרות היום בניסוח אחר") && steps.me[2].endsWith(String(againDue)), `what is due again today: ${steps.me[2]}`);
       expect((await noa.locator(".me-screen .links-card:not(.pr-me-rows)", { hasText: "הטעויות שלי" }).count()) === 0, "F's own \"הטעויות שלי\" link is not shown twice");
@@ -205,7 +205,7 @@ const NOTICES = ["התכונה הזו עוד לא פתוחה.", "״הטעויו�
       const aspectText = norm(await noa.locator(".pr-aspects").innerText());
       steps.aspects = aspectText;
       const asp = r.aspects(null);
-      expect(asp.filter((a) => a.bucket).every((a) => aspectText.includes(`${{ mechanism: "מנגנון פעולה", adverse: "תופעות לוואי", uses: "שימושים", contra: "התוויות נגד וזהירות" }[a.aspect]}: ${{ hot: "חם", warm: "פושר", cool: "יושב טוב" }[a.bucket]}`)), `"לפי היבט:" chips: ${aspectText}`);
+      expect(asp.filter((a) => a.bucket).every((a) => aspectText.includes(`${{ mechanism: "מנגנון פעולה", adverse: "תופעות לוואי", uses: "שימושים", contra: "התוויות נגד וזהירות" }[a.aspect]}: ${{ hot: "קשה", warm: "בינוני", cool: "יושב טוב" }[a.bucket]}`)), `"לפי היבט:" chips: ${aspectText}`);
       const waiting = asp.filter((a) => !a.bucket).sort((a, b) => b.questions - a.questions)[0];
       const AS = { mechanism: "מנגנון פעולה", contra: "התוויות נגד וזהירות", pk: "פרמקוקינטיקה" };
       expect(waiting && aspectText.includes(`היבט מופיע מ-4 שאלות. הכי קרוב: ${AS[waiting.aspect]}, עוד ${4 - waiting.questions === 1 ? "שאלה אחת" : `${4 - waiting.questions} שאלות`}.`), `the aspect meter: ${waiting && waiting.aspect} has ${waiting && waiting.questions} of 4`);

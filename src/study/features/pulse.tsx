@@ -39,7 +39,7 @@ const LazyBadge = lazy(() => import("../components/MuseumParts").then((m) => ({ 
 const LazyExhibit = lazy(() => import("../components/MuseumParts").then((m) => ({ default: m.ExhibitBody })));
 const LazySetting = lazy(() => import("../components/PulseParts").then((m) => ({ default: m.PulseSettingBody })));
 
-/** P-11 "דופק הקבוצה" on "יחד" (its body loads with its own chunk). */
+/** P-11 "מה קשה לקבוצה" on "יחד" (its body loads with its own chunk). */
 export function PulseCard({ ctx }: { ctx: Ctx }) {
   if (!flags.pulse) return null;
   return (
@@ -59,7 +59,7 @@ export function MuseumCard({ ctx }: { ctx: Ctx }) {
   );
 }
 
-/** P-12 "לא לכלול אותי בדופק" under "שלי" → הגדרות (its own chunk). */
+/** P-12 "לא לכלול אותי בספירה" under "שלי" → הגדרות (its own chunk). */
 export function PulseSettingRow({ ctx }: { ctx: Ctx }) {
   if (!flags.pulse) return null;
   return (
@@ -70,12 +70,12 @@ export function PulseSettingRow({ ctx }: { ctx: Ctx }) {
 }
 
 /** The one chip on a trap card (C's review, Today; review F-11), with the
- *  museum flag: "חיסון · ממוזיאון המלכודות · מוצג מס׳ n" for an exhibit's
- *  card, else "מלכודת של הקבוצה". Null without the flag (C keeps its own). */
+ *  museum flag: "טעות נפוצה · לחזרה · טעות מס׳ n" for an exhibit's
+ *  card, else "טעות נפוצה בקבוצה". Null without the flag (C keeps its own). */
 export function CardBadge({ ctx, cardId }: { ctx: Ctx; cardId: string }) {
   if (!flags.museum) return null;
   return (
-    <Suspense fallback={<span className="a-chip group card-badge">מלכודת של הקבוצה</span>}>
+    <Suspense fallback={<span className="a-chip group card-badge">טעות נפוצה בקבוצה</span>}>
       <LazyBadge ctx={ctx} cardId={cardId} />
     </Suspense>
   );

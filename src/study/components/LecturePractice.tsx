@@ -212,7 +212,7 @@ export default function LecturePractice({ route, ctx }: ScreenProps<"practice">)
         </RouteLink>
       ) : null}
 
-      {/* E (phase 3, usable early by decision 3): "טבלה ריקה" and "מלכודת משלי", each with its meter. */}
+      {/* E (phase 3, usable early by decision 3): "טבלה ריקה" and "שאלה משלי", each with its meter. */}
       <ExtrasCard ctx={ctx} lectureId={lectureId} slides={lecture.slides} />
 
       {twoFlags.length ? (

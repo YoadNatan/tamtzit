@@ -332,7 +332,7 @@ const ITEMS = [
         r1.includes("סבב 1 · עונים לבד") &&
           r1.includes("סבב 2 · אחרי הוויכוח") &&
           r1.includes("100%, היה 60%") &&
-          norm(await noa.locator("li.quiz-opt").nth(wrong1).innerText()).includes("המלכודת של הסבב") &&
+          norm(await noa.locator("li.quiz-opt").nth(wrong1).innerText()).includes("הטעות הנפוצה בסבב") &&
           r1.includes("׳על בטוח׳: −6 · נשמר רק אצלך.") &&
           r1.includes("בסבב 2: נכון · הבנתי בדיון"),
         r1.slice(0, 500),
@@ -340,7 +340,7 @@ const ITEMS = [
       await see(maya, "׳נראה לי׳: −2 · נשמר רק אצלך.");
       await revealed(dana);
       const d1 = await textOf(dana);
-      check("ZA-4 a member who watches sees the key and the explanations, never the counts, the trap or anyone's choice", (await dana.locator(".quiz-bars").count()) === 0 && !d1.includes("המלכודת של הסבב") && !d1.includes("הבחירה שלך") && d1.includes("התשובה הנכונה"), d1.slice(0, 300));
+      check("ZA-4 a member who watches sees the key and the explanations, never the counts, the trap or anyone's choice", (await dana.locator(".quiz-bars").count()) === 0 && !d1.includes("הטעות הנפוצה בסבב") && !d1.includes("הבחירה שלך") && d1.includes("התשובה הנכונה"), d1.slice(0, 300));
       a11y.push(...(await snap(noa, out, "quiz-4-revote", { primary: undefined })));
       // Step 8: Noa flags the question.
       await noa.getByRole("button", { name: "משהו לא בסדר בשאלה?" }).click();

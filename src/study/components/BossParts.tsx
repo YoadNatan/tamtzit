@@ -37,7 +37,7 @@ import { Avatar, BackLink, Head, RouteLink } from "./Shell";
  * rounds of at least 3 answers, a wrong answer costs the team, never a
  * person, and no moment names anyone. */
 
-/** "קרב הבוס" on "יחד": the heads a battle would have now, the revenge
+/** "אתגר קבוצתי" on "יחד": the heads a battle would have now, the revenge
  *  round, and decision 3's meter; hidden while the switch is off or the
  *  member is out. */
 export function BossCardBody({ ctx }: { ctx: Ctx }) {
@@ -57,7 +57,7 @@ export function BossCardBody({ ctx }: { ctx: Ctx }) {
   return (
     <section className="a-stack boss-card" aria-labelledby="boss-card-h">
       <div className="a-sec">
-        <h2 id="boss-card-h">קרב הבוס</h2>
+        <h2 id="boss-card-h">אתגר קבוצתי</h2>
         {o.state === "open" && headsChip(o.heads.length) ? <span className="a-chip fun">{headsChip(o.heads.length)}</span> : null}
       </div>
       <RouteLink to={{ v: "boss", isNew: true }} go={ctx.go} className="a-li row-link">
@@ -77,7 +77,7 @@ export function BossCardBody({ ctx }: { ctx: Ctx }) {
       </RouteLink>
       {revenge ? (
         <p className="a-small boss-revenge">
-          <b>סבב נקמה:</b> {isolateLatin(revenge.heads?.join(" · ") ?? "", "bcr")} · {revenge.open ? "פתוח עכשיו" : "נפתח מחר"}
+          <b>סבב חוזר:</b> {isolateLatin(revenge.heads?.join(" · ") ?? "", "bcr")} · {revenge.open ? "פתוח עכשיו" : "נפתח מחר"}
         </p>
       ) : null}
     </section>
@@ -91,10 +91,10 @@ function Hp({ label, hp, tone }: { label: string; hp: number; tone: "ok" | "bad"
       <div className="a-row between">
         <b className="a-small">{label}</b>
         <b className="a-small">
-          {v} <bdi dir="ltr">HP</bdi>
+          {v} נקודות
         </b>
       </div>
-      <div className="a-bar" role="img" aria-label={`${label}: ${v} HP`}>
+      <div className="a-bar" role="img" aria-label={`${label}: ${v} נקודות`}>
         <i style={{ width: `${v}%`, background: tone === "ok" ? "var(--ok)" : "var(--bad)" } as CSSProperties} />
       </div>
     </div>
@@ -111,7 +111,7 @@ export function BossHudBody({ state }: { state: unknown }) {
   const cur = b.head != null ? b.heads[b.head] : null;
   const last = z.state === "reveal" ? b.last_round : null;
   return (
-    <section className="a-stack boss-hud" aria-label="קרב הבוס">
+    <section className="a-stack boss-hud" aria-label="אתגר קבוצתי">
       <div className="a-row between">
         <span className="a-small a-muted">{isolateLatin(b.name, "bn")}</span>
         <span className="a-chip fun">{headChip(b)}</span>
@@ -119,10 +119,10 @@ export function BossHudBody({ state }: { state: unknown }) {
       <div className="a-card flat">
         <div className="a-grid2">
           <Hp label="הקבוצה" hp={b.team_hp} tone="ok" />
-          <Hp label="הבוס" hp={b.boss_hp} tone="bad" />
+          <Hp label="האתגר" hp={b.boss_hp} tone="bad" />
         </div>
       </div>
-      <ul className="a-wrap boss-heads" aria-label="הראשים">
+      <ul className="a-wrap boss-heads" aria-label="הנושאים">
         {b.heads.map((h, i) => (
           <li key={`${h.name}${i}`} className={`a-chip${h.down ? " ok" : i === b.head ? " fun" : ""}`} aria-current={i === b.head ? "true" : undefined}>
             {h.down ? "✓ " : ""}
@@ -150,18 +150,18 @@ export function BossHudBody({ state }: { state: unknown }) {
             <>
               {last.dmg ? (
                 <>
-                  <bdi dir="ltr">−{last.dmg} HP</bdi> לבוס
+                  <bdi dir="ltr">−{last.dmg}</bdi> לאתגר
                 </>
               ) : (
-                "הבוס לא נפגע"
+                "האתגר לא ירד"
               )}
               {" · "}
               {last.loss ? (
                 <>
-                  <bdi dir="ltr">−{last.loss} HP</bdi> לקבוצה
+                  <bdi dir="ltr">−{last.loss}</bdi> לקבוצה
                 </>
               ) : (
-                "הקבוצה לא נפגעה"
+                "הקבוצה לא איבדה נקודות"
               )}
             </>
           )}
@@ -203,7 +203,7 @@ export function BossEndBody({ ctx, state }: { ctx: Ctx; state: unknown }) {
     try {
       const n = await bossLootSave(quizId);
       setSaved(n);
-      ctx.say(n ? "השלל נכנס לתור שלך בימים הקרובים." : "השלל כבר בתור שלך.");
+      ctx.say(n ? "הטעויות נכנסו לתור שלך לימים הקרובים." : "הטעויות כבר בתור שלך.");
     } catch (e) {
       setError(failText(e instanceof Error ? e.message : "", "boss"));
     }
@@ -212,23 +212,23 @@ export function BossEndBody({ ctx, state }: { ctx: Ctx; state: unknown }) {
   const lastText = lastMoment ? momentText(lastMoment) : null;
   return (
     <>
-      <Head back={<BackLink go={ctx.go} fallback={{ v: "group" }} />} title={isolateLatin(`קרב הבוס · ${b.name}`, "beh")}>
-        <span className={`a-chip ${won ? "ok" : "busy"}`}>{won ? "ניצחון" : "סבב נקמה מחר"}</span>
+      <Head back={<BackLink go={ctx.go} fallback={{ v: "group" }} />} title={isolateLatin(`אתגר קבוצתי · ${b.name}`, "beh")}>
+        <span className={`a-chip ${won ? "ok" : "busy"}`}>{won ? "ניצחון" : "סבב חוזר מחר"}</span>
       </Head>
       <section className="a-card boss-result" aria-labelledby="boss-end-h">
         <div className="a-row between">
           <span className="a-stack">
             <span className="a-h1" id="boss-end-h">
-              {won ? "הבוס הובס!" : "הקרב נגמר"}
+              {won ? "עברתם את האתגר!" : "האתגר נגמר"}
             </span>
             <span className="a-small">
               {won ? (
                 <>
-                  הקבוצה סיימה עם {b.team_hp} <bdi dir="ltr">HP</bdi> מתוך 100.
+                  לקבוצה נשארו {b.team_hp} נקודות מתוך 100.
                 </>
               ) : (
                 <>
-                  {standing.length === 1 ? "ראש אחד עוד עומד" : `${standing.length} ראשים עוד עומדים`}: {isolateLatin(standing.map((h) => h.name).join(" · "), "bst")}.
+                  {standing.length === 1 ? "נושא אחד עוד פתוח" : `${standing.length} נושאים עוד פתוחים`}: {isolateLatin(standing.map((h) => h.name).join(" · "), "bst")}.
                 </>
               )}
             </span>
@@ -254,7 +254,7 @@ export function BossEndBody({ ctx, state }: { ctx: Ctx; state: unknown }) {
       {b.moments.length ? (
         <section className="a-stack" aria-labelledby="boss-moments-h">
           <div className="a-sec">
-            <h2 id="boss-moments-h">רגעי הקרב</h2>
+            <h2 id="boss-moments-h">רגעים מהאתגר</h2>
             <span className="a-small a-muted">של הקבוצה, בלי שמות</span>
           </div>
           <ul className="a-list">
@@ -266,7 +266,7 @@ export function BossEndBody({ ctx, state }: { ctx: Ctx; state: unknown }) {
                   <div className="boss-moment">
                     <span className="a-row between">
                       <b>{isolateLatin(t.title, `mt${i}`)}</b>
-                      <span className={`a-chip ${t.tone}`}>{/HP|relapse/.test(t.chip) ? <bdi dir="ltr">{t.chip}</bdi> : t.chip}</span>
+                      <span className={`a-chip ${t.tone}`}>{/^−/.test(t.chip) ? <bdi dir="ltr">{t.chip}</bdi> : t.chip}</span>
                     </span>
                     <span className="m">
                       {isolateLatin(t.line, `ml${i}`)}
@@ -288,7 +288,7 @@ export function BossEndBody({ ctx, state }: { ctx: Ctx; state: unknown }) {
       {played ? (
         <section className="a-card flat boss-loot" aria-labelledby="boss-loot-h">
           {loot === null ? (
-            <p className="a-small a-muted">טוען את השלל…</p>
+            <p className="a-small a-muted">טוען את הטעויות שלך…</p>
           ) : loot.length ? (
             <>
               <div className="a-row between">
@@ -323,15 +323,15 @@ export function BossEndBody({ ctx, state }: { ctx: Ctx; state: unknown }) {
           ) : (
             <>
               <div className="a-row between">
-                <b id="boss-loot-h">השלל שלך</b>
+                <b id="boss-loot-h">לחזרה שלך</b>
                 <span className="a-chip">רק לך</span>
               </div>
-              <p className="a-small">בלי טעויות שלך בקרב הזה, אז אין שלל.</p>
+              <p className="a-small">לא טעית באתגר הזה, אז אין מה לחזור עליו.</p>
             </>
           )}
         </section>
       ) : null}
-      <p className="a-small a-muted">{won ? LOST_LINE : "סבב הנקמה מחכה ב׳יחד׳ מהיום הלימודי הבא, עם הראשים שנשארו."}</p>
+      <p className="a-small a-muted">{won ? LOST_LINE : "הסבב החוזר מחכה ב׳יחד׳ מהיום הלימודי הבא, עם הנושאים שנשארו פתוחים."}</p>
     </>
   );
 }

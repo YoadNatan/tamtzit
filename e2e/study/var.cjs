@@ -1,11 +1,11 @@
 // Package V's flow (§12.4.V: V-3, V-4; corrections.html s1-s3) on the shared
 // mock: six members in the fixture lecture.
 //   1. איתי's correction to the Loop diuretics' mechanism waits; נועה
-//      disagrees: "לא מסכימים: כרטיס צהוב" on the proposal, one line with
+//      disagrees: "לא מסכימים" on the proposal, one line with
 //      slide 6; the card opens, "מחכים לצד השני"; the correction waits.
 //   2. איתי finds the card on "יחד" and writes the other side.
 //   3. מאיה, דניאל and רוני back a side: while backing is open every phone
-//      shows only "{n} גיבו · הגיבוי יוצג אחרי ה-VAR, מ-3", never bars, never
+//      shows only "{n} גיבו · הגיבוי יוצג אחרי הבדיקה, מ-3", never bars, never
 //      a backer's name (review SEC-10).
 //   4. שוהם asks VAR (≈ $0.08 and the group's month); רוני asks at the same
 //      moment and gets "נבדק עכשיו במכשיר אחר" with no second reservation
@@ -19,10 +19,10 @@
 //      her queue, in Today's session), and "הבנתי" clears it.
 //   7. A yellow card on a paragraph with no proposal, VAR, "בהרצאה נאמר
 //      אחרת" with a line: no box.
-//   8. The log: the corrections, the verdicts, "כרטיס צהוב לשקף" added,
+//   8. The log: the corrections, the verdicts, "טעות בשקף" added,
 //      removed and put back.
 // Without VAR (every set but "v" and "all") it checks that nothing of V
-// shows: no "יומן התיקונים", no "לא מסכימים", no "כרטיסים צהובים", and a
+// shows: no "יומן התיקונים", no "לא מסכימים", no "מחלוקות", and a
 // card's link goes to "יחד".
 //
 //   NODE_PATH=$(npm root -g) node e2e/study/var.cjs <dist> <out dir>
@@ -92,7 +92,7 @@ const boxIn = (loc) => loc.evaluate((el) => {
       await noa.goto(`${mock.base}/?v=group`);
       await noa.locator("main").first().waitFor({ timeout: 15000 });
       await noa.waitForTimeout(500);
-      expect((await noa.getByText("כרטיסים צהובים").count()) === 0, "no \"כרטיסים צהובים\" on \"יחד\"");
+      expect((await noa.getByText("מחלוקות").count()) === 0, "no \"מחלוקות\" on \"יחד\"");
       await noa.goto(`${mock.base}/?v=dispute&d=fade0001-0000-4000-8000-000000000001`);
       await noa.waitForURL((u) => !u.search.includes("v=dispute"), { timeout: 15000 });
       expect(!new URL(noa.url()).search.includes("dispute"), "a yellow card's link leads elsewhere");
@@ -102,7 +102,7 @@ const boxIn = (loc) => loc.evaluate((el) => {
         const n2 = await open("נועה");
         await n2.locator(`[data-part="2"] .edit-dot.pending`).first().click();
         await n2.locator(".k-proposal").waitFor({ timeout: 10000 });
-        expect((await n2.getByRole("button", { name: "לא מסכימים: כרטיס צהוב" }).count()) === 0, "no \"לא מסכימים\" on a waiting correction");
+        expect((await n2.getByRole("button", { name: "לא מסכימים" }).count()) === 0, "no \"לא מסכימים\" on a waiting correction");
       }
     } else {
       /* ── 1. a yellow card on a waiting correction ── */
@@ -125,7 +125,7 @@ const boxIn = (loc) => loc.evaluate((el) => {
       // "לאשר" is the primary beside "לא מסכימים", on one row (corrections.html s1; review V-APPROVE-BELOW-FOLD).
       const foot = await atSizes(noa, async () => ({
         approve: await boxIn(noa.locator(".k-foot").getByRole("button", { name: "לאשר" })),
-        dispute: await boxIn(noa.locator(".k-foot").getByRole("button", { name: "לא מסכימים: כרטיס צהוב" })),
+        dispute: await boxIn(noa.locator(".k-foot").getByRole("button", { name: "לא מסכימים" })),
       }));
       steps.foot = foot.map((f) => `${f.size}: לאשר x ${f.approve.x0}..${f.approve.x1} y ${f.approve.y0}..${f.approve.y1}, dispute x ${f.dispute.x0}..${f.dispute.x1} y ${f.dispute.y0}..${f.dispute.y1}`).join("; ");
       // Beside it at both sizes; on screen at 390×844 (at 360×640 the sheet's words scroll first, as every sheet's there).
@@ -133,18 +133,18 @@ const boxIn = (loc) => loc.evaluate((el) => {
         foot.every((f) => Math.abs((f.approve.y0 + f.approve.y1) / 2 - (f.dispute.y0 + f.dispute.y1) / 2) <= 3 && f.approve.x1 <= f.dispute.x0) && foot[0].approve.y1 <= foot[0].approve.vh,
         `לאשר beside the dispute button at 390 and 360, on screen at 390: ${steps.foot}`,
       );
-      await noa.getByRole("button", { name: "לא מסכימים: כרטיס צהוב" }).click();
+      await noa.getByRole("button", { name: "לא מסכימים" }).click();
       await noa.getByLabel("הטענה, בשורה אחת").fill("בשקף 6 כתוב עד 25%, לא 20-25%.");
       await noa.locator(".k-dispute").scrollIntoViewIfNeeded();
       a11y.push(...(await snap(noa, out, "v-0-form")));
-      await noa.getByRole("button", { name: "לפתוח כרטיס צהוב" }).click();
+      await noa.getByRole("button", { name: "לפתוח מחלוקת" }).click();
       await noa.waitForURL(/v=dispute/, { timeout: 15000 });
       await noa.locator(".v-dispute .v-claims").waitFor({ timeout: 15000 });
       await noa.getByText("מחכים לצד השני.").waitFor({ timeout: 10000 });
       const d1 = db.disputes[0];
       expect(d1 && d1.proposal_id === p1.id && p1.state === "disputed", "the card holds the correction (disputed)");
       steps.title = (await noa.locator(".ph-head .t, .ph-head h1").first().innerText()).trim();
-      expect(/^כרטיס צהוב · Loop diuretics/.test(steps.title), `the title: ${steps.title}`);
+      expect(/^מחלוקת · Loop diuretics/.test(steps.title), `the title: ${steps.title}`);
       a11y.push(...(await snap(noa, out, "v-1-opened")));
 
       /* ── 2. the other side, from "יחד" ── */
@@ -171,7 +171,7 @@ const boxIn = (loc) => loc.evaluate((el) => {
         await pg.getByRole("button", { name: `✓ הגיבוי שלך: ${side}` }).waitFor({ timeout: 10000 });
       }
       const roni = pages["רוני"];
-      await roni.getByText("3 גיבו · הגיבוי יוצג אחרי ה-VAR, מ-3").waitFor({ timeout: 10000 });
+      await roni.getByText("3 גיבו · הגיבוי יוצג אחרי הבדיקה, מ-3").waitFor({ timeout: 10000 });
       expect((await roni.locator(".v-backing .a-bar").count()) === 0, "no bars while backing is open (review SEC-10)");
       const text = await roni.locator("main").innerText();
       expect(!/מאיה|דניאל/.test(text), "no backer's name on the card");
@@ -180,14 +180,14 @@ const boxIn = (loc) => loc.evaluate((el) => {
 
       /* ── 4. VAR: one at a time, the verdict live, the bars after it ── */
       const shoham = await open("שוהם", `/?v=dispute&d=${d1.id}`);
-      await shoham.getByRole("button", { name: "VAR", exact: true }).waitFor({ timeout: 10000 });
+      await shoham.getByRole("button", { name: "לבדוק מול השקפים", exact: true }).waitFor({ timeout: 10000 });
       steps.spendLine = (await shoham.locator(".v-var .a-muted").innerText()).trim();
       expect(/\$0\.08 · השימוש של הקבוצה החודש: \$12\.40 מתוך \$33/.test(steps.spendLine), `the spend line: ${steps.spendLine}`);
       a11y.push(...(await snap(shoham, out, "v-4-var", { primary: ".ph-foot .a-btn.primary" })));
       db.varDelayMs = 2500;
       await roni.reload();
-      await roni.getByRole("button", { name: "VAR", exact: true }).waitFor({ timeout: 10000 });
-      await Promise.all([shoham.getByRole("button", { name: "VAR", exact: true }).click(), roni.getByRole("button", { name: "VAR", exact: true }).click()]);
+      await roni.getByRole("button", { name: "לבדוק מול השקפים", exact: true }).waitFor({ timeout: 10000 });
+      await Promise.all([shoham.getByRole("button", { name: "לבדוק מול השקפים", exact: true }).click(), roni.getByRole("button", { name: "לבדוק מול השקפים", exact: true }).click()]);
       // Whichever phone came second reads "busy" (the database orders them, not the script).
       const BUSY = "נבדק עכשיו במכשיר אחר. התוצאה תופיע כאן.";
       steps.busyOn = await Promise.any([
@@ -274,9 +274,9 @@ const boxIn = (loc) => loc.evaluate((el) => {
       await noa.locator(PK).first().click({ position: { x: 12, y: 12 } });
       await noa.locator(".blk-actions").getByRole("button", { name: "תיקון", exact: true }).click();
       await noa.getByRole("button", { name: "ביטול", exact: true }).first().click(); // the editor opened at once (two taps)
-      await noa.getByRole("button", { name: "לא מסכימים: כרטיס צהוב" }).click();
+      await noa.getByRole("button", { name: "לא מסכימים" }).click();
       await noa.getByLabel("הטענה, בשורה אחת").fill("הספיגה הפומית של Furosemide היא 10-90%, לא קבועה.");
-      await noa.getByRole("button", { name: "לפתוח כרטיס צהוב" }).click();
+      await noa.getByRole("button", { name: "לפתוח מחלוקת" }).click();
       await noa.waitForURL(/v=dispute/, { timeout: 15000 });
       const d2 = db.disputes[1];
       expect(d2 && d2.proposal_id === null && d2.anchor === 3, "a card on the paragraph itself");
@@ -286,7 +286,7 @@ const boxIn = (loc) => loc.evaluate((el) => {
       await itai2.getByRole("button", { name: "לשלוח" }).click();
       db.varDelayMs = 300;
       db.varVerdict = { certainty: "slide", summary: "כתוב בשקף 6: 10-90%.", on_slides: [{ text: "Oral bioavailability 10-90%", slides: [6] }], interpretation: [], listen: false, trap: null };
-      await itai2.getByRole("button", { name: "VAR", exact: true }).click();
+      await itai2.getByRole("button", { name: "לבדוק מול השקפים", exact: true }).click();
       await itai2.locator(".v-verdict").waitFor({ timeout: 15000 });
       expect((await itai2.getByText("ודאות: כתוב בשקף").count()) === 1, "a verdict the slide settles");
       expect((await itai2.getByText("הגיבוי יוצג מ-3").count()) === 1, "no backers: \"הגיבוי יוצג מ-3\"");
@@ -303,18 +303,18 @@ const boxIn = (loc) => loc.evaluate((el) => {
       await noa.getByText("יומן התיקונים").first().click();
       await noa.locator(".v-log-list").waitFor({ timeout: 15000 });
       expect((await noa.locator(`[data-part="2"] .v-box`).count()) === 0, "the reader is gone (the log is its own screen)");
-      await noa.getByRole("button", { name: "כרטיס צהוב לשקף" }).click();
+      await noa.getByRole("button", { name: "טעות בשקף" }).click();
       await noa.getByLabel(/^שקף/).fill("6");
       await noa.getByLabel("מה לא תקין בשקף").fill("בטבלה כתוב t½ ≈ 1.5 h ל-Furosemide, ובשקף 7 כתוב 2 h.");
       await noa.getByRole("button", { name: "להוסיף ליומן" }).click();
-      await noa.getByText("כרטיס צהוב לשקף 6").waitFor({ timeout: 10000 });
+      await noa.getByText("טעות בשקף 6").waitFor({ timeout: 10000 });
       steps.log = (await noa.locator(".v-log-list > li").allInnerTexts()).map((t) => t.replace(/\n/g, " | "));
       expect(steps.log.length === 4, `the log: two verdicts, a correction, a slide flag (${steps.log.length})`);
-      expect(steps.log.some((t) => /פסיקת VAR · בהרצאה נאמר אחרת/.test(t)) && steps.log.some((t) => /נועה מול איתי/.test(t)), "the verdicts with both sides");
+      expect(steps.log.some((t) => /הכרעה מול השקפים · בהרצאה נאמר אחרת/.test(t)) && steps.log.some((t) => /נועה מול איתי/.test(t)), "the verdicts with both sides");
       expect(steps.log.some((t) => /תיקון: איתי · אישור: דניאל · מקור: שקף 6/.test(t) && /ביטול/.test(t)), "the correction with \"ביטול\" (the paragraph's latest)");
       await noa.evaluate(() => window.scrollTo(0, 0));
       a11y.push(...(await snap(noa, out, "v-9-log")));
-      const flagRow = noa.locator(".v-log-list > li", { hasText: "כרטיס צהוב לשקף 6" });
+      const flagRow = noa.locator(".v-log-list > li", { hasText: "טעות בשקף 6" });
       await flagRow.getByRole("button", { name: "ביטול" }).click();
       await flagRow.getByText("הוסר: נועה").waitFor({ timeout: 10000 });
       await flagRow.getByRole("button", { name: "להחזיר" }).click();

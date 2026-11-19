@@ -33,7 +33,7 @@ export type TrapMeter = {
   waiting: number;
   toFix: number;
   leftToday: number;
-  /** What there is ("2 מלכודות שלך בבנק · אחת כבר עם השם שלך"), or "" for none. */
+  /** What there is ("2 שאלות שלך בבנק · אחת כבר עם השם שלך"), or "" for none. */
   line: string;
   /** What more needs ("השם יופיע אחרי שתישאל במבחן קבוצתי"), or "". */
   next: string;
@@ -48,15 +48,15 @@ export function trapMeter(mine: readonly MyTrap[], now: number): TrapMeter {
   const today = mine.filter((t) => now - Date.parse(t.created_at) < 24 * 3600 * 1000).length;
   const leftToday = Math.max(0, TRAPS.DRAFTS_A_DAY - today);
   const parts: string[] = [];
-  if (ok.length) parts.push(`${count(ok.length, "מלכודת אחת", "מלכודות")} שלך בבנק`);
+  if (ok.length) parts.push(`${count(ok.length, "שאלה אחת", "שאלות")} שלך בבנק`);
   if (named) parts.push(named === ok.length ? (named === 1 ? "כבר עם השם שלך" : "כולן כבר עם השם שלך") : named === 1 ? "אחת כבר עם השם שלך" : `${named} כבר עם השם שלך`);
   if (toFix && ok.length) parts.push(toFix === 1 ? "אחת מחכה לתיקון" : `${toFix} מחכות לתיקון`);
-  else if (toFix) parts.push(toFix === 1 ? "מלכודת אחת שלך מחכה לתיקון" : `${toFix} מלכודות שלך מחכות לתיקון`);
+  else if (toFix) parts.push(toFix === 1 ? "שאלה אחת שלך מחכה לתיקון" : `${toFix} שאלות שלך מחכות לתיקון`);
   let next = "";
-  if (!ok.length && !toFix) next = "מלכודת שעוברת את הבדיקה נכנסת לבנק של כולם, בלי שם.";
+  if (!ok.length && !toFix) next = "שאלה שעוברת את הבדיקה נכנסת לבנק של כולם, בלי שם.";
   else if (waiting === 1) next = ok.length === 1 ? "השם יופיע אחרי שתישאל במבחן קבוצתי." : "אחת עוד מחכה למבחן קבוצתי, ואז יופיע השם.";
   else if (waiting > 1) next = `${waiting} עוד מחכות למבחן קבוצתי, ואז יופיע השם.`;
-  if (leftToday < TRAPS.DRAFTS_A_DAY) next = [next, leftToday ? `נשארו היום ${count(leftToday, "מלכודת חדשה אחת", "מלכודות חדשות")}.` : "להיום נגמרו המלכודות החדשות; מחר אפשר שוב."].filter(Boolean).join(" ");
+  if (leftToday < TRAPS.DRAFTS_A_DAY) next = [next, leftToday ? `נשארו היום ${count(leftToday, "שאלה חדשה אחת", "שאלות חדשות")}.` : "להיום נגמרו השאלות החדשות; מחר אפשר שוב."].filter(Boolean).join(" ");
   return { inBank: ok.length, named, waiting, toFix, leftToday, line: parts.join(" · "), next };
 }
 

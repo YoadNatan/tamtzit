@@ -211,7 +211,7 @@ const TEXT: Record<string, string> = {
   // Not in §6.3: undoing an edit that is gone.
   "corrections:edit not found": "אי אפשר לבטל את התיקון הזה. כדאי לרענן.",
   ...each(["corrections", "dispute"], "bad source", "צריך מקור: שקף מההרצאה, דקה בהקלטה, או מקור חיצוני עם הסבר."),
-  "corrections:pending exists": "לפסקה הזו כבר יש הצעת תיקון שממתינה. אפשר לאשר אותה או לפתוח כרטיס צהוב.",
+  "corrections:pending exists": "לפסקה הזו כבר יש הצעת תיקון שממתינה. אפשר לאשר אותה או לפתוח מחלוקת.",
   "corrections:own proposal": "אי אפשר לאשר הצעה שלך. אישור מגיע מחבר או חברה אחרים בקבוצה, בלחיצה או בקול בפגישה.",
   ...each(["corrections", "dispute"], "not pending", "ההצעה כבר לא ממתינה. כדאי לרענן."),
   ...each(["meeting", "corrections"], "not the reader", "רק במסך ההקראה, בזמן הפגישה."),
@@ -251,10 +251,10 @@ const TEXT: Record<string, string> = {
   "plan:bad rounds": "כל הרצאה חוזרת 2 עד 4 פעמים.",
   "plan:conflict": "התוכנית השתנתה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.",
   "plan:bad choice": "המחיר הוא עוד זמן ביום, או יום חזרה אחד פחות.",
-  "marathon:conflict": "המרתון השתנה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.",
-  "marathon:bad time": "מועד המרתון כבר עבר.",
+  "marathon:conflict": "ערב הלמידה השתנה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.",
+  "marathon:bad time": "מועד ערב הלמידה כבר עבר.",
   "marathon:bad agenda": "משהו בסדר היום לא תקין. כדאי לבנות אותו מחדש.",
-  "marathon:marathon over": "המרתון כבר הסתיים.",
+  "marathon:marathon over": "ערב הלמידה כבר הסתיים.",
 
   // the day's meeting (meeting design §8.1; §12.7.4)
   "meeting:bad parts": "החלקים שנבחרו לא נמצאו בהרצאה.",
@@ -274,19 +274,19 @@ const TEXT: Record<string, string> = {
 
   // yellow cards and VAR (meeting design §8.1; §12.7.4)
   "dispute:bad claim": "טענה בשורה אחת: 5 עד 240 תווים.",
-  "dispute:dispute open": "על הפסקה הזו כבר פתוח כרטיס צהוב.",
-  "dispute:not open": "הגיבוי נסגר כשביקשו VAR, או שהכרטיס הצהוב כבר נסגר. כדאי לרענן.",
+  "dispute:dispute open": "על הפסקה הזו כבר פתוחה מחלוקת.",
+  "dispute:not open": "הגיבוי נסגר כשביקשו בדיקה מול השקפים, או שהמחלוקת כבר נסגרה. כדאי לרענן.",
   "dispute:too long": "עד 200 תווים.",
-  "dispute:sides taken": "לכרטיס הזה כבר יש שני צדדים. אפשר לגבות אחד מהם.",
+  "dispute:sides taken": "למחלוקת הזו כבר יש שני צדדים. אפשר לגבות אחד מהם.",
   "dispute:a side cannot back": "צד במחלוקת לא מגבה. הגיבוי הוא של שאר הקבוצה.",
-  "dispute:not ready": "VAR צריך שני צדדים, ורק פעם אחת למחלוקת.",
-  "dispute:not judged": "עוד אין פסיקה, או שכבר הוחלט.",
+  "dispute:not ready": "בדיקה מול השקפים צריכה שני צדדים, ורק פעם אחת למחלוקת.",
+  "dispute:not judged": "עוד אין הכרעה, או שכבר הוחלט.",
   ...each(["dispute", "today"], "dispute not found", "לא נמצא. כדאי לרענן."),
   ...each(["dispute", "today"], "flag not found", "לא נמצא. כדאי לרענן."),
   ...each(["dispute", "today"], "not found", "לא נמצא. כדאי לרענן."),
   "dispute:bad note": "צריך לכתוב מה לא תקין בשקף (5 עד 300 תווים).",
-  "dispute:daily_limit": "אפשר לבקש VAR עד 3 פעמים ביום.",
-  "dispute:refusal": "לא התקבלה פסיקה למחלוקת הזאת. אפשר לנסח את הטענות אחרת.",
+  "dispute:daily_limit": "אפשר לבקש בדיקה מול השקפים עד 3 פעמים ביום.",
+  "dispute:refusal": "לא התקבלה הכרעה במחלוקת הזאת. אפשר לנסח את הטענות אחרת.",
   ...each(["dispute"], "truncated", "הבדיקה נעצרה באמצע. אפשר לנסות שוב."),
   ...each(["dispute"], "timeout", "הבדיקה נעצרה באמצע. אפשר לנסות שוב."),
   ...each(["dispute"], "network", "הבדיקה נעצרה באמצע. אפשר לנסות שוב."),
@@ -311,13 +311,13 @@ const TEXT: Record<string, string> = {
   "wall:too big": "התמונה גדולה מדי גם אחרי הקטנה. אפשר לצלם שוב.",
 
   // the museum (fun design §5.7; §12.7.4); Claude's own failures as the memory aids'
-  "museum:exhibit not found": "המוצג הזה כבר לא במוזיאון. כדאי לרענן.",
-  "museum:busy": "השלט נכתב עכשיו במכשיר אחר.",
-  "museum:checked": "למוצג הזה כבר יש שלט.",
+  "museum:exhibit not found": "הטעות הזו כבר לא ברשימה. כדאי לרענן.",
+  "museum:busy": "ההסבר נכתב עכשיו במכשיר אחר.",
+  "museum:checked": "לטעות הזו כבר יש הסבר.",
 
   // the boss (fun design §5.7; for a member the pulse does not count, H adds BOSS_NOT_COUNTED)
-  "boss:no heads": "עוד אין מספיק נקודות חמות לבוס: צריך לפחות שני נושאים שלפחות 3 מכם מתקשים בהם. הדופק מתעדכן בלילה.",
-  "boss:revenge not yet": "סבב הנקמה נפתח מחר.",
+  "boss:no heads": "עוד אין מספיק נושאים קשים לאתגר: צריך לפחות שני נושאים שלפחות 3 מכם מתקשים בהם. זה מתעדכן בלילה.",
+  "boss:revenge not yet": "הסבב החוזר נפתח מחר.",
 
   // the bank written ahead (server design §9.1, its "upload" line)
   "bank:server off": "הכתיבה בשרת עוד לא פועלת, אז השאלות ייכתבו מהטלפון אחרי הסיכום.",
@@ -327,7 +327,7 @@ const TEXT: Record<string, string> = {
   "traps:bad question": "השאלה צריכה להסתיים בסימן שאלה (8 עד 400 תווים).",
   "traps:bad options": "4 או 5 תשובות, שונות זו מזו, עד 220 תווים כל אחת.",
   "traps:bad answer": "צריך לסמן את התשובה הנכונה.",
-  "traps:daily_limit": "אפשר לכתוב עד 10 מלכודות ביום, ולבדוק עד 5.",
+  "traps:daily_limit": "אפשר לכתוב עד 10 שאלות משלך ביום, ולבדוק עד 5.",
   "traps:draft not found": "הטיוטה הזו לא נמצאה. כדאי לרענן.",
   "traps:refusal": "לא התקבלה בדיקה הפעם. אפשר לנסח אחרת.",
   ...each(["traps"], "truncated", "הבדיקה נעצרה באמצע. אפשר לנסות שוב."),
@@ -338,7 +338,7 @@ const TEXT: Record<string, string> = {
 
 /** §12.7.4's second line for "no heads": H adds it after failText("no heads",
  *  "boss") for a member the night did not count (study_pulse_ready is null). */
-export const BOSS_NOT_COUNTED = "הקרב נבנה מהדופק, והדופק מוצג למי שנספרים בו.";
+export const BOSS_NOT_COUNTED = "האתגר נבנה מ״מה קשה לקבוצה״, שמוצג רק למי שנספרים בו.";
 
 const FALLBACK: Partial<Record<Area, string>> = {
   writing: "הכתיבה נעצרה. אפשר ללחוץ ״המשך כתיבה״.",

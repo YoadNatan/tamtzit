@@ -25,12 +25,12 @@ export function BlankTableSession(p: { ctx: Ctx; lectureId: string; slide: numbe
   );
 }
 
-/** "להוסיף מלכודת משלי" in N's "תרגול" tab, or null. */
+/** "להוסיף שאלה משלי" in N's "תרגול" tab, or null. */
 export function AddTrap({ lc, spot }: { lc: LectureCtx; spot: Spot }) {
   if (!flags.traps) return null;
   return (
     <RouteLink to={{ v: "trap", l: lc.lecture.id, at: { part: spot.part, anchor: spot.anchor } }} go={lc.ctx.go} className="a-btn add-trap">
-      להוסיף מלכודת משלי
+      להוסיף שאלה משלי
     </RouteLink>
   );
 }
@@ -46,7 +46,7 @@ export function ExtrasCard(p: { ctx: Ctx; lectureId: string; slides: ReadonlyArr
   );
 }
 
-/** A member's trap in practice ("מלכודת של חבר בקבוצה") or, once a live quiz
+/** A member's trap in practice ("שאלה של מישהו מהקבוצה") or, once a live quiz
  *  unmasked it, its author ("נכתבה ע״י רוני · נבדקה מול השקפים"); `chip` in a
  *  question's chip row, else the reveal's line. Nothing for any other
  *  question, and nothing with VITE_STUDY_TRAPS off. `source` when the caller
@@ -68,7 +68,7 @@ export function TrapChip({ ctx, questionId, source, chip = true }: { ctx: Ctx; q
   }, [questionId, source, known]);
   if (!flags.traps || !who?.member) return null;
   const name = who.author ? ctx.nameOf(who.author) || "חבר בקבוצה" : "";
-  const text = who.author ? `נכתבה ע״י ${name} · נבדקה מול השקפים` : "מלכודת של חבר בקבוצה";
+  const text = who.author ? `נכתבה ע״י ${name} · נבדקה מול השקפים` : "שאלה של מישהו מהקבוצה";
   return chip ? <span className="a-chip fun trap-chip">{text}</span> : <p className="a-small a-muted trap-author">{text}</p>;
 }
 

@@ -16,7 +16,7 @@ const LazyCard = lazy(() => import("../components/BossParts").then((m) => ({ def
 const LazyHud = lazy(() => import("../components/BossParts").then((m) => ({ default: m.BossHudBody })));
 const LazyEnd = lazy(() => import("../components/BossParts").then((m) => ({ default: m.BossEndBody })));
 
-/** "קרב הבוס" on "יחד": the heads, the meter, the revenge round. */
+/** "אתגר קבוצתי" on "יחד": the heads, the meter, the revenge round. */
 export function BossCard({ ctx }: { ctx: Ctx }) {
   if (!flags.boss) return null;
   return (

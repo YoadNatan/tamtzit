@@ -123,7 +123,7 @@ module.exports = {
         ids.forEach((qid, i) => pushRound(q, i, qid));
         return Z.rounds.filter((r) => r.quiz_id === q.id).length;
       }
-      // "3 לקפה": section M's picker (package M's plugin), as study_quiz__pick_preset.
+      // "שאלות פתיחה": section M's picker (package M's plugin), as study_quiz__pick_preset.
       const preset = q.preset === "coffee" ? db.meetingMock?.pickPreset?.(q) : null;
       if (preset) {
         preset.slice(0, q.n_wanted).forEach((qid, i) => {
@@ -267,7 +267,7 @@ module.exports = {
       }
       return best;
     };
-    /** "3 לקפה"'s word for a round, from 3 first votes (section Z's end: never a count). */
+    /** "שאלות פתיחה"'s word for a round, from 3 first votes (section Z's end: never a count). */
     const majorityOf = (r) => {
       const n = r.answered1 ?? 0;
       if (n < 3) return null;

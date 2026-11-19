@@ -4,7 +4,7 @@ import type { Ctx, LectureCtx, LectureExt } from "./types";
 
 /* ── Package M's slot (§12.2.3, §12.4.M): the day's meeting ──
  *
- * The meeting screen (the opening "3 לקפה", the pre-guess, the agenda, the
+ * The meeting screen (the opening "שאלות פתיחה", the pre-guess, the agenda, the
  * closing), planning, catch-up, the meeting's card on "יחד" and its band,
  * and in the lecture: the reader's card (one line in the reader's bar, its
  * callouts after the paragraphs they are about), and "לא

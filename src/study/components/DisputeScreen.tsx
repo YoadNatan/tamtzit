@@ -26,12 +26,12 @@ import "../styles/var.css";
 
 /* ── One yellow card (?v=dispute&d=; package V; corrections.html s2) ──
  *
- * "כרטיס צהוב · {part}": each side's line with its slides and its name;
+ * "מחלוקת · {part}": each side's line with its slides and its name;
  * "מחכים לצד השני" until another member writes side b ("לכתוב את הצד
  * השני"); "עם מי הצדק? גיבוי בלי שמות": the others back a side, and while
  * backing is open only the total shows ("{n} גיבו · הגיבוי יוצג אחרי ה-VAR,
  * מ-3"); "VAR" with its cost and the group's spend; "בודקים מול השקפים…";
- * the verdict ("פסיקת VAR"); then "לקבל" (the box is pinned and the trap
+ * the verdict ("הכרעה מול השקפים"); then "לקבל" (the box is pinned and the trap
  * card joins everyone's deck) or "בהרצאה נאמר אחרת" with a line. Once VAR
  * is asked, backing closes and the bars show from three others (review
  * SEC-10). Live: the card's row is published (never the backing). */
@@ -119,7 +119,7 @@ export default function DisputeScreen({ route, ctx }: ScreenProps<"dispute">) {
   if (!data)
     return (
       <main className="v-dispute">
-        <Head back={back} title="כרטיס צהוב" />
+        <Head back={back} title="מחלוקת" />
         {failure ? (
           <p className="a-error" role="alert">
             {failure.text}
@@ -139,7 +139,7 @@ export default function DisputeScreen({ route, ctx }: ScreenProps<"dispute">) {
 
   return (
     <main className="v-dispute">
-      <Head back={back} title={`כרטיס צהוב${data.partTitle ? " · " + data.partTitle : ""}`} />
+      <Head back={back} title={`מחלוקת${data.partTitle ? " · " + data.partTitle : ""}`} />
       <section className="a-card flat a-stack v-claims" aria-label="הטענות">
         <ClaimLine side={s.a} id="a" />
         <div className="a-divider" />
@@ -196,7 +196,7 @@ export default function DisputeScreen({ route, ctx }: ScreenProps<"dispute">) {
       {s.verdict ? <VerdictCard verdict={s.verdict} id={s.id} /> : null}
 
       {s.state === "open" && s.b ? (
-        <section className="a-card flat a-stack v-var" aria-label="VAR">
+        <section className="a-card flat a-stack v-var" aria-label="בדיקה מול השקפים">
           {busy === "var" || judging ? (
             <p className="a-small" role="status">
               {busy === "var" ? "בודקים מול השקפים…" : "נבדק עכשיו במכשיר אחר. התוצאה תופיע כאן."}
@@ -204,8 +204,8 @@ export default function DisputeScreen({ route, ctx }: ScreenProps<"dispute">) {
           ) : (
             <>
               <p className="a-small">
-                <bdi dir="ltr">VAR</bdi> בודק את שתי הטענות מול השקפים, בלי השמות, ומפריד בין מה שכתוב בשקף לבין פרשנות.
-                {s.backing_open ? " הגיבוי נסגר כשמבקשים." : ""}
+                הבדיקה משווה את שתי הטענות לשקפים, בלי השמות, ומפרידה בין מה שכתוב בשקף לבין פרשנות.
+                {s.backing_open ? " הגיבוי נסגר כשמבקשים בדיקה." : ""}
               </p>
               <p className="a-small a-muted">
                 <span aria-hidden="true">≈</span>
@@ -230,7 +230,7 @@ export default function DisputeScreen({ route, ctx }: ScreenProps<"dispute">) {
           <p className="a-small a-muted">{`החליט: ${s.decided_by ?? "ללא שם"}`}</p>
         </aside>
       ) : null}
-      {s.state === "closed" ? <p className="a-small a-muted">הכרטיס הצהוב בוטל.</p> : null}
+      {s.state === "closed" ? <p className="a-small a-muted">המחלוקת בוטלה.</p> : null}
 
       {failure && failure.phase === phaseOf(s) ? (
         <p className="a-error a-small" role="alert">
@@ -244,12 +244,12 @@ export default function DisputeScreen({ route, ctx }: ScreenProps<"dispute">) {
         <StickyActions>
           {s.state === "open" && s.b && !judging ? (
             <button className="a-btn primary wide" disabled={Boolean(busy)} onClick={() => void act("var", () => askVar(s.id))}>
-              {busy === "var" ? "בודקים מול השקפים…" : <bdi dir="ltr">VAR</bdi>}
+              {busy === "var" ? "בודקים מול השקפים…" : "לבדוק מול השקפים"}
             </button>
           ) : null}
           {s.state === "open" && me === s.a.author_id ? (
             <button className="a-btn ghost" disabled={Boolean(busy)} onClick={() => void act("close", () => closeDispute(s.id))}>
-              ביטול הכרטיס הצהוב
+              לבטל את המחלוקת
             </button>
           ) : null}
           {s.state !== "open" ? (

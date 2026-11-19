@@ -122,7 +122,7 @@ export type QuizRound = {
   /** The wrong option most chosen in vote 1 (unique, by 2 of at least 3). */
   trap?: number | null;
   jump?: { lecture_id: string; part: number; anchor: number; quote: string } | null;
-  /** "3 לקפה" (section M's opening): a majority word instead of numbers. */
+  /** "שאלות פתיחה" (section M's opening): a majority word instead of numbers. */
   majority?: "most_right" | "split" | "most_wrong" | null;
 };
 
@@ -329,7 +329,7 @@ export function firstVote(r: QuizRound | null | undefined): { choice: number | n
   return (r.vote ?? 1) === 1 && r.mine ? { choice: r.mine.choice, bet: r.mine.bet ?? null } : null;
 }
 
-/** "3 לקפה"'s reveal (section M's opening): a majority word, never a number
+/** "שאלות פתיחה"'s reveal (section M's opening): a majority word, never a number
  *  (none below 3 answers). Kept for M's QuizInline; no screen of this
  *  package shows a coffee quiz. */
 export const MAJORITY_WORD: Record<NonNullable<QuizRound["majority"]>, string> = {
@@ -485,7 +485,7 @@ export const QUIZ_ERROR_TEXT: Record<QuizError, string | null> = {
   "bad bet": "ההימור הוא ניחוש, נראה לי או על בטוח.",
   "meeting not found": "הפגישה הזו לא נמצאה. כדאי לרענן.",
   already: "לפגישה הזו כבר יש מבחן כזה.",
-  "need 3": "לקרב בוס צריך לפחות 3 משתתפים.",
+  "need 3": "לאתגר קבוצתי צריך לפחות 3 משתתפים.",
   network: "אין חיבור כרגע. מנסים שוב…",
 };
 

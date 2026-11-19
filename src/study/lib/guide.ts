@@ -349,7 +349,7 @@ export const STOP_SELECTORS = [
   ".m-unclear", // "לא ברור לי"
   ".read-mark .a-btn", // "סימון שקראתי"
   ".confirm .a-btn.danger", // delete
-  ".quiz-setup .ph-foot .a-btn.primary", // opening a quiz, "לפתוח 3 לקפה"
+  ".quiz-setup .ph-foot .a-btn.primary", // opening a quiz, "לפתוח את שאלות הפתיחה"
   ".wall-screen .ph-foot", // "תנו לי 3 מצחיקות" (AI)
   ".ask-bar .ask-row", // "לשאול" (AI)
   ".upload .ph-foot .a-btn.primary", // "יצירת סיכום" (AI)
@@ -702,11 +702,11 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
         screen: "יחד",
         steps: [
           m(T.nowHead, "מי מקריאים עכשיו, ו״לעקוב״."),
-          ...(f.meeting ? [m(T.meetingCard, "קובעים מועד, ובה ׳3 לקפה׳, סדר יום והקראה.")] : []),
+          ...(f.meeting ? [m(T.meetingCard, "קובעים מועד, ובה שאלות פתיחה, סדר יום והקראה.")] : []),
           ...(f.quiz ? [m(T.quizCard, "׳כולנו נגד המבחן׳: בלי נקודות אישיות, ו-80% זה ׳עברנו׳.")] : []),
-          ...(f.pulse ? [m(T.pulseCard, "דופק הקבוצה: מה חם עכשיו, בספירה בלי שמות.")] : []),
-          ...(f.boss ? [m(T.bossCard, "קרב הבוס: הקבוצה מול הנושאים שהכי מכשילים אותה.")] : []),
-          ...(f.museum ? [m(T.museumCard, "מוזיאון המלכודות: התשובות השגויות שהכי הרבה בחרו, בלי שמות.")] : []),
+          ...(f.pulse ? [m(T.pulseCard, "מה קשה לקבוצה: הנושאים שהכי מכשילים עכשיו, בלי שמות.")] : []),
+          ...(f.boss ? [m(T.bossCard, "אתגר קבוצתי: כל הקבוצה ביחד מול הנושאים שהכי מכשילים אותה.")] : []),
+          ...(f.museum ? [m(T.museumCard, "טעויות נפוצות: התשובות השגויות שהכי הרבה בחרו, בלי שמות.")] : []),
         ],
       };
     case "wall":
@@ -849,15 +849,15 @@ const HINTS: Hint[] = [
   { flag: "meeting", title: "הפגישה היומית", say: "קובעים ב״יחד״ פגישה: מתי ומה קוראים.", walk: "meeting" },
   { flag: "anchor", title: "מה יושב על הפסקה", say: "מתחת לכל פסקה רואים את השאלות, הכרטיסיות והתגובות שלה.", walk: "read" },
   { flag: "corrections", title: "תיקון בסיכום", say: "מצאתם טעות? נוגעים בפסקה ← ״תיקון״.", walk: "correct" },
-  { flag: "var", title: "כרטיס צהוב ו-VAR", say: "על תיקון שנוי במחלוקת אפשר להרים כרטיס צהוב.", go: { v: "group" } },
+  { flag: "var", title: "מחלוקות", say: "על תיקון שלא מסכימים עליו אפשר לפתוח מחלוקת ולבדוק אותה מול השקפים.", go: { v: "group" } },
   { flag: "wall", title: "קיר האסוציאציות", say: "אסוציאציות של הקבוצה לכל מונח, ב״יחד״.", go: { v: "wall" } },
   { flag: "ask", title: "לשאול את החומר", say: "שאלה על החומר? בשורת החיפוש בספרייה.", walk: "ask" },
   { flag: "progress", title: "ההתקדמות שלי", say: "ב״שלי״: מה כבר יושב ומה עוד לא, גלוי רק לך.", go: { v: "progress" } },
-  { flag: "pulse", title: "דופק הקבוצה", say: "ב״יחד״: מה חם עכשיו בקבוצה, בלי שמות.", go: { v: "pulse" } },
-  { flag: "museum", title: "מוזיאון המלכודות", say: "התשובות השגויות שהכי הרבה בחרו, בלי שמות.", go: { v: "museum" } },
-  { flag: "boss", title: "קרב הבוס", say: "הקבוצה מול הנושאים שהכי מכשילים אותה, ב״יחד״.", go: { v: "boss" } },
-  { flag: "groupPlan", title: "תוכנית המרתון", say: "תוכנית של הקבוצה עד המבחן, ב״יחד״.", go: { v: "plan" } },
-  { flag: "traps", title: "מלכודת משלי", say: "בפסקה אפשר לכתוב מלכודת משלך ולבדוק אותה.", walk: "read" },
+  { flag: "pulse", title: "מה קשה לקבוצה", say: "ב״יחד״: מה הכי קשה לקבוצה עכשיו, בלי שמות.", go: { v: "pulse" } },
+  { flag: "museum", title: "טעויות נפוצות", say: "התשובות השגויות שהכי הרבה בחרו, בלי שמות.", go: { v: "museum" } },
+  { flag: "boss", title: "אתגר קבוצתי", say: "כל הקבוצה ביחד מול הנושאים שהכי מכשילים אותה, ב״יחד״.", go: { v: "boss" } },
+  { flag: "groupPlan", title: "תוכנית עד המבחן", say: "תוכנית של הקבוצה עד המבחן, ב״יחד״.", go: { v: "plan" } },
+  { flag: "traps", title: "שאלה משלי", say: "בפסקה אפשר לכתוב שאלה משלך ולבדוק אותה מול השקפים.", walk: "read" },
   { flag: "blankTable", title: "טבלה ריקה", say: "טבלה מהשקפים למילוי מהזיכרון, בתרגול.", go: { v: "practice" } },
   { flag: "qtypes", title: "סוגי שאלות", say: "חדש: עוד סוגי שאלות, גם על תמונות מהשקפים.", go: { v: "practice" } },
 ];

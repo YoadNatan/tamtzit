@@ -17,7 +17,7 @@
 // db.meetingMock.calls logs every call by member (fn, who, at), so a script
 // says who asked (never a follower's reader_view), and .bodies every
 // response, for the privacy checks (no key before a guess's release, no
-// count below 3). db.meetingMock.pickPreset is section Z's hook for "3 לקפה".
+// count below 3). db.meetingMock.pickPreset is section Z's hook for "שאלות פתיחה".
 // Time: E2E_LIVE_MS (60000) for "a place within the last minute",
 // E2E_FOLLOW_MS (600000) for a follower's presence.
 const LIVE = Number(process.env.E2E_LIVE_MS || 60_000);
@@ -114,7 +114,7 @@ module.exports = {
     const slideTo = (m) => sectionsOf(m.lecture_id).find((s) => s.idx === m.part_to)?.slide_to ?? null;
     const memberOf = (m) => m && isMember(m.group_id);
 
-    // Section Z's hook for "3 לקפה" (study_quiz__pick_preset): two from the parts read at the previous
+    // Section Z's hook for "שאלות פתיחה" (study_quiz__pick_preset): two from the parts read at the previous
     // meeting day, one older, never today's unread parts; a teaser first, then the oldest (deterministic here).
     M.pickPreset = (z) => {
       const m = meetingOf(z.meeting_id);

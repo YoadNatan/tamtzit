@@ -32,7 +32,7 @@ import "../styles/progress.css";
  * A private page: readiness per part as a range, not a score ("טווח, לא
  * ציון"); the danger list of "על בטוח" mistakes, each with when it comes
  * back ("היום" · "מחר" · "עוד 3 ימים") in another wording; weak points by
- * aspect (חם · פושר · יושב טוב); and calibration, how often "על בטוח" was
+ * aspect (קשה · בינוני · יושב טוב); and calibration, how often "על בטוח" was
  * right. No streak and no flame (T's). Yoad's decision 1 (17 Nov 2026): it
  * is the device's member's, with no account. Wherever a number needs more
  * answers than there are, the place stays and says how many more (decision
@@ -207,7 +207,7 @@ export default function Progress({ route, ctx }: ScreenProps<"progress">) {
   const danger = (
     <section ref={dangerRef} className="a-stack pr-danger" aria-labelledby="pr-danger-h">
       <div className="a-sec">
-        <h2 id="pr-danger-h">רשימת הסכנה</h2>
+        <h2 id="pr-danger-h">טעויות ׳על בטוח׳</h2>
         <span className="a-chip warn">ענית ׳על בטוח׳ וטעית</span>
       </div>
       {data.danger.length ? (

@@ -15,9 +15,9 @@ before(async () => {
  * the certainty's words. The screens' flows are e2e/study/var.cjs. */
 
 test("backing: the total only while it is open; the split once closed; else the line about three", () => {
-  assert.deepEqual(V.backingView({ backing_open: true, backers: 4, backs: null }), { kind: "open", line: "4 גיבו · הגיבוי יוצג אחרי ה-VAR, מ-3" });
-  assert.deepEqual(V.backingView({ backing_open: true, backers: 1, backs: null }), { kind: "open", line: "גיבוי אחד · הגיבוי יוצג אחרי ה-VAR, מ-3" });
-  assert.deepEqual(V.backingView({ backing_open: true, backers: 0, backs: null }), { kind: "open", line: "עוד אין גיבויים · הגיבוי יוצג אחרי ה-VAR, מ-3" });
+  assert.deepEqual(V.backingView({ backing_open: true, backers: 4, backs: null }), { kind: "open", line: "4 גיבו · הגיבוי יוצג אחרי הבדיקה, מ-3" });
+  assert.deepEqual(V.backingView({ backing_open: true, backers: 1, backs: null }), { kind: "open", line: "גיבוי אחד · הגיבוי יוצג אחרי הבדיקה, מ-3" });
+  assert.deepEqual(V.backingView({ backing_open: true, backers: 0, backs: null }), { kind: "open", line: "עוד אין גיבויים · הגיבוי יוצג אחרי הבדיקה, מ-3" });
   // Even a split the server sent while open is never drawn (it never does: SEC-10).
   assert.equal(V.backingView({ backing_open: true, backers: 4, backs: { a: 3, b: 1 } }).kind, "open");
   assert.deepEqual(V.backingView({ backing_open: false, backers: 5, backs: { a: 3, b: 2 } }), { kind: "bars", a: 3, b: 2 });

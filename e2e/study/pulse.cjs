@@ -2,13 +2,13 @@
 // shared mock: six members in the fixture lecture, with Yoad's decisions 1
 // and 3 of 17 Nov 2026 (no accounts: a member of a week is counted; below the
 // floor a meter, never a dead end).
-//   1. שוהם, counted last night: "דופק הקבוצה" on "יחד" names the lecture's
-//      hot topics; its screen has חם · פושר · יושב טוב, "אצלך" and "רק לך",
+//   1. שוהם, counted last night: "מה קשה לקבוצה" on "יחד" names the lecture's
+//      hot topics; its screen has קשה · בינוני · יושב טוב, "אצלך" and "רק לך",
 //      her own chips, "רק אצלך חם, אז זה נכנס לתור האישי", "החור שנסגר
 //      השבוע" once, the meter of the topics still below 3, "מחר בפגישה:"
 //      (tomorrow's meeting) and the footer; no number of people and no name
 //      anywhere; the slide tag opens the slide, the topic its practice.
-//   2. Every lecture (?v=pulse): "נקודות חמות: …".
+//   2. Every lecture (?v=pulse): "קשה לקבוצה: …".
 //   3. Decision 3: a lecture below the floor shows "עוד אדם אחד וזה נפתח"
 //      and her own rows; a group below the floor its own meter; the card on
 //      "יחד" says it too.
@@ -19,7 +19,7 @@
 //      ("מחר"), then reads again.
 //   6. The hooks: "הפסקה הזאת קשה לנו" in the paragraph's chip row; J's
 //      "דרושה אסוציאציה" with "משלי" and "תנו לי 3 מצחיקות" (and in the
-//      paragraph sheet's "אסוציאציה" tab); M's agenda line "נקודה חמה: …"
+//      paragraph sheet's "אסוציאציה" tab); M's agenda line "נושא קשה: …"
 //      with its slide; practice asks for the group's signal.
 //   7. The switch 'pulse' off: "התכונה הזו כבויה כרגע בשרת." and no card.
 // Without the flag (every set but "u" and "all") it checks that nothing of U
@@ -76,13 +76,13 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       const s = await open("שוהם", "/?v=group");
       await s.locator("main").first().waitFor({ timeout: 15000 });
       await s.waitForTimeout(600);
-      expect((await s.getByRole("heading", { name: "דופק הקבוצה" }).count()) === 0, "no \"דופק הקבוצה\" on \"יחד\"");
+      expect((await s.getByRole("heading", { name: "מה קשה לקבוצה" }).count()) === 0, "no \"מה קשה לקבוצה\" on \"יחד\"");
       await go(s, "/?v=pulse");
       await s.waitForURL((u) => !u.search.includes("v=pulse"), { timeout: 15000 });
       expect(!new URL(s.url()).search.includes("pulse"), "?v=pulse leads elsewhere");
       await go(s, "/?v=me");
       await s.getByRole("heading", { name: "הגדרות" }).waitFor({ timeout: 15000 });
-      expect((await s.getByText("לא לכלול אותי בדופק").count()) === 0, "no \"לא לכלול אותי בדופק\" under \"שלי\"");
+      expect((await s.getByText("לא לכלול אותי בספירה").count()) === 0, "no \"לא לכלול אותי בספירה\" under \"שלי\"");
       if (flags.wall) {
         await go(s, `/?v=wall&l=${L}`);
         await s.getByText("הכי טובות").first().waitFor({ timeout: 15000 });
@@ -130,31 +130,31 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       await card.waitFor({ timeout: 15000 });
       const cardText = await card.innerText();
       steps.card = cardText.replace(/\n/g, " | ");
-      expect(/דופק הקבוצה/.test(cardText) && /נקודות חמות: Loop diuretics, Thiazides/.test(cardText) && /עודכן הלילה/.test(cardText), "the card names the lecture's hot topics, \"עודכן הלילה\"");
+      expect(/מה קשה לקבוצה/.test(cardText) && /קשה לקבוצה: Loop diuretics, Thiazides/.test(cardText) && /עודכן הלילה/.test(cardText), "the card names the lecture's hot topics, \"עודכן הלילה\"");
       await card.scrollIntoViewIfNeeded();
       await shot(s, "u-1-group-card");
       await card.locator("a").first().click();
       await s.waitForURL((u) => u.search.includes("v=pulse") && u.search.includes(`l=${L}`), { timeout: 15000 });
       await s.locator(".pulse-section").first().waitFor({ timeout: 15000 });
       const heads = await s.locator(".pulse-section .a-sec h2").allInnerTexts();
-      expect(heads.join(",") === "חם,פושר,יושב טוב", `the sections חם · פושר · יושב טוב (${heads})`);
+      expect(heads.join(",") === "קשה,בינוני,יושב טוב", `the sections קשה · בינוני · יושב טוב (${heads})`);
       expect((await s.locator(".pulse-section").first().getByText("אצלך", { exact: true }).count()) === 1 && (await s.locator(".pulse-section").first().getByText("רק לך").count()) === 1, "the first section carries \"אצלך\" and \"רק לך\"");
       expect((await s.locator(".pulse-section").nth(1).getByText("אצלך", { exact: true }).count()) === 0, "only the first");
       const sub = await s.locator(".ph-sub").first().innerText();
       expect(/מתעדכן בלילה/.test(sub) && /בלי שמות, רק איפה ש-3 לפחות תרגלו/.test(sub), "the line under the head");
       const h1 = await s.locator("h1").first().innerText();
-      expect(/דופק הקבוצה · /.test(h1), `the head "דופק הקבוצה · {title}" (${h1})`);
+      expect(/מה קשה לקבוצה · /.test(h1), `the head "מה קשה לקבוצה · {title}" (${h1})`);
       const rows = await s.locator(".pulse-row").allInnerTexts();
       steps.rows = rows.map((r) => r.replace(/\n/g, " | "));
       expect(rows.length === 5, `five rows (${rows.length})`);
-      expect(/Loop diuretics · מנגנון פעולה/.test(rows[0]) && /ש׳ 6/.test(rows[0]) && /חם$/.test(rows[0].trim()), "a row: topic · aspect, its slide, the member's own chip");
-      expect((await s.getByText("רק אצלך חם, אז זה נכנס לתור האישי").count()) === 1, "P-5 on the warm row that is hot for her");
+      expect(/Loop diuretics · מנגנון פעולה/.test(rows[0]) && /ש׳ 6/.test(rows[0]) && /קשה$/.test(rows[0].trim()), "a row: topic · aspect, its slide, the member's own chip");
+      expect((await s.getByText("קשה רק לך, אז זה נכנס לתור האישי").count()) === 1, "P-5 on the warm row that is hot for her");
       expect((await s.getByText("החור שנסגר השבוע").count()) === 1, "P-6 once, though two rows closed this week");
       const meterLine = await s.locator('[data-meter="lecture"]').innerText();
       expect(/5 מתוך 6 נושאים פתוחים · עוד אדם אחד לנושא הבא/.test(meterLine), `decision 3: the meter of the topics still below 3 (${meterLine})`);
       const brief = await s.locator(".pulse-brief").innerText();
       steps.brief = brief;
-      expect(/^מחר בפגישה:/.test(brief) && /הנקודה החמה ׳Loop diuretics · מנגנון פעולה׳/.test(brief) && /ובמבחן הקבוצתי ׳/.test(brief), "\"מחר בפגישה:\" with the hot point and the quiz's question");
+      expect(/^מחר בפגישה:/.test(brief) && /הנושא הקשה ׳Loop diuretics · מנגנון פעולה׳/.test(brief) && /ובמבחן הקבוצתי ׳/.test(brief), "\"מחר בפגישה:\" with the hot point and the quiz's question");
       expect((await s.getByText("אפשר לצאת מהספירה ב׳שלי׳.").count()) === 1, "the footer");
       const whole = await s.locator("main").innerText();
       expect(!NUMBERS_OR_NAMES.test(whole), "no count of people and no member's name on the pulse");
@@ -176,7 +176,7 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       await go(s, "/?v=pulse");
       await s.locator(".pulse-lectures").waitFor({ timeout: 15000 });
       const list = await s.locator(".pulse-lectures").innerText();
-      expect(/נקודות חמות: Loop diuretics, Thiazides/.test(list), "P-10: the lecture's line");
+      expect(/קשה לקבוצה: Loop diuretics, Thiazides/.test(list), "P-10: the lecture's line");
       await shot(s, "u-3-pulse-list");
 
       /* ── 3. decision 3: below the floor, a meter and her own rows ── */
@@ -185,7 +185,7 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       P.meter = [{ lecture_id: L, open: 0, waiting: 2, need: 1 }];
       await go(s, `/?v=pulse&l=${L}`);
       await s.locator('[data-meter="lecture"]').waitFor({ timeout: 15000 });
-      expect(/עוד אין דופק להרצאה הזו/.test(await s.locator(".empty").innerText()), "P-9 empty");
+      expect(/בהרצאה הזו עוד אין מספיק תשובות/.test(await s.locator(".empty").innerText()), "P-9 empty");
       expect(/עוד אדם אחד וזה נפתח/.test(await s.locator('[data-meter="lecture"]').innerText()), "the meter: \"עוד אדם אחד וזה נפתח\"");
       expect((await s.locator(".pulse-mine .pulse-row").count()) === 3, "and her own rows (\"אצלך\", hers at any count)");
       await shot(s, "u-4-meter-lecture");
@@ -193,7 +193,7 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       P.groupNeed = 1;
       await go(s, `/?v=pulse&l=${L}`);
       await s.locator('[data-meter="group"]').waitFor({ timeout: 15000 });
-      expect(/הדופק נפתח מ-3 מתרגלים: עוד אדם אחד וזה נפתח\./.test(await s.locator('[data-meter="group"]').innerText()), "the group's meter below 3 counted");
+      expect(/״מה קשה לקבוצה״ נפתח מ-3 מתרגלים: עוד אדם אחד וזה נפתח\./.test(await s.locator('[data-meter="group"]').innerText()), "the group's meter below 3 counted");
       await shot(s, "u-5-meter-group");
       await go(s, "/?v=group");
       await s.locator(".pulse-card").waitFor({ timeout: 15000 });
@@ -204,17 +204,17 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       const r = await open("רוני", `/?v=pulse&l=${L}`);
       await r.locator('[data-meter="waiting"]').waitFor({ timeout: 15000 });
       const wait = await r.locator('[data-meter="waiting"]').innerText();
-      expect(/שבוע בקבוצה/.test(wait) && /הדופק ייפתח לך בעוד 5 ימים/.test(wait) && !/חשבון/.test(wait), `P-14 with the days left, no account (${wait.replace(/\n/g, " ")})`);
+      expect(/שבוע בקבוצה/.test(wait) && /הוא ייפתח לך בעוד 5 ימים/.test(wait) && !/חשבון/.test(wait), `P-14 with the days left, no account (${wait.replace(/\n/g, " ")})`);
       expect((await r.locator(".pulse-section:not(.pulse-mine)").count()) === 0, "none of the group's words");
       expect((await r.locator(".pulse-mine .pulse-row").count()) === 3, "his own rows");
       await shot(r, "u-6-waiting");
 
       /* ── 5. נועה opts out, and comes back ── */
       const n = await open("נועה", "/?v=me");
-      const box = n.getByRole("checkbox", { name: /לא לכלול אותי בדופק/ });
+      const box = n.getByRole("checkbox", { name: /לא לכלול אותי בספירה/ });
       await box.waitFor({ timeout: 15000 });
       expect(!(await box.isChecked()), "in the count");
-      expect(/מי שיוצאים מהספירה לא רואים את הדופק/.test(await n.locator(".pulse-setting").innerText()), "P-12 with its last sentence");
+      expect(/מי שיוצאים מהספירה לא רואים את ״מה קשה לקבוצה״/.test(await n.locator(".pulse-setting").innerText()), "P-12 with its last sentence");
       await n.locator(".pulse-setting").scrollIntoViewIfNeeded();
       await shot(n, "u-7-setting");
       await box.check();
@@ -222,7 +222,7 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       expect(P.out.has(id("נועה")), "her own opt-out row");
       await go(n, `/?v=pulse&l=${L}`);
       await n.locator(".pulse-state").first().waitFor({ timeout: 15000 });
-      expect(/התשובות שלך לא נספרות בדופק, ולכן גם הדופק לא מוצג/.test(await n.locator("main").innerText()), "out: she reads nothing (reciprocal)");
+      expect(/התשובות שלך לא נספרות, ולכן גם ״מה קשה לקבוצה״ לא מוצג לך/.test(await n.locator("main").innerText()), "out: she reads nothing (reciprocal)");
       await shot(n, "u-8-out");
       await go(n, "/?v=group");
       await n.getByRole("heading", { name: "שאלות פתוחות" }).waitFor({ timeout: 15000 });
@@ -231,12 +231,12 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       // A night while she is out leaves her out of the count; back in, she waits for the next one.
       P.night(all.filter((u) => u !== id("רוני")));
       await go(n, "/?v=me");
-      await n.getByRole("checkbox", { name: /לא לכלול אותי בדופק/ }).uncheck();
+      await n.getByRole("checkbox", { name: /לא לכלול אותי בספירה/ }).uncheck();
       await n.getByText("חזרת לספירה.", { exact: false }).waitFor({ timeout: 10000 });
       expect(!P.out.has(id("נועה")), "her row is gone");
       await go(n, `/?v=pulse&l=${L}`);
       await n.locator('[data-meter="waiting"]').waitFor({ timeout: 15000 });
-      expect(/הדופק ייפתח לך מחר/.test(await n.locator('[data-meter="waiting"]').innerText()), "back in: the next night counts her (\"מחר\")");
+      expect(/הוא ייפתח לך מחר/.test(await n.locator('[data-meter="waiting"]').innerText()), "back in: the next night counts her (\"מחר\")");
       P.night(all.filter((u) => u !== id("רוני")));
       await go(n, `/?v=pulse&l=${L}`);
       await n.locator(".pulse-row").first().waitFor({ timeout: 15000 });
@@ -268,10 +268,10 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
       }
       if (flags.meeting) {
         await go(s, `/?v=meeting&m=${MT}`);
-        const hot = s.locator(".m-agenda").getByText(/נקודה חמה:/);
+        const hot = s.locator(".m-agenda").getByText(/נושא קשה:/);
         await hot.waitFor({ timeout: 15000 });
         const line = await hot.innerText();
-        expect(/נקודה חמה: Loop diuretics · מנגנון פעולה/.test(line) && /ש׳ 6/.test(line), `M's agenda: the hot spot with its slide (${line})`);
+        expect(/נושא קשה: Loop diuretics · מנגנון פעולה/.test(line) && /ש׳ 6/.test(line), `M's agenda: the hot spot with its slide (${line})`);
         await hot.scrollIntoViewIfNeeded();
         await shot(s, "u-11-agenda");
         // Out of the count: no hot spot for her.
@@ -279,7 +279,7 @@ const NUMBERS_OR_NAMES = new RegExp(`(\\d+ (מכם|אנשים|חברים|תרג�
         await go(s, `/?v=meeting&m=${MT}`);
         await s.locator(".m-agenda").waitFor({ timeout: 15000 });
         await s.waitForTimeout(600);
-        expect((await s.locator(".m-agenda").getByText(/נקודה חמה:/).count()) === 0, "out of the count: no hot spot in her agenda");
+        expect((await s.locator(".m-agenda").getByText(/נושא קשה:/).count()) === 0, "out of the count: no hot spot in her agenda");
         P.out.delete(id("שוהם"));
       }
 

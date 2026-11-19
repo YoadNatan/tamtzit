@@ -12,7 +12,7 @@ import "../styles/meeting.css";
 /* ── The day's meeting (package M; meeting.html s1, spec §12.4.M, the meeting
  * design §4.3 items 5-7) ──
  *
- * Before the reading: the opening "3 לקפה · בפרקים הקודמים" (5 minutes,
+ * Before the reading: the opening "שאלות פתיחה · מה קראנו בפעם הקודמת" (5 minutes,
  * three questions on what was read before, answered alone; any member opens
  * it and hosts, or "לדלג לסדר היום"), with M-2 the pre-guess on today's
  * first part, then the three-line agenda ("סדר היום": today's reading, and
@@ -116,7 +116,7 @@ export default function MeetingScreen({ route, ctx }: ScreenProps<"meeting">) {
   };
 
   const showOpening = m.today && !m.over && (rituals.coffee === "offer" || rituals.coffee === "live");
-  const title = showOpening ? "3 לקפה · בפרקים הקודמים" : m.today ? "הפגישה של היום" : "הפגישה הבאה";
+  const title = showOpening ? "שאלות פתיחה · מה קראנו בפעם הקודמת" : m.today ? "הפגישה של היום" : "הפגישה הבאה";
   const sub = showOpening ? (
     <p className="ph-sub">
       <span>5 דק׳ · עונים לבד, בלי לפתוח את הסיכום</span>
@@ -141,7 +141,7 @@ export default function MeetingScreen({ route, ctx }: ScreenProps<"meeting">) {
   else if (rituals.coffee === "offer" && m.today)
     primary = (
       <button type="button" className="a-btn primary wide" disabled={busy} onClick={() => void open("coffee")}>
-        לפתוח 3 לקפה
+        לפתוח את שאלות הפתיחה
       </button>
     );
   else if (rituals.closing === "offer")
@@ -226,7 +226,7 @@ export default function MeetingScreen({ route, ctx }: ScreenProps<"meeting">) {
           <li className="a-li">
             <div>
               <b dir="rtl">
-                נקודה חמה: <TopicLabel topic={a.hot_spot.title} aspect={a.hot_spot.aspect ?? "other"} />
+                נושא קשה: <TopicLabel topic={a.hot_spot.title} aspect={a.hot_spot.aspect ?? "other"} />
                 {a.hot_spot.slides?.[0] ? (
                   <>
                     {" "}
@@ -257,7 +257,7 @@ export default function MeetingScreen({ route, ctx }: ScreenProps<"meeting">) {
       </ul>
 
       {m.over ? <p className="a-card flat a-muted">הפגישה של היום הסתיימה.</p> : null}
-      {rituals.closing === "done" ? <p className="a-small a-muted">המבחן הקבוצתי של היום הסתיים. לכל היותר שני טקסים ביום: ״3 לקפה״ ומבחן בסוף.</p> : null}
+      {rituals.closing === "done" ? <p className="a-small a-muted">המבחן הקבוצתי של היום הסתיים. לכל היותר שני מבחנים קצרים ביום: שאלות הפתיחה ומבחן בסוף.</p> : null}
 
       <div className="a-row m-links">
         {!m.started_at ? (
