@@ -582,8 +582,8 @@ test("releases 1 and 2 on this branch: with Q's and C's ends questions and pract
   const have = sqlRegistry();
   assert.deepEqual(
     have,
-    { F: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, B: 1, V: 1, J: 1, U: 2, H: 2, G: 2, E: 1, T: 3 },
-    "section F at version 1, W at 2 (W1 with W2's hardening), Q at 2 (Q's end and practice 2.0), Z at 2 (section Z with its end), C at 2 (C's end), K at 2 (K's end), P at 2 (A2: P's end), M at 2 (the day's meeting, no reader planned ahead), N at 1 (the paragraph anchor), B at 1 (the points read ahead), V at 1 (disputes and VAR), J at 1 (the association wall), U at 2 (the anonymous counts, the pulse, and U-3's traps and museum), H at 2 (the boss battle, its heads and rounds unreadable from the table), G at 2 (the group's marathon plan, its meter counting to the study day's start), E at 1 (a member's own trap, the blank table's tables) and T at 3 (Today with T-2's end, one question shown once)",
+    { F: 1, W: 2, Q: 3, Z: 3, C: 3, K: 2, P: 2, M: 3, N: 1, B: 1, V: 1, J: 1, U: 3, H: 3, G: 2, E: 1, T: 3, X: 1 },
+    "section F at version 1, W at 2 (W1 with W2's hardening), Q at 3 (Q's end, practice 2.0 and the question types' columns), Z at 3 (section Z with its end, one-answer questions only), C at 3 (C's end, the question types' cards), K at 2 (K's end), P at 2 (A2: P's end), M at 3 (the day's meeting, no reader planned ahead, text-only guesses), N at 1 (the paragraph anchor), B at 1 (the points read ahead), V at 1 (disputes and VAR), J at 1 (the association wall), U at 3 (the anonymous counts, the pulse, and U-3's traps and museum, of text questions), H at 3 (the boss battle, its heads and rounds unreadable from the table, one-answer questions), G at 2 (the group's marathon plan, its meter counting to the study day's start), E at 1 (a member's own trap, the blank table's tables), T at 3 (Today with T-2's end, one question shown once) and X at 1 (the question types)",
   );
   // Package U: the pulse needs section U at 1, which this SQL registers. Its flag
   // depends on PROGRESS (flags.ts: the pulse's "אצלך" sits with progress), whose

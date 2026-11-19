@@ -1657,6 +1657,7 @@ begin
       from public.study_questions q
      where q.group_id = z.group_id and q.lecture_id = any (z.lecture_ids)
        and q.retired_at is null and q.stale_at is null and q.hidden_at is null and q.has_key
+       and q.form = 'one' and coalesce(q.step, 1) = 1   -- M 3: what a quiz can ask
        and not (q.lecture_id = m.lecture_id and q.part_idx between m.part_from and m.part_to and q.part_idx > readto)
        and exists (select 1 from public.study_meetings y
                     where y.group_id = z.group_id and y.day = prev and y.cancelled_at is null and y.lecture_id = q.lecture_id
@@ -1672,6 +1673,7 @@ begin
     from (select c.id from public.study_questions c
            where c.group_id = z.group_id and c.lecture_id = any (z.lecture_ids)
              and c.retired_at is null and c.stale_at is null and c.hidden_at is null and c.has_key and not (c.id = any (pick))
+             and c.form = 'one' and coalesce(c.step, 1) = 1   -- M 3
              and not (c.lecture_id = m.lecture_id and c.part_idx between m.part_from and m.part_to and c.part_idx > readto)
            order by not exists (select 1 from public.study_meetings y
                                  where y.group_id = z.group_id and y.day = prev and y.lecture_id = c.lecture_id
@@ -1710,7 +1712,7 @@ begin
     if lecs is null then
       select array_agg(x.lecture_id) into lecs
         from (select q.lecture_id from public.study_questions q join public.study_lectures l on l.id = q.lecture_id and l.deleted_at is null
-               where q.group_id = m.group_id and q.has_key and q.retired_at is null
+               where q.group_id = m.group_id and q.has_key and q.retired_at is null and q.form = 'one' and coalesce(q.step, 1) = 1   -- M 3
                group by q.lecture_id order by max(q.created_at) desc limit 40) x;
     end if;
     qid := public.study_quiz_create(m.group_id, 'coop', coalesce(lecs, array[m.lecture_id]), 3, 45, 'all', 'coffee', p_meeting);
@@ -1758,6 +1760,7 @@ begin
                     from public.study_questions q
                    where q.lecture_id = m.lecture_id and q.part_idx = m.part_from and q.anchor is not null
                      and q.has_key and q.retired_at is null and q.stale_at is null and q.hidden_at is null
+                     and q.form = 'one' and coalesce(q.step, 1) = 1 and coalesce(q.style, '') not in ('label', 'image')   -- M 3: text only
                    order by q.anchor, q.teaser = '', q.created_at, q.id) x
            order by x.anchor
            limit 2) y;
@@ -2065,6 +2068,7 @@ begin
             join public.study_quiz_rounds r on r.quiz_id = z.id and r.revealed_at is not null and r.voided_at is null
             join public.study_questions q on q.id = r.question_id and q.retired_at is null and q.stale_at is null
                                           and q.hidden_at is null and q.has_key
+                                          and q.form = 'one' and coalesce(q.step, 1) = 1 and coalesce(q.style, '') not in ('label', 'image')   -- M 3: text only
            where z.meeting_id = p_meeting
              and (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = r.vote) >= 3
            group by r.question_id
@@ -2075,6 +2079,7 @@ begin
     from (select q.id from public.study_questions q
            where q.lecture_id = m.lecture_id and q.part_idx between m.part_from and upto
              and q.retired_at is null and q.stale_at is null and q.hidden_at is null and q.has_key and not (q.id = any (qs))
+             and q.form = 'one' and coalesce(q.step, 1) = 1 and coalesce(q.style, '') not in ('label', 'image')   -- M 3: text only
            order by exists (select 1 from public.study_meeting_events e
                              where e.meeting_id = p_meeting and e.kind = 'explain' and e.part_idx = q.part_idx and e.anchor = q.anchor) desc,
                     q.part_idx, coalesce(q.anchor, 0), q.created_at
@@ -2176,6 +2181,11 @@ exception when duplicate_object then
 end $$;
 
 insert into study_private.schema_sections (section, version) values ('M', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- M 3 (question types): the coffee quiz asks one-answer questions only (as
+-- section Z's pickers); the pre-guess and catch-up, which show text only,
+-- never a question with a picture either.
+insert into study_private.schema_sections (section, version) values ('M', 3)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION M ════
 

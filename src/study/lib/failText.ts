@@ -176,6 +176,12 @@ const TEXT: Record<string, string> = {
   "practice:not pending": "השאלה כבר לא ממתינה: היא נוספה לבנק, הורדה או נוסחה מחדש. כדאי לרענן.",
   "practice:not checked": "אפשר להוסיף לבנק שאלה רק אחרי הפותר העיוור. שאלה שהוא טעה בה אפשר לנסח מחדש או להוריד.",
   "practice:reword limit": "השאלה הזו כבר נוסחה מחדש ארבע פעמים. אפשר להשאיר אותה או להוריד.",
+  // question types (docs/study/question-types.md)
+  "practice:not for steps": "מקרה בשלבים לא מנסחים מחדש. אפשר להשאיר אותו או להוריד.",
+  "practice:not a set question": "השאלה הזו לא נתמכת עדיין בגרסה שלך. כדאי לרענן.",
+  "practice:bad choices": "צריך לענות על כל החלקים של השאלה.",
+  "practice:schema": "סוגי השאלות החדשים עוד לא הופעלו במסד הנתונים. אפשר לבחור שאלות אמריקאיות בינתיים.",
+  "practice:bad geometry": "לא הצלחנו לקרוא את הסימונים מהקובץ. אפשר לנסות קובץ אחר.",
   "practice:request not found": "הבקשה הזו לא נמצאה. כדאי לרענן.",
   // Not in §6.3: worded as "question not found".
   "exam:exam not found": "המבחן לא נמצא. כדאי לרענן.",
@@ -350,6 +356,8 @@ const OTHER_FALLBACK = "לא הצלחנו. אפשר לנסות שוב.";
  *  same. */
 export const INTERNAL_CODES: readonly string[] = [
   "session expiring",
+  // a writer's item of a question type the server's checks already passed (server key only)
+  "bad form",
   "confirm name",
   "edit conflict",
   // the writer's and the batches' own bookkeeping (server key only)

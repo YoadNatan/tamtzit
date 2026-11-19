@@ -1466,6 +1466,8 @@ declare
 begin
   select * into q from public.study_questions x where x.id = p_question;
   if not found or q.lecture_id is null then return null; end if;
+  -- U 3: a trap is a wrong option of a text question (a trap card, the museum, the pulse show text only).
+  if q.form <> 'one' or coalesce(q.style, '') in ('label', 'image') then return null; end if;
   insert into public.study_traps (group_id, lecture_id, question_id, option, source, found_at, opens_at)
   values (q.group_id, q.lecture_id, p_question, p_option, p_source, p_found, study_private.pulse_next_cutoff(p_found))
   on conflict (question_id, option) do nothing
@@ -1750,6 +1752,9 @@ grant execute on function public.study_museum(uuid, uuid), public.study_museum_m
 
 -- U at 2: U-3's traps and the museum (version 1 was U-1 and U-2).
 insert into study_private.schema_sections (section, version) values ('U', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- U 3: no trap of a question with a picture or of a set question (question types).
+insert into study_private.schema_sections (section, version) values ('U', 3)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION U ════
 

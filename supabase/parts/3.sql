@@ -234,7 +234,8 @@ begin
   with pool as (
     select q.id,
            char_length(q.vignette) + char_length(q.question)
-             + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0) as chars,
+             + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0)
+             + case when q.figure <> '' or q.layout is not null then 180 else 0 end as chars,   -- Z 3: a picture, about 12 s more
            array_position(z.lecture_ids, coalesce(q.lecture_id, q.ref_lecture)) as lec_pos,
            coalesce(q.part_idx, -1) as part_idx,
            exists (select 1 from public.study_question_flags f
@@ -249,6 +250,7 @@ begin
        and coalesce(q.lecture_id, q.ref_lecture) = any (z.lecture_ids)
        and q.retired_at is null
        and q.has_key
+       and q.form = 'one' and coalesce(q.step, 1) = 1   -- Z 3: one answer, a staged case's step 1 only
        and (z.kinds = 'all' or q.kind = z.kinds)
   ),
   ranked as (
@@ -889,6 +891,7 @@ language sql stable set search_path = public as $$
          (count(*) filter (where q.kind = 'case'))::int
     from public.study_questions q
    where q.group_id = p_group and q.retired_at is null and q.has_key
+     and q.form = 'one' and coalesce(q.step, 1) = 1   -- Z 3: what a quiz can ask
      and coalesce(q.lecture_id, q.ref_lecture) is not null
    group by 1;
 $$;
@@ -1142,7 +1145,8 @@ begin
       insert into public.study_quiz_rounds (quiz_id, idx, question_id, seconds)
       select p_quiz, (u.o - 1)::int, u.id,
              public.study_quiz__seconds(z.seconds, (char_length(q.vignette) + char_length(q.question)
-               + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0))::int)
+               + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0)
+               + case when q.figure <> '' or q.layout is not null then 180 else 0 end)::int)
         from unnest(ids) with ordinality as u(id, o)
         join public.study_questions q on q.id = u.id
        where u.o <= z.n_wanted;
@@ -1153,7 +1157,8 @@ begin
   with pool as (
     select q.id,
            char_length(q.vignette) + char_length(q.question)
-             + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0) as chars,
+             + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0)
+             + case when q.figure <> '' or q.layout is not null then 180 else 0 end as chars,   -- Z 3: a picture, about 12 s more
            array_position(z.lecture_ids, coalesce(q.lecture_id, q.ref_lecture)) as lec_pos,
            coalesce(q.part_idx, -1) as part_idx,
            coalesce(q.anchor, -1) as anchor,
@@ -1173,6 +1178,7 @@ begin
        and q.stale_at is null
        and q.hidden_at is null                                   -- review F-6: two flags hide it everywhere
        and q.has_key
+       and q.form = 'one' and coalesce(q.step, 1) = 1   -- Z 3: one answer, a staged case's step 1 only
        and (z.kinds = 'all' or q.kind = z.kinds)
        and (z.part_from is null or coalesce(q.part_idx, -1) between z.part_from and z.part_to)
   ),
@@ -1975,5 +1981,10 @@ grant execute on function public.study_quiz_create(uuid, text, uuid[], int, int,
   to authenticated;
 
 insert into study_private.schema_sections (section, version) values ('Z', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- Z 3 (question types): the pickers and the pool take one-answer questions
+-- only (a set question, a pin number to tap, a staged case's later step
+-- never come), and a question with a picture gets about 12 s more.
+insert into study_private.schema_sections (section, version) values ('Z', 3)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION Z ════

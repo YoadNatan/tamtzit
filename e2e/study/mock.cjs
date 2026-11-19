@@ -34,7 +34,7 @@ const now = () => new Date().toISOString();
 const uuid = (n) => `${String(n).padStart(8, "0")}-0000-4000-8000-${String(n).padStart(12, "0")}`;
 /** A database with every section loaded, at the versions the approved features
  *  need (spec §2.11, §12.2.2): the SQL always runs before a release's flags. */
-const SCHEMA_ALL = { F: 1, A: 1, W: 2, Q: 2, Z: 2, C: 2, K: 2, P: 2, M: 2, N: 1, V: 1, U: 2, J: 1, H: 2, B: 1, G: 2, E: 1, T: 3 };
+const SCHEMA_ALL = { F: 1, A: 1, W: 2, Q: 3, Z: 3, C: 3, K: 2, P: 2, M: 3, N: 1, V: 1, U: 3, J: 1, H: 3, B: 1, G: 2, E: 1, T: 3, X: 1 };
 /** The registry this branch's SQL writes (each section's last statement in
  *  supabase/study-schema.sql): what production's study_schema() answers once
  *  the release's SQL has run. Builds with every flag off and release 1's

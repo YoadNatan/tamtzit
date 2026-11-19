@@ -1298,7 +1298,7 @@ delete from public.study_exams where id = 'aaaaaaaa-1111-4000-8000-0000000000e3'
 select 'QR4c. on its first day Noa deletes it: ' || count(*) || ' left (expect 0)' from public.study_exams where id = 'aaaaaaaa-1111-4000-8000-0000000000e3';
 do $$ begin insert into public.study_exams (group_id, title, pages) values ((select id from public.study_groups limit 1), 'ארוך', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 61) n)); raise notice 'QR5. FAIL: an exam of 61 pages';
 exception when check_violation then raise notice 'QR5. ok: at most 60 pages an exam'; end $$;
-select 'Q-reg. the registry: ' || (public.study_schema() ->> 'Q') || ' (expect 2: Q''s end, spec §12.9)';
+select 'Q-reg. the registry: ' || (public.study_schema() ->> 'Q') || ' (expect 3: Q''s end, spec §12.9, and the question types'' columns)';
 reset role;
 delete from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-0000000000a7';
 update study_private.features set enabled = false where name = 'exams';
@@ -1418,7 +1418,7 @@ do $$ begin insert into public.study_answers (user_id, question_id, choice, corr
   values ('cccccccc-0000-4000-8000-000000000003', '5a200000-0000-4000-8000-000000000001', 0, true, 4);
   raise notice 'QA4. FAIL: a bet of 4';
 exception when check_violation then raise notice 'QA4. ok: the bet is 1-3 (ניחוש · נראה לי · על בטוח)'; end $$;
-select 'QA-reg. the registry: ' || (public.study_schema() ->> 'Q') || ' (expect 2)';
+select 'QA-reg. the registry: ' || (public.study_schema() ->> 'Q') || ' (expect 3)';
 delete from public.study_questions where id in (current_setting('t.qa1')::uuid, current_setting('t.qa2')::uuid);
 delete from public.study_question_batches where id = '5a400000-0000-4000-8000-000000000001';
 
@@ -1579,7 +1579,7 @@ reset role;
 select stest.worker_finish(current_setting('t.qb')::uuid, :'key') is null as wf \gset
 select 'QS14. finished by the worker: ' || status || ', rejected ' || rejected || ', solver ' || solver_rejected || ', hold ' || coalesce(hold_until::text, 'none')
        || ' (expect ready, 1, 2, none)' from public.study_question_batches where id = current_setting('t.qb')::uuid;
-select 'QS-reg. Q = ' || (public.study_schema() ->> 'Q') || ' (expect 2)';
+select 'QS-reg. Q = ' || (public.study_schema() ->> 'Q') || ' (expect 3)';
 
 -- ═════════ SR2 · SEC-2, SEC-13: the fix sheet only for a hidden question, never in a quiz ═════════
 set role authenticated;
@@ -2013,7 +2013,7 @@ select 'P2-4d. hidden by two flags, q3 leaves the counts: ' || case when sum(n) 
   from public.study_session_counts(array[:'p2l']::uuid[]);
 set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
 select 'P2-4e. the stranger counts nothing: ' || case when count(*) = 0 then 'ok' else 'FAIL' end from public.study_session_counts(array[:'p2l']::uuid[]);
-select 'P2-reg. the registry: ' || case when public.study_schema() ->> 'Q' = '2' then 'ok' else 'FAIL ' || (public.study_schema() ->> 'Q') end || ' (Q at 2: Q''s end and practice 2.0)';
+select 'P2-reg. the registry: ' || case when public.study_schema() ->> 'Q' = '3' then 'ok' else 'FAIL ' || (public.study_schema() ->> 'Q') end || ' (Q at 3: Q''s end, practice 2.0 and the question types)';
 
 -- Clean-up: the lectures take their parts, points, requests, batches, drafts, questions, answers and flags.
 reset role;
@@ -2771,7 +2771,7 @@ set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
 do $$ begin perform public.study_quiz_record(current_setting('t.gid')::uuid); raise notice 'ZA12b. FAIL: a stranger read the record';
 exception when others then raise notice 'ZA12b. %: members only (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
 reset role;
-select 'ZA13. the hold is gone after the end: ' || count(*) || ' keys held (expect 0); the registry: ' || (public.study_schema() ->> 'Z') || ' (expect 2)'
+select 'ZA13. the hold is gone after the end: ' || count(*) || ' keys held (expect 0); the registry: ' || (public.study_schema() ->> 'Z') || ' (expect 3)'
   from public.study_question_keys where held_until > now();
 update public.study_questions set stale_at = null where id = '3c2a0000-0000-4000-8000-000000000004';
 
@@ -3237,7 +3237,7 @@ do $$ begin perform public.study_card_claim(current_setting('t.bc')::uuid, curre
 exception when others then raise notice 'CR2. %: a batch gets three paid tries (%)', case when sqlerrm = 'gave up' then 'ok' else 'FAIL' end, sqlerrm; end $$;
 select 'CR2b. tries ' || :c1 || :c2 || :c3 || '; the round is no longer held open: next round ' || round || ', fresh ' || fresh || ' (expect 111; 2, true)'
   from public.study_card_round('eeeeeeee-0000-4000-8000-0000000000c2');
-select 'C-reg. the registry: ' || (public.study_schema() ->> 'C') || ' (expect 2: with section C''s end)';
+select 'C-reg. the registry: ' || (public.study_schema() ->> 'C') || ' (expect 3: with section C''s end and the question types'' cards)';
 -- ════════════════════════════════════════════════════════════════════════
 --  SECTION C's end checks · CA (anchors, trap cards, the marks after a
 --  correction), CS (the deck part by part, private cards, one review home),
@@ -3460,7 +3460,7 @@ select 'CS10. private tables published: ' || count(*) || ' (expect 0)' from pg_p
 select 'CS10b. RLS on: ' || count(*) filter (where relrowsecurity) || ' of ' || count(*) || ', anon may read: '
        || count(*) filter (where has_table_privilege('anon', oid, 'select')) || ' (expect 3 of 3, 0)'
   from pg_class where relname in ('study_card_adoptions', 'study_my_cards', 'study_my_card_reviews') and relnamespace = 'public'::regnamespace;
-select 'CS-reg. C = ' || (public.study_schema() ->> 'C') || ' (expect 2)';
+select 'CS-reg. C = ' || (public.study_schema() ->> 'C') || ' (expect 3)';
 select 'FR4. the private card''s key to its question: ' || count(*) || ' (expect 1: section Q is loaded)'
   from pg_constraint where conname = 'study_my_cards_question_id_fkey';
 
@@ -3514,7 +3514,7 @@ set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
 do $$ begin perform public.study_card_still_true(current_setting('t.ca3')::uuid); raise notice 'CA4b. FAIL: a stranger checked a card';
 exception when others then raise notice 'CA4b. %: members only (%)', case when sqlerrm = 'card not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
 reset role;
-select 'CA-reg. the registry: ' || (public.study_schema() ->> 'C') || ' (expect 2)';
+select 'CA-reg. the registry: ' || (public.study_schema() ->> 'C') || ' (expect 3)';
 
 -- ═════════ CW · the worker path: planned and saved with the key alone, a held part busy for a tap ═════════
 select 'CW1. anon may call study_card_round: ' || has_function_privilege('anon', 'public.study_card_round(uuid, text)', 'execute')
@@ -5162,7 +5162,7 @@ reset role;
 -- Leave nothing open for the sections after this one.
 update public.study_quizzes set state = 'ended', ended_at = now() where state in ('lobby', 'question', 'reveal');
 update public.study_meetings set reading = false where reading;
-select mtest.m_is('M-reg. the registry (M 2: no planned reader)', public.study_schema() ->> 'M', '2');
+select mtest.m_is('M-reg. the registry (M 2: no planned reader; M 3: the question types'' filters)', public.study_schema() ->> 'M', '3');
 -- The fixtures go, as at section Z's end: the quizzes, the lectures (their meetings, taps, guesses,
 -- questions and answers with them), the members and the helpers.
 delete from public.study_quizzes where group_id = :'gid';
@@ -6068,7 +6068,7 @@ select pg_temp.ux('U5j', 'a member writes no count: ' || not exists (
          select 1 from information_schema.role_table_grants
           where grantee in ('authenticated', 'anon') and table_name like 'study_pulse_%' and table_name <> 'study_pulse_optout'
             and privilege_type in ('INSERT', 'UPDATE', 'DELETE')), 'a member writes no count: true');
-select pg_temp.ux('U-reg', public.study_schema() ->> 'U', '2');   -- U-3 (traps and the museum) raised it to 2
+select pg_temp.ux('U-reg', public.study_schema() ->> 'U', '3');   -- U-3 (traps and the museum) raised it to 2; the question types to 3
 
 -- ═════════ MU · U-3: traps and the museum (section U at 2; decision 3's meter) ═════════
 -- On the nights above: q6's option 1 (three counted members, 9 days ago) became a trap the night of
@@ -6649,7 +6649,7 @@ select pg_temp.hx('HB0a', study_private.boss_min_heads() || '/' || study_private
                          || '/' || study_private.boss_hit_pct() || '/' || study_private.boss_loot_days(), '2/4/3/3/20/2/80/3');
 select pg_temp.hx('HB0b', (select string_agg(right(question_id::text, 1) || '/' || option || ' ' || state || coalesce(' #' || exhibit_no, ''), ', ' order by question_id)
                            from public.study_traps where lecture_id = :'hl1'), '1/3 open, 3/2 open #1, 5/0 open');
-select pg_temp.hx('HB0c', study_private.boss_hooks_ok()::text || ' · H ' || (public.study_schema() ->> 'H'), 'true · H 2');
+select pg_temp.hx('HB0c', study_private.boss_hooks_ok()::text || ' · H ' || (public.study_schema() ->> 'H'), 'true · H 3');
 
 -- ═════════ H1 · the card's heads and decision 3's meter ═════════
 set role authenticated;
@@ -6896,7 +6896,7 @@ reset role;
 select pg_temp.hx('HB6h', (select string_agg(column_name, ',' order by column_name) from information_schema.column_privileges
                             where grantee = 'authenticated' and table_schema = 'public' and table_name = 'study_boss_battles' and privilege_type = 'SELECT'),
                   'created_at,ended_at,group_id,id,lecture_ids,name,outcome,planned,quiz_id,revenge_of,team_hp');
-select pg_temp.hx('H-reg', public.study_schema() ->> 'H', '2');
+select pg_temp.hx('H-reg', public.study_schema() ->> 'H', '3');
 
 -- Clean-up for the sections after this one: the lecture takes its parts,
 -- questions, answers, quizzes' rounds, traps and pulse rows; the battles go
@@ -7901,3 +7901,343 @@ drop schema ttest cascade;
 select ttest_gone || '' from (select 'T7. the fixtures are gone: ' || case when not exists (select 1 from public.study_questions where id::text like 'd52%')
                                 and not exists (select 1 from public.study_members where user_id::text like 'd5000000%') then 'ok' else 'FAIL' end as ttest_gone) x;
 -- ════ END SECTION T ════
+
+-- ════ BEGIN SECTION X · question types (package X) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION X checks · question types (docs/study/question-types.md): Q 3's
+--  columns and draft rules, X's set answers, review, solver check and the
+--  label geometry backfill, and the filters in Z, M, H, U and C. On
+--  fixtures of their own, removed at the end. Every line says ok or FAIL.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+select id as xg from public.study_groups order by created_at limit 1 \gset
+select set_config('x.g', :'xg', false) is not null as g \gset
+\set xl 'e7100000-0000-4000-8000-000000000001'
+\set xa 'e7000000-0000-4000-8000-000000000001'
+\set xb 'e7000000-0000-4000-8000-000000000002'
+\set xs 'e7000000-0000-4000-8000-000000000003'
+\set xold 'e7200000-0000-4000-8000-000000000001'
+\set xm 'e7600000-0000-4000-8000-000000000001'
+select set_config('x.l', :'xl', false) is not null as l \gset
+select count(*) = 0 as no_key from vault.decrypted_secrets where name = 'study_worker_key' \gset
+\if :no_key
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef');
+\endif
+select set_config('x.key', (select decrypted_secret from vault.decrypted_secrets where name = 'study_worker_key' limit 1), false) is not null as k \gset
+create schema if not exists xtest;
+create or replace function xtest.is_(p_label text, p_got text, p_want text) returns text language sql immutable as $$
+  select p_label || case when p_got is not distinct from p_want then '. ok: ' || coalesce(p_got, 'null')
+                         else '. FAIL: ' || coalesce(p_got, 'null') || ' (expect ' || coalesce(p_want, 'null') || ')' end $$;
+-- The error a statement raises ('none' when it raises nothing).
+create or replace function xtest.err(p_sql text) returns text language plpgsql as $$
+begin
+  execute p_sql;
+  return 'none';
+exception when others then
+  return sqlerrm;
+end $$;
+revoke all on schema xtest from public;
+grant usage on schema xtest to authenticated;
+grant execute on function xtest.is_(text, text, text), xtest.err(text) to authenticated;
+insert into auth.users (id, raw_user_meta_data) values
+ (:'xa', '{"app":"study","full_name":"אורי"}'), (:'xb', '{"app":"study","full_name":"בר"}'), (:'xs', '{"app":"study","full_name":"זרה"}');
+insert into public.study_members (group_id, user_id, name) values (:'xg', :'xa', 'אורי'), (:'xg', :'xb', 'בר');
+-- A lecture of 10 slides; slide 3 has a picture (fig:3-1).
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'xl', :'xg', 'פיזיולוגיה', 'The nephron (synthetic)', 'pptx',
+  (select jsonb_agg(case when n = 3 then jsonb_build_object('n', n, 'figures', jsonb_build_array(jsonb_build_object('k', 1, 'path', 'x/s3-1.jpg', 'w', 800, 'h', 600)))
+                         else jsonb_build_object('n', n) end order by n) from generate_series(1, 10) n), 'ready', :'xa');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ (:'xl', 0, 'מקטעי הנפרון', 1, 10, 'ready', E'## מקטעי הנפרון\n\nThe loop of Henle concentrates urine. [ש'' 3]');
+-- An old multiple-choice question, as before the upgrade.
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, anchor, quote, kind, question, options, slides, topic, aspect)
+values (:'xold', :'xg', :'xl', 'ai', 0, 1, 'The loop of Henle', 'mcq', 'Which segment concentrates urine?', array['Glomerulus','Loop of Henle','Collecting duct','Bowman capsule'], array[3], 'Nephron', 'other');
+insert into public.study_question_keys (question_id, answer, explanations, takeaway) values (:'xold', 1, array['a','b','c','d'], 'Henle');
+
+-- ═════════ X1a · an old question is untouched ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000001';
+select xtest.is_('X1a. an old question: form one, no layout, no step, and it still answers',
+  (select q.form || ' · ' || coalesce(q.layout::text, 'null') || ' · ' || coalesce(q.step::text, 'null') from public.study_questions q where q.id = :'xold')
+  || ' · ' || (select a.correct::text from public.study_answer_question(:'xold', 1, 'lecture', 1000, 2) a),
+  'one · null · null · true');
+
+-- ═════════ X1b · each form is saved through study_draft_save; bad shapes are refused ═════════
+select set_config('x.req', (array_agg(request_id))[1]::text, false) is not null as r,
+       set_config('x.b1', (array_agg(batch_id order by seq))[1]::text, false) is not null as b1,
+       set_config('x.b2', (array_agg(batch_id order by seq))[2]::text, false) is not null as b2,
+       set_config('x.b3', (array_agg(batch_id order by seq))[3]::text, false) is not null as b3
+  from public.study_request_create(:'xl',
+    '{"level":"custom","count":9,"parts":[0],"styles":["tf","match","order","steps","label","image"],"difficulty":"exam"}',
+    '[{"part_idx":0,"seq":0,"wanted":5,"points":[],"styles":["tf","match","order","steps","label"]},
+      {"part_idx":0,"seq":1,"wanted":3,"points":[],"styles":["label","image","steps"]},
+      {"part_idx":0,"seq":2,"wanted":1,"points":[],"styles":["steps"]}]'::jsonb, current_setting('x.key'));
+reset role;
+update public.study_question_batches set status = 'writing' where request_id = current_setting('x.req')::uuid;
+create or replace function xtest.save(p_batch text, p_q jsonb) returns text language plpgsql as $$
+begin
+  return public.study_draft_save(p_batch::uuid, p_q, current_setting('x.key'))::text;
+exception when others then
+  return 'error: ' || sqlerrm;
+end $$;
+grant execute on function xtest.save(text, jsonb) to authenticated;
+set role authenticated;
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000001';
+select set_config('x.tf', xtest.save(current_setting('x.b1'), '{"style":"tf","form":"tf","kind":"mcq","question":"אילו מהמשפטים נכונים?","slides":[3],
+  "options":["Furosemide acts on the thick ascending limb","Furosemide spares potassium","Furosemide is a loop diuretic"],
+  "explanations":["נכון. [ש'' 3]","לא נכון: מאבדים אשלגן. [ש'' 3]","נכון. [ש'' 3]"],"seq":[1,0,1],"takeaway":"Loop diuretic"}'), false) is not null as tf \gset
+select xtest.is_('X1b. a tf draft is saved', (current_setting('x.tf') ~ '^[0-9a-f-]{36}$')::text, 'true');
+select xtest.is_('X1b2. tf with only true statements', xtest.save(current_setting('x.b1'), '{"style":"tf","form":"tf","kind":"mcq","question":"אילו נכונים?","slides":[3],
+  "options":["a1","a2","a3"],"explanations":["x","y","z"],"seq":[1,1,1]}'), 'error: bad form');
+select xtest.is_('X1b3. tf with an answer index', xtest.save(current_setting('x.b1'), '{"style":"tf","form":"tf","kind":"mcq","question":"אילו נכונים?","slides":[3],
+  "options":["a1","a2","a3"],"explanations":["x","y","z"],"seq":[1,0,1],"answer":0}'), 'error: bad form');
+select xtest.is_('X1b4. a tf style saved as a one-answer form', xtest.save(current_setting('x.b1'), '{"style":"tf","kind":"mcq","question":"אילו נכונים?","slides":[3],
+  "options":["a1","a2","a3"],"explanations":["x","y","z"],"answer":0}'), 'error: bad form');
+select set_config('x.match', xtest.save(current_setting('x.b1'), '{"style":"match","form":"match","kind":"mcq","question":"התאימו תרופה למקטע","slides":[3],
+  "layout":{"kind":"match","prompts":["Furosemide","Thiazide","Amiloride"]},
+  "options":["Collecting duct","Thick ascending limb","Distal convoluted tubule","Proximal tubule"],
+  "explanations":["ENaC. [ש'' 3]","NKCC2. [ש'' 3]","NCC. [ש'' 3]","לא מתאים. [ש'' 3]"],"seq":[1,2,0]}'), false) is not null as m \gset
+select xtest.is_('X1c. a match draft is saved', (current_setting('x.match') ~ '^[0-9a-f-]{36}$')::text, 'true');
+select xtest.is_('X1c2. match with the same option twice', xtest.save(current_setting('x.b1'), '{"style":"match","form":"match","kind":"mcq","question":"התאימו","slides":[3],
+  "layout":{"kind":"match","prompts":["p1","p2","p3"]},"options":["o1","o2","o3"],"explanations":["x","y","z"],"seq":[1,1,0]}'), 'error: bad form');
+select xtest.is_('X1c3. match with two extra options', xtest.save(current_setting('x.b1'), '{"style":"match","form":"match","kind":"mcq","question":"התאימו","slides":[3],
+  "layout":{"kind":"match","prompts":["p1","p2","p3"]},"options":["o1","o2","o3","o4","o5"],"explanations":["x","y","z","w","v"],"seq":[0,1,2]}'), 'error: bad form');
+select xtest.is_('X1d. order already in order', xtest.save(current_setting('x.b1'), '{"style":"order","form":"order","kind":"mcq","question":"סדרו","slides":[3],
+  "options":["s1","s2","s3"],"explanations":["x","y","z"],"seq":[0,1,2]}'), 'error: bad form');
+select set_config('x.order', xtest.save(current_setting('x.b1'), '{"style":"order","form":"order","kind":"mcq","question":"סדרו את מסלול הסינון","slides":[3],
+  "options":["Loop of Henle","Glomerulus","Collecting duct","Proximal tubule"],
+  "explanations":["שלישי. [ש'' 3]","ראשון. [ש'' 3]","רביעי. [ש'' 3]","שני. [ש'' 3]"],"seq":[1,3,0,2]}'), false) is not null as o \gset
+select xtest.is_('X1d2. an order draft is saved', (current_setting('x.order') ~ '^[0-9a-f-]{36}$')::text, 'true');
+select xtest.is_('X1e. a step 2 without its step 1 in the batch', xtest.save(current_setting('x.b1'), '{"style":"steps","kind":"case","question":"מה הטיפול?","slides":[3],
+  "series":"e7300000-0000-4000-8000-000000000001","step":2,"options":["a1","a2","a3"],"explanations":["x","y","z"],"answer":0}'), 'error: bad form');
+select set_config('x.s1', xtest.save(current_setting('x.b1'), '{"style":"steps","kind":"case","vignette":"גבר בן 60 עם חולשה.","question":"מה הממצא?","slides":[3],
+  "series":"e7300000-0000-4000-8000-000000000001","step":1,"layout":{"kind":"steps","of":2,"lead":0},
+  "options":["Hyperkalemia","Hyponatremia","Hypercalcemia"],"explanations":["נכון. [ש'' 3]","לא. [ש'' 3]","לא. [ש'' 3]"],"answer":0}'), false) is not null as s1 \gset
+select set_config('x.s2', xtest.save(current_setting('x.b1'), '{"style":"steps","kind":"case","vignette":"גבר בן 60 עם חולשה. נמצא Hyperkalemia. ב-ECG גלי T גבוהים.","question":"מה ראשון?","slides":[3],
+  "series":"e7300000-0000-4000-8000-000000000001","step":2,"layout":{"kind":"steps","of":2,"lead":30},
+  "options":["Calcium gluconate","Furosemide","Observation"],"explanations":["נכון. [ש'' 3]","לא. [ש'' 3]","לא. [ש'' 3]"],"answer":0}'), false) is not null as s2 \gset
+select xtest.is_('X1e2. both steps of a staged case are saved', (current_setting('x.s1') ~ '^[0-9a-f-]{36}$' and current_setting('x.s2') ~ '^[0-9a-f-]{36}$')::text, 'true');
+select xtest.is_('X1e3. a step without a series', xtest.save(current_setting('x.b1'), '{"style":"steps","kind":"case","question":"מה הטיפול?","slides":[3],
+  "options":["a1","a2","a3"],"explanations":["x","y","z"],"answer":0}'), 'error: bad form');
+select xtest.is_('X1f. a label on a picture the lecture does not have', xtest.save(current_setting('x.b1'), '{"style":"label","kind":"mcq","question":"מה מסומן במספר 2 בשרטוט?","slides":[3],"figure":"fig:4-1",
+  "layout":{"kind":"label","mode":"name","fig":"fig:4-1","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"lines":[],"baked":false,"masks":[],
+            "pins":[{"n":1,"x":0.2,"y":0.2},{"n":2,"x":0.5,"y":0.5},{"n":3,"x":0.8,"y":0.8}],"ask":2},
+  "options":["Glomerulus","Loop of Henle","Collecting duct"],"explanations":["x","y","z"],"answer":1}'), 'error: bad form');
+select set_config('x.lab', xtest.save(current_setting('x.b1'), '{"style":"label","kind":"mcq","question":"מה מסומן במספר 2 בשרטוט?","slides":[3],"figure":"fig:3-1",
+  "layout":{"kind":"label","mode":"name","fig":"fig:3-1","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"lines":[],"baked":false,"masks":[],
+            "pins":[{"n":1,"x":0.2,"y":0.2},{"n":2,"x":0.5,"y":0.5},{"n":3,"x":0.8,"y":0.8}],"ask":2},
+  "options":["Glomerulus","Loop of Henle","Collecting duct"],"explanations":["x [ש'' 3]","Henle. [ש'' 3]","z [ש'' 3]"],"answer":1}'), false) is not null as lab \gset
+select xtest.is_('X1g. a label draft is ok without the blind solver (keyed by the slide''s geometry)',
+  (select check_state from public.study_question_drafts where id = current_setting('x.lab')::uuid), 'ok');
+select xtest.is_('X1g2. the batch is full at 5 (the staged case counted once)', xtest.save(current_setting('x.b1'), '{"style":"tf","form":"tf","kind":"mcq","question":"אילו נכונים?","slides":[3],
+  "options":["a1","a2","a3"],"explanations":["x","y","z"],"seq":[1,0,1]}'), 'error: part full');
+select xtest.is_('X1g3. a tap label with options that are not 1..m', xtest.save(current_setting('x.b2'), '{"style":"label","form":"tap","kind":"mcq","question":"באיזה מספר מסומן Loop of Henle?","slides":[3],"figure":"fig:3-1",
+  "layout":{"kind":"label","mode":"tap","fig":"fig:3-1","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"lines":[],"baked":false,"masks":[],
+            "pins":[{"n":1,"x":0.2,"y":0.2},{"n":2,"x":0.5,"y":0.5},{"n":3,"x":0.8,"y":0.8}]},
+  "options":["1","2","4"],"explanations":["x","y","z"],"answer":1}'), 'error: bad form');
+select set_config('x.tap', xtest.save(current_setting('x.b2'), '{"style":"label","form":"tap","kind":"mcq","question":"באיזה מספר מסומן Loop of Henle?","slides":[3],"figure":"fig:3-1",
+  "layout":{"kind":"label","mode":"tap","fig":"fig:3-1","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"lines":[],"baked":false,"masks":[],
+            "pins":[{"n":1,"x":0.2,"y":0.2},{"n":2,"x":0.5,"y":0.5},{"n":3,"x":0.8,"y":0.8}]},
+  "options":["1","2","3"],"explanations":["1 הוא Glomerulus.","2 הוא Loop of Henle. [ש'' 3]","3 הוא Collecting duct."],"answer":1}'), false) is not null as tap \gset
+select set_config('x.img', xtest.save(current_setting('x.b2'), '{"style":"image","kind":"mcq","question":"מה מראה התמונה?","slides":[3],"figure":"fig:3-1",
+  "layout":{"kind":"image","fig":"fig:3-1"},"options":["A nephron","A hepatic lobule","An alveolus"],"explanations":["נכון. [ש'' 3]","לא. [ש'' 3]","לא. [ש'' 3]"],"answer":0}'), false) is not null as img \gset
+select set_config('x.r1', xtest.save(current_setting('x.b2'), '{"style":"steps","kind":"case","question":"מה הממצא?","slides":[3],"series":"e7300000-0000-4000-8000-000000000002","step":1,
+  "options":["a1","a2","a3"],"explanations":["x","y","z"],"answer":0}'), false) is not null as r1 \gset
+select set_config('x.r2', xtest.save(current_setting('x.b2'), '{"style":"steps","kind":"case","question":"ומה עכשיו?","slides":[3],"series":"e7300000-0000-4000-8000-000000000002","step":2,
+  "options":["a1","a2","a3"],"explanations":["x","y","z"],"answer":0}'), false) is not null as r2 \gset
+select set_config('x.j1', xtest.save(current_setting('x.b3'), '{"style":"steps","kind":"case","question":"מה הממצא?","slides":[3],"series":"e7300000-0000-4000-8000-000000000003","step":1,
+  "options":["a1","a2","a3"],"explanations":["x","y","z"],"answer":0}'), false) is not null as j1 \gset
+select set_config('x.j2', xtest.save(current_setting('x.b3'), '{"style":"steps","kind":"case","question":"ומה עכשיו?","slides":[3],"series":"e7300000-0000-4000-8000-000000000003","step":2,
+  "options":["a1","a2","a3"],"explanations":["x","y","z"],"answer":0}'), false) is not null as j2 \gset
+select xtest.is_('X1h. every draft of the second and third batches is saved',
+  (select count(*)::text from public.study_question_drafts d where d.id::text in (current_setting('x.tap'), current_setting('x.img'), current_setting('x.r1'), current_setting('x.r2'), current_setting('x.j1'), current_setting('x.j2'))), '6');
+select xtest.is_('X1h2. made counts a staged case once (5 · 3 · 1)',
+  (select string_agg(made::text, ' · ' order by seq) from public.study_question_batches where request_id = current_setting('x.req')::uuid), '5 · 3 · 1');
+select xtest.is_('X1h3. the request''s progress counts a staged case once', (select made::text from public.study_request_progress(current_setting('x.req')::uuid)), '9');
+
+-- ═════════ X1i · the blind solver on a set draft; a staged case kept, reworded, removed and rejected whole ═════════
+select xtest.is_('X1i. a set draft checked with the right order', public.study_draft_check_set(current_setting('x.tf')::uuid, array[1,0,1], false, current_setting('x.key')), 'ok');
+select xtest.is_('X1i2. the wrong order fails', public.study_draft_check_set(current_setting('x.match')::uuid, array[0,2,1], false, current_setting('x.key')), 'failed');
+select xtest.is_('X1i3. right but ambiguous fails', public.study_draft_check_set(current_setting('x.order')::uuid, array[1,3,0,2], true, current_setting('x.key')), 'failed');
+select xtest.is_('X1i4. the server key only', xtest.err(format('select public.study_draft_check_set(%L, array[1,0,1], false)', current_setting('x.tf'))), 'forbidden');
+select xtest.is_('X1i5. a one-answer draft is not checked as a set', xtest.err(format('select public.study_draft_check_set(%L, array[1,0], false, %L)', current_setting('x.s1'), current_setting('x.key'))), 'not a set question');
+reset role;
+select xtest.is_('X1i6. the solver''s placing is kept with the key', (select solver_seq::text from public.study_question_draft_keys where draft_id = current_setting('x.match')::uuid), '{0,2,1}');
+select xtest.is_('X1i7. and no member reads a draft''s key', has_table_privilege('authenticated', 'public.study_question_draft_keys', 'select')::text, 'false');
+set role authenticated;
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000001';
+select xtest.is_('X1j. a staged case is never reworded', xtest.err(format('select public.study_draft_reword(%L, %L)', current_setting('x.s2'), current_setting('x.key'))), 'not for steps');
+select public.study_draft_check(current_setting('x.s1')::uuid, 0, false, current_setting('x.key')) is not null as c1 \gset
+select xtest.is_('X1j2. a step not yet checked keeps the whole case out', xtest.err(format('select public.study_draft_keep(%L)', current_setting('x.s1'))), 'not checked');
+select public.study_draft_check(current_setting('x.s2')::uuid, 0, false, current_setting('x.key')) is not null as c2 \gset
+select set_config('x.q_s1', public.study_draft_keep(current_setting('x.s2')::uuid)::text, false) is not null as kept \gset
+select xtest.is_('X1j3. kept whole, step 1''s question back, the series and steps in the bank',
+  (select string_agg(q.step::text || ':' || (q.series = 'e7300000-0000-4000-8000-000000000001')::text, ' ' order by q.step) from public.study_questions q
+    where q.series = 'e7300000-0000-4000-8000-000000000001')
+  || ' · ' || (select step::text from public.study_questions where id = current_setting('x.q_s1')::uuid), '1:true 2:true · 1');
+select public.study_draft_remove(current_setting('x.r2')::uuid);
+select xtest.is_('X1k. removing a step removes its whole case',
+  (select string_agg(status, ' ' order by step) from public.study_question_drafts where series = 'e7300000-0000-4000-8000-000000000002'), 'removed removed');
+select public.study_draft_check(current_setting('x.j2')::uuid, 2, false, current_setting('x.key')) is not null as cj \gset
+select public.study_draft_reject(current_setting('x.j2')::uuid, current_setting('x.key'));
+select xtest.is_('X1k2. a failed step rejects its whole case, and the batch counts it back',
+  (select string_agg(status, ' ' order by step) from public.study_question_drafts where series = 'e7300000-0000-4000-8000-000000000003')
+  || ' · made ' || (select made::text from public.study_question_batches where id = current_setting('x.b3')::uuid), 'rejected rejected · made 0');
+select public.study_draft_check(current_setting('x.tap')::uuid, 1, false, current_setting('x.key')) is not null as ct \gset
+select public.study_draft_check(current_setting('x.img')::uuid, 0, false, current_setting('x.key')) is not null as ci \gset
+select count(*) > 0 as kept_all from public.study_draft_keep_all(current_setting('x.req')::uuid) \gset
+select xtest.is_('X1k3. keep all: the checked ones in, a failed one (match, order) waits',
+  (select string_agg(style || '/' || form, ' ' order by style, form) from public.study_questions where lecture_id = :'xl' and id <> :'xold'),
+  'image/one label/one label/tap steps/one steps/one tf/tf');
+select set_config('x.q_tf', (select question_id::text from public.study_question_drafts where id = current_setting('x.tf')::uuid), false) is not null as a,
+       set_config('x.q_lab', (select question_id::text from public.study_question_drafts where id = current_setting('x.lab')::uuid), false) is not null as b,
+       set_config('x.q_tap', (select question_id::text from public.study_question_drafts where id = current_setting('x.tap')::uuid), false) is not null as c,
+       set_config('x.q_img', (select question_id::text from public.study_question_drafts where id = current_setting('x.img')::uuid), false) is not null as d \gset
+select xtest.is_('X1k4. the bank row carries the layout and the set key', (select (q.layout ->> 'kind') || ' · ' || coalesce(q.layout ->> 'ask', '') from public.study_questions q where q.id = current_setting('x.q_lab')::uuid), 'label · 2');
+-- Match and order, failed by the solver, are put in by the owner for the answer checks.
+reset role;
+update public.study_question_drafts set check_state = 'ok' where id in (current_setting('x.match')::uuid, current_setting('x.order')::uuid);
+set role authenticated;
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000001';
+select set_config('x.q_match', public.study_draft_keep(current_setting('x.match')::uuid)::text, false) is not null as m2,
+       set_config('x.q_order', public.study_draft_keep(current_setting('x.order')::uuid)::text, false) is not null as o2 \gset
+
+-- ═════════ X1l · study_answer_set ═════════
+select xtest.is_('X1l. a tf answer half right: not correct, 2 of 3, the key back',
+  (select correct::text || ' · ' || right_n || '/' || total || ' · ' || seq::text from public.study_answer_set(current_setting('x.q_tf')::uuid, array[1,1,1], 'lecture', 1500, 2)),
+  'false · 2/3 · {1,0,1}');
+select xtest.is_('X1l2. the answer row: choice null, choices, the bet', (select coalesce(choice::text, 'null') || ' · ' || choices::text || ' · ' || confidence
+  from public.study_answers where user_id = auth.uid() and question_id = current_setting('x.q_tf')::uuid order by answered_at desc limit 1), 'null · {1,1,1} · 2');
+select xtest.is_('X1l3. all right is correct', (select correct::text || ' ' || right_n || '/' || total from public.study_answer_set(current_setting('x.q_tf')::uuid, array[1,0,1])), 'true 3/3');
+select xtest.is_('X1l4. "לא יודעים": not correct', (select correct::text || ' ' || right_n from public.study_answer_set(current_setting('x.q_order')::uuid, null)), 'false 0');
+select xtest.is_('X1l4b. and its row has no choices', (select coalesce(choices::text, 'null') from public.study_answers where user_id = auth.uid() and question_id = current_setting('x.q_order')::uuid order by answered_at desc limit 1), 'null');
+select xtest.is_('X1l5. tf takes 0 or 1 only', xtest.err(format('select public.study_answer_set(%L, array[1,2,1])', current_setting('x.q_tf'))), 'bad choices');
+select xtest.is_('X1l6. the wrong length', xtest.err(format('select public.study_answer_set(%L, array[1,0])', current_setting('x.q_tf'))), 'bad choices');
+select xtest.is_('X1l7. match: one option twice', xtest.err(format('select public.study_answer_set(%L, array[1,1,2])', current_setting('x.q_match'))), 'bad choices');
+select xtest.is_('X1l8. order: out of range', xtest.err(format('select public.study_answer_set(%L, array[1,3,0,4])', current_setting('x.q_order'))), 'bad choices');
+select xtest.is_('X1l9. order right', (select correct::text from public.study_answer_set(current_setting('x.q_order')::uuid, array[1,3,0,2])), 'true');
+select xtest.is_('X1l10. match wrong (prompt 1 got another option)', (select correct::text || ' ' || right_n from public.study_answer_set(current_setting('x.q_match')::uuid, array[3,2,0])), 'false 2');
+select xtest.is_('X1l11. a one-answer question is not a set', xtest.err(format('select public.study_answer_set(%L, array[1,0,1])', current_setting('x.q_lab'))), 'not a set question');
+select xtest.is_('X1l12. a bad bet', xtest.err(format('select public.study_answer_set(%L, array[1,0,1], %L, 10, 4)', current_setting('x.q_tf'), 'lecture')), 'bad bet');
+select xtest.is_('X1l13. study_answer_question on a set question', xtest.err(format('select public.study_answer_question(%L, 1)', current_setting('x.q_tf'))), 'no key');
+reset role;
+update public.study_question_keys set held_until = now() + interval '1 minute' where question_id = current_setting('x.q_tf')::uuid;
+set role authenticated;
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000001';
+select xtest.is_('X1l14. a key a live quiz holds', xtest.err(format('select public.study_answer_set(%L, array[1,0,1])', current_setting('x.q_tf'))), 'in quiz');
+select xtest.is_('X1l15. and its review is held too', (select count(*)::text from public.study_question_set_feedback(array[current_setting('x.q_tf')::uuid])), '0');
+reset role;
+update public.study_question_keys set held_until = null where question_id = current_setting('x.q_tf')::uuid;
+set role authenticated;
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000001';
+
+-- ═════════ X1m · review, privacy, the mistake cards ═════════
+select xtest.is_('X1m. the review: the key, explanations and my latest choices',
+  (select seq::text || ' · ' || choices::text || ' · ' || cardinality(explanations) from public.study_question_set_feedback(array[current_setting('x.q_tf')::uuid, current_setting('x.q_lab')::uuid])),
+  '{1,0,1} · {1,0,1} · 3');
+select xtest.is_('X1m2. the mistake card of a tf answer: the first statement answered wrong',
+  (select front || ' | ' || back from public.study_my_cards where user_id = auth.uid() and question_id = current_setting('x.q_tf')::uuid),
+  'נכון או לא נכון: Furosemide spares potassium | לא נכון: לא נכון: מאבדים אשלגן. [ש'' 3]');
+select xtest.is_('X1m3. of a match: the prompt answered wrong and its right option',
+  (select front || ' | ' || back from public.study_my_cards where user_id = auth.uid() and question_id = current_setting('x.q_match')::uuid),
+  'Furosemide – מה מתאים? | Thick ascending limb: NKCC2. [ש'' 3]');
+select xtest.is_('X1m4. of an order ("לא יודעים"): the question and the whole order, with the takeaway',
+  (select back || ' | ' || extra from public.study_my_cards where user_id = auth.uid() and question_id = current_setting('x.q_order')::uuid),
+  '1. Glomerulus → 2. Proximal tubule → 3. Loop of Henle → 4. Collecting duct | ');
+select public.study_answer_question(current_setting('x.q_lab')::uuid, 0) is not null as wrong_label \gset
+select xtest.is_('X1m5. of a label: where it is, on the slide''s picture',
+  (select front || ' | ' || back from public.study_my_cards where user_id = auth.uid() and question_id = current_setting('x.q_lab')::uuid),
+  'בשרטוט שבשקף 3: איפה Loop of Henle? | Loop of Henle: Henle. [ש'' 3]');
+select public.study_answer_question(current_setting('x.q_tap')::uuid, 2) is not null as wrong_tap \gset
+select xtest.is_('X1m6. of a tap label: the structure from the lead-in',
+  (select front from public.study_my_cards where user_id = auth.uid() and question_id = current_setting('x.q_tap')::uuid),
+  'בשרטוט שבשקף 3: איפה Loop of Henle?');
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000002';
+select xtest.is_('X1m7. nothing for a member who did not answer', (select count(*)::text from public.study_question_set_feedback(array[current_setting('x.q_tf')::uuid, current_setting('x.q_match')::uuid])), '0');
+select xtest.is_('X1m8. another member never reads my choices', (select count(*)::text from public.study_answers where question_id = current_setting('x.q_tf')::uuid), '0');
+
+-- ═════════ X1n · the filters: quiz, preset, boss, guess, catch-up, traps ═════════
+reset role;
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, state, idx, n_total)
+values ('e7500000-0000-4000-8000-000000000001', :'xg', 'coop', 'סוגי שאלות', array[:'xl']::uuid[], 20, 15, 'lobby', 0, 0);
+select public.study_quiz__pick('e7500000-0000-4000-8000-000000000001') is not null as picked \gset
+select xtest.is_('X1n. the quiz asks one-answer questions only: the old, image, label by name and step 1',
+  (select string_agg(coalesce(q.style, 'old') || '/' || q.form, ' ' order by coalesce(q.style, 'old'), q.form) from public.study_quiz_rounds r join public.study_questions q on q.id = r.question_id
+    where r.quiz_id = 'e7500000-0000-4000-8000-000000000001'),
+  'image/one label/one old/one steps/one');
+select xtest.is_('X1n2. a picture gets about 12 s more (180 characters at 15 a second)',
+  (select string_agg((r.seconds = public.study_quiz__seconds(15, char_length(q.vignette) + char_length(q.question)
+                        + (select sum(char_length(o)) from unnest(q.options) o)::int + case when q.figure <> '' then 180 else 0 end))::text, ' ')
+     from public.study_quiz_rounds r join public.study_questions q on q.id = r.question_id
+    where r.quiz_id = 'e7500000-0000-4000-8000-000000000001' and q.style = 'image'), 'true');
+select xtest.is_('X1n3. never step 2 of a staged case', (select count(*)::text from public.study_quiz_rounds r join public.study_questions q on q.id = r.question_id
+    where r.quiz_id = 'e7500000-0000-4000-8000-000000000001' and q.step = 2), '0');
+select xtest.is_('X1n4. the pool counts what a quiz can ask', (select mcq || ' ' || cases from public.study_quiz_pool(:'xg') where lecture_id = :'xl'), '3 1');
+select xtest.is_('X1n5. the boss asks label by name, never tap, tf or step 2',
+  study_private.boss_askable(current_setting('x.q_lab')::uuid)::text || ' ' || study_private.boss_askable(current_setting('x.q_tap')::uuid)::text || ' '
+  || study_private.boss_askable(current_setting('x.q_tf')::uuid)::text || ' '
+  || study_private.boss_askable((select id from public.study_questions where series = 'e7300000-0000-4000-8000-000000000001' and step = 2))::text,
+  'true false false false');
+update public.study_questions set anchor = case when id = current_setting('x.q_lab')::uuid then 0 when id = current_setting('x.q_img')::uuid then 2 else 3 end
+ where lecture_id = :'xl' and id <> :'xold';
+insert into public.study_meetings (id, group_id, day, starts_at, lecture_id, part_from, part_to, started_at, read_part, created_by)
+values (:'xm', :'xg', study_private.day_of(now()) - 2, now() - interval '2 days', :'xl', 0, 0, now() - interval '2 days', 0, :'xa');
+set role authenticated;
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000001';
+select xtest.is_('X1n6. the pre-guess never picks a question with a picture or a set',
+  (select string_agg(coalesce(q.style, 'old'), ' ' order by coalesce(q.style, 'old')) from unnest(public.study_meeting_guess_pick(:'xm')) g join public.study_questions q on q.id = g),
+  'old steps');
+select xtest.is_('X1n7. catch-up neither',
+  (select string_agg(coalesce(q.style, 'old') || '/' || q.form, ' ' order by coalesce(q.style, 'old')) from jsonb_array_elements_text(public.study_meeting_catchup(:'xm') -> 'questions') g join public.study_questions q on q.id = g::uuid),
+  'old/one steps/one');
+reset role;
+select xtest.is_('X1n8. no trap from a label, an image or a set question; an old one still',
+  (study_private.trap_add(current_setting('x.q_lab')::uuid, 0, 'pulse', now()) is null)::text || ' '
+  || (study_private.trap_add(current_setting('x.q_img')::uuid, 1, 'pulse', now()) is null)::text || ' '
+  || (study_private.trap_add(current_setting('x.q_tf')::uuid, 0, 'pulse', now()) is null)::text || ' '
+  || (study_private.trap_add(:'xold', 0, 'pulse', now()) is not null)::text,
+  'true true true true');
+
+-- ═════════ X1o · the geometry backfill; the new aspects and kinds ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000002';
+select xtest.is_('X1o. a member sets a picture''s labels', public.study_lecture_set_geo(:'xl', '[{"n":3,"k":1,"geo":{"v":1,"src":"pptx","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},
+  "labels":[{"t":"Glomerulus","b":{"x":0.1,"y":0.1,"w":0.1,"h":0.05}},{"t":"Loop of Henle","b":{"x":0.5,"y":0.6,"w":0.1,"h":0.05}},{"t":"Collecting duct","b":{"x":0.8,"y":0.8,"w":0.1,"h":0.05}}],"lines":[],"baked":false}}]'::jsonb)::text, '1');
+select xtest.is_('X1o2. stored on the figure, everything else kept',
+  (select (s -> 'figures' -> 0 -> 'geo' -> 'labels' -> 1 ->> 't') || ' · ' || (s -> 'figures' -> 0 ->> 'path') || ' · ' || jsonb_array_length(l.slides)
+     from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = :'xl' and (s ->> 'n')::int = 3),
+  'Loop of Henle · x/s3-1.jpg · 10');
+select xtest.is_('X1o3. two labels are not enough', xtest.err(format('select public.study_lecture_set_geo(%L, %L::jsonb)', :'xl',
+  '[{"n":3,"k":1,"geo":{"v":1,"src":"pptx","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"labels":[{"t":"A","b":{}},{"t":"B","b":{}}],"lines":[],"baked":false}}]')), 'bad geometry');
+select xtest.is_('X1o4. a picture the lecture does not have', xtest.err(format('select public.study_lecture_set_geo(%L, %L::jsonb)', :'xl',
+  '[{"n":5,"k":1,"geo":{"v":1,"src":"pptx","stage":{"w":4,"h":3},"img":{},"labels":[{"t":"A","b":{}},{"t":"B","b":{}},{"t":"C","b":{}}],"lines":[],"baked":false}}]')), 'bad geometry');
+set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000003';
+select xtest.is_('X1o5. a stranger', xtest.err(format('select public.study_lecture_set_geo(%L, %L::jsonb)', :'xl', '[]')), 'lecture not found');
+reset role;
+select xtest.is_('X1o6. anon may not call the set answer', (has_function_privilege('anon', 'public.study_answer_set(uuid, int[], text, int, int)', 'execute'))::text, 'false');
+reset role;
+select xtest.is_('X1p. the new aspects and point kinds are accepted',
+  xtest.err(format('update public.study_questions set aspect = %L where id = %L', 'anatomy', :'xold')) || ' · '
+  || xtest.err(format('update public.study_question_drafts set aspect = %L where id = %L', 'imaging', current_setting('x.tf'))) || ' · '
+  || xtest.err(format('update public.study_questions set aspect = %L where id = %L', 'astrology', :'xold')), 'none · none · new row for relation "study_questions" violates check constraint "study_questions_aspect_x"');
+insert into public.study_point_parts (lecture_id, part_idx) values (:'xl', 0);
+select xtest.is_('X1p2. a point of kind structure', xtest.err(format('insert into public.study_points (lecture_id, part_idx, n, kind, text, slides) values (%L, 0, 1, %L, %L, array[3])', :'xl', 'structure', 'The loop of Henle')), 'none');
+select xtest.is_('X1p3. the form check by name', xtest.err(format('update public.study_questions set form = %L where id = %L', 'essay', :'xold')),
+  'new row for relation "study_questions" violates check constraint "study_questions_form_x"');
+select xtest.is_('X1p4. a step without a series', xtest.err(format('update public.study_questions set step = 1 where id = %L', :'xold')),
+  'new row for relation "study_questions" violates check constraint "study_questions_step_x"');
+select xtest.is_('X1-reg. the registry: Q 3, X 1, and Z, M, H, U, C at 3',
+  (select string_agg(k || ' ' || (public.study_schema() ->> k), ', ' order by k) from unnest(array['C','H','M','Q','U','X','Z']) k),
+  'C 3, H 3, M 3, Q 3, U 3, X 1, Z 3');
+
+-- The fixtures go.
+delete from public.study_quizzes where id = 'e7500000-0000-4000-8000-000000000001';
+delete from public.study_meetings where id = :'xm';
+delete from public.study_traps where question_id = :'xold';
+delete from public.study_lectures where id = :'xl';
+delete from public.study_members where user_id in (:'xa', :'xb', :'xs');
+delete from auth.users where id in (:'xa', :'xb', :'xs');
+drop schema xtest cascade;
+select 'X-end. the fixtures are gone: ' || case when not exists (select 1 from public.study_questions where lecture_id = :'xl')
+  and not exists (select 1 from public.study_members where user_id::text like 'e7000000%') then 'ok' else 'FAIL' end;
+-- ════ END SECTION X ════

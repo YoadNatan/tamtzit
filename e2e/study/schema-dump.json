@@ -210,6 +210,18 @@
     "required": 2
    }
   ],
+  "study_answer_set": [
+   {
+    "args": [
+     "p_question",
+     "p_choices",
+     "p_mode",
+     "p_ms",
+     "p_confidence"
+    ],
+    "required": 2
+   }
+  ],
   "study_answers_mistake_card": [
    {
     "args": [],
@@ -616,6 +628,17 @@
     "required": 3
    }
   ],
+  "study_draft_check_set": [
+   {
+    "args": [
+     "p_draft",
+     "p_seq",
+     "p_ambiguous",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
   "study_draft_keep": [
    {
     "args": [
@@ -890,6 +913,15 @@
      "p_lecture"
     ],
     "required": 1
+   }
+  ],
+  "study_lecture_set_geo": [
+   {
+    "args": [
+     "p_lecture",
+     "p_geo"
+    ],
+    "required": 2
    }
   ],
   "study_loot_done": [
@@ -1854,6 +1886,14 @@
     "required": 1
    }
   ],
+  "study_question_set_feedback": [
+   {
+    "args": [
+     "p_ids"
+    ],
+    "required": 1
+   }
+  ],
   "study_question_still_true": [
    {
     "args": [
@@ -2618,7 +2658,8 @@
    "mode",
    "ms",
    "answered_at",
-   "confidence"
+   "confidence",
+   "choices"
   ],
   "study_boss_battles": [
    "id",
@@ -3200,7 +3241,9 @@
    "takeaway",
    "whens",
    "solver_choice",
-   "solver_ambiguous"
+   "solver_ambiguous",
+   "seq",
+   "solver_seq"
   ],
   "study_question_drafts": [
    "id",
@@ -3236,7 +3279,11 @@
    "decided_by",
    "decided_at",
    "created_at",
-   "updated_at"
+   "updated_at",
+   "form",
+   "layout",
+   "series",
+   "step"
   ],
   "study_question_flags": [
    "id",
@@ -3254,7 +3301,8 @@
    "key_by",
    "key_at",
    "held_until",
-   "whens"
+   "whens",
+   "seq"
   ],
   "study_question_requests": [
    "id",
@@ -3316,6 +3364,10 @@
    "style",
    "points",
    "request_id",
+   "form",
+   "layout",
+   "series",
+   "step",
    "author_id",
    "unmasked_at"
   ],

@@ -1436,7 +1436,8 @@ begin
       raise exception 'bad points';
     end if;
     sl := array(select v::int from jsonb_array_elements_text(x -> 'slides') v);
-    if coalesce(x ->> 'kind', '') not in ('drug', 'mechanism', 'indication', 'adverse', 'contra', 'number')
+    if coalesce(x ->> 'kind', '') not in ('drug', 'mechanism', 'indication', 'adverse', 'contra', 'number',
+                                          'structure', 'process', 'finding')   -- Q 3
        or char_length(btrim(coalesce(x ->> 'text', ''))) not between 3 and 300
        or char_length(btrim(coalesce(x ->> 'subject', ''))) > 120
        or cardinality(sl) not between 1 and 20 or not (sl <@ have)
@@ -1582,7 +1583,8 @@ language plpgsql volatile security definer set search_path = public as $$
 #variable_conflict use_column
 declare
   g      uuid := public.study_lecture_group(p_lecture);
-  sty    constant text[] := array['case', 'mechanism', 'drug_choice', 'adverse_contra', 'compare', 'not_true', 'blank_table'];
+  sty    constant text[] := array['case', 'mechanism', 'drug_choice', 'adverse_contra', 'compare', 'not_true', 'blank_table',
+                                   'image', 'label', 'steps', 'tf', 'match', 'order'];   -- Q 3: the question types
   total  int;
   parts  int[];
   styles text[];
@@ -1614,7 +1616,7 @@ begin
   if coalesce(p_request ->> 'level', '') not in ('focused', 'full', 'deep', 'custom')
      or coalesce(p_request ->> 'difficulty', '') not in ('easy', 'exam', 'hard')
      or total not between 1 and 40 or cardinality(parts) not between 1 and 60
-     or cardinality(styles) not between 1 and 7 or not (styles <@ sty)
+     or cardinality(styles) not between 1 and 13 or not (styles <@ sty)
      or char_length(coalesce(p_request ->> 'style_note', '')) > 400
      or char_length(coalesce(p_request ->> 'style_example', '')) > 2000
      or char_length(btrim(coalesce(p_request ->> 'focus', ''))) > 200 then
@@ -1750,6 +1752,7 @@ declare
   have int[];
   pgen int;
   did  uuid;
+  fp   jsonb;                                        -- Q 3: the form, layout, set key and step (form_parse)
 begin
   if exists (select 1 from jsonb_array_elements_text(coalesce(p_q -> 'slides', '[]'::jsonb)) v where v !~ '^[0-9]{1,4}$')
      or exists (select 1 from jsonb_array_elements_text(coalesce(p_q -> 'points', '[]'::jsonb)) v
@@ -1760,11 +1763,16 @@ begin
   pts := array(select v::uuid from jsonb_array_elements_text(coalesce(p_q -> 'points', '[]'::jsonb)) v);
   if coalesce(p_q ->> 'kind', '') not in ('mcq', 'case') then raise exception 'bad kind'; end if;
   if cardinality(opts) not between 2 and 6 then raise exception 'bad options'; end if;
-  if ans is null or ans >= cardinality(opts) then raise exception 'bad answer'; end if;
+  if ans >= cardinality(opts) then raise exception 'bad answer'; end if;
   if cardinality(expl) <> cardinality(opts) then raise exception 'explanations do not match options'; end if;
   if cardinality(whn) not in (0, cardinality(opts)) then raise exception 'whens do not match options'; end if;
   if cardinality(tags) not in (0, cardinality(opts)) then raise exception 'tags do not match options'; end if;
   if not (sty = any (rq.styles)) then raise exception 'bad style'; end if;
+  -- Q 3: a set question (tf, match, order) has no one answer: its key is seq.
+  fp := study_private.form_parse(p_q, opts, b.lecture_id, sty);
+  if (fp ->> 'form') in ('tf', 'match', 'order') then ans := null;
+  elsif ans is null then raise exception 'bad answer';
+  end if;
   if not (pts <@ b.points) then raise exception 'bad points'; end if;
   select coalesce(array_agg((s ->> 'n')::int), '{}') into have
     from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = b.lecture_id;
@@ -1781,7 +1789,8 @@ begin
   end if;
   insert into public.study_question_drafts (group_id, lecture_id, request_id, batch_id, part_idx, style, points, kind, difficulty,
                                             vignette, question, options, slides, topic, aspect, anchor, quote, part_gen, teaser,
-                                            figure, option_tags, rewrites, replaces, model, created_by)
+                                            figure, option_tags, rewrites, replaces, model, created_by,
+                                            form, layout, series, step, check_state)
   values (rq.group_id, b.lecture_id, rq.id, b.id, b.part_idx, sty, pts, p_q ->> 'kind',
           case when coalesce(p_q ->> 'difficulty', '') ~ '^[1-3]$' then (p_q ->> 'difficulty')::int else 2 end,
           coalesce(p_q ->> 'vignette', ''), p_q ->> 'question', opts, sl, left(coalesce(p_q ->> 'topic', ''), 120),
@@ -1789,10 +1798,14 @@ begin
           case when para is null then '' else left(coalesce(p_q ->> 'quote', ''), 200) end,
           case when para is null then null else pgen end,
           left(btrim(coalesce(p_q ->> 'teaser', '')), 120), fig, tags, coalesce(p_rewrites, 0), p_replaces,
-          left(p_q ->> 'model', 80), rq.created_by)
+          left(p_q ->> 'model', 80), rq.created_by,
+          fp ->> 'form', case when jsonb_typeof(fp -> 'layout') = 'object' then fp -> 'layout' end,
+          (fp ->> 'series')::uuid, (fp ->> 'step')::smallint,
+          case when sty = 'label' then 'ok' else 'checking' end)   -- a label item is keyed by the slide's geometry
   returning id into did;
-  insert into public.study_question_draft_keys (draft_id, answer, explanations, takeaway, whens)
-  values (did, ans, expl, left(coalesce(p_q ->> 'takeaway', ''), 600), whn);
+  insert into public.study_question_draft_keys (draft_id, answer, explanations, takeaway, whens, seq)
+  values (did, ans, expl, left(coalesce(p_q ->> 'takeaway', ''), 600), whn,
+          case when jsonb_typeof(fp -> 'seq') = 'array' then array(select v::smallint from jsonb_array_elements_text(fp -> 'seq') v) end);
   return did;
 end;
 $$;
@@ -1814,10 +1827,20 @@ begin
     raise exception 'batch not found';
   end if;
   if b.status <> 'writing' then raise exception 'batch not writing'; end if;
-  if b.made >= b.wanted then raise exception 'part full'; end if;
+  -- Q 3: a staged case's later steps are not items of their own: they follow
+  -- their step 1 in the same batch and never count.
+  if coalesce(nullif(p_q ->> 'step', ''), '1') <> '1'
+     and (coalesce(p_q ->> 'series', '') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          or not exists (select 1 from public.study_question_drafts x
+                          where x.batch_id = p_batch and x.series = (p_q ->> 'series')::uuid and x.step = 1)) then
+    raise exception 'bad form';
+  end if;
+  if coalesce(nullif(p_q ->> 'step', ''), '1') = '1' and b.made >= b.wanted then raise exception 'part full'; end if;
   select * into rq from public.study_question_requests x where x.id = b.request_id;
   did := study_private.draft_insert(b, rq, p_q, null, null, 0);
-  update public.study_question_batches x set made = x.made + 1, updated_at = now() where x.id = p_batch;
+  update public.study_question_batches x
+     set made = x.made + case when coalesce(nullif(p_q ->> 'step', ''), '1') = '1' then 1 else 0 end, updated_at = now()
+   where x.id = p_batch;
   return did;
 end;
 $$;
@@ -1868,6 +1891,7 @@ begin
     raise exception 'draft not found';
   end if;
   if d.status <> 'pending' then raise exception 'not pending'; end if;
+  if d.series is not null then raise exception 'not for steps'; end if;   -- Q 3: a staged case is kept or removed whole
   if d.lease_until > now() then raise exception 'busy'; end if;
   if d.rewrites >= 4 then raise exception 'reword limit'; end if;
   update public.study_question_drafts x set lease_until = now() + interval '330 seconds', updated_at = now() where x.id = p_draft;
@@ -1905,6 +1929,7 @@ begin
   select * into d from public.study_question_drafts x where x.id = p_draft for update;
   if not found or not public.study_is_member(d.group_id) then raise exception 'draft not found'; end if;
   if d.status <> 'pending' then raise exception 'not pending'; end if;
+  if d.series is not null then raise exception 'not for steps'; end if;   -- Q 3
   if coalesce(p_auto, false) and (d.check_state <> 'failed' or d.rewrites >= 2) then raise exception 'rewrite limit'; end if;
   if not coalesce(p_auto, false) and d.rewrites >= 4 then raise exception 'reword limit'; end if;
   select * into b from public.study_question_batches x where x.id = d.batch_id;
@@ -1929,7 +1954,9 @@ begin
   if not found or not public.study_is_member(d.group_id) then raise exception 'draft not found'; end if;
   if d.status <> 'pending' then raise exception 'not pending'; end if;
   if d.check_state <> 'failed' then raise exception 'not failed'; end if;
-  update public.study_question_drafts x set status = 'rejected', lease_until = null, updated_at = now() where x.id = p_draft;
+  -- Q 3: one failed step rejects its whole staged case (one item of the batch).
+  update public.study_question_drafts x set status = 'rejected', lease_until = null, updated_at = now()
+   where x.id = p_draft or (d.series is not null and x.series = d.series and x.status = 'pending');
   update public.study_question_batches x
      set made = greatest(0, x.made - 1), solver_rejected = x.solver_rejected + 1, updated_at = now()
    where x.id = d.batch_id;
@@ -1947,13 +1974,13 @@ begin
   select * into k from public.study_question_draft_keys x where x.draft_id = d.id;
   insert into public.study_questions (group_id, lecture_id, batch_id, source, part_idx, kind, difficulty, vignette, question,
                                       options, slides, topic, aspect, has_key, model, anchor, quote, part_gen, teaser, figure,
-                                      option_tags, style, points, request_id, created_by)
+                                      option_tags, style, points, request_id, created_by, form, layout, series, step)
   values (d.group_id, d.lecture_id, d.batch_id, 'ai', d.part_idx, d.kind, d.difficulty, d.vignette, d.question,
           d.options, d.slides, d.topic, d.aspect, true, d.model, d.anchor, d.quote, d.part_gen, d.teaser, d.figure,
-          d.option_tags, d.style, d.points, d.request_id, d.created_by)
+          d.option_tags, d.style, d.points, d.request_id, d.created_by, d.form, d.layout, d.series, d.step)
   returning id into qid;
-  insert into public.study_question_keys (question_id, answer, explanations, takeaway, whens)
-  values (qid, k.answer, k.explanations, k.takeaway, k.whens);
+  insert into public.study_question_keys (question_id, answer, explanations, takeaway, whens, seq)
+  values (qid, k.answer, k.explanations, k.takeaway, k.whens, k.seq);
   update public.study_question_drafts x
      set status = 'kept', question_id = qid, decided_by = auth.uid(), decided_at = now(), lease_until = null, updated_at = now()
    where x.id = d.id;
@@ -1969,6 +1996,9 @@ returns uuid language plpgsql volatile security definer set search_path = public
 declare
   lec uuid;
   d   public.study_question_drafts;
+  s   public.study_question_drafts;
+  qid uuid;
+  one uuid;
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   select x.lecture_id into lec from public.study_question_drafts x where x.id = p_draft;
@@ -1980,6 +2010,27 @@ begin
     raise exception 'lecture not found';
   end if;
   if d.status <> 'pending' then raise exception 'not pending'; end if;
+  if d.series is not null then
+    -- Q 3: a staged case: every pending step, under the same lock, step 1's id back.
+    perform 1 from public.study_question_drafts x where x.series = d.series and x.status = 'pending' for update;
+    if exists (select 1 from public.study_question_drafts x where x.series = d.series and x.status = 'pending'
+                and x.check_state not in ('ok', 'unchecked')) then
+      raise exception 'not checked';
+    end if;
+    if exists (select 1 from public.study_question_drafts x where x.series = d.series and x.status = 'pending'
+                and x.lease_until > now()) then
+      raise exception 'busy';
+    end if;
+    if (select count(*) from public.study_questions q where q.lecture_id = d.lecture_id and q.retired_at is null)
+       + (select count(*) from public.study_question_drafts x where x.series = d.series and x.status = 'pending') > 150 then
+      raise exception 'enough questions';
+    end if;
+    for s in select * from public.study_question_drafts x where x.series = d.series and x.status = 'pending' order by x.step loop
+      qid := study_private.draft_to_bank(s);
+      if one is null then one := qid; end if;
+    end loop;
+    return one;
+  end if;
   if d.check_state not in ('ok', 'unchecked') then raise exception 'not checked'; end if;
   if d.lease_until > now() then raise exception 'busy'; end if;
   if (select count(*) from public.study_questions q where q.lecture_id = d.lecture_id and q.retired_at is null) >= 150 then
@@ -1999,8 +2050,10 @@ language plpgsql volatile security definer set search_path = public as $$
 declare
   rq   public.study_question_requests;
   d    public.study_question_drafts;
+  s    public.study_question_drafts;
   room int;
   n    int := 0;
+  m    int;
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   select * into rq from public.study_question_requests x where x.id = p_request;
@@ -2013,8 +2066,26 @@ begin
   for d in select * from public.study_question_drafts x
             where x.request_id = p_request and x.status = 'pending' and x.check_state in ('ok', 'unchecked')
               and (x.lease_until is null or x.lease_until <= now())
+              and coalesce(x.step, 1) = 1                                  -- Q 3: a staged case from its step 1
             order by x.part_idx, x.created_at, x.id
             for update loop
+    if d.series is not null then
+      -- Q 3: every step must qualify, else the case waits; it is kept whole.
+      continue when exists (select 1 from public.study_question_drafts y where y.series = d.series and y.status = 'pending'
+                             and (y.check_state not in ('ok', 'unchecked') or y.lease_until > now()));
+      select count(*)::int into m from public.study_question_drafts y where y.series = d.series and y.status = 'pending';
+      if n + m > room then
+        if n = 0 then raise exception 'enough questions'; end if;
+        exit;
+      end if;
+      for s in select * from public.study_question_drafts y where y.series = d.series and y.status = 'pending' order by y.step for update loop
+        draft_id := s.id;
+        question_id := study_private.draft_to_bank(s);
+        n := n + 1;
+        return next;
+      end loop;
+      continue;
+    end if;
     if n >= room then
       if n = 0 then raise exception 'enough questions'; end if;
       exit;
@@ -2036,10 +2107,14 @@ begin
   select * into d from public.study_question_drafts x where x.id = p_draft for update;
   if not found or not public.study_is_member(d.group_id) then raise exception 'draft not found'; end if;
   if d.status <> 'pending' then raise exception 'not pending'; end if;
-  if d.lease_until > now() then raise exception 'busy'; end if;
+  if d.lease_until > now()
+     or (d.series is not null and exists (select 1 from public.study_question_drafts x
+                                           where x.series = d.series and x.status = 'pending' and x.lease_until > now())) then
+    raise exception 'busy';
+  end if;
   update public.study_question_drafts x
      set status = 'removed', decided_by = auth.uid(), decided_at = now(), updated_at = now()
-   where x.id = p_draft;
+   where x.id = p_draft or (d.series is not null and x.series = d.series and x.status = 'pending');   -- Q 3: the whole staged case
 end;
 $$;
 
@@ -2064,12 +2139,12 @@ begin
            where d.request_id = rq.id and d.part_idx = p.idx and d.status in ('pending', 'kept') and d.check_state <> 'failed'
              and u = any (rq.points)),
          (select coalesce(sum(b.wanted), 0)::int from public.study_question_batches b where b.request_id = rq.id and b.part_idx = p.idx),
-         (select count(*)::int from public.study_question_drafts d where d.request_id = rq.id and d.part_idx = p.idx and d.status in ('pending', 'kept')),
-         (select count(*)::int from public.study_question_drafts d where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'kept'),
-         (select count(*)::int from public.study_question_drafts d where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'pending'),
-         (select count(*)::int from public.study_question_drafts d
+         (select count(distinct coalesce(d.series, d.id))::int from public.study_question_drafts d where d.request_id = rq.id and d.part_idx = p.idx and d.status in ('pending', 'kept')),
+         (select count(distinct coalesce(d.series, d.id))::int from public.study_question_drafts d where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'kept'),
+         (select count(distinct coalesce(d.series, d.id))::int from public.study_question_drafts d where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'pending'),
+         (select count(distinct coalesce(d.series, d.id))::int from public.study_question_drafts d
            where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'pending' and d.check_state = 'checking'),
-         (select count(*)::int from public.study_question_drafts d
+         (select count(distinct coalesce(d.series, d.id))::int from public.study_question_drafts d
            where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'pending' and d.check_state = 'failed'),
          exists (select 1 from public.study_question_batches b where b.request_id = rq.id and b.part_idx = p.idx and b.status in ('pending', 'writing'))
     from unnest(rq.parts) as p(idx)
@@ -2284,6 +2359,227 @@ begin
 end $$;
 
 insert into study_private.schema_sections (section, version) values ('Q', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Q 3 · QUESTION TYPES: COLUMNS   (docs/study/question-types.md)
+--  Appended at the END of section Q, inside its markers. Every question
+--  before it is form 'one' and works as it did. The forms: one (a single
+--  answer, study_answer_question), tap ("באיזה מספר מסומן X?": options are
+--  pin numbers, a single answer), and the set forms tf, match and order
+--  (study_question_keys.answer null and seq the key; study_answers.choice
+--  null and choices the answer; section X answers them). layout: what the
+--  screen draws (a picture's crop and masks, a label's pins, a match's
+--  prompts, a staged case's carried text). series and step: a staged case's
+--  2-3 rows, each a whole one-answer question. Re-runnable.
+-- ════════════════════════════════════════════════════════════════════════
+alter table public.study_questions
+  add column if not exists form   text     not null default 'one',
+  add column if not exists layout jsonb,
+  add column if not exists series uuid,
+  add column if not exists step   smallint;
+alter table public.study_question_drafts
+  add column if not exists form   text     not null default 'one',
+  add column if not exists layout jsonb,
+  add column if not exists series uuid,
+  add column if not exists step   smallint;
+alter table public.study_question_keys add column if not exists seq smallint[];
+alter table public.study_question_draft_keys
+  add column if not exists seq        smallint[],
+  add column if not exists solver_seq smallint[];          -- what the blind solver placed (a set draft)
+alter table public.study_question_draft_keys alter column answer drop not null;   -- a set draft's key is seq
+alter table public.study_answers add column if not exists choices smallint[];
+
+-- The checks, by name (added once), and the style, aspect and kind lists
+-- widened: each inline check is found by its definition (its generated name
+-- is not guessed), dropped and added again under a name.
+do $$
+declare
+  t text;
+  c record;
+  sty constant text := '''case'', ''mechanism'', ''drug_choice'', ''adverse_contra'', ''compare'', ''not_true'', ''blank_table'', '
+                    || '''image'', ''label'', ''steps'', ''tf'', ''match'', ''order''';
+  asp constant text := '''mechanism'', ''uses'', ''pk'', ''adverse'', ''contra'', ''interactions'', ''resistance'', ''dosing'', '
+                    || '''classification'', ''epidemiology'', ''lifecycle'', ''pathogenesis'', ''clinical'', ''diagnosis'', '
+                    || '''treatment'', ''prevention'', ''anatomy'', ''histology'', ''physiology'', ''imaging'', ''other''';
+begin
+  foreach t in array array['study_questions', 'study_question_drafts'] loop
+    if not exists (select 1 from pg_constraint where conname = t || '_form_x') then
+      execute format('alter table public.%I add constraint %I check (form in (''one'', ''tap'', ''tf'', ''match'', ''order''))', t, t || '_form_x');
+    end if;
+    if not exists (select 1 from pg_constraint where conname = t || '_step_x') then
+      execute format('alter table public.%I add constraint %I check ((series is null) = (step is null) and (step is null or step between 1 and 3))',
+                     t, t || '_step_x');
+    end if;
+    if not exists (select 1 from pg_constraint where conname = t || '_layout_x') then
+      execute format('alter table public.%I add constraint %I check (layout is null or (jsonb_typeof(layout) = ''object'' and pg_column_size(layout) <= 16000))',
+                     t, t || '_layout_x');
+    end if;
+    for c in select x.conname from pg_constraint x
+              where x.conrelid = ('public.' || t)::regclass and x.contype = 'c' and x.conname <> t || '_style_x'
+                and pg_get_constraintdef(x.oid) like '%blank_table%' loop
+      execute format('alter table public.%I drop constraint %I', t, c.conname);
+    end loop;
+    if not exists (select 1 from pg_constraint where conname = t || '_style_x') then
+      execute format('alter table public.%I add constraint %I check (style is null or style in (%s))', t, t || '_style_x', sty);
+    end if;
+    for c in select x.conname from pg_constraint x
+              where x.conrelid = ('public.' || t)::regclass and x.contype = 'c' and x.conname <> t || '_aspect_x'
+                and pg_get_constraintdef(x.oid) like '%prevention%' loop
+      execute format('alter table public.%I drop constraint %I', t, c.conname);
+    end loop;
+    if not exists (select 1 from pg_constraint where conname = t || '_aspect_x') then
+      execute format('alter table public.%I add constraint %I check (aspect in (%s))', t, t || '_aspect_x', asp);
+    end if;
+  end loop;
+  foreach t in array array['study_question_keys', 'study_question_draft_keys'] loop
+    if not exists (select 1 from pg_constraint where conname = t || '_seq_x') then
+      execute format('alter table public.%I add constraint %I check (seq is null or (cardinality(seq) between 2 and 6 and 0 <= all (seq) and 5 >= all (seq)))',
+                     t, t || '_seq_x');
+    end if;
+  end loop;
+  if not exists (select 1 from pg_constraint where conname = 'study_answers_choices_x') then
+    alter table public.study_answers add constraint study_answers_choices_x
+      check (choices is null or (cardinality(choices) between 2 and 6 and 0 <= all (choices) and 5 >= all (choices)));
+  end if;
+  for c in select x.conname from pg_constraint x
+            where x.conrelid = 'public.study_question_requests'::regclass and x.contype = 'c'
+              and x.conname <> 'study_question_requests_styles_x' and pg_get_constraintdef(x.oid) like '%blank_table%' loop
+    execute format('alter table public.study_question_requests drop constraint %I', c.conname);
+  end loop;
+  if not exists (select 1 from pg_constraint where conname = 'study_question_requests_styles_x') then
+    execute format('alter table public.study_question_requests add constraint study_question_requests_styles_x '
+                   'check (cardinality(styles) between 1 and 13 and styles <@ array[%s])', sty);
+  end if;
+  -- study_points.kind: structure, process and finding (anatomy, physiology, imaging lectures)
+  for c in select x.conname from pg_constraint x
+            where x.conrelid = 'public.study_points'::regclass and x.contype = 'c'
+              and x.conname <> 'study_points_kind_x' and pg_get_constraintdef(x.oid) like '%indication%' loop
+    execute format('alter table public.study_points drop constraint %I', c.conname);
+  end loop;
+  if not exists (select 1 from pg_constraint where conname = 'study_points_kind_x') then
+    alter table public.study_points add constraint study_points_kind_x
+      check (kind in ('drug', 'mechanism', 'indication', 'adverse', 'contra', 'number', 'structure', 'process', 'finding'));
+  end if;
+end $$;
+create index if not exists study_questions_series on public.study_questions (series, step) where series is not null;
+create index if not exists study_question_drafts_series on public.study_question_drafts (series, step) where series is not null;
+
+-- A writer's item's form, layout, set key and step, checked against its
+-- style and options (draft_insert, above, calls it). Returns
+-- { form, layout, seq, series, step } or raises 'bad form':
+--   image, steps and the seven older styles: form one;
+--   label: one (name mode) or tap ("באיזה מספר מסומן X?": options '1'…'m',
+--     3-6, one pin each); layout.fig the item's figure, a picture of the
+--     lecture; 3-12 pins, every coordinate within -0.5..1.5;
+--   tf: 3-5 statements, seq 0/1 per statement with both present;
+--   match: 3-5 prompts (≤120 characters), options the prompts or one more,
+--     seq distinct and in range;
+--   order: 3-6 steps, seq a permutation that is not the identity;
+--   steps: a series (uuid) and its step 1-3; no other style has one.
+create or replace function study_private.form_parse(p_q jsonb, opts text[], p_lecture uuid, p_style text)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  f    text   := coalesce(nullif(p_q ->> 'form', ''), 'one');
+  lay  jsonb  := case when jsonb_typeof(p_q -> 'layout') = 'object' then p_q -> 'layout' end;
+  n    int    := cardinality(opts);
+  sq   int[];
+  ser  uuid;
+  stp  int;
+  fig  text   := coalesce(p_q ->> 'figure', '');
+  np   int;
+  ans  int    := case when coalesce(p_q ->> 'answer', '') ~ '^[0-5]$' then (p_q ->> 'answer')::int end;
+  hasf boolean;                                    -- the figure is one of the lecture's pictures
+begin
+  hasf := fig ~ '^fig:[0-9]{1,4}-[0-9]{1,3}$'
+          and exists (select 1 from public.study_lectures l, jsonb_array_elements(l.slides) s,
+                             jsonb_array_elements(coalesce(s -> 'figures', '[]'::jsonb)) g
+                       where l.id = p_lecture and (s ->> 'n')::int = split_part(substr(fig, 5), '-', 1)::int
+                         and (g ->> 'k')::int = split_part(substr(fig, 5), '-', 2)::int);
+  if f not in ('one', 'tap', 'tf', 'match', 'order') then raise exception 'bad form'; end if;
+  if p_q ? 'layout' and jsonb_typeof(p_q -> 'layout') not in ('object', 'null') then raise exception 'bad form'; end if;
+  if lay is not null and pg_column_size(lay) > 16000 then raise exception 'bad form'; end if;
+  if jsonb_typeof(p_q -> 'seq') = 'array' then
+    if jsonb_array_length(p_q -> 'seq') > 6
+       or exists (select 1 from jsonb_array_elements_text(p_q -> 'seq') v where v !~ '^[0-9]$') then
+      raise exception 'bad form';
+    end if;
+    sq := array(select v::int from jsonb_array_elements_text(p_q -> 'seq') v);
+  end if;
+  if coalesce(p_q ->> 'series', '') <> '' then
+    if (p_q ->> 'series') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then raise exception 'bad form'; end if;
+    ser := (p_q ->> 'series')::uuid;
+  end if;
+  if coalesce(p_q ->> 'step', '') <> '' then
+    if (p_q ->> 'step') !~ '^[1-3]$' then raise exception 'bad form'; end if;
+    stp := (p_q ->> 'step')::int;
+  end if;
+  if (ser is null) <> (stp is null) or (ser is not null) <> (p_style = 'steps') then raise exception 'bad form'; end if;
+  -- The form the style must have.
+  if (p_style = 'label' and f not in ('one', 'tap'))
+     or (p_style in ('tf', 'match', 'order') and f <> p_style)
+     or (p_style not in ('label', 'tf', 'match', 'order') and f <> 'one') then
+    raise exception 'bad form';
+  end if;
+  if f in ('one', 'tap') and sq is not null then raise exception 'bad form'; end if;
+  if f in ('tf', 'match', 'order') and (sq is null or ans is not null) then raise exception 'bad form'; end if;
+  if p_style = 'label' then
+    np := case when jsonb_typeof(lay -> 'pins') = 'array' then jsonb_array_length(lay -> 'pins') else 0 end;
+    if lay is null or coalesce(lay ->> 'kind', '') <> 'label' or coalesce(lay ->> 'mode', '') <> (case when f = 'tap' then 'tap' else 'name' end)
+       or coalesce(lay ->> 'fig', '') <> fig or not hasf
+       or np not between 3 and 12
+       or exists (select 1 from jsonb_array_elements(lay -> 'pins') p
+                   where jsonb_typeof(p -> 'x') <> 'number' or jsonb_typeof(p -> 'y') <> 'number'
+                      or (p ->> 'x')::numeric not between -0.5 and 1.5 or (p ->> 'y')::numeric not between -0.5 and 1.5) then
+      raise exception 'bad form';
+    end if;
+    if f = 'tap' and (n not between 3 and 6 or np <> n or ans is null
+                      or opts <> array(select i::text from generate_series(1, n) i)) then
+      raise exception 'bad form';
+    end if;
+    if f = 'one' and (coalesce(lay ->> 'ask', '') !~ '^[0-9]{1,2}$'
+                      or not exists (select 1 from jsonb_array_elements(lay -> 'pins') p where p ->> 'n' = lay ->> 'ask')) then
+      raise exception 'bad form';
+    end if;
+  elsif p_style = 'image' then
+    if not hasf or (lay is not null and (coalesce(lay ->> 'kind', '') <> 'image' or coalesce(lay ->> 'fig', '') <> fig)) then
+      raise exception 'bad form';
+    end if;
+  elsif f = 'tf' then
+    if n not between 3 and 5 or cardinality(sq) <> n or exists (select 1 from unnest(sq) v where v not in (0, 1))
+       or not (1 = any (sq)) or not (0 = any (sq)) or lay is not null then
+      raise exception 'bad form';
+    end if;
+  elsif f = 'match' then
+    np := case when jsonb_typeof(lay -> 'prompts') = 'array' then jsonb_array_length(lay -> 'prompts') else 0 end;
+    if coalesce(lay ->> 'kind', '') <> 'match' or np not between 3 and 5 or n not in (np, np + 1) or cardinality(sq) <> np
+       or exists (select 1 from jsonb_array_elements(lay -> 'prompts') p
+                   where jsonb_typeof(p) <> 'string' or char_length(btrim(p #>> '{}')) not between 1 and 120)
+       or exists (select 1 from unnest(sq) v where v >= n)
+       or (select count(distinct v) from unnest(sq) v) <> np then
+      raise exception 'bad form';
+    end if;
+  elsif f = 'order' then
+    if n not between 3 and 6 or cardinality(sq) <> n
+       or (select count(distinct v) from unnest(sq) v where v < n) <> n
+       or sq = array(select i from generate_series(0, n - 1) i) or lay is not null then
+      raise exception 'bad form';
+    end if;
+  elsif p_style = 'steps' then
+    if lay is not null and (coalesce(lay ->> 'kind', '') <> 'steps' or coalesce(lay ->> 'of', '') not in ('2', '3')
+                            or stp > (lay ->> 'of')::int) then
+      raise exception 'bad form';
+    end if;
+  elsif lay is not null then
+    raise exception 'bad form';                    -- a plain question draws nothing
+  end if;
+  return jsonb_build_object('form', f, 'layout', lay, 'seq', case when sq is null then null else to_jsonb(sq) end,
+                            'series', ser, 'step', stp);
+end;
+$$;
+revoke all on function study_private.form_parse(jsonb, text[], uuid, text) from public;
+
+insert into study_private.schema_sections (section, version) values ('Q', 3)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 
 -- ════ END SECTION Q ════

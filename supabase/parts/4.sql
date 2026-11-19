@@ -1398,21 +1398,77 @@ declare
   b   text;
   x   text := '';
   cid uuid;
+  frm text;                        -- C 3, question types: the form, read through to_jsonb as the anchor
+  lay jsonb;
+  sq  int[];
+  ch  int[];
+  i   int;
+  tgt text;
+  fig text;
 begin
   select * into q from public.study_questions z where z.id = p_question;
   if not found or q.lecture_id is null or q.source = 'exam' then return null; end if;
   select * into k from public.study_question_keys z where z.question_id = p_question;
-  if not found or k.answer is null then return null; end if;
-  f := coalesce(nullif(btrim(to_jsonb(q) ->> 'teaser'), ''),
-                btrim(case when q.vignette <> '' then q.vignette || E'\n' else '' end || q.question));
-  if char_length(f) > 400 then f := btrim(regexp_replace(left(f, 399), '\s+\S*$', '')) || '…'; end if;
-  b := q.options[k.answer + 1] || coalesce(': ' || nullif(k.explanations[k.answer + 1], ''), '');
-  if char_length(b) > 300 then b := btrim(regexp_replace(left(b, 299), '\s+\S*$', '')) || '…'; end if;
-  if p_choice is not null and p_choice <> k.answer and p_choice < cardinality(q.options) then
-    x := 'ענית ' || q.options[p_choice + 1] || coalesce(': ' || nullif(k.explanations[p_choice + 1], ''), '');
-  elsif p_choice is null then
-    x := coalesce(nullif(k.takeaway, ''), '');
+  if not found then return null; end if;
+  frm := coalesce(to_jsonb(q) ->> 'form', 'one');
+  lay := to_jsonb(q) -> 'layout';
+  fig := coalesce(to_jsonb(q) ->> 'figure', '');
+  if frm in ('tf', 'match', 'order') then
+    -- A set question: the first element answered wrong, from the latest answer's choices.
+    sq := case when jsonb_typeof(to_jsonb(k) -> 'seq') = 'array'
+               then array(select v::int from jsonb_array_elements_text(to_jsonb(k) -> 'seq') v) end;
+    if sq is null or cardinality(sq) = 0 then return null; end if;
+    select case when jsonb_typeof(to_jsonb(a) -> 'choices') = 'array'
+                then array(select v::int from jsonb_array_elements_text(to_jsonb(a) -> 'choices') v) end
+      into ch
+      from public.study_answers a where a.user_id = p_user and a.question_id = p_question
+     order by a.answered_at desc, a.id limit 1;
+    if ch is not null and cardinality(ch) = cardinality(sq) then
+      i := (select min(j) from generate_subscripts(sq, 1) j where ch[j] is distinct from sq[j]);
+      if i is null then return null; end if;
+    end if;
+    if i is null then
+      -- "לא יודעים": the question, the whole key, the takeaway.
+      f := btrim(case when q.vignette <> '' then q.vignette || E'\n' else '' end || q.question);
+      b := case frm
+             when 'tf' then (select string_agg(case when sq[j] = 1 then 'נכון' else 'לא נכון' end || ': ' || q.options[j], ' · ' order by j)
+                               from generate_subscripts(sq, 1) j)
+             when 'match' then (select string_agg(coalesce(lay -> 'prompts' ->> (j - 1), '') || ' – ' || q.options[sq[j] + 1], ' · ' order by j)
+                                  from generate_subscripts(sq, 1) j)
+             else (select string_agg(j || '. ' || q.options[sq[j] + 1], ' → ' order by j) from generate_subscripts(sq, 1) j)
+           end;
+      x := coalesce(nullif(k.takeaway, ''), '');
+    elsif frm = 'tf' then
+      f := 'נכון או לא נכון: ' || q.options[i];
+      b := case when sq[i] = 1 then 'נכון' else 'לא נכון' end || coalesce(': ' || nullif(k.explanations[i], ''), '');
+    elsif frm = 'match' then
+      f := coalesce(nullif(lay -> 'prompts' ->> (i - 1), ''), q.question) || ' – מה מתאים?';
+      b := q.options[sq[i] + 1] || coalesce(': ' || nullif(k.explanations[sq[i] + 1], ''), '');
+    else
+      f := btrim(case when q.vignette <> '' then q.vignette || E'\n' else '' end || q.question);
+      b := (select string_agg(j || '. ' || q.options[sq[j] + 1], ' → ' order by j) from generate_subscripts(sq, 1) j);
+    end if;
+  else
+    if k.answer is null then return null; end if;
+    if coalesce(to_jsonb(q) ->> 'style', '') = 'label' then
+      -- A label: where the structure is, on the slide's picture (the slide tag opens it).
+      tgt := case when frm = 'tap' then substring(q.question from 'מסומן (.+?)\?\s*$') else q.options[k.answer + 1] end;
+      f := 'בשרטוט שבשקף ' || coalesce(nullif(split_part(substr(fig, 5), '-', 1), ''), q.slides[1]::text, '') || ': איפה '
+           || coalesce(tgt, '') || '?';
+      b := coalesce(tgt, '') || coalesce(': ' || nullif(k.explanations[k.answer + 1], ''), '');
+    else
+      f := coalesce(nullif(btrim(to_jsonb(q) ->> 'teaser'), ''),
+                    btrim(case when q.vignette <> '' then q.vignette || E'\n' else '' end || q.question));
+      b := q.options[k.answer + 1] || coalesce(': ' || nullif(k.explanations[k.answer + 1], ''), '');
+    end if;
+    if p_choice is not null and p_choice <> k.answer and p_choice < cardinality(q.options) then
+      x := 'ענית ' || q.options[p_choice + 1] || coalesce(': ' || nullif(k.explanations[p_choice + 1], ''), '');
+    elsif p_choice is null then
+      x := coalesce(nullif(k.takeaway, ''), '');
+    end if;
   end if;
+  if char_length(f) > 400 then f := btrim(regexp_replace(left(f, 399), '\s+\S*$', '')) || '…'; end if;
+  if char_length(b) > 300 then b := btrim(regexp_replace(left(b, 299), '\s+\S*$', '')) || '…'; end if;
   if char_length(x) > 500 then x := btrim(regexp_replace(left(x, 499), '\s+\S*$', '')) || '…'; end if;
   insert into public.study_my_cards (user_id, group_id, lecture_id, part_idx, anchor, origin, question_id, front, back, extra, slides)
   values (p_user, q.group_id, q.lecture_id, q.part_idx, (to_jsonb(q) ->> 'anchor')::int, p_origin, p_question, f, b, x,
@@ -1591,6 +1647,10 @@ grant execute on function public.study_card_round(uuid, text), public.study_card
   to authenticated;
 
 insert into study_private.schema_sections (section, version) values ('C', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- C 3 (question types): the card of a set question's mistake (the first
+-- element answered wrong) and of a label's ("בשרטוט שבשקף N: איפה X?").
+insert into study_private.schema_sections (section, version) values ('C', 3)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION C ════
 
