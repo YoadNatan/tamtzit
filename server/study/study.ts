@@ -168,9 +168,23 @@ export const OP_SCHEMA: Readonly<Record<string, Readonly<Record<string, number>>
   bank: { B: 1 }, // work.ts's bank branch: the points read ahead (package B, decision 2 of 17 Nov 2026)
 };
 
-/** What a call of `op` needs of the schema: every call's sections and the op's. */
+/** The needs of an op's variant that the op's name does not carry
+ *  (OP_SCHEMA lists §12.2.2's ops and only those). Courses
+ *  (docs/study/sources.md B8): op "ask" with scope "course" reads
+ *  study_courses (S 1) besides K's end, and op "questions" in a round over
+ *  several lectures (a planId) writes plan_id (S 1) besides Q's end. The op
+ *  checks its variant with assertSchema(sb, "<variant>") after the router's
+ *  check of the op. */
+export const VARIANT_SCHEMA: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+  ask_course: { K: 2, S: 1 },
+  questions_plan: { Q: 2, S: 1 },
+};
+
+/** What a call of `op` (or of a variant, VARIANT_SCHEMA) needs of the
+ *  schema: every call's sections and the op's. */
 export function schemaFor(op?: string): Record<string, number> {
-  return { ...REQUIRED_SCHEMA, ...(op && Object.hasOwn(OP_SCHEMA, op) ? OP_SCHEMA[op] : {}) };
+  const own = op && Object.hasOwn(OP_SCHEMA, op) ? OP_SCHEMA[op] : op && Object.hasOwn(VARIANT_SCHEMA, op) ? VARIANT_SCHEMA[op] : {};
+  return { ...REQUIRED_SCHEMA, ...own };
 }
 
 /** What /api/study/health's schemaOk asks of the database: the server

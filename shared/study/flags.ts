@@ -67,6 +67,10 @@ export function flagsFrom(e: Record<string, unknown>) {
     // case, true/false, match and order. Section Q at 3 (the columns) and X 1
     // (answering a set, the geometry backfill).
     qtypes: practice && on(e.VITE_STUDY_QTYPES),
+    // Courses (docs/study/sources.md, phase 1): the course page, the batch
+    // upload, "לשאול על כל הקורס" and a round over several lectures. Section
+    // S at 1 (study_courses, plan_id) and the switch `courses`.
+    courses: on(e.VITE_STUDY_COURSES),
   } as const;
 }
 
@@ -144,6 +148,8 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     ...(f.boss ? { H: 2 } : {}),
     ...(f.groupPlan ? { G: 2 } : {}),
     ...(f.traps || f.blankTable ? { E: 1 } : {}),
+    // Courses (sources.md B8): section S at 1.
+    ...(f.courses ? { S: 1 } : {}),
     // f.guide needs nothing: the guide keeps its memory on the device.
   };
 }

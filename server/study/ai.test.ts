@@ -99,6 +99,7 @@ test("health's schemaOk asks for the server's sections and what the app built wi
   assert.deepEqual(healthSchema({ VITE_STUDY_QUESTIONS: "0", VITE_STUDY_PRACTICE: "1" }), { F: 1, W: 2, Q: 1, C: 1, K: 1 }, "only \"1\" turns a flag on");
   assert.deepEqual(healthSchema(set(["CORRECTIONS"])), { F: 1, W: 2, Q: 1, C: 1, K: 2 }, "corrections: K's end and W2's hardening");
   assert.deepEqual(healthSchema(set(["ASK"])), { F: 1, W: 2, Q: 1, C: 1, K: 2 }, "לשאול: K's end (W 2 is the server's own)");
+  assert.deepEqual(healthSchema(set(["COURSES"])), { F: 1, W: 2, Q: 1, C: 1, K: 1, S: 1 }, "courses: section S at 1");
 });
 
 test("the per-op needs are §12.2.2's (questions at Q 2, cards at C 2 and ask at K 2 with their ends)", () => {
@@ -125,6 +126,10 @@ test("the per-op needs are §12.2.2's (questions at Q 2, cards at C 2 and ask at
   assert.deepEqual(schemaFor("fix_check"), { ...REQUIRED_SCHEMA, K: 2 }, "an op's own version wins over every call's");
   assert.deepEqual(schemaFor(), REQUIRED_SCHEMA);
   assert.deepEqual(schemaFor("toString"), REQUIRED_SCHEMA, "an inherited name is no op");
+  // Courses (sources.md B8): an op's variant needs section S too; the variants are not ops.
+  assert.deepEqual(schemaFor("ask_course"), { ...REQUIRED_SCHEMA, K: 2, S: 1 });
+  assert.deepEqual(schemaFor("questions_plan"), { ...REQUIRED_SCHEMA, Q: 2, S: 1 });
+  assert.ok(!Object.hasOwn(OP_SCHEMA, "ask_course") && !Object.hasOwn(OP_SCHEMA, "questions_plan"));
 });
 
 test("a database older than an op needs answers 503 schema, op by op (§12.2.2)", async () => {
