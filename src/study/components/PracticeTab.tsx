@@ -136,7 +136,7 @@ export default function PracticeTab({ lc, spot }: { lc: LectureCtx; spot: Spot }
             <li key={c.id} className="a-li n-item" data-kind="card">
               <div>
                 <span className="a-row between">
-                  <span className="m">כרטיס</span>
+                  <span className="m">כרטיסייה</span>
                   <span className={`a-chip${st.tone ? ` ${st.tone}` : ""}`}>{st.label}</span>
                 </span>
                 <b dir="rtl">{isolateLatin(plain(c.kind === "cloze" ? clozeQuestion(c.front, "…") : c.front), `c${c.id}`)}</b>

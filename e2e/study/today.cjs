@@ -319,7 +319,7 @@ const dayOf = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusal
       expect((await noa.locator(".review-progress").innerText()).trim() === "0/13", `the review holds the cut's 13: ${await noa.locator(".review-progress").innerText()}`);
       if (flags.wall) {
         await noa.locator(".wall-hint").waitFor({ timeout: 10000 });
-        await noa.locator(".review-top .ph-sub", { hasText: "שכחת את הכרטיס הזה פעמיים, אז מגיע רמז" }).waitFor({ timeout: 5000 });
+        await noa.locator(".review-top .ph-sub", { hasText: "שכחת את הכרטיסייה הזו פעמיים, אז מגיע רמז" }).waitFor({ timeout: 5000 });
         expect((await noa.locator(".card-panel .a-chip.bad").innerText()).trim() === "נשכח פעמיים", "\"נשכח פעמיים\" and the wall's hint, with its line (cards.html s2)");
       }
       await shot(noa, "today-5-card-hint", { primary: ".ph-foot .a-btn.primary" });

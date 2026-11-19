@@ -236,7 +236,7 @@ const boxIn = (loc) => loc.evaluate((el) => {
       await card.waitFor({ timeout: 15000 });
       steps.update = (await card.innerText()).replace(/\n/g, " | ");
       expect(/עדכון בסיכום/.test(steps.update) && /תוקן אחרי שלמדת/.test(steps.update) && /תיקון: איתי · אישור: דניאל · מקור: שקף 6/.test(steps.update) && /רק לך/.test(steps.update), `the update card: ${steps.update}`);
-      expect(/חזרת על כרטיס שנשען על השורה הישנה/.test(steps.update), "why it reached her");
+      expect(/חזרת על כרטיסייה שנשענה על השורה הישנה/.test(steps.update), "why it reached her");
       expect(db.updates.filter((u) => !u.seen_at).length === 1 && db.updates[0].user_id === id("מאיה"), "one update, hers: not the author's or the approver's");
       await card.scrollIntoViewIfNeeded();
       a11y.push(...(await snap(maya, out, "v-7-update")));

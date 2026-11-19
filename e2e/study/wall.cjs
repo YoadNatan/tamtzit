@@ -8,7 +8,7 @@
 //      vote buttons.
 //   3. Votes: נועה "מצחיק", מאיה "נתקע לי" on שוהם's; the second vote makes
 //      it the would-be winner: one op wall_check (one reservation), then
-//      "בגב הכרטיס של כולם", live on איתי's page. "אסוציאציית השבוע" on
+//      "בגב הכרטיסייה של כולם", live on איתי's page. "אסוציאציית השבוע" on
 //      "יחד".
 //   4. Marks: איתי's "לא מדויק" takes the chip off; he lifts it and it comes
 //      back. "לא מתאים" hides דניאל's from נועה, not from דניאל.
@@ -204,8 +204,8 @@ const boxIn = (loc) => loc.evaluate((el) => {
       await entry(maya, "Furosemide חוסמת").getByRole("button", { name: /^נתקע לי/ }).click();
       await until(() => db.wallOps.some((o) => o.op === "wall_check" && o.answer), 10000, "the check");
       expect(db.wallOps.filter((o) => o.op === "wall_check").length === 1 && db.wallReserves.filter((r) => r.kind === "wall_check").length === 1, "the vote that makes it the would-be winner: one wall_check, one reservation");
-      await entry(itai, "Furosemide חוסמת").getByText("בגב הכרטיס של כולם").waitFor({ timeout: 10000 });
-      ok.push("\"בגב הכרטיס של כולם\" once checked, live on another page");
+      await entry(itai, "Furosemide חוסמת").getByText("בגב הכרטיסייה של כולם").waitFor({ timeout: 10000 });
+      ok.push("\"בגב הכרטיסייה של כולם\" once checked, live on another page");
       await itai.reload();
       await entry(itai, "Furosemide חוסמת").getByText("מנצחת השבוע").waitFor({ timeout: 10000 });
       a11y.push(...(await snap(itai, out, "j-3-wall", { primary: ".ph-foot .a-btn.primary" })));
@@ -230,11 +230,11 @@ const boxIn = (loc) => loc.evaluate((el) => {
       await e1.getByRole("button", { name: "עוד פעולות" }).click();
       await e1.getByRole("button", { name: "לא מדויק" }).click();
       await e1.getByText("סומן ׳לא מדויק׳ · איתי").waitFor({ timeout: 10000 });
-      expect((await e1.getByText("בגב הכרטיס של כולם").count()) === 0 && db.aidWinners.length === 0, "\"לא מדויק\" takes it off the cards");
+      expect((await e1.getByText("בגב הכרטיסייה של כולם").count()) === 0 && db.aidWinners.length === 0, "\"לא מדויק\" takes it off the cards");
       a11y.push(...(await snap(itai, out, "j-4-marked")));
       await e1.getByRole("button", { name: "עוד פעולות" }).click();
       await e1.getByRole("button", { name: "להסיר את הסימון" }).click();
-      await e1.getByText("בגב הכרטיס של כולם").waitFor({ timeout: 10000 });
+      await e1.getByText("בגב הכרטיסייה של כולם").waitFor({ timeout: 10000 });
       ok.push("its marker lifts the mark, and it is back on the cards");
       const e2 = entry(itai, "הלולאה של הרכבת");
       await e2.getByRole("button", { name: "עוד פעולות" }).click();

@@ -329,7 +329,7 @@ function lastSixPm() {
     const shownParts = await sh.locator(".deck-part[data-part]").count();
     const moreParts = (await sh.locator(".more-parts").innerText().catch(() => "")).trim();
     check(
-      "C3. the deck page: 5 כרטיסים · 8 חלקים · made once for the group; the ring at 0, no part in her deck, five rows and 'ועוד 3 חלקים', its name in Anki",
+      "C3. the deck page: 5 כרטיסיות · 8 חלקים · made once for the group; the ring at 0, no part in her deck, five rows and 'ועוד 3 חלקים', its name in Anki",
       /^5 כרטיסיות · \d+ חלקים · נוצרו פעם אחת לכל הקבוצה$/.test((await sh.locator(".deck-sub").innerText()).trim()) &&
         (await ring()) === 0 &&
         (await sh.getByText("בחפיסה שלך: 0 כרטיסיות").count()) === 1 &&
