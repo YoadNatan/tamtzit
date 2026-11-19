@@ -859,6 +859,7 @@ const HINTS: Hint[] = [
   { flag: "groupPlan", title: "תוכנית המרתון", say: "תוכנית של הקבוצה עד המבחן, ב״יחד״.", go: { v: "plan" } },
   { flag: "traps", title: "מלכודת משלי", say: "בפסקה אפשר לכתוב מלכודת משלך ולבדוק אותה.", walk: "read" },
   { flag: "blankTable", title: "טבלה ריקה", say: "טבלה מהשקפים למילוי מהזיכרון, בתרגול.", go: { v: "practice" } },
+  { flag: "qtypes", title: "סוגי שאלות", say: "חדש: עוד סוגי שאלות, גם על תמונות מהשקפים.", go: { v: "practice" } },
 ];
 
 /** The flags of a build that have a "חדש" line, on now. */

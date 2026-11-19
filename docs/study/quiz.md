@@ -111,6 +111,14 @@ Details that are easy to miss:
   of the players answered before first (counted from 3 players); in "כולנו
   נגד המבחן" in the lectures' order, in a race shuffled.
 
+**Question types** ([question-types.md](question-types.md)): the pickers (and
+the pool, the coffee preset, the boss) take one-answer questions only: plain
+ones, a question about a picture, a label by its number, and step 1 of a
+staged case; never a set (tf, match, order), a pin number to tap or a later
+step (section Z at 3). A question with a picture gets about 12 s more, and
+the room draws the picture under the lead-in (QuizMedia), its pins shown but
+never tapped.
+
 ## Left out (with their hook points)
 
 The addendum's Z's end is in the SQL as written; these parts of it wait for

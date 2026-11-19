@@ -59,6 +59,14 @@ Practice 2.0 (`proposal/practice-2/DECISIONS.md`, its four screens in
   "לפסקה", "סבב נוסף" (with the same choice), "רק הטעויות מהסבב".
 - **The library**: a chip "15 שאלות" on a lecture's card, to its practice.
 
+**Question types** (`VITE_STUDY_QTYPES`, [question-types.md](question-types.md)):
+besides multiple choice, a question about a slide's picture, a label to name
+("מה מסומן במספר 3?") or to find ("באיזה מספר מסומן X?"), נכון / לא נכון,
+התאמה, סידור and a staged clinical case. "שאלות חדשות" offers them in their
+own chip group; "סבב חדש" filters by "סוג שאלה". A set question (tf, match,
+order) is right only when every part is; the verdict shows how many were
+right ("✗ טעות · 3 מתוך 4").
+
 ## Who sees what
 
 The questions, their rounds and flags are the group's. The key and the

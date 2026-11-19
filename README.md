@@ -161,6 +161,8 @@ the page's build stamp, an old `/study/` link, `/api/study/health` and
 | `SEND_EMAIL_HOOK_SECRET`, `STUDY_TRANSCRIBE_KEY` | server | **secret**; for packages not built yet |
 | `VITE_STUDY_*` | build (and health on the server) | release flags, `1` or unset; the list is in [`.env.example`](.env.example) |
 
+The question types (`VITE_STUDY_QTYPES`, [`docs/study/question-types.md`](docs/study/question-types.md))
+are on in production once sections Q 3 and X 1 are loaded (part 2 and part 7).
 Release flags are compiled in at build time: set them in Production only
 (Preview uses the same database), then redeploy. A package's flag goes on
 only after its SQL has run and its code is merged

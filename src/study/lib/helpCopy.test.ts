@@ -58,6 +58,7 @@ const RELEASES: Array<[string, string[]]> = [
   ["12", R12],
   ["1 with the guide", G1],
   ["12 with the guide", [...R12, "GUIDE"]],
+  ["production with the question types", [...R9, "GUIDE", "QTYPES"]],
 ];
 const flagSet = (names: string[]): Flags => flagsFrom(Object.fromEntries(names.map((n) => [`VITE_STUDY_${n}`, "1"])));
 const W = { serverWrites: false, devicePrint: false };
@@ -80,6 +81,7 @@ const HELP: Array<[string, (f: Flags) => boolean]> = [
   ["כרטיס צהוב ו-VAR", (f) => f.var],
   ["סימון קריאה", () => true],
   ["תרגול", (f) => f.practice],
+  ["סוגי שאלות", (f) => f.qtypes], // question types (docs/study/question-types.md)
   ["מבחנים קודמים", (f) => f.exams],
   ["מלכודת משלי", (f) => f.traps],
   ["טבלה ריקה", (f) => f.blankTable], // package E, P10 (decision 3: usable early)
@@ -350,4 +352,14 @@ test("T-1: Today's help names only the rows the build queues (each waits for its
     "המסך הראשון: ״התור שלי״ לפי הזמן שיש (10, 20 או 45 דקות): כרטיסים שהגיע זמנם. מה שלא נכנס עובר למחר. הלהבה נדלקת ב-4 מתוך 7 ימים. הכול גלוי רק לך.",
   );
   assert.equal(today(["CARDS"]), "", "no Today, no row");
+});
+
+test("question types: help says which types there are and where to choose and filter them", () => {
+  const f = flagSet([...R9, "QTYPES"]);
+  const row = helpRows(f, W, ALL_ENDS).find((r) => r.title === "סוגי שאלות");
+  assert.equal(
+    row?.text,
+    "יש כמה סוגים: אמריקאית, שאלה על תמונה, סימון על תמונה (מה מסומן במספר, או באיזה מספר מסומן מבנה), התאמה, סידור, מקרה קליני בשלבים ונכון / לא נכון. בוחרים סוגים ב״שאלות חדשות״, ובתרגול אפשר לסנן לפי סוג.",
+  );
+  assert.ok(!helpRows(flagSet(R9), W, ALL_ENDS).some((r) => r.title === "סוגי שאלות"), "not without the flag");
 });

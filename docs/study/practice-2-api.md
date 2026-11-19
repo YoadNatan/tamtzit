@@ -330,6 +330,17 @@ not found`; 409 `not pending`, `busy` (being reworded on another phone),
 `reword limit` (four versions); 402/429 (40 a member a day). A rewrite that
 fails its checks writes nothing (`made: 0`) and frees the draft at once.
 
+**Question types** ([question-types.md](question-types.md)): the options'
+`styles` may also be image, label, steps, tf, match and order (13 keys).
+"plan" also answers `facts` (per part: tables, captioned pictures, labelled
+pictures, points by kind) and `defaults` (the types checked first for the
+chosen parts), and weighs `estimate.questionsUsd` by the planned types.
+"create" with a new type answers 409 `schema` until section X is loaded.
+"reword" of a staged case answers 409 `not for steps`. A draft line and a
+`q` line carry `form`, `layout`, `series` and `step`. A set draft is checked
+with `study_draft_check_set`; a label draft is saved `ok` (keyed by the
+picture's geometry) and never goes to the blind solver.
+
 ## 3. The RPCs
 
 Members call these with their token (`sb.rpc(name, args)`); the server-only
