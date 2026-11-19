@@ -123,9 +123,15 @@
 .m-plan .m-fields legend {
   padding: 0;
 }
-.m-plan .m-date,
+/* Date and time side by side while the date has room for its whole value
+   and Android's calendar icon; on a narrower phone (320 px) each takes the
+   whole row. */
+.m-plan .m-date {
+  flex: 1 1 10.5rem;
+  min-width: 0;
+}
 .m-plan .m-time {
-  flex: 1 1 0;
+  flex: 1 1 9rem;
   min-width: 0;
 }
 .m-plan .m-cancel {

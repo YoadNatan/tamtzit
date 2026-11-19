@@ -36,5 +36,5 @@ export function trimRun(run: string): string {
  *  as "Nov 2026 19" on iPhone Safari. So the field takes the direction of the
  *  phone's language: right to left only for a right-to-left language. */
 export function pickerDir(lang: string | undefined = typeof navigator === "undefined" ? undefined : navigator.language): "rtl" | "ltr" {
-  return /^(he|iw|yi|ar|fa|ur)\b/i.test(lang ?? "") ? "rtl" : "ltr";
+  return /^(he|iw|yi|ar|fa|ur|ckb|ps|sd|ug|dv|syr)\b/i.test(lang ?? "") ? "rtl" : "ltr";
 }

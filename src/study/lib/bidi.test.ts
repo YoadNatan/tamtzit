@@ -20,7 +20,7 @@ test("a Latin run ends before the separator: \"Loop diuretics · מנגנון\" 
 
 test("a date or time field takes the phone language's direction, so \"19 Nov 2026\" never reads \"Nov 2026 19\"", () => {
   for (const lang of ["en-US", "en-IL", "en", "ru-RU", "de"]) assert.equal(pickerDir(lang), "ltr", lang);
-  for (const lang of ["he-IL", "he", "iw", "ar-EG", "fa"]) assert.equal(pickerDir(lang), "rtl", lang);
+  for (const lang of ["he-IL", "he", "iw", "ar-EG", "fa", "ckb-IQ", "ps", "sd", "ug", "dv", "syr"]) assert.equal(pickerDir(lang), "rtl", lang);
   assert.equal(pickerDir(""), "ltr");
   assert.equal(pickerDir("hr-HR"), "ltr", "Croatian is not Hebrew");
 });

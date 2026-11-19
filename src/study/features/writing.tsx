@@ -347,10 +347,10 @@ export async function afterUpload(lecture: Lecture, _figurePaths: string[]): Pro
   }
 }
 
-/** The upload's saving line, short (Yoad, 19 Nov 2026): how far the saving
- *  is, and to keep the screen open until it ends. */
+/** The upload's saving line, short (Yoad, 19 Nov 2026): how many slides are
+ *  saved, and to keep the screen open until the saving ends. */
 export function uploadNote(done: number, total: number): string {
-  return `שומרים… ${done} מתוך ${total} · להשאיר את המסך פתוח עד הסוף`;
+  return `שומרים את השקפים: ${done} מתוך ${total}. להשאיר את המסך פתוח עד שהשמירה נגמרת.`;
 }
 
 /** What help says about writing and sharing (spec §6.2): "שיתוף" offers

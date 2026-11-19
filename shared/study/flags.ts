@@ -75,7 +75,7 @@ export type Flags = ReturnType<typeof flagsFrom>;
 /** The addendum's ends (§12.1.4, §12.3) whose code this build has. A flag
  *  shows the screens the merged code has: without its end, practice and the
  *  flashcards are the spec's (§7.Q's Q-1, §7.C), they need their sections at
- *  version 1, and help and the privacy note say only what those screens do.
+ *  version 1, and help says only what those screens do.
  *  Release 1 (QUESTIONS, PRACTICE, CARDS) shipped Q-1 and C without their
  *  ends and nothing of section B, the bank written ahead
  *  (docs/study/RELEASE-1.md). Release 2 (study/rel2) brings Q's end with
@@ -84,7 +84,7 @@ export type Flags = ReturnType<typeof flagsFrom>;
  *  C: the cards need section C at 2. B is package B as Yoad's decision 2 (17
  *  Nov 2026) redefines it (study/w4-b): the points to know read on the
  *  server after the summary, nothing written ahead; it sets only what help
- *  and the privacy note say, and no build needs section B (the setup screen
+ *  says, and no build needs section B (the setup screen
  *  reads its column when it is there). The merge that brings an end sets its
  *  entry to true. */
 export type Ends = { Q: boolean; C: boolean; B: boolean };

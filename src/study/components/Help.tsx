@@ -37,9 +37,9 @@ export function HelpSpend({ ctx }: { ctx: Ctx }) {
 const t = (s: string, k: string) => isolateLatin(s, k);
 
 type HelpProps = {
-  /** The top bar's back arrow (a signed-out visitor gets one to Join). */
+  /** The top bar's back arrow (help opens only inside the app, for members). */
   back: ReactNode;
-  /** The spend line for members ("השימוש של הקבוצה החודש: …"); none signed out. */
+  /** The spend line ("השימוש של הקבוצה החודש: …"). */
   footer?: ReactNode;
   /** The guide's "איך עושים…?" for members (VITE_STUDY_GUIDE): its search also
    *  filters the rows below, which then come under "כל ההסברים". */

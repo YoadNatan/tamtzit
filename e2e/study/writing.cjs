@@ -120,8 +120,8 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
     await page.locator("label:has-text('מרצה') input").fill("ד״ר בדיקה");
     a11y.push(...(await snap(page, out, "writing-0-upload", { primary: ".ph-foot .a-btn.primary" })));
     await page.getByRole("button", { name: "יצירת סיכום" }).click();
-    const saving = await page.getByText(/שומרים… \d+ מתוך 20/).first().textContent({ timeout: 10000 }).catch(() => "");
-    check("A1 the saving line, short: how far, and to keep the screen open", /^שומרים… \d+ מתוך 20 · להשאיר את המסך פתוח עד הסוף$/.test(saving.trim()), saving);
+    const saving = await page.getByText(/שומרים את השקפים: \d+ מתוך 20/).first().textContent({ timeout: 10000 }).catch(() => "");
+    check("A1 the saving line, short: how far, and to keep the screen open", /^שומרים את השקפים: \d+ מתוך 20\. להשאיר את המסך פתוח עד שהשמירה נגמרת\.$/.test(saving.trim()), saving);
     await page.waitForURL(/\/\?l=/, { timeout: 60000 });
     const L1 = new URL(page.url()).searchParams.get("l");
     const l1 = db.lectures.find((l) => l.id === L1);

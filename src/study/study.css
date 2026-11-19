@@ -211,11 +211,18 @@ main.join {
 .join-form {
   gap: var(--sp-6);
 }
-/* "יש לי קוד" | "פתיחת קבוצה חדשה": two tiles of one height, each on one line. */
+/* "יש לי קוד" | "פתיחת קבוצה חדשה": two tiles of one height, each on one
+   line, its label inside the tile with room to its rounded edges down to
+   320 px (a narrower phone takes a smaller label). */
 .join .a-seg > .a-btn {
-  padding-inline: var(--sp-3);
+  padding-inline: var(--sp-2);
   font-size: 0.875rem;
   white-space: nowrap;
+}
+@media (max-width: 359px) {
+  .join .a-seg > .a-btn {
+    font-size: 0.78rem;
+  }
 }
 /* A field's own width (the code field's letter spacing) never widens the form. */
 .code-input {
@@ -226,10 +233,6 @@ main.join {
 }
 .join-signin {
   justify-self: start;
-}
-/* "פתיחת קבוצה חדשה" fits its half of the row down to 320 px. */
-.join .a-seg > .a-btn {
-  padding-inline: var(--sp-2);
 }
 
 /* ═════════════ the library ═════════════ */

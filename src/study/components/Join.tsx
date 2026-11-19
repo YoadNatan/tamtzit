@@ -83,7 +83,7 @@ export default function Join({ initialCode, onJoined }: Props) {
             </button>
           </div>
           {flags.guide && mode === "create" && !hadCode && !code ? (
-            <p className="a-callout warn join-alone">זו קבוצה חדשה וריקה. קיבלתם קישור? ״יש לי קוד״, הקוד בסוף הקישור.</p>
+            <p className="a-callout warn join-alone">כאן פותחים קבוצה חדשה וריקה. קיבלתם קישור? לוחצים ״יש לי קוד״ (הקוד בסוף הקישור).</p>
           ) : null}
 
           <form onSubmit={submit} className="a-stack">
