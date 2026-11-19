@@ -1,0 +1,152 @@
+/* ── Package E: the blank table and a member's own trap (spec §12.6.E) ──
+   The design system's tokens and kit (styles/tokens.css, styles/kit.css):
+   cards, chips, buttons, the table, fields and the bottom bar are the kit's;
+   this file only places E's pieces. The blank table follows the approved
+   practice screen (docs/study/proposal/mockups/practice.html s3): the slide's
+   table in a flat card, the empty cells as dots, the cell being filled a "?"
+   chip, a wrong cell struck with the slide's value beside it, the column's
+   chips under the table. Right and wrong never by colour alone. */
+
+/* ── "טבלה ריקה" ── */
+.blank-card {
+  padding: var(--sp-3);
+  overflow-x: auto;
+}
+.blank-grid {
+  table-layout: fixed;
+}
+.blank-grid th:first-child {
+  width: 32%;
+}
+.blank-grid th,
+.blank-grid td {
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
+.blank-grid tbody th {
+  color: var(--ink);
+  font-weight: 600;
+}
+.blank-grid tr.blank-now th {
+  color: var(--accent);
+}
+.blank-grid .blank-dot {
+  color: var(--muted);
+}
+.blank-said {
+  color: var(--bad);
+}
+.blank-slot {
+  max-width: 100%;
+}
+.blank-chips .a-row {
+  gap: var(--sp-3);
+}
+.blank-result p,
+.blank-end p {
+  margin: 0;
+}
+.blank-end,
+.blank-empty {
+  display: grid;
+  gap: var(--sp-4);
+}
+.blank-empty h2,
+.blank-end h2 {
+  margin: 0;
+}
+
+/* ── a lecture's practice: the extras' cards ── */
+.extras-blank,
+.extras-traps {
+  display: grid;
+  gap: var(--sp-4);
+}
+.extras-blank p,
+.extras-traps p {
+  margin: 0;
+}
+.extras-traps .add-trap,
+.extras-blank > .a-btn {
+  justify-self: start;
+}
+.blank-row {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* ── "מלכודת משלי" ── */
+.trap-meter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.trap-next {
+  margin: 0;
+}
+.trap-form {
+  gap: var(--sp-6);
+}
+.trap-quote p {
+  margin: var(--sp-2) 0 0;
+}
+.trap-options {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.trap-options legend {
+  padding: 0;
+  margin-bottom: var(--sp-3);
+}
+.trap-option {
+  flex-wrap: nowrap;
+  gap: var(--sp-3);
+}
+.trap-option > .l {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--line);
+  color: var(--chip-ink);
+  font-size: var(--text-chip);
+  font-weight: 700;
+}
+.trap-option > .a-input {
+  flex: 1;
+  min-width: 0;
+}
+.trap-option > .trap-key {
+  flex: none;
+  white-space: nowrap;
+}
+.trap-options > .a-link {
+  justify-self: start;
+}
+.trap-problem .a-row {
+  margin-top: var(--sp-3);
+}
+.trap-done {
+  display: grid;
+  gap: var(--sp-4);
+}
+.trap-done h2,
+.trap-done p {
+  margin: 0;
+}
+.trap-done h2:focus,
+.trap-problem b:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.add-trap {
+  justify-self: start;
+}
+.trap-author {
+  margin: 0;
+}

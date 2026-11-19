@@ -1,0 +1,434 @@
+/* ── The group quiz (package Z; spec §5.8, design-quiz §4.2) ──
+   The approved screens (docs/study/proposal/mockups/live-quiz.html) in the
+   design system: the top bar with the mode's chip, the mode as a-opt, the
+   people as avatars, the rules as an a-list, the timer chip and a-timer, the
+   question as a-q and a-opts, the bet as three wide buttons, each vote's
+   a-bars, the private line in a flat card, one bottom bar. This file only
+   places the kit's components (styles/kit.css) with its tokens
+   (styles/tokens.css), in light and dark. Right and wrong never by colour
+   alone; numbers isolated; every target 44 px or more. */
+
+/* ── the setup ── */
+.quiz-open-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.quiz-mode b {
+  font-size: var(--text-para);
+}
+.quiz-course-head {
+  min-height: var(--hit);
+}
+.quiz-lecture {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-5);
+}
+.quiz-lecture .a-choice {
+  flex: 1 1 12em;
+  min-width: 0;
+}
+.quiz-lecture-title {
+  overflow-wrap: anywhere;
+}
+/* "ליצירת שאלות" is a link inside its sentence. */
+.quiz-none .a-link {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.quiz-summary p {
+  margin: 0;
+}
+.a-row > .icon,
+.a-btn > .icon,
+.a-chip > .icon,
+.a-opt > .l > .icon {
+  flex: none;
+}
+
+/* ── the lobby ── */
+.quiz-people {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.quiz-person {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 36px;
+  padding: var(--sp-1) var(--sp-4) var(--sp-1) var(--sp-2);
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+}
+.quiz-person-name {
+  font-weight: 600;
+}
+.quiz-person.is-away .a-avatar {
+  opacity: 0.45;
+}
+.quiz-rules .a-li {
+  padding-block: var(--sp-4);
+}
+.quiz-rules b.a-row {
+  flex-wrap: nowrap;
+  gap: var(--sp-3);
+}
+.quiz-rules b.a-row > .icon {
+  color: var(--muted);
+}
+.quiz-writing p {
+  margin: 0;
+}
+.quiz-cancel {
+  align-self: start;
+}
+.quiz-watch,
+.quiz-away {
+  gap: var(--sp-4);
+}
+.quiz-away span {
+  flex: 1;
+  min-width: 10em;
+}
+.quiz-offline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.quiz-writing .dot,
+.quiz-offline .dot {
+  width: 7px;
+  height: 7px;
+  margin-inline-end: var(--sp-1);
+}
+.quiz-offline .dot {
+  margin-inline-end: var(--sp-4);
+  background: var(--warn-line);
+}
+
+/* ── the countdown ── */
+.quiz-count {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--sp-6);
+  flex: 1;
+  margin: var(--sp-16) 0;
+  text-align: center;
+}
+.quiz-count p {
+  margin: 0;
+}
+.quiz-count-ring {
+  width: 128px;
+  height: 128px;
+}
+.quiz-count-ring::after {
+  inset: 10px;
+}
+.quiz-count-n {
+  font: 900 3.5rem/1 var(--font-display);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── the question ── */
+.quiz-clock {
+  font-variant-numeric: tabular-nums;
+}
+.quiz-question-card > .quiz-live:empty {
+  display: none;
+}
+.quiz-headline {
+  margin: 0;
+  font: 700 var(--text-h2) / var(--leading-tight) var(--font-display);
+}
+.quiz-headline:focus {
+  outline: none;
+}
+.quiz-headline:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.quiz-headline.is-ok {
+  color: var(--ok-text);
+}
+.quiz-headline.is-bad {
+  color: var(--bad);
+}
+.quiz-vignette,
+.quiz-question-card .a-q {
+  margin: 0;
+}
+.quiz-question-card .a-q {
+  font-size: var(--reading-size, var(--text-body));
+}
+.quiz-opt-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.quiz-opt .quiz-opt-text {
+  min-height: 26px;
+}
+.quiz-opt > .x .a-tag {
+  margin-inline-start: var(--sp-1);
+}
+/* A chip on an answer's tinted card: drawn on the surface, so its text keeps 4.5:1. */
+.quiz-opt.correct .quiz-mark,
+.quiz-opt.wrong .a-chip {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.quiz-spin {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+}
+.quiz-dont-know,
+.quiz-unfold,
+.quiz-flag-link {
+  justify-self: start;
+}
+.quiz-take h3 {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--text-small);
+}
+.quiz-take p {
+  margin: 0;
+}
+.quiz-bets {
+  flex-wrap: nowrap;
+  gap: var(--sp-3);
+}
+.quiz-bets .a-btn.wide {
+  min-width: 0;
+  padding-inline: var(--sp-3);
+}
+/* "על בטוח": the bold bet, the deepest of the kit's graded scale, in the
+   accent's outline. */
+.quiz-bets .quiz-sure:not(:disabled) {
+  border-color: var(--accent);
+}
+.quiz-bet p,
+.quiz-note,
+.quiz-status {
+  margin: 0;
+}
+.quiz-status {
+  min-height: 1.5em;
+  font-weight: 600;
+}
+/* "✓ התשובה נעולה עד החשיפה": the bar's state, not a button. */
+.ph-foot > .quiz-locked {
+  flex: 1;
+  margin: 0;
+  cursor: default;
+  font-size: var(--text-btn);
+}
+
+/* ── the argument and the reveal ── */
+.quiz-bars {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.quiz-bar-letter {
+  font-weight: 700;
+}
+.quiz-argue-line {
+  margin: 0;
+}
+.quiz-argue-line .icon {
+  vertical-align: -2px;
+}
+.quiz-source {
+  margin: 0;
+}
+.quiz-voided {
+  margin: 0;
+}
+.quiz-private p {
+  margin: 0;
+}
+.quiz-void {
+  align-self: start;
+}
+.quiz-table {
+  margin: 0;
+  padding: var(--sp-2);
+  gap: var(--sp-1);
+  list-style: none;
+}
+.quiz-table .a-lead {
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  color: var(--ink);
+}
+.quiz-table .a-lead.me {
+  font-weight: 700;
+}
+
+/* ── the end ── */
+.quiz-team {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+.quiz-team p {
+  margin: 0;
+}
+.quiz-team .a-ring span {
+  font-size: var(--text-btn);
+}
+.quiz-team-pct {
+  font: 700 var(--text-h2) / var(--leading-tight) var(--font-display);
+}
+.quiz-strip {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.quiz-strip .a-chip {
+  font-variant-numeric: tabular-nums;
+}
+.quiz-end .a-sec h3 {
+  margin: 0;
+}
+.quiz-end .a-q,
+.quiz-end .a-card p,
+.quiz-mine {
+  margin: 0;
+}
+.quiz-podium .a-li {
+  align-items: center;
+}
+.quiz-podium .is-mine {
+  color: var(--accent);
+}
+.quiz-podium .icon {
+  color: var(--group);
+}
+.quiz-gone > .a-card {
+  margin-top: var(--sp-8);
+}
+
+/* ── the live banner and "יחד" ── */
+.quiz-live-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--group-soft);
+  color: var(--group);
+}
+.quiz-card-open {
+  align-items: center;
+}
+.quiz-card-open .a-row {
+  flex-wrap: nowrap;
+}
+.quiz-new {
+  justify-self: start;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .a-timer > i {
+    transition: width 0.3s ease;
+  }
+  .quiz-spin {
+    animation: quiz-spin 0.8s linear infinite;
+  }
+}
+@keyframes quiz-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── the playful look on the live quiz (tokens.css) ──
+   The quiz is the group's game: its timer is a thick candy bar in the
+   group's colours, a right answer's headline pops, and the end throws
+   confetti over the result. Never under prefers-reduced-motion. */
+.quiz-headline {
+  font-weight: 800;
+}
+/* Only as wide as its words, so its pop never pushes past the screen. */
+.quiz-headline.is-ok {
+  width: fit-content;
+  max-width: 100%;
+}
+.quiz-count-n {
+  color: var(--accent);
+}
+.quiz-question-card .a-timer,
+.quiz-room .a-timer {
+  height: 12px;
+}
+.quiz-end {
+  position: relative;
+  isolation: isolate;
+}
+
+.quiz-team-pct {
+  color: var(--accent);
+  font-weight: 900;
+}
+.quiz-podium .icon {
+  color: var(--sun-pop);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .quiz-headline.is-ok {
+    animation: a-pop 0.45s var(--ease-bounce) both;
+  }
+  .quiz-count-n {
+    animation: a-pop 0.5s var(--ease-bounce) both;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .quiz-end {
+    padding-top: calc(var(--sp-6) + 30px);
+  }
+  .quiz-end::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: var(--sp-3) var(--sp-6) auto;
+    height: 28px;
+    background: var(--confetti);
+    pointer-events: none;
+    animation: a-burst-in 0.7s ease-out 0.05s 1 backwards;
+  }
+}
+/* The quiz is the group's lane: its notes ("בלי שמות") wear the group's
+   tint and strip, not the reader's "הרחבה" blue. */
+.quiz-room .a-callout:not(.warn):not(.quiet):not(.rec),
+.quiz-setup .a-callout:not(.warn):not(.quiet):not(.rec) {
+  border-color: var(--group-strip);
+  background: var(--group-soft);
+}
+
+/* The clock and "שאלה 1 מתוך 7": tabular display figures (they tick). */
+.quiz-clock {
+  font-family: var(--font-display);
+  font-size: var(--text-btn);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+main.quiz-room > .ph-head > .t {
+  font-variant-numeric: tabular-nums;
+}

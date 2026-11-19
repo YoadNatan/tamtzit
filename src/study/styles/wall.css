@@ -1,0 +1,296 @@
+/* ── The association wall's placement (package J; wall.html, cards.html s2) ──
+ * Only places the kit's pieces: entries, the vote toggles (44 px to the
+ * finger), the composer, the photo. Tokens only (design-system.md). */
+
+.wall-screen .ph-head .t bdi {
+  unicode-bidi: isolate;
+}
+.wall-tabs {
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.wall-tab {
+  min-height: var(--hit);
+  color: var(--muted);
+}
+/* The wall's filter is one metaphor, text tabs: no "·" between them (the
+   separators are hidden, decoration only), the chosen one in the ink, bold,
+   on a bar in the fun lane's strip colour (3:1 on the page). */
+.wall-tabs {
+  gap: var(--sp-2) var(--sp-3);
+}
+.wall-tabs > .a-row > [aria-hidden="true"] {
+  display: none;
+}
+.wall-tabs .wall-tab {
+  padding-inline: var(--sp-4);
+  text-decoration: none;
+  box-shadow: inset 0 -3px 0 transparent;
+}
+.wall-tab.on {
+  box-shadow: inset 0 -3px 0 var(--fun-strip);
+  color: var(--ink);
+  font-weight: 800;
+}
+.wall-entries {
+  gap: var(--sp-5);
+}
+.wall-entry {
+  display: grid;
+  gap: var(--sp-4);
+}
+.wall-entry.week {
+  border-color: var(--fun-line);
+}
+.wall-entry .wall-body {
+  margin: 0;
+}
+.wall-fact,
+.wall-mark {
+  margin: 0;
+}
+.wall-mark {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--warn-bg);
+  color: var(--ink);
+}
+.wall-foot {
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.wall-who,
+.wall-votes {
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+/* A vote is the kit's a-up pill as a toggle button (wall.html s1): the
+ * pill keeps its size and an absolutely placed ::after grows the target to
+ * 44 px, the kit's way for small controls (review J-VOTE-TEXT-TOP). */
+.wall-vote {
+  position: relative;
+  cursor: pointer;
+}
+.wall-vote::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, calc((100% - var(--hit)) / 2));
+}
+.wall-vote:disabled {
+  opacity: 0.6;
+}
+.wall-photo {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  background: #fff;
+}
+/* In the moment sheet the slide's picture is a thumbnail, so "לנעוץ" stays
+ * at the sheet's foot on screen (wall.html s3; review J-MOMENT-PIN-OFFSCREEN). */
+.wall-sheet .wall-photo {
+  width: auto;
+  max-width: 100%;
+  max-height: 96px;
+}
+.wall-menu {
+  position: relative;
+}
+.wall-menu ul {
+  position: absolute;
+  inset-inline-end: 0;
+  bottom: 100%;
+  z-index: 7;
+  min-width: 190px;
+  margin: 0 0 var(--sp-2);
+  padding: var(--sp-3);
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  list-style: none;
+}
+.wall-menu li button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--hit);
+  padding: 0 var(--sp-5);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink);
+  font: 600 var(--text-btn) var(--font-body);
+  text-align: start;
+  cursor: pointer;
+}
+.wall-menu li button:hover {
+  background: var(--paper);
+}
+.wall-menu li button.danger-text {
+  color: var(--bad);
+}
+/* The drafts ("תנו לי 3"): dashed, the first in the accent (wall.html s2). */
+.wall-draft {
+  display: grid;
+  gap: var(--sp-4);
+  border-style: dashed;
+}
+.wall-draft.first {
+  border-color: var(--me-line);
+}
+.wall-draft .a-para {
+  margin: 0;
+}
+.wall-draft-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wall-decode summary {
+  min-height: var(--hit);
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  cursor: pointer;
+}
+.wall-ask .a-small {
+  margin: 0;
+}
+/* The composer. */
+.wall-composer {
+  gap: var(--sp-5);
+}
+.wall-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.wall-credit {
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.wall-rule {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.wall-figure {
+  gap: var(--sp-3);
+}
+/* "לנעוץ רגע" in the follower's bar and the reader's bar. */
+.follow-bar .wall-moment,
+.reader-extra .wall-moment {
+  white-space: nowrap;
+}
+.wall-sheet .wall-pick {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.wall-pick button.a-li {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+/* On a card (cards.html s2): the hint in the fun colours, flat (a note in
+   the card, never a button in a button): the fun tint and its strip. */
+.wall-hint.a-card {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+  border: 0;
+  border-inline-start: 4px solid var(--fun-strip);
+  border-radius: var(--r-md);
+  background: var(--fun-soft);
+  box-shadow: none;
+  text-align: start;
+}
+.wall-hint .a-para {
+  margin: 0;
+}
+.wall-back {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+}
+/* "יחד": the week's association and the credit requests. */
+.wall-week .a-para {
+  margin: 0;
+}
+.wall-credit-ask p {
+  margin: 0;
+}
+.wall-tab-panel .a-grid2 {
+  gap: var(--sp-3);
+}
+.wall-to-wall {
+  align-self: center;
+  min-height: var(--hit);
+  display: inline-flex;
+  align-items: center;
+}
+/* A long paragraph chip wraps (its first words), never widens the screen.
+ * One inline run, not the chip's flex items: "ה-NKCC2" keeps its English next
+ * to its Hebrew prefix (review J-SPOT-CHIP-GAPS). */
+.a-chip.wall-spot {
+  display: inline-block;
+  white-space: normal;
+  text-align: start;
+}
+/* The drafts' bottom bar: two actions side by side, each on one line at 360 px. */
+.wall-drafts .ph-foot > .a-btn {
+  padding-inline: var(--sp-3);
+  gap: var(--sp-2);
+  white-space: nowrap;
+}
+@media (max-width: 379px) {
+  .wall-drafts .ph-foot > .a-btn .icon {
+    display: none;
+  }
+}
+/* "לנעוץ רגע": the paragraph's chip beside the title, as wall.html s3. */
+.wall-sheet-head {
+  flex: 1;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+/* ── the playful look on the wall (tokens.css) ──
+   The wall is the fun lane: each association is a little note pinned up,
+   with the fun colour as a short rounded bar inside its top (inset from the
+   corners, so it never tapers into the radius; the card keeps one even
+   border) and a tiny alternating tilt (static, so it stays under
+   prefers-reduced-motion). */
+.wall-entries > .wall-entry {
+  position: relative;
+  padding-top: calc(var(--sp-6) + var(--sp-4));
+}
+.wall-entries > .wall-entry::before {
+  content: "";
+  position: absolute;
+  inset-block-start: var(--sp-3);
+  inset-inline: var(--r-lg);
+  height: 5px;
+  border-radius: var(--r-pill);
+  background: var(--fun-pop);
+  pointer-events: none;
+}
+.wall-entries > .wall-entry:nth-child(odd) {
+  rotate: -0.5deg;
+}
+.wall-entries > .wall-entry:nth-child(even) {
+  rotate: 0.5deg;
+}
+.wall-entries > .wall-entry:focus-within {
+  rotate: none;
+}

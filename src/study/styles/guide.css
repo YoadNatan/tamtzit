@@ -1,0 +1,176 @@
+/* ── The guide (docs/study/guide.md) ──
+   Only the kit's tokens and pieces: a card for the bubble, a list for the
+   first steps, a bar for their progress. Loaded with the guide's lazy
+   chunk. The ring and the bubble sit above the tab bar (--z-tabs) and under
+   a full-screen layer, a sheet and the toast; there is no scrim. */
+
+.g-ring {
+  position: fixed;
+  z-index: calc(var(--z-tabs) + 2);
+  pointer-events: none;
+  border: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  transition:
+    left 0.18s ease,
+    top 0.18s ease,
+    width 0.18s ease,
+    height 0.18s ease;
+}
+.g-ring[data-stop="1"] {
+  border-color: var(--group);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--group) 22%, transparent);
+}
+
+.g-bubble {
+  position: fixed;
+  z-index: calc(var(--z-tabs) + 2);
+  inset-inline: var(--gutter-right) var(--gutter-left);
+  max-width: calc(var(--measure) - 2 * var(--gutter));
+  margin: 0 auto;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-7) var(--sp-4);
+  box-shadow: var(--shadow-pop);
+  border-color: color-mix(in srgb, var(--me-pop) 60%, var(--line));
+  border-bottom-color: var(--me-pop);
+}
+.g-bubble:focus {
+  outline: none;
+}
+.g-bubble:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.g-bubble-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin: calc(-1 * var(--sp-3)) 0 calc(-1 * var(--sp-3));
+}
+.g-kicker {
+  color: var(--muted);
+  font-weight: 600;
+}
+.g-hint .g-kicker {
+  color: var(--accent);
+}
+.g-say {
+  margin: 0;
+  font-size: var(--text-para);
+  line-height: var(--leading);
+}
+.g-actions {
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+.g-actions .a-btn.small {
+  min-height: 36px;
+}
+.g-all-help {
+  margin-inline-start: auto;
+}
+
+/* ── "הצעדים הראשונים" ── */
+.g-steps {
+  gap: var(--sp-4);
+}
+.g-steps-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.g-steps-head .a-h2 {
+  margin: 0;
+}
+.g-steps .a-list {
+  padding: 0 var(--sp-5);
+}
+.g-step {
+  align-items: center;
+}
+.g-step > div {
+  flex: 1;
+}
+.g-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: var(--sp-1);
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  color: var(--ok-ink);
+  font: 700 0.8125rem / 1 var(--font-body);
+}
+.g-step.is-done .g-check {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+.g-step.is-done b {
+  color: var(--muted);
+}
+.g-steps-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.g-steps-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.g-steps-row > span {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── the sandbox ── */
+.try-screen .try-note {
+  margin: 0;
+}
+.try-screen .lecture-body {
+  padding: 0;
+}
+.try-seg {
+  align-self: start;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .g-ring,
+  .howto-chev {
+    transition: none;
+  }
+}
+
+/* ── "איך עושים…?" in help ── */
+.howto-q {
+  align-items: center;
+}
+/* The same chevron as help's own rows below (study.css, ".help summary::after"). */
+.howto-chev {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-inline-start: auto;
+  margin-inline-end: var(--sp-3);
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 0.2s;
+}
+.howto-q[aria-expanded="true"] {
+  color: var(--accent);
+}
+.howto-q[aria-expanded="true"] .howto-chev {
+  transform: translateY(2px) rotate(-135deg);
+}
+.howto-a {
+  padding: 0 0 var(--sp-5);
+}
+.howto-a .a-para {
+  margin: 0;
+}

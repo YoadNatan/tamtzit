@@ -1,0 +1,143 @@
+/* ── Package A2's screens: "ההתקדמות שלי" and "שלי"'s rows (progress-pulse.html s1) ──
+ * Only places the kit's pieces: .a-sec, .a-bars, .a-list, .a-chip, .a-ring.
+ * Sizes and colours are the kit's tokens. */
+
+.progress-screen .pr-body {
+  gap: var(--sp-7);
+}
+/* A range is a piece of the track, from its lower end to its upper one. */
+.pr-range > i {
+  border-radius: var(--r-pill);
+}
+/* Under the threshold: how many answers there are toward a range, quiet. */
+.pr-range > i.pr-count {
+  background: var(--me-pop);
+  opacity: 0.55;
+}
+.pr-ready .a-bars .r > b {
+  white-space: nowrap;
+}
+.pr-more {
+  justify-self: start;
+}
+.pr-danger-list {
+  border-color: var(--warn-line);
+}
+.pr-danger-row {
+  width: 100%;
+}
+.pr-danger-row .a-row.between {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+.pr-danger-row .a-row.between > .a-chip {
+  flex: none;
+}
+.pr-calibration {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+.pr-calibration .a-ring {
+  min-width: 54px;
+}
+.pr-ring-wait > span {
+  font-size: var(--text-small);
+}
+.pr-empty {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+}
+/* "שלי"'s rows: a title, a line under it, a count. */
+.pr-me-rows .a-li > div b {
+  color: var(--accent);
+}
+
+/* ── the playful look on progress (tokens.css) ──
+   Each topic is a row of its own: its name over a candy bar, its count in a
+   fixed tile at the end. A range fills from my lane to the primary's light
+   end; the answers toward a range are the same colour, lighter. The danger
+   list rests flat with the sun's strip; the calibration ring is thick. */
+.pr-ready .a-bars {
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: var(--sp-6);
+}
+.pr-ready .a-bars .r {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) 3.6em;
+  grid-template-areas:
+    "name n"
+    "bar n";
+  row-gap: var(--sp-2);
+  font-size: var(--text-btn);
+}
+.pr-ready .a-bars .r > span:first-child {
+  grid-area: name;
+  font-weight: 700;
+}
+.pr-ready .a-bars .r > span:first-child .a-muted {
+  font-weight: 400;
+}
+.pr-ready .a-bars .r > .a-bar {
+  grid-area: bar;
+}
+.pr-ready .a-bars .r > b {
+  grid-area: n;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  font-size: var(--text-chip);
+  font-weight: 800;
+  text-align: center;
+}
+.pr-range {
+  height: 12px;
+}
+.pr-range > i:not(.pr-count) {
+  background-color: var(--me-pop);
+  background-image: linear-gradient(90deg, var(--me-pop), var(--accent-2));
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.28);
+}
+.pr-range > i.pr-count {
+  background: var(--me-pop);
+  opacity: 0.55;
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.28);
+}
+.pr-danger-list {
+  border-color: var(--line);
+  border-inline-start: 5px solid var(--sun-pop);
+}
+.pr-calibration .a-ring {
+  width: 76px;
+  height: 76px;
+}
+/* The ring: a 10 px stroke, my lane's arc with round ends on the track. */
+.pr-calibration .a-ring {
+  background: none;
+}
+.pr-calibration .a-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(var(--me-pop) var(--p, 0%), var(--track) 0);
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 10px),
+    #000 calc(100% - 10px + 0.5px)
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 10px),
+    #000 calc(100% - 10px + 0.5px)
+  );
+}
+.pr-calibration .a-ring::after {
+  inset: 10px;
+  background: var(--surface);
+  box-shadow: none;
+}

@@ -1,0 +1,2039 @@
+<title>תמצית 2.0</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&display=swap">
+<style>
+/* ── Tamtzit proposal: page + phone kit ──
+   Layout: a long reading page (max 1120px); each feature is a two-column
+   article (words | phone screens) that stacks on a phone. The phone screens
+   reuse the live app's own tokens (src/study/study.css), so they look like
+   the real app in both themes. */
+
+:root {
+  /* the app's palette (study.css) */
+  --paper: #f6f4ef;
+  --surface: #ffffff;
+  --ink: #1d2128;
+  --muted: #5d6573;
+  --faint: #8b93a1;
+  --line: #e2ded4;
+  --accent: #0d5c63;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcecec;
+  --extra-bg: #eaf1fb;
+  --extra-line: #9db8e0;
+  --warn-bg: #fdf3dc;
+  --warn-line: #e0b252;
+  --lecturer-bg: #fbe9ec;
+  --lecturer-line: #d98a99;
+  --ok: #1f7a4d;
+  --bad: #b3261e;
+  --shadow: 0 1px 2px rgba(29, 33, 40, 0.06), 0 6px 20px -10px rgba(29, 33, 40, 0.18);
+  /* proposal-only: the two lanes of the loop, and the phone body */
+  --me: #0d5c63;
+  --me-soft: #dcecec;
+  --group: #a3541b;
+  --group-soft: #f7e6d6;
+  --fun: #7a3b8f;
+  --fun-soft: #f1e4f5;
+  --bezel: #1d2128;
+  --glass: rgba(246, 244, 239, 0.9);
+  --scrim: rgba(29, 33, 40, 0.32);
+  --font-display: "Frank Ruhl Libre", "David Libre", "Times New Roman", serif;
+  --font-body: "IBM Plex Sans Hebrew", "Assistant", "Heebo", "Arial Hebrew", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #14171c; --surface: #1b1f26; --ink: #e7e9ee; --muted: #a3abb8; --faint: #737b89; --line: #2c323c;
+    --accent: #5fb7bd; --accent-ink: #0b1418; --accent-soft: #19343a; --extra-bg: #172235; --extra-line: #3e5f91;
+    --warn-bg: #2b2414; --warn-line: #a07d2a; --lecturer-bg: #2c1a20; --lecturer-line: #9b5565; --ok: #5cc28f; --bad: #ff8a80;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px -10px rgba(0, 0, 0, 0.6);
+    --me: #5fb7bd; --me-soft: #19343a; --group: #e3a067; --group-soft: #36261a; --fun: #c99ad6; --fun-soft: #2c2132;
+    --bezel: #050608; --glass: rgba(20, 23, 28, 0.9); --scrim: rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #14171c; --surface: #1b1f26; --ink: #e7e9ee; --muted: #a3abb8; --faint: #737b89; --line: #2c323c;
+  --accent: #5fb7bd; --accent-ink: #0b1418; --accent-soft: #19343a; --extra-bg: #172235; --extra-line: #3e5f91;
+  --warn-bg: #2b2414; --warn-line: #a07d2a; --lecturer-bg: #2c1a20; --lecturer-line: #9b5565; --ok: #5cc28f; --bad: #ff8a80;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px -10px rgba(0, 0, 0, 0.6);
+  --me: #5fb7bd; --me-soft: #19343a; --group: #e3a067; --group-soft: #36261a; --fun: #c99ad6; --fun-soft: #2c2132;
+  --bezel: #050608; --glass: rgba(20, 23, 28, 0.9); --scrim: rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 8px 72px;
+}
+h1, h2, h3, h4 { font-family: var(--font-display); line-height: 1.2; text-wrap: balance; margin: 0; }
+p { margin: 0; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.muted { color: var(--muted); }
+bdi { unicode-bidi: isolate; }
+
+/* ── page chrome ── */
+.topnav {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  margin-inline: calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
+  padding: 8px max(16px, env(safe-area-inset-right, 0px));
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--glass); }
+.topnav a {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topnav a:hover { background: var(--line); color: var(--ink); }
+
+.hero { padding-block: 40px 28px; display: grid; gap: 18px; max-width: 760px; scroll-margin-top: 64px; }
+.hero .kicker { font-weight: 700; color: var(--accent); font-size: 0.95rem; letter-spacing: 0.02em; }
+.hero h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); font-weight: 900; }
+.hero .lead { font-size: 1.2rem; color: var(--ink); max-width: 62ch; }
+.howto { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 0.95rem; align-items: center; }
+.legend { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot.me { background: var(--me); }
+.dot.group { background: var(--group); }
+.dot.fun { background: var(--fun); }
+
+section.block { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top: 64px; }
+section.block > header { display: grid; gap: 8px; max-width: 760px; }
+section.block > header h2 { font-size: clamp(1.7rem, 4vw, 2.3rem); font-weight: 900; }
+section.block > header p { color: var(--muted); font-size: 1.05rem; }
+.eyebrow { font-size: 0.82rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
+.eyebrow.me { color: var(--me); }
+.eyebrow.group { color: var(--group); }
+.eyebrow.fun { color: var(--fun); }
+
+/* ── the loop ── */
+.loop { display: grid; gap: 14px; }
+.lanes {
+  display: grid;
+  grid-template-columns: auto repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+.lane-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-weight: 800;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  display: grid;
+  place-items: center;
+  padding: 6px 2px;
+  border-radius: 10px;
+}
+.lane-label.group { color: var(--group); background: var(--group-soft); }
+.lane-label.me { color: var(--me); background: var(--me-soft); }
+.col-head { font-weight: 700; font-size: 0.9rem; color: var(--muted); padding: 0 4px; }
+.cell {
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  font-size: 0.92rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  min-width: 0;
+}
+.cell.group { border-top: 3px solid var(--group); }
+.cell.me { border-top: 3px solid var(--me); }
+.cell b { font-weight: 700; }
+.bridge-row { display: contents; }
+.bridge {
+  font-size: 0.82rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 10px;
+  justify-self: center;
+  text-align: center;
+  line-height: 1.35;
+}
+.bridge.down { color: var(--group); background: var(--group-soft); }
+.bridge.up { color: var(--me); background: var(--me-soft); }
+.bridges { display: grid; gap: 4px; justify-items: center; align-content: center; }
+@media (max-width: 760px) {
+  .lanes { grid-template-columns: minmax(0, 1fr); }
+  .lane-label { writing-mode: horizontal-tb; transform: none; justify-self: start; padding: 4px 12px; }
+  .col-head { padding-top: 10px; font-size: 1rem; color: var(--ink); }
+  .spacer { display: none; }
+}
+
+/* ── a day ── */
+.day { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.moment { border-radius: 14px; padding: 16px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 8px; align-content: start; min-width: 0; }
+.moment .when { font-family: var(--font-display); font-size: 1.25rem; font-weight: 900; }
+.moment .where { font-size: 0.8rem; font-weight: 700; }
+.moment .where.me { color: var(--me); }
+.moment .where.group { color: var(--group); }
+.moment ul { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: 0.93rem; }
+@media (max-width: 900px) { .day { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .day { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── feature articles ── */
+.group-head { padding-top: 28px; display: grid; gap: 6px; max-width: 760px; scroll-margin-top: 64px; }
+.group-head h3 { font-size: 1.6rem; font-weight: 900; }
+.feat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 28px;
+  align-items: start;
+  padding: 26px 0;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 64px;
+}
+.feat-text { display: grid; gap: 12px; min-width: 0; max-width: 560px; }
+.feat-text h4 { font-size: 1.55rem; font-weight: 900; }
+.feat-text .tagline { font-size: 1.08rem; }
+.facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 0.95rem; }
+.facts li { display: grid; grid-template-columns: 7.2em minmax(0, 1fr); gap: 10px; }
+.facts li > span:first-child { font-weight: 700; color: var(--muted); font-size: 0.85rem; padding-top: 2px; }
+.facts .to-me { color: var(--me); }
+.facts .to-group { color: var(--group); }
+.asked { font-size: 0.92rem; color: var(--muted); border-inline-start: 3px solid var(--warn-line); padding-inline-start: 10px; }
+.asked q { color: var(--ink); quotes: "״" "״"; }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge { font-size: 0.78rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--line); color: var(--muted); }
+.badge.me { background: var(--me-soft); color: var(--me); }
+.badge.group { background: var(--group-soft); color: var(--group); }
+.badge.fun { background: var(--fun-soft); color: var(--fun); }
+.badge.new { background: var(--warn-bg); color: var(--ink); border: 1px solid var(--warn-line); }
+.feat-phones { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; min-width: 0; }
+@media (max-width: 860px) {
+  .feat { grid-template-columns: minmax(0, 1fr); }
+  .feat-text { max-width: none; }
+  .feat-phones { justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 8px; scroll-snap-type: x mandatory; }
+  .feat-phones > figure { scroll-snap-align: start; }
+}
+@media (max-width: 1040px) { .feat { grid-template-columns: minmax(0, 1fr); } .feat-phones { justify-content: flex-start; } }
+.feat > .vote { max-width: 560px; }
+@media (min-width: 1041px) { .feat:not(.stack) > .feat-phones { grid-column: 2; grid-row: 1 / span 2; } .feat:not(.stack) > .vote { grid-column: 1; } }
+
+/* ── voting ── */
+.vote { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+.vote-q { font-size: 0.85rem; font-weight: 700; color: var(--muted); }
+.vote-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.vote-opts button {
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-height: 38px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.vote-opts button[aria-pressed="true"][data-v="build"] { background: var(--ok); border-color: var(--ok); color: var(--accent-ink); }
+.vote-opts button[aria-pressed="true"][data-v="talk"] { background: var(--warn-line); border-color: var(--warn-line); color: #0b1418; }
+.vote-opts button[aria-pressed="true"][data-v="skip"] { background: var(--muted); border-color: var(--muted); color: var(--accent-ink); }
+.vote-opts button:disabled { opacity: 0.55; cursor: default; }
+.vote textarea {
+  font: inherit;
+  font-size: 16px;
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+.vote-tally { font-size: 0.82rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.vote-tally b { color: var(--ink); }
+.vote-status { font-size: 0.9rem; color: var(--muted); }
+.vote-msg { font-size: 0.82rem; color: var(--muted); }
+.vote-msg:empty { display: none; }
+
+/* ── summary table, cut list, decisions, phases ── */
+.table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { padding: 10px 12px; text-align: start; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 0.82rem; color: var(--muted); font-weight: 700; background: var(--paper); }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; font-weight: 700; }
+.phases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.phase { border-radius: 14px; padding: 16px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 8px; align-content: start; min-width: 0; }
+.phase h3 { font-size: 1.3rem; font-weight: 900; }
+.phase .when { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.phase ul { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: 0.93rem; }
+@media (max-width: 760px) { .phases { grid-template-columns: minmax(0, 1fr); } }
+.cutlist, .decisions { display: grid; gap: 10px; }
+.cutlist li, .decisions li { list-style: none; }
+.cutlist, .decisions { margin: 0; padding: 0; }
+.cut, .decision { border-radius: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 4px; }
+.decision .def { font-size: 0.9rem; color: var(--muted); }
+.decision .def b { color: var(--ok); }
+
+/* ═════════════ the phone kit ═════════════
+   Everything inside .phone mimics the live app. Screen size: 300 × 620.
+   Use only these classes inside phones (plus inline <bdi dir="ltr"> for
+   English runs inside Hebrew). */
+figure.mock { margin: 0; display: grid; gap: 8px; justify-items: center; flex: none; }
+figure.mock figcaption { font-size: 0.82rem; color: var(--muted); max-width: 300px; text-align: center; }
+.phone {
+  width: 300px;
+  height: 620px;
+  border-radius: 40px;
+  border: 9px solid var(--bezel);
+  background: var(--paper);
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 24px 50px -24px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+}
+.phone::before { /* the camera island */
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 84px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--bezel);
+  z-index: 5;
+}
+.ph-status { flex: none; height: 34px; display: flex; justify-content: space-between; align-items: center; padding: 6px 22px 0; font-size: 11px; font-weight: 700; }
+.ph-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.ph-head .t { font-weight: 700; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.ph-head .back { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+.ph-sub { flex: none; display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.ph-body { flex: 1; overflow: hidden; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.ph-foot { flex: none; padding: 8px 12px 10px; border-top: 1px solid var(--line); background: var(--paper); display: flex; gap: 6px; }
+.ph-tabs { flex: none; display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 4px 14px; border-top: 1px solid var(--line); background: var(--paper); }
+.ph-tab { display: grid; justify-items: center; gap: 1px; font-size: 9.5px; color: var(--faint); font-weight: 600; }
+.ph-tab svg { width: 18px; height: 18px; }
+.ph-tab.on { color: var(--accent); }
+
+/* app pieces */
+.a-h1 { font-family: var(--font-display); font-size: 20px; font-weight: 900; line-height: 1.2; }
+.a-h2 { font-family: var(--font-display); font-size: 15.5px; font-weight: 700; line-height: 1.3; }
+.a-muted { color: var(--muted); }
+.a-small { font-size: 11px; }
+.a-row { display: flex; align-items: center; gap: 6px; }
+.a-row.between { justify-content: space-between; }
+.a-wrap { display: flex; flex-wrap: wrap; gap: 4px; }
+.a-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-height: 30px; padding: 4px 10px; border-radius: 9px; border: 1px solid var(--line);
+  background: var(--surface); font-weight: 600; font-size: 12px; color: var(--ink); white-space: nowrap;
+}
+.a-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.a-btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.a-btn.wide { flex: 1; min-height: 36px; font-size: 13px; }
+.a-chip { font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--line); color: var(--muted); white-space: nowrap; }
+.a-chip.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.a-chip.busy { background: var(--accent-soft); color: var(--accent); }
+.a-chip.warn { background: var(--warn-bg); color: var(--ink); border: 1px solid var(--warn-line); }
+.a-chip.bad { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+.a-chip.group { background: var(--group-soft); color: var(--group); }
+.a-chip.fun { background: var(--fun-soft); color: var(--fun); }
+.a-card { border-radius: 11px; border: 1px solid var(--line); background: var(--surface); padding: 9px 10px; display: grid; gap: 4px; box-shadow: var(--shadow); }
+.a-card.flat { box-shadow: none; }
+.a-tag { display: inline-flex; font-size: 9.5px; font-weight: 700; padding: 0 5px; border-radius: 5px; background: var(--line); color: var(--muted); vertical-align: 1px; white-space: nowrap; }
+.a-bar { height: 5px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.a-bar > i { display: block; height: 100%; background: var(--accent); }
+.a-bar.group > i { background: var(--group); }
+.a-callout { border-radius: 9px; padding: 7px 9px; font-size: 12px; border-inline-start: 3px solid var(--extra-line); background: var(--extra-bg); }
+.a-callout.warn { border-color: var(--warn-line); background: var(--warn-bg); }
+.a-callout.rec { border-color: var(--lecturer-line); background: var(--lecturer-bg); }
+.a-callout b { font-weight: 700; }
+.a-para { font-size: 12.5px; line-height: 1.65; }
+.a-para.marked { background: var(--accent-soft); border-radius: 6px; box-shadow: -3px 0 0 var(--accent); padding: 2px 4px; }
+.a-avatar { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 10.5px; font-weight: 700; color: #fff; flex: none; }
+.a-avatar.c1 { background: #0d5c63; } .a-avatar.c2 { background: #a3541b; } .a-avatar.c3 { background: #7a3b8f; }
+.a-avatar.c4 { background: #1f7a4d; } .a-avatar.c5 { background: #2f5d9e; } .a-avatar.c6 { background: #9e2f4d; }
+/* answer options */
+.a-q { font-size: 13px; font-weight: 600; line-height: 1.55; }
+.a-opts { display: grid; gap: 5px; }
+.a-opt { border-radius: 10px; border: 1px solid var(--line); background: var(--surface); padding: 6px 8px; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 7px; align-items: start; font-size: 12px; }
+.a-opt > .l { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; background: var(--line); color: var(--muted); }
+.a-opt > .x { grid-column: 2; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.a-opt.correct { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--surface)); }
+.a-opt.correct > .l { background: var(--ok); color: var(--accent-ink); }
+.a-opt.wrong { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 7%, var(--surface)); }
+.a-opt.wrong > .l { background: var(--bad); color: var(--accent-ink); }
+.a-opt.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* votes, leaderboard, timer, cards */
+.a-up { display: inline-grid; justify-items: center; min-width: 30px; padding: 2px 4px; border-radius: 8px; border: 1px solid var(--line); font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--paper); line-height: 1.2; }
+.a-up.on { border-color: var(--fun); color: var(--fun); background: var(--fun-soft); }
+.a-lead { display: grid; grid-template-columns: 18px 22px minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 5px 6px; border-radius: 9px; font-size: 12px; }
+.a-lead.me { background: var(--accent-soft); }
+.a-lead .r { font-weight: 800; color: var(--muted); text-align: center; }
+.a-lead .s { font-weight: 800; font-variant-numeric: tabular-nums; }
+.a-timer { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.a-timer > i { display: block; height: 100%; background: var(--group); }
+.a-flash { border-radius: 14px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); padding: 14px; display: grid; gap: 8px; align-content: center; text-align: center; min-height: 170px; }
+.a-flash .front { font-family: var(--font-display); font-size: 16px; font-weight: 700; }
+.a-grade { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.a-grade span { border-radius: 9px; padding: 5px 2px; text-align: center; font-size: 10.5px; font-weight: 700; border: 1px solid var(--line); background: var(--surface); }
+.a-grade span small { display: block; font-weight: 600; color: var(--muted); font-size: 9px; }
+.a-input { border-radius: 10px; border: 1px solid var(--line); background: var(--surface); padding: 7px 9px; color: var(--faint); font-size: 12px; }
+.a-bubble { border-radius: 12px; padding: 7px 9px; font-size: 12px; line-height: 1.55; max-width: 88%; }
+.a-bubble.me { background: var(--accent); color: var(--accent-ink); justify-self: start; border-bottom-right-radius: 4px; }
+.a-bubble.bot { background: var(--surface); border: 1px solid var(--line); justify-self: end; border-bottom-left-radius: 4px; }
+.a-stack { display: grid; gap: 6px; }
+.a-sheet { position: absolute; inset: auto 0 0 0; background: var(--surface); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; padding: 10px 12px 16px; display: grid; gap: 6px; box-shadow: 0 -10px 30px -12px rgba(0, 0, 0, 0.35); z-index: 3; }
+.a-scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 2; }
+.a-ring { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; background: conic-gradient(var(--accent) var(--p, 60%), var(--line) 0); position: relative; }
+.a-ring::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); }
+.a-ring > span { position: relative; z-index: 1; }
+.a-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.a-divider { height: 1px; background: var(--line); }
+/* lists, tables, toasts, sections, later-phase marks */
+.a-sec { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 2px; }
+.a-sec > b { font-family: var(--font-display); font-size: 14.5px; font-weight: 700; }
+.a-list { border-radius: 11px; border: 1px solid var(--line); background: var(--surface); padding: 0 10px; display: grid; }
+.a-li { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.a-li:last-child { border-bottom: 0; }
+.a-li > div { min-width: 0; display: grid; gap: 1px; }
+.a-li > div > b { font-size: 12.5px; font-weight: 700; line-height: 1.4; }
+.a-li .m { font-size: 11px; color: var(--muted); line-height: 1.45; }
+.a-li > .a-chip, .a-li > .a-btn { flex: none; margin-top: 1px; }
+.a-table { width: 100%; border-collapse: collapse; font-size: 10.5px; line-height: 1.35; }
+.a-table th, .a-table td { padding: 4px 3px; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top; }
+.a-table th { font-size: 9.5px; color: var(--muted); font-weight: 700; background: transparent; }
+.a-toast { align-self: center; background: var(--ink); color: var(--paper); border-radius: 999px; padding: 5px 12px; font-size: 11.5px; font-weight: 600; text-align: center; }
+.a-later { position: relative; outline: 1.5px dashed var(--warn-line); outline-offset: 2px; border-radius: 10px; }
+.a-later::after { content: attr(data-later); position: absolute; top: -8px; inset-inline-end: 6px; font-size: 9px; font-weight: 700; color: var(--ink); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 999px; padding: 0 6px; line-height: 1.5; }
+.a-meter { display: grid; gap: 3px; }
+.a-bars { display: grid; gap: 4px; }
+.a-bars .r { display: grid; grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) 1.6em; gap: 6px; align-items: center; font-size: 11px; }
+.a-bars .r > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-bars .r > b { text-align: end; font-variant-numeric: tabular-nums; }
+.a-bars .a-bar { height: 8px; }
+.a-bars .r.ok { color: var(--ok); font-weight: 700; }
+.a-bars .r.ok .a-bar > i { background: var(--ok); }
+
+
+.swim { display: grid; gap: 8px; max-width: 860px; }
+.swim-head { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 52px); z-index: 2; background: var(--paper); padding-block: 4px; }
+.lane-tag { font-family: var(--font-display); font-weight: 900; font-size: 1.1rem; padding: 6px 12px; border-radius: 10px; text-align: center; }
+.lane-tag.group { color: var(--group); background: var(--group-soft); }
+.lane-tag.me { color: var(--me); background: var(--me-soft); }
+.loop-step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); width: calc(50% - 5px); }
+.loop-step p { color: var(--muted); font-size: 0.93rem; }
+.loop-step .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: var(--accent-ink); background: var(--faint); }
+.loop-step.g { justify-self: start; border-top: 3px solid var(--group); }
+.loop-step.g .n { background: var(--group); }
+.loop-step.p { justify-self: end; border-top: 3px solid var(--me); }
+.loop-step.p .n { background: var(--me); }
+.loop-step.b { width: 100%; border-top: 3px solid var(--fun); background: linear-gradient(90deg, var(--me-soft), var(--surface) 40%, var(--surface) 60%, var(--group-soft)); }
+.loop-step.b .n { background: var(--fun); }
+.loop-bridge { display: grid; justify-items: center; }
+@media (max-width: 560px) { .loop-step { width: 88%; } }
+.navtabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.navtab { display: grid; gap: 4px; align-content: start; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); color: var(--accent); }
+.navtab b { color: var(--ink); }
+.navtab .muted { font-size: 0.88rem; }
+.day { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.feat.stack { grid-template-columns: minmax(0, 1fr); }
+.feat.stack .feat-text { max-width: 760px; }
+.feat.stack .feat-phones { justify-content: flex-start; }
+@media (max-width: 900px) { .day { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .day { grid-template-columns: minmax(0, 1fr); } }
+.phases { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.phase p { font-size: 0.93rem; }
+.phase.blocked { border-style: dashed; background: transparent; }
+.objs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+.obj { display: grid; gap: 4px; align-content: start; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 0.93rem; }
+.obj b { font-family: var(--font-display); font-size: 1.15rem; font-weight: 900; }
+.obj .where { font-size: 0.8rem; font-weight: 700; justify-self: start; padding: 1px 10px; border-radius: 999px; }
+.obj.group { border-top: 3px solid var(--group); } .obj.group .where { color: var(--group); background: var(--group-soft); }
+.obj.me { border-top: 3px solid var(--me); } .obj.me .where { color: var(--me); background: var(--me-soft); }
+.obj.both { border-top: 3px solid var(--fun); } .obj.both .where { color: var(--fun); background: var(--fun-soft); }
+.rules { margin: 0; padding-inline-start: 20px; display: grid; gap: 6px; max-width: 760px; }
+.dec-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.dec-n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 0.85rem; background: var(--line); color: var(--ink); }
+.decision .def { padding-inline-start: 36px; }
+.budget td.num { white-space: nowrap; }
+.budget tfoot td { font-weight: 800; background: var(--paper); }
+.budget tfoot td:last-child { white-space: normal; }
+.nw { white-space: nowrap; }
+#votes th:not(:first-child), #votes td.num { width: 1%; white-space: nowrap; text-align: center; padding-inline: 6px; }
+#votes .table-wrap { max-width: 760px; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.stat { padding: 6px 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-weight: 700; font-size: 0.92rem; }
+
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
+    <symbol id="i-cards" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></symbol>
+    <symbol id="i-award" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></symbol>
+    <symbol id="i-smile" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+  </defs>
+</svg>
+
+<div class="page" dir="rtl" lang="he">
+  <nav class="topnav" aria-label="ניווט בעמוד">
+    <a href="#vision">החזון</a><a href="#loop">הלולאה</a><a href="#private">פרטיות</a><a href="#day">יום עם תמצית</a>
+    <a href="#g-personal">אישי</a><a href="#g-group">קבוצתי</a><a href="#g-bridge">גשרים</a><a href="#g-fun">כיף</a>
+    <a href="#phases">שלבים</a><a href="#budget">עלות</a><a href="#decisions">החלטות</a><a href="#votes">הצבעות</a>
+  </nav>
+
+  <header class="hero" id="vision">
+    <span class="kicker">הצעה לפני בנייה · לאישור של יועד ושוהם</span>
+    <h1>תמצית 2.0</h1>
+    <p class="lead">מה שהקבוצה קוראת, מתווכחת וצוחקת עליו בבוקר נוחת בחזרות האישיות של כל אחד ואחת, ומה שמגלים לבד, כמו ספק, תיקון או אסוציאציה שנדבקת, חוזר לקבוצה ומשפר את החומר של כולם, בלי שאף אחד יראה ציון של מישהו אחר.</p>
+    <div class="stats"><span class="stat">14 פיצ׳רים</span><span class="stat">34 מסכים לדוגמה</span><span class="stat">3 שלבים עד המרתון</span><span class="stat">12 החלטות פתוחות</span></div>
+    <div class="howto">
+      <span class="legend"><span class="dot group"></span>קבוצתי</span>
+      <span class="legend"><span class="dot me"></span>אישי</span>
+      <span class="legend"><span class="dot fun"></span>כיף</span>
+      <span>בכל פיצ׳ר: מסכים לדוגמה מתוך ההרצאה על תרופות נגד טפילים, והצבעה: לבנות, לדבר על זה, או לא עכשיו.</span>
+    </div>
+    <p class="vote-status" id="vote-status" aria-live="polite"></p>
+  </header>
+
+  <section class="block" id="loop">
+    <header><span class="eyebrow">איך הכול מתחבר</span><h2>הלולאה: מהקבוצה אליך, וממך לקבוצה</h2>
+    <p>כל דבר שנוצר באפליקציה עובר בין הלימוד הקבוצתי לאישי. הציונים והטעויות של כל אחד נשארים פרטיים.</p></header>
+    <div class="swim">
+  <div class="swim-head"><span class="lane-tag group">קבוצה</span><span class="lane-tag me">אישי</span></div>
+  <div class="loop-step g"><span class="n">1</span><div><b>מעלים הרצאה, פעם אחת לכולם</b><p>מעלים את המצגת. <bdi dir="ltr">Claude</bdi> כותב סיכום, ועד הפגישה גם כ-15 שאלות ו-54 כרטיסים על ההרצאה הזו, פעם אחת לכל השישה. כל אלה יושבים על פסקאות הסיכום. הפתיחה, הניחוש, המבחן הקבוצתי והתרגול שואבים מאותו בנק, ולכן שאלה יכולה לחזור.</p></div></div><div class="loop-bridge"><span class="bridge down">מהקבוצה לאישי</span></div><div class="loop-step p"><span class="n">2</span><div><b>בבוקר, התור שלי</b><p>ב׳היום׳: הפגישה של היום מלמעלה, ומתחת תור של 10, 20 או 45 דקות: כרטיסים שהגיע זמנם, הטעויות שלך מהמבחן של אתמול, וטעות ׳על בטוח׳ בניסוח אחר. רק לך.</p></div></div><div class="loop-bridge"><span class="bridge up">מהאישי לקבוצה</span></div><div class="loop-step g"><span class="n">3</span><div><b>פותחים את הפגישה: 3 לקפה</b><p>שלוש שאלות על אתמול: עונים לבד בטלפון, והחשיפה בלי שמות. אחר כך סדר יום של שלוש שורות: מה קוראים, נקודה חמה אחת ושאלה פתוחה.</p></div></div><div class="loop-step g"><span class="n">4</span><div><b>קוראים יחד</b><p>מקריאים, והשאר עוקבים בטלפון. ׳לא ברור׳ אנונימי מראה במסך ההקראה איפה לעצור; התשובה לשאלת ניחוש נדלקת אצל כולם כשמגיעים אליה; תיקון עם מקור מאושר בקול ומתעדכן לכולם.</p></div></div><div class="loop-step g"><span class="n">5</span><div><b>סוגרים במבחן קבוצתי</b><p>עונים לבד עם הימור ביטחון, רואים התפלגות בלי שמות, וכשהקבוצה חצויה: 90 שניות לשכנע, הצבעה שנייה, והסבר לכל תשובה, גם לשגויות.</p></div></div><div class="loop-bridge"><span class="bridge down">מהקבוצה לאישי</span></div><div class="loop-step p"><span class="n">6</span><div><b>אחרי הפגישה, רק אצלך</b><p>כל תשובה ראשונה שגויה, גם אם תוקנה בוויכוח, נכנסת לתור שלך עם הטיעון שניצח וחוזרת אחרי יום ואחרי 3 ימים. פסקה שסימנת ׳לא ברור׳ חוזרת מחר, עם ההסבר.</p></div></div><div class="loop-step p"><span class="n">7</span><div><b>לבד, בערב</b><p>תרגול עם נתיחה לכל מסיח, כרטיסיות ו׳לשאול את ההרצאה׳. מה שנשאר לא ברור עולה בלחיצה לקבוצה, כשאלה על הפסקה.</p></div></div><div class="loop-step b"><span class="n">8</span><div><b>מה שיוצרים לבד, כולם מקבלים</b><p>אסוציאציה, תיקון, מלכודת או תשובה לשאלה פתוחה נשמרים על הפסקה, בשם שלך, ונכנסים לכרטיסים ולמבחנים של כולם.</p></div></div><div class="loop-step g"><span class="n">9</span><div><b>בלילה, הדופק של הקבוצה</b><p>הטעויות הפרטיות נספרות בלי שמות, רק איפה שלפחות 3 מכם טעו: מה חם בסדר היום של מחר, אילו שאלות עולות למבחן הקבוצתי, איפה דרושה אסוציאציה. טעות ׳על בטוח׳ של לפחות 3 מכם נכנסת למוזיאון המלכודות.</p></div></div><div class="loop-step b"><span class="n">10</span><div><b>לקראת המבחן</b><p>מאמצע דצמבר: מרתון עם מסלול קבוצתי ומסלול פרטי, קודם סבב סיכומים משותף, אחר כך שחזורים ונקודות חולשה. בסוף: קרב בוס שבנוי מהנקודות החלשות של הקבוצה, והשלל: תוכנית פרטית ל-3 ימים מהטעויות שלך.</p></div></div>
+</div>
+  </section>
+
+  <section class="block" id="private">
+    <header><span class="eyebrow">פרטיות</span><h2>מה משותף ומה פרטי</h2>
+    <p>התוכן נוצר פעם אחת לכל הקבוצה. הזיכרון, הציונים והטעויות של כל אחד נשמרים רק אצלו, ומסד הנתונים עצמו אוכף את זה, לא רק המסכים.</p></header>
+    <ul class="objs"><li class="obj group"><b>הרצאה</b><span class="where">של הקבוצה</span><span>מועלית פעם אחת לכולם. מי קרא מה נשאר גלוי לקבוצה, כמו היום.</span></li><li class="obj group"><b>פסקה</b><span class="where">של הקבוצה</span><span>הכתובת של הכול. תיקון מראה מי תיקן ומאיזה מקור, עם היסטוריה וביטול בלחיצה.</span></li><li class="obj both"><b>שאלה</b><span class="where">גם וגם</span><span>השאלה של הקבוצה, והמפתח נשאר בשרת עד שעונים. התשובות, ההימורים והציונים: רק שלך. הקבוצה רואה ספירה לכל אפשרות, רק כשלפחות 3 ענו, בלי שמות.</span></li><li class="obj both"><b>כרטיס</b><span class="where">גם וגם</span><span>החפיסה של הקבוצה, ואפשר לתקן אותה לכולם. הלו״ז, החזרות והשכחות: רק שלך.</span></li><li class="obj group"><b>אסוציאציה</b><span class="where">של הקבוצה</span><span>על הקיר של הקבוצה, בשם או בלי שם. ההצבעות נספרות, המנצחת עוברת לגב הכרטיס של כולם, ו׳שלי׳ נעוץ רק אצלך.</span></li><li class="obj me"><b>טעות</b><span class="where">רק שלך</span><span>רק שלך. מגיעה לקבוצה רק כספירה אנונימית, מלפחות 3 אנשים, פעם בלילה: לדופק, למוזיאון ולבחירת השאלות.</span></li></ul>
+    <ol class="rules">
+      <li>מה שעושים לבד (תשובות, טעויות, שכחות) מגיע לקבוצה רק כספירה בלי שמות, רק כשלפחות 3 אנשים תרמו, ומחושב פעם בלילה כדי שאי אפשר יהיה לנחש מי תרגל עכשיו.</li>
+      <li>בהקראה, בזמן אמת: ׳לא ברור׳ נספר בלי שמות, מוצג רק במסך של מי שמקריא, ורק מ-3 לחיצות. תוצאת הניחוש על היום נחשפת רק כ׳רוב הקבוצה׳, בלי מספרים.</li>
+      <li>במבחן הקבוצתי: ספירה לכל תשובה רק אחרי שהשאלה נסגרת. טבלת ניקוד קיימת רק במצב מירוץ, רק לשחקנים שלו ורק בתוך המשחק. אין טבלת מובילים מחוץ למשחק.</li>
+      <li>מה שמפרסמים, מפרסמים בשם: תגובה, תיקון, אסוציאציה. אפשר לפרסם אסוציאציה בלי שם, ולגבות צד במחלוקת בלי שם.</li>
+      <li>אפשר לצאת מהדופק של הקבוצה בהגדרות.</li>
+    </ol>
+  </section>
+
+  <section class="block" id="day"><header><span class="eyebrow">בפועל</span><h2>יום אחד עם תמצית</h2></header><div class="day"><div class="moment"><span class="where me">אישי</span><span class="when">07:50 · בבית, עם הקפה</span><ul><li>׳היום׳: הפגישה ב-09:00, מלריה (ש׳ <bdi dir="ltr" class="nw">19–33</bdi>), הקראה: שוהם</li><li>התור שלי, 20 דקות: 7 כרטיסים, 2 טעויות מהמבחן של אתמול, ושאלה שענית ׳על בטוח׳ וטעית, בניסוח אחר</li><li>שתי שאלות ניחוש על מה שייקרא היום. התשובות יידלקו בהקראה</li></ul></div><div class="moment"><span class="where group">קבוצה</span><span class="when">09:00 · פתיחה, 5 דקות</span><ul><li>3 לקפה: <bdi dir="ltr">Metronidazole</bdi> ובירה, <bdi dir="ltr">Miltefosine</bdi> ו-5 החודשים, ומי מעכב את <bdi dir="ltr">PKC</bdi> במקרופאג</li><li>החשיפה בלי שמות: ׳רוב הקבוצה צדקה׳</li><li>סדר היום: מלריה, נקודה חמה על <bdi dir="ltr">Miltefosine</bdi> ואמצעי מניעה, ושאלה פתוחה על <bdi dir="ltr">LMT-Ros3</bdi></li></ul></div><div class="moment"><span class="where group">קבוצה</span><span class="when">09:10 · הקראה</span><ul><li>שוהם מקריאה, כולם עוקבים בטלפון</li><li>בפסקת ה-<bdi dir="ltr">hypnozoites</bdi>: 3 לחיצות ׳לא ברור׳. עוצרים, ומאיה מסבירה</li><li>דינג: ההקראה הגיעה לתשובה של שאלת הניחוש, ה-<bdi dir="ltr">Sporozoite</bdi></li><li>נועה ואיתי חלוקים על שקף 20 מול הטבלה בשקף 23: כרטיס צהוב, ו-<bdi dir="ltr">VAR</bdi> בערב</li></ul></div><div class="moment"><span class="where group">קבוצה</span><span class="when">11:30 · סוגרים</span><ul><li>מבחן קבוצתי, 5 שאלות על מה שנקרא, כ-10 דקות</li><li>בשאלת ההיריון וה-<bdi dir="ltr">Quinine</bdi> הקבוצה חצויה: 90 שניות ויכוח, ואז 5 מתוך 6</li><li>המלכודת של הסבב: <bdi dir="ltr">Doxycycline</bdi></li></ul></div><div class="moment"><span class="where me">אישי</span><span class="when">אחר הצהריים והערב · לבד</span><ul><li>הטעויות שלך מהמבחן מחכות ב׳היום׳, גם אלה שתוקנו בוויכוח</li><li>הכרטיסים של המלריה נכנסים לחפיסה שלך, חלק אחרי חלק</li><li>23:40: ׳למה אף פעם לא נותנים <bdi dir="ltr">Artemisinins</bdi> לבד?⁠׳ ← תשובה משקף 30, ועדיין לא ברור ← לשאול את הקבוצה</li></ul></div><div class="moment"><span class="where group">קבוצה, אוטומטית</span><span class="when">בלילה</span><ul><li>הספירה האנונימית: איפה לפחות 3 מכם מתקשים</li><li>מחר בסדר היום: ׳איזו תרופה על איזה שלב׳ (ש׳ 23)</li><li>בבוקר: תשובה של איתי לשאלה של מאיה, וכרטיס חדש בתור שלה</li></ul></div></div></section>
+
+  <section class="block" id="features">
+    <header><span class="eyebrow">14 פיצ׳רים</span><h2>מה בונים</h2>
+    <p>כל פיצ׳ר עם המסכים שלו, למה הוא חשוב, ואיך הוא מתחבר לשאר.</p></header>
+    <div class="group-head" id="g-personal"><span class="eyebrow me">3 פיצ׳רים</span><h3>לימוד אישי</h3><p class="muted">מה שכל אחד עושה לבד, בקצב שלו. הציונים והטעויות נראים רק לך.</p></div><article class="feat stack" id="f-cards">
+  <div class="feat-text">
+    <div class="badges"><span class="badge me">לימוד אישי</span><span class="badge">שלב 1</span><span class="badge">מאמץ גדול</span></div>
+    <h4>כרטיסיות: חפיסה משותפת, זיכרון פרטי</h4>
+    <p class="tagline">חפיסה אחת לכל הרצאה שהקבוצה מתקנת יחד, ייצוא ל-<bdi dir="ltr">Anki</bdi> כבר עכשיו, וחזרה באפליקציה בקצב אישי. כל כרטיס פותח את הפסקה שלו.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>חזרה מרווחת היא הטכניקה השנייה עם ׳תועלת גבוהה׳ (<bdi dir="ltr">Dunlosky</bdi> ושותפיו 2013; <bdi dir="ltr">Cepeda</bdi> ושותפיו 2006), וכרטיסיות עובדות טוב יותר כשהן מרווחות (<bdi dir="ltr">Kornell 2009</bdi>). <bdi dir="ltr">FSRS</bdi>, האלגוריתם הפתוח של <bdi dir="ltr">Anki</bdi>, צריך פחות חזרות לאותו זיכרון (<bdi dir="ltr">Ye</bdi> ושותפיו 2022). שוהם כתבה שכרטיסיות ׳טובות לשינון אבל לא ללמידה כללית של החומר׳, ולכן כל כרטיס מחובר לפסקה שלו.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>חפיסה בדוקה שאף אחד לא הקליד, ועל גב הכרטיס האסוציאציה שהקבוצה בחרה. כל טעות שלך במבחן הקבוצתי הופכת לכרטיס פרטי עם ההסבר.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>השכחות שלך נספרות בלי שמות: כרטיס שלפחות 3 מכם שוכחים מבקש ׳דרושה אסוציאציה׳ בקיר. כרטיס שתוקן מתוקן לכולם, ובייצוא חוזר ל-<bdi dir="ltr">Anki</bdi> הוא מתעדכן בלי לאבד התקדמות.</span></li><li><span class="">עלות AI</span><span>כ-<bdi dir="ltr" class="nw">$0.21</bdi> לחפיסה של 54 כרטיסים להרצאה הזו, פעם אחת לכל הקבוצה (בערך חצי במצב חסכוני: <bdi dir="ltr">Batch API</bdi>, שמחזיר את התוצאה באיחור, לרוב תוך שעה ולכל היותר תוך יממה). חזרה, עריכה וייצוא: חינם.</span></li><li><span class="">מה נכנס מתי</span><span>בשלב 1: החפיסה, העריכה וייצוא ל-<bdi dir="ltr">Anki</bdi>, בלי חשבון. בשלב 2: חזרה באפליקציה, אחרי שמירת חשבון עם קוד במייל (החלטה 12).</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>הייתי רוצה לעשות חזרות קבועות בסגנון אנקי · ייצוא ל-<bdi dir="ltr">Anki</bdi> או חזרה באפליקציה? גם וגם</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>07:58</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להיום</span><span class="t">כרטיסיות להיום</span><span class="a-chip busy">7/18</span></div>
+    <div class="ph-sub"><span>לוח החזרות שלך, בקצב שלך</span><span class="a-chip">רק לך</span></div>
+    <div class="ph-body">
+      <div class="a-bar"><i style="width: 39%"></i></div>
+      <div class="a-flash">
+        <div class="a-row between"><span class="a-chip group">מהחפיסה של הקבוצה</span><span class="a-small a-muted">ראית אתמול</span></div>
+        <p class="front"><bdi dir="ltr">Mefloquine</bdi>: מה ה-<bdi dir="ltr">t½</bdi>, ולכן באיזו תדירות נותנים?</p>
+        <div class="a-divider"></div>
+        <p class="a-para"><b>כ-20 יום, ולכן פעם בשבוע.</b> <span class="a-tag">ש׳ 28</span></p>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-row"><svg width="14" height="14"><use href="#i-book"/></svg><b>מאיפה זה?</b></span><span class="a-btn">לפסקה</span></div>
+        <span class="a-small a-muted">בסיכום: חלק 6 · מלריה · <bdi dir="ltr">Mefloquine</bdi></span>
+        <p class="a-para marked">ה-<bdi dir="ltr">t½</bdi> של <bdi dir="ltr">Mefloquine</bdi> ארוך, כ-20 יום, ולכן נותנים אותה פעם בשבוע. <span class="a-tag">ש׳ 28</span></p>
+        <p class="a-para a-muted">היא עלולה לגרום לתופעות נוירופסיכיאטריות (<bdi dir="ltr">boxed warning</bdi>) ולהפרעות הולכה. <span class="a-tag">ש׳ 28</span></p>
+      </div>
+      <div class="a-row a-small a-muted"><svg width="14" height="14"><use href="#i-clock"/></svg><span>נשארו עוד 11, כ-6 דקות. מחר: 9 כרטיסים.</span></div>
+    </div>
+    <div class="ph-foot"><div class="a-grade" style="width: 100%"><span>שוב<small>10 דק׳</small></span><span>קשה<small>יומיים</small></span><span>טוב<small>4 ימים</small></span><span>קל<small>9 ימים</small></span></div></div>
+  </div>
+  <figcaption><b>חזרה של הבוקר</b> · <b>בשלב 2</b>. כרטיס מהחפיסה המשותפת, בקצב אישי, עם קפיצה לפסקה.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>08:03</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להיום</span><span class="t">כרטיסיות להיום</span><span class="a-chip busy">9/18</span></div>
+    <div class="ph-sub"><span>שכחת את הכרטיס הזה פעמיים, אז מגיע רמז</span><span class="a-chip">רק לך</span></div>
+    <div class="ph-body">
+      <div class="a-bar"><i style="width: 50%"></i></div>
+      <div class="a-flash">
+        <div class="a-row between"><span class="a-chip group">מהחפיסה של הקבוצה</span><span class="a-chip bad">נשכח פעמיים</span></div>
+        <p class="front"><bdi dir="ltr">Quinine</bdi>: מה זה <bdi dir="ltr">Cinchonism</bdi>, ואילו עוד שתי רעילויות?</p>
+        <div class="a-card flat" style="border-color: var(--fun); background: var(--fun-soft)">
+          <div class="a-row between"><span class="a-chip fun">רמז מהקיר</span><span class="a-row"><span class="a-avatar c5">ד</span><span class="a-small">דניאל</span></span></div>
+          <p class="a-para"><bdi dir="ltr">Quinine</bdi> = הופעה של <bdi dir="ltr">Queen</bdi>: טינטון, כאב ראש, בחילה, סחרחורת, ראייה מטושטשת. בדרך הביתה: סוכר נופל, <bdi dir="ltr">QT</bdi>&nbsp;ארוך. <span class="a-tag">ש׳ 27</span></p>
+        </div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-small a-muted">הבא בתור · מטעות שלך</span><span class="a-chip group">מהמבחן הקבוצתי</span></div>
+        <b>תולעת סרט בהיריון: מה נותנים?</b>
+        <p class="a-small a-muted">ענית <bdi dir="ltr">Mebendazole</bdi>, אבל היא <bdi dir="ltr">Benzimidazole</bdi>, ולכן טרטוגנית <span class="a-tag">ש׳ 35,37</span>. בגב: <bdi dir="ltr">Niclosamide</bdi>, קו ראשון ל-<bdi dir="ltr">Cestodes</bdi> ובטוחה בהיריון <span class="a-tag">ש׳ 36</span></p>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide">להציג תשובה</span></div>
+  </div>
+  <figcaption><b>כרטיס ששכחת פעמיים</b> · <b>בשלב 2</b>. אחרי שתי שכחות הרמז הוא האסוציאציה שהקבוצה בחרה, ולצדו כרטיס מטעות שלך במבחן.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:30</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להרצאה</span><span class="t">כרטיסיות · <bdi dir="ltr">Anti parasite</bdi></span></div>
+    <div class="ph-sub"><span>54 כרטיסים · 8 חלקים · נוצרו פעם אחת לכל הקבוצה</span></div>
+    <div class="ph-body">
+      <div class="a-row">
+        <div class="a-ring" style="--p: 37%; min-width: 54px"><span>20</span></div>
+        <div><b>בחפיסה שלך: 20 כרטיסים</b><p class="a-small a-muted">מ-3 חלקים. עד 20 חדשים ביום, כדי שהחפיסה לא תקבור אותך.</p></div>
+      </div>
+      <div class="a-list">
+        <div class="a-li"><div><b>מבוא ו-<bdi dir="ltr">Amebiasis</bdi></b></div><span class="a-chip ok">6 בחפיסה ✓</span></div>
+        <div class="a-li"><div><b><bdi dir="ltr">Metronidazole</bdi></b></div><span class="a-chip ok">7 בחפיסה ✓</span></div>
+        <div class="a-li"><div><b><bdi dir="ltr">Leishmaniasis</bdi>: המחלה</b></div><span class="a-chip ok">7 בחפיסה ✓</span></div>
+        <div class="a-li"><div><b><bdi dir="ltr">Leishmaniasis</bdi>: טיפול</b><span class="m">7 כרטיסים</span></div><span class="a-btn">להוסיף</span></div>
+        <div class="a-li"><div><b>מלריה: מחזור החיים ושלבים</b><span class="m">7 כרטיסים</span></div><span class="a-btn">להוסיף</span></div>
+        <div class="a-li"><div><span class="m">ועוד 3 חלקים: מלריה (2) ו-<bdi dir="ltr">Helminths</bdi></span></div></div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-row"><span class="a-chip ok">תוקן לכולם</span><span class="a-avatar c3">מ</span><span class="a-small">מאיה · אתמול</span></span><span class="a-btn ghost">לבטל</span></div>
+        <p class="a-para"><bdi dir="ltr">Doxycycline</bdi>: אסורה בהיריון ובילדים מתחת לגיל 8. <span class="a-tag">ש׳ 33</span></p>
+        <p class="a-small a-muted">מתעדכן גם ב-<bdi dir="ltr">Anki</bdi> בייצוא הבא, בלי לאבד התקדמות.</p>
+      </div>
+      <p class="a-small a-muted">ב-<bdi dir="ltr">Anki</bdi>: תמצית::פתוגן-מאכסן::<bdi dir="ltr">Anti parasite</bdi></p>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide"><svg width="14" height="14"><use href="#i-cards"/></svg><span>ייצוא ל-<bdi dir="ltr">Anki</bdi> · <bdi dir="ltr">.apkg</bdi></span></span></div>
+  </div>
+  <figcaption><b>החפיסה של ההרצאה</b>. 54 כרטיסים שנוצרו פעם אחת לכולם: מוסיפים לחפיסה שלך חלק אחרי חלק, ומייצאים ל-<bdi dir="ltr">Anki</bdi>.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="cards">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: כרטיסיות: חפיסה משותפת, זיכרון פרטי">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-cards" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: כרטיסיות: חפיסה משותפת, זיכרון פרטי"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat stack" id="f-practice">
+  <div class="feat-text">
+    <div class="badges"><span class="badge me">לימוד אישי</span><span class="badge">שלב 1</span><span class="badge">מאמץ בינוני</span></div>
+    <h4>תרגול: שאלות עם נתיחה לכל מסיח</h4>
+    <p class="tagline">שאלות אמריקאיות ומקרים קליניים בעברית, רק מהשקפים. לפני כל תשובה: הימור ביטחון בלחיצה. אחרי: למה כל אפשרות לא נכונה כאן, מתי דווקא כן, ומאיזה שקף.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>תרגול במבחנים מנצח קריאה חוזרת: 61% מול 40% אחרי שבוע (<bdi dir="ltr">Roediger &amp; Karpicke 2006</bdi>). מסיח בלי הסבר עלול להילמד כנכון (<bdi dir="ltr">Roediger &amp; Marsh 2005</bdi>), ולכן כל אפשרות מקבלת נתיחה (<bdi dir="ltr">Butler &amp; Roediger 2008</bdi>). טעות ׳על בטוח׳ שתוקנה נזכרת טוב יותר (<bdi dir="ltr">Butterfield &amp; Metcalfe 2001</bdi>), ולכן ההימור נשמר מהיום הראשון.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>בנק אחד בדוק לכל הרצאה, שנוצר פעם אחת לכל השישה; שני דגלים מוציאים שאלה בעייתית מהתרגול של כולם עד שמתקנים אותה. השאלות שרוב הקבוצה פספסה עולות בראש התור שלך, והמסיח שתפס הכי הרבה מכם הופך לכרטיס מלכודת.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>התשובות הפרטיות נספרות בלי שמות, רק כשלפחות 3 ענו: שאלה שחצתה את הקבוצה עולה לפתיחה ולמבחן הקבוצתי, ופסקה עם הרבה טעויות מסומנת להקראה הבאה. בשלב 3, מלכודת שכתבת נבדקת מול השקפים ונכנסת לבנק של כולם, עם השם שלך.</span></li><li><span class="">עלות AI</span><span>כ-<bdi dir="ltr" class="nw">$0.28</bdi> לסבב של 15 שאלות ועוד כ-<bdi dir="ltr" class="nw">$0.10</bdi> לבדיקה של ׳פותר עיוור׳ (<bdi dir="ltr">Claude</bdi> פותר כל שאלה בלי לראות את המפתח, כדי לתפוס מפתח שגוי), פעם אחת להרצאה לכל הקבוצה; בערך חצי במצב חסכוני. לענות: חינם. ׳טבלה ריקה׳: חינם, כי המפתח הוא טבלת השקף. ניסוח אחר לטעות: שאלה או כרטיס אחרים מאותה פסקה, בלי עלות.</span></li><li><span class="">מה נכנס מתי</span><span>בשלב 3: ׳טבלה ריקה׳ מטבלאות השקפים, ׳להוסיף מלכודת משלי׳, ושאלות בסגנון מבחני העבר כשתיקיית הדרייב תחזור.</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>הסבר לכל תשובה, גם לשגויות</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:47</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להרצאה</span><span class="t">תרגול · <bdi dir="ltr">Anti parasite</bdi></span><span class="a-chip busy">4/15</span></div>
+    <div class="ph-body">
+      <div class="a-bar"><i style="width: 27%"></i></div>
+      <div class="a-row between"><span class="a-chip">מקרה קליני</span><span class="a-small a-muted">מבוסס על ש׳ 38</span></div>
+      <p class="a-q">מטייל חזר מתאילנד עם חום, ובמשטח <bdi dir="ltr">P. vivax</bdi>. אחרי <bdi dir="ltr">Chloroquine</bdi> החום ירד. מה עוד חייבים לעשות לפני השחרור?</p>
+      <div class="a-opts">
+        <div class="a-opt"><span class="l">א</span><span>לאשפז ולתת <bdi dir="ltr">Artesunate IV</bdi></span></div>
+        <div class="a-opt"><span class="l">ב</span><span>לבדוק <bdi dir="ltr">G6PD</bdi> ולתת <bdi dir="ltr">Primaquine</bdi></span></div>
+        <div class="a-opt picked"><span class="l">ג</span><span>לתת <bdi dir="ltr">Mefloquine</bdi> פעם בשבוע</span></div>
+        <div class="a-opt"><span class="l">ד</span><span>לתת <bdi dir="ltr">Doxycycline</bdi> כמניעה</span></div>
+        <div class="a-opt"><span class="l">ה</span><span>לשחרר, החום כבר ירד</span></div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><b class="a-small">הימור ביטחון, לפני הבדיקה</b><span class="a-chip">רק לך</span></div>
+        <div class="a-row"><span class="a-btn wide">ניחוש</span><span class="a-btn wide" style="border-color: var(--accent); color: var(--accent)">נראה לי</span><span class="a-btn wide">על בטוח</span></div>
+        <p class="a-small a-muted">טעות ׳על בטוח׳ נכנסת לרשימת הסכנה. התשובה וההימור נשמרים רק אצלך.</p>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide">לבדוק</span></div>
+  </div>
+  <figcaption><b>שאלה, לפני תשובה</b>. שאלת מקרה מהשקפים, עם הימור ביטחון בלחיצה אחת לפני הבדיקה.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:48</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להרצאה</span><span class="t">תרגול · <bdi dir="ltr">Anti parasite</bdi></span><span class="a-chip busy">4/15</span></div>
+    <div class="ph-body">
+      <div class="a-bar"><i style="width: 27%"></i></div>
+      <div class="a-row between"><span class="a-chip bad">טעות · ׳נראה לי׳</span><span class="a-row"><span class="a-small a-muted">חוזרת מחר בניסוח אחר</span><span class="a-chip">רק לך</span></span></div>
+      <div class="a-opts">
+        <div class="a-opt wrong picked"><span class="l">ג</span><span>לתת <bdi dir="ltr">Mefloquine</bdi> פעם בשבוע</span><span class="x">רק על שלב הדם <span class="a-tag">ש׳ 23</span>. פעם בשבוע בזכות <bdi dir="ltr">t½</bdi> של כ-20 יום <span class="a-tag">ש׳ 28</span>, אבל ל-<bdi dir="ltr">hypnozoites</bdi> לא מגיעה. <b>מתי כן:</b> בשאלה על שלב הדם.</span></div>
+        <div class="a-opt correct"><span class="l">ב</span><span>לבדוק <bdi dir="ltr">G6PD</bdi> ולתת <bdi dir="ltr">Primaquine</bdi></span><span class="x">ל-<bdi dir="ltr">vivax</bdi> יש <bdi dir="ltr">hypnozoites</bdi>, ורק <bdi dir="ltr">Primaquine</bdi> או <bdi dir="ltr">Tafenoquine</bdi> מגיעות אליהם <span class="a-tag">ש׳ 19-20</span>. לפני <bdi dir="ltr">Primaquine</bdi>: <bdi dir="ltr">G6PD</bdi>. <span class="a-tag">ש׳ 37</span></span></div>
+        <div class="a-opt"><span class="l">א</span><span>לאשפז ולתת <bdi dir="ltr">Artesunate IV</bdi></span><span class="x">זה למלריה קשה <span class="a-tag">ש׳ 30</span>. <b>מתי כן:</b> <bdi dir="ltr">falciparum</bdi> עם תרדמת. <span class="a-tag">ש׳ 19</span></span></div>
+        <div class="a-opt"><span class="l">ד</span><span>לתת <bdi dir="ltr">Doxycycline</bdi> כמניעה</span><span class="x">לבדה היא רק למניעה, וב-<bdi dir="ltr">hypnozoites</bdi> היא לא נוגעת. <b>מתי כן:</b> בשאלה על מניעה. <span class="a-tag">ש׳ 33,37</span></span></div>
+        <div class="a-opt"><span class="l">ה</span><span>לשחרר, החום כבר ירד</span><span class="x">החום בא משלב הדם <span class="a-tag">ש׳ 20</span>. ה-<bdi dir="ltr">hypnozoites</bdi> נשארים בכבד, וה-<bdi dir="ltr">relapse</bdi> מחכה. <span class="a-tag">ש׳ 19-20</span></span></div>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn">לפסקה: מקרה 2</span><span class="a-btn"><svg width="14" height="14"><use href="#i-flag"/></svg></span><span class="a-btn primary wide">לשאלה הבאה</span></div>
+  </div>
+  <figcaption><b>הנתיחה</b>. אחרי התשובה: קודם הנתיחה של מה שבחרת, אחר כך כל השאר, וקפיצה לפסקה.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>22:05</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לתרגול</span><span class="t">טבלה ריקה · לפי שלב</span><span class="a-chip busy">4/6</span></div>
+    <div class="ph-sub">הטבלה משקף 23, מהזיכרון · שורה אחר שורה</div>
+    <div class="ph-body">
+      <div class="a-card flat">
+        <table class="a-table">
+          <thead><tr><th style="width: 32%">תרופה</th><th style="width: 17%">כבד ראשוני</th><th style="width: 17%"><bdi dir="ltr">Hypno&shy;zoite</bdi></th><th style="width: 17%">דם א‑מיני</th><th style="width: 17%"><bdi dir="ltr">Gameto&shy;cytes</bdi></th></tr></thead>
+          <tbody>
+            <tr><td><bdi dir="ltr">Chloroquine, quinine</bdi></td><td>—</td><td>—</td><td>כן</td><td>מוגבלת, לא&nbsp;<bdi dir="ltr">falci&shy;parum</bdi></td></tr>
+            <tr><td><bdi dir="ltr">Mefloquine</bdi></td><td>—</td><td>—</td><td>כן</td><td>—</td></tr>
+            <tr><td><bdi dir="ltr">Artemisinins</bdi></td><td>—</td><td>—</td><td>כן</td><td>שלבים מוקדמים</td></tr>
+            <tr><td><bdi dir="ltr">Atovaquone-proguanil</bdi></td><td>כן</td><td><s style="color: var(--bad)">כן</s> —</td><td>כן</td><td>—</td></tr>
+            <tr><td><bdi dir="ltr">Antifolates (SP)</bdi></td><td><span class="a-chip busy">?</span></td><td class="a-muted">·</td><td class="a-muted">·</td><td class="a-muted">·</td></tr>
+            <tr><td><bdi dir="ltr">Primaquine, tafenoquine</bdi></td><td class="a-muted">·</td><td class="a-muted">·</td><td class="a-muted">·</td><td class="a-muted">·</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="a-row"><span class="a-btn">כן</span><span class="a-btn">—</span><span class="a-btn">חלשה</span></div>
+      <div class="a-row"><span class="a-btn">מוגבלת</span><span class="a-btn">שלבים מוקדמים</span></div>
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-chip bad">טעות בשורה 4</span><span class="a-row"><span class="a-small a-muted">נכנסה לכרטיסיות</span><span class="a-chip">רק לך</span></span></div>
+        <p class="a-small"><bdi dir="ltr">Atovaquone-proguanil</bdi>: כבד ודם, לא <bdi dir="ltr">hypnozoite</bdi>. בעמודה הזאת ׳כן׳ רק בשורה אחת. <span class="a-tag">ש׳ 23</span></p>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide">לבדוק את השורה</span></div>
+  </div>
+  <figcaption><b>טבלה ריקה מהזיכרון</b> · <b>בשלב 3</b>. טבלת השקף ריקה, ממלאים בצ׳יפים, והתא שטעית בו הופך לכרטיס.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="practice">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: תרגול: שאלות עם נתיחה לכל מסיח">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-practice" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: תרגול: שאלות עם נתיחה לכל מסיח"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat" id="f-today">
+  <div class="feat-text">
+    <div class="badges"><span class="badge me">לימוד אישי</span><span class="badge">שלב 2</span><span class="badge">מאמץ בינוני</span><span class="badge new">רעיון חדש</span></div>
+    <h4>היום: הבית האישי שמתחיל מהקבוצה</h4>
+    <p class="tagline">מסך אחד שעונה על ׳מה לומדים עכשיו׳: מה הקבוצה עושה היום, תור אישי שנחתך לזמן שיש, והשלמה של 12 דקות לפגישה שפספסת.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>חזרה קבועה קורית רק כשמסך אחד אומר מה לעשות עכשיו. תרגול שליפה וחזרה מרווחת הן שתי הטכניקות שקיבלו ׳תועלת גבוהה׳ אצל <bdi dir="ltr">Dunlosky</bdi> ושותפיו (2013), ותור שמערבב הרצאות מוסיף <bdi dir="ltr">interleaving</bdi> (<bdi dir="ltr">Rohrer &amp; Taylor 2007</bdi>). כאן ׳חזרות קבועות בסגנון אנקי׳ הופכות להרגל.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>התור נבנה מהיום של הקבוצה: ההרצאה שנקראת היום, הטעויות שלך מהמבחן הקבוצתי, פסקאות שסימנת ׳לא ברור׳ ושאלות שעלו בפגישה. פגישה שפספסת מגיעה אליך מקוצרת ל-12 דקות: על מה התעכבו, מה נפתר ומה ננעץ.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>מה שסיימת לבד מסומן ב׳מי קרא מה׳, כמו היום, בלי שעה ובלי ׳באיחור׳. בשלב 3, ורק בהסכמה, שאלה פתוחה של הקבוצה בנושא שיושב אצלך טוב יכולה להגיע ל׳הקבוצה צריכה אותך׳.</span></li><li><span class="">עלות AI</span><span>אין: הרכבה של נתונים שכבר קיימים.</span></li><li><span class="">מה נכנס מתי</span><span>בשלב 3: ׳הקבוצה צריכה אותך׳ (בהסכמה) והמסלול הפרטי של המרתון.</span></li></ul>
+    
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>07:52</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">היום · יום ג׳</span></div>
+    <div class="ph-body">
+      <div class="a-card" style="border-color: var(--group); background: var(--group-soft)">
+        <div class="a-row between"><b>הקבוצה היום · 09:00</b><span class="a-tag">ש׳ 19-33</span></div>
+        <p class="a-para">מלריה: מחזור החיים, מנגנונים ושילובים</p>
+        <div class="a-row between">
+          <span class="a-row"><span class="a-avatar c1">ש</span><span class="a-small">הקראה: <b>שוהם</b></span></span>
+          <span class="a-btn">ניחוש לפני · 2 שאלות</span>
+        </div>
+      </div>
+      <div class="a-sec"><span class="a-row"><b class="a-h2">התור שלי</b><span class="a-chip">רק לך</span></span><span class="a-row"><span class="a-chip">10</span><span class="a-chip busy">20 דק׳</span><span class="a-chip">45</span></span></div>
+      <div class="a-list">
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><b>7 כרטיסים</b><span class="a-chip busy">הגיע הזמן</span></span><span class="m">למשל <bdi dir="ltr">Pentostam</bdi>: איך היא הופכת לפעילה? <span class="a-tag">ש׳ 17</span></span></div></div>
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><b>2 מהמבחן הקבוצתי</b><span class="a-chip bad">טעית אתמול</span></span><span class="m"><bdi dir="ltr">Miltefosine</bdi>: עד מתי אמצעי מניעה? <span class="a-tag">ש׳ 16</span></span></div></div>
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><b>1 מרשימת הסכנה, בניסוח חדש</b><span class="a-chip warn">על בטוח</span></span><span class="m"><bdi dir="ltr">Paromomycin</bdi>: <bdi dir="ltr">luminal</bdi> או <bdi dir="ltr">tissue</bdi>? <span class="a-tag">ש׳ 4</span></span></div></div>
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><b>פסקה שסימנת ׳לא ברור׳</b><span class="a-chip group">מהפגישה</span></span><span class="m">איך <bdi dir="ltr">Miltefosine</bdi> נכנסת לטפיל? עוד פתוחה <span class="a-tag">ש׳ 15</span></span></div></div>
+      </div>
+      <div class="a-row"><span class="a-btn primary wide">להתחיל · 20 דק׳</span><span class="a-btn ghost"><svg width="14" height="14"><use href="#i-bolt"/></svg>להבה 4/7</span></div>
+      <div class="a-card flat" style="border-color: var(--group)">
+        <div class="a-row between"><span class="a-row"><span class="a-avatar c4">א</span><span class="a-small"><b>שאלה פתוחה</b> · איתי, אתמול</span></span><span class="a-btn">לענות</span></div>
+        <p class="a-small">למה <bdi dir="ltr">Chloroquine</bdi> גם בטבלה של <bdi dir="ltr">Amebiasis</bdi>? <span class="a-tag">ש׳ 4</span></p>
+      </div>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab on"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>בבוקר, לפני הפגישה</b>. מסך הבית: הפגישה של היום מלמעלה, והתור האישי שנחתך ל-20 דקות.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>20:10</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להיום</span><span class="t">השלמה · <bdi dir="ltr">Leishmaniasis</bdi>: טיפול</span></div>
+    <div class="ph-sub"><span>בפרק הקודם של תמצית…</span><span>·</span><span>12 דק׳</span><span class="a-chip">רק לך</span></div>
+    <div class="ph-body">
+      <div class="a-card flat">
+        <div class="a-row between"><b>התעכבנו על</b><span class="a-chip group">עצרנו להסביר</span></div>
+        <p class="a-para"><bdi dir="ltr">Miltefosine</bdi> טרטוגנית (<bdi dir="ltr">Black Box</bdi>): אמצעי מניעה בטיפול ועוד 5 חודשים. <span class="a-tag">ש׳ 16</span></p>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><b>שאלה שנפתרה</b><span class="a-chip ok">נענתה</span></div>
+        <p class="a-para">למה <bdi dir="ltr">Sodium stibogluconate</bdi> מחייבת <bdi dir="ltr">ECG</bdi>?</p>
+        <div class="a-row"><span class="a-avatar c3">מ</span><span class="a-small">הארכת <bdi dir="ltr">QTc</bdi>, היפוך גלי <bdi dir="ltr">T</bdi> והפרעות קצב. <span class="a-tag">ש׳ 18</span></span></div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><b>אסוציאציה שננעצה</b><span class="a-row"><span class="a-avatar c5">ד</span><span class="a-small">דניאל</span></span></div>
+        <p class="a-para"><bdi dir="ltr">Pentostam</bdi> מגיעה עם 5 כוכבים, ועובדת רק כשיורדת ל-3: <bdi dir="ltr">Sb(V)→Sb(III)</bdi>. <span class="a-tag">ש׳ 17</span></p>
+      </div>
+      <div class="a-row"><svg width="14" height="14"><use href="#i-target"/></svg><span class="a-small"><b>בדיקה קצרה:</b> 5 שאלות שהקבוצה התקשתה בהן. לבד, בלי שעון.</span></div>
+      <div class="a-row"><span class="a-btn primary wide">להתחיל השלמה</span></div>
+      <p class="a-small a-muted">קראו: שוהם, נועה, מאיה, איתי, דניאל. בסוף ההשלמה מצטרפים לרשימה, בלי שעה ובלי ׳באיחור׳.</p>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab on"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>פגישה שפספסת: השלמה של 12 דקות</b>. השלמה פרטית: רק מה שהקבוצה ייצרה בפגישה, ובדיקה קצרה.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="today">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: היום: הבית האישי שמתחיל מהקבוצה">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-today" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: היום: הבית האישי שמתחיל מהקבוצה"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><div class="group-head" id="g-group"><span class="eyebrow group">5 פיצ׳רים</span><h3>לימוד קבוצתי</h3><p class="muted">מה שקורה כשהקבוצה יחד: בפגישה היומית ובין הפגישות.</p></div><article class="feat stack" id="f-meeting">
+  <div class="feat-text">
+    <div class="badges"><span class="badge group">לימוד קבוצתי</span><span class="badge">שלב 1</span><span class="badge">מאמץ בינוני</span></div>
+    <h4>הפגישה היומית: 3 לקפה, ׳לא ברור׳ ותשובות שנדלקות</h4>
+    <p class="tagline">פתיחה של 5 דקות עם שליפה על אתמול וניחוש על היום, כפתור ׳לא ברור׳ אנונימי בזמן ההקראה, ותשובה שנדלקת אצל כולם כשההקראה מגיעה אליה.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>שאלה על אתמול היא חזרה מרווחת של יום (<bdi dir="ltr">Cepeda</bdi> ושותפיו 2006). ניסיון לענות לפני הקריאה משפר את הלמידה גם כשהניחוש שגוי (<bdi dir="ltr">Richland, Kornell &amp; Kao 2009</bdi>), וסקרנות משפרת את הזיכרון של התשובה (<bdi dir="ltr">Gruber</bdi> ושותפיו 2014). לחיצה אנונימית חושפת בלבול שלא אומרים בקול (<bdi dir="ltr">Caldwell 2007</bdi>). ולא מעמיסים: לכל היותר שני טקסים ביום, פתיחה ומבחן בסוף.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>הקריאה המשותפת עונה על הניחושים הפרטיים שלך בדיוק בפסקה הנכונה, ופסקה שסימנת ׳לא ברור׳ חוזרת אליך לבד מחר, עם ההסבר שנתנו בפגישה.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>ניחושים ולחיצות ׳לא ברור׳ פרטיים נספרים בלי שמות ומראים במסך ההקראה איפה הקבוצה עומדת ללכת לאיבוד, לפני שזה קורה. הם גם בונים את סדר היום של שלוש שורות.</span></li><li><span class="">עלות AI</span><span><bdi dir="ltr" class="nw">$0</bdi> בזמן אמת: השאלות מהבנק. הניחוש על היום צריך שהבנק ייווצר לפני הפגישה (ראו ההחלטה על יצירה אוטומטית).</span></li><li><span class="">מה נכנס מתי</span><span>בשלב 1: ׳לא ברור׳, ׳3 לקפה׳ על אתמול וסדר יום. בשלב 2: ניחוש על היום שנדלק בהקראה, ונקודות חמות מהדופק בסדר היום.</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>היום מישהו מקריא והשאר עוקבים אצלהם, אנחנו רוצים שזה יהיה מוטמע שיטתית וחכם</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>09:02</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">3 לקפה · בפרקים הקודמים</span><span class="a-chip busy">2/3</span></div>
+    <div class="ph-sub"><span>5 דק׳ · עונים לבד, בלי לפתוח את הסיכום</span><span>·</span><span>אפשר לדלג</span></div>
+    <div class="ph-body">
+      <div class="a-card flat">
+        <b class="a-small">1 · <bdi dir="ltr">Metronidazole</bdi> נתפסה עם בירה</b>
+        <div class="a-row between"><span class="a-small a-muted">תגובה דמוית <bdi dir="ltr">disulfiram</bdi> <span class="a-tag">ש׳ 7</span></span><span class="a-chip ok">רובכם צדקו</span></div>
+      </div>
+      <div class="a-stack">
+        <p class="a-q">2 · <bdi dir="ltr">Miltefosine</bdi> סיימה קורס של 28 יום, אבל עוד לא באמת עזבה. מה זה מחייב? <span class="a-tag">ש׳ 16</span></p>
+        <div class="a-opts">
+          <div class="a-opt picked"><span class="l">א</span><span>אמצעי מניעה בטיפול ו-5 חודשים אחריו</span></div>
+          <div class="a-opt"><span class="l">ב</span><span>בדיקת <bdi dir="ltr">G6PD</bdi> לפני כל מנה</span></div>
+          <div class="a-opt"><span class="l">ג</span><span>בלי אלכוהול 48 שעות</span></div>
+          <div class="a-opt"><span class="l">ד</span><span>ניטור <bdi dir="ltr">ECG</bdi> בכל הטיפול</span></div>
+        </div>
+        <p class="a-small a-muted">3 · למה <bdi dir="ltr">Leishmania</bdi> לא מתעכלת במקרופאג? <span class="a-tag">ש׳ 11</span></p>
+      </div>
+      <div class="a-later" data-later="שלב 2">
+        <div class="a-stack">
+          <div class="a-row"><b class="a-small">ניחוש על היום · 1 מתוך 2</b><span class="a-chip group">יידלק בהקראה</span></div>
+          <span class="a-small">איזה שלב של <bdi dir="ltr">Plasmodium</bdi> אף תרופה לא הורגת?</span>
+        </div>
+      </div>
+      <div class="a-sec"><b>סדר היום</b></div>
+      <div class="a-list">
+        <div class="a-li"><div><b>היום: מלריה <span class="a-tag">ש׳ 19-33</span></b><span class="m">הקראה: שוהם</span></div><span class="a-avatar c1">ש</span></div>
+        <div class="a-later" data-later="שלב 2"><div class="a-li"><div><b>נקודה חמה: <bdi dir="ltr">Miltefosine</bdi> בהיריון <span class="a-tag">ש׳ 16</span></b></div></div></div>
+        <div class="a-li"><div><b>שאלה פתוחה: מה עושה <bdi dir="ltr">LMT-Ros3</bdi>? <span class="a-tag">ש׳ 15</span></b></div></div>
+      </div>
+    </div>
+  </div>
+  <figcaption><b>3 לקפה: פתיחת הפגישה</b>. חמש דקות בפתיחה: שליפה על אתמול, ניחוש על היום, וסדר יום של שלוש שורות.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>09:34</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לספרייה</span><span class="t">מלריה: מחזור החיים</span></div>
+    <div class="ph-sub"><span class="a-avatar c1">ש</span><b style="color: var(--ink)">מעקב: שוהם</b><span>·</span><span>כאן: 6</span></div>
+    <div class="ph-body">
+      <p class="a-h2">מחזור החיים של <bdi dir="ltr">Plasmodium</bdi> ומטרות התרופות</p>
+      <p class="a-para a-muted">…ואף תרופה אחת לא מסלקת גם את שלבי הכבד וגם את שלבי הדם. <span class="a-tag">ש׳ 20</span></p>
+      <div class="a-para marked">
+        <table class="a-table">
+          <tr><th>שלב</th><th>תרופות</th></tr>
+          <tr><td><bdi dir="ltr">Sporozoite</bdi></td><td>אין תרופה שהורגת אותו</td></tr>
+          <tr><td>שלב הכבד</td><td><bdi dir="ltr">Primaquine, atovaquone-proguanil</bdi></td></tr>
+          <tr><td><bdi dir="ltr">Hypnozoite</bdi></td><td><bdi dir="ltr">Primaquine, tafenoquine</bdi></td></tr>
+          <tr><td><bdi dir="ltr">Blood schizont</bdi></td><td><bdi dir="ltr">Chloroquine, artemisinins, quinine, mefloquine</bdi></td></tr>
+          <tr><td><bdi dir="ltr">Gametocyte</bdi></td><td><bdi dir="ltr">Primaquine, artemisinins</bdi> (מוקדם)</td></tr>
+        </table>
+      </div>
+      <div class="a-row between"><span class="a-tag">ש׳ 20</span><span class="a-btn" style="border-color: var(--accent); color: var(--accent)"><svg width="14" height="14"><use href="#i-check"/></svg>לא ברור לי</span></div>
+      <div class="a-toast">סומן, בלי שם. הפסקה תחזור אליך מחר.</div>
+      <div class="a-later" data-later="שלב 2">
+        <div class="a-card" style="background: var(--fun-soft); border-color: var(--fun)">
+          <b>דינג! התשובה לניחוש 1</b>
+          <p class="a-para">את ה-<bdi dir="ltr">Sporozoite</bdi> אף תרופה לא הורגת. דווקא נגד ה-<bdi dir="ltr">hypnozoite</bdi> יש: <bdi dir="ltr">Primaquine</bdi> ו-<bdi dir="ltr">tafenoquine</bdi>. <span class="a-tag">ש׳ 20</span></p>
+          <div class="a-row between"><span class="a-small a-muted">ניחשת <bdi dir="ltr">Hypnozoite</bdi>, כמו רוב הקבוצה</span><span class="a-chip">רק לך</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <figcaption><b>בהקראה, בטלפון של מי שעוקב</b>. ׳לא ברור׳ בלחיצה ובלי שם, והתשובה לשאלת הניחוש נדלקת כשמגיעים אליה.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>09:35</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לספרייה</span><span class="t">מלריה: מחזור החיים</span><span class="a-chip group">5 עוקבים</span></div>
+    <div class="ph-sub"><b style="color: var(--ink)">ההקראה שלך משותפת</b><span>·</span><span class="a-avatar c2">נ</span><span class="a-avatar c3">מ</span><span class="a-avatar c4">א</span><span class="a-avatar c5">ד</span><span class="a-avatar c6">ר</span></div>
+    <div class="ph-body">
+      <p class="a-h2">מחזור החיים של <bdi dir="ltr">Plasmodium</bdi> ומטרות התרופות</p>
+      <p class="a-para a-muted">…ואף תרופה אחת לא מסלקת גם את שלבי הכבד וגם את שלבי הדם. <span class="a-tag">ש׳ 20</span></p>
+      <div class="a-para marked">
+        <table class="a-table">
+          <tr><th>שלב</th><th>תרופות</th></tr>
+          <tr><td><bdi dir="ltr">Sporozoite</bdi></td><td>אין תרופה שהורגת אותו</td></tr>
+          <tr><td>שלב הכבד</td><td><bdi dir="ltr">Primaquine, atovaquone-proguanil</bdi></td></tr>
+          <tr><td><bdi dir="ltr">Hypnozoite</bdi></td><td><bdi dir="ltr">Primaquine, tafenoquine</bdi></td></tr>
+          <tr><td><bdi dir="ltr">Blood schizont</bdi></td><td><bdi dir="ltr">Chloroquine, artemisinins, quinine, mefloquine</bdi></td></tr>
+          <tr><td><bdi dir="ltr">Gametocyte</bdi></td><td><bdi dir="ltr">Primaquine, artemisinins</bdi> (מוקדם)</td></tr>
+        </table>
+      </div>
+      <div class="a-callout warn">
+        <div class="a-stack">
+          <div class="a-row between"><b>3 ׳לא ברור׳ · בלי שמות</b><span class="a-tag">ש׳ 20</span></div>
+          <span class="a-btn primary">לעצור ולהסביר</span>
+          <div class="a-row"><span class="a-btn">להמשיך</span><span class="a-btn">לשאלה פתוחה למחר</span></div>
+        </div>
+      </div>
+      <div class="a-later" data-later="שלב 2">
+        <div class="a-card flat">
+          <div class="a-row between"><b class="a-small">בפסקה הבאה: ניחוש 2</b><span class="a-chip warn">כדאי להאט</span></div>
+          <span class="a-small">למה דווקא ב-<bdi dir="ltr">vivax</bdi> וב-<bdi dir="ltr">ovale</bdi> יש <bdi dir="ltr">relapse</bdi>? <span class="a-tag">ש׳ 19</span></span>
+          <span class="a-small a-muted">רוב הקבוצה ניחשה לא נכון</span>
+        </div>
+      </div>
+      <p class="a-small a-muted">הספירה מופיעה רק במסך ההקראה, ורק מ-3 לחיצות.</p>
+    </div>
+  </div>
+  <figcaption><b>במסך ההקראה</b>. רק במסך ההקראה: כמה סימנו ׳לא ברור׳, בלי שמות, ואיפה הקבוצה ניחשה לא נכון.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="meeting">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: הפגישה היומית: 3 לקפה, ׳לא ברור׳ ותשובות שנדלקות">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-meeting" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: הפגישה היומית: 3 לקפה, ׳לא ברור׳ ותשובות שנדלקות"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat stack" id="f-live-quiz">
+  <div class="feat-text">
+    <div class="badges"><span class="badge group">לימוד קבוצתי</span><span class="badge">שלב 1</span><span class="badge">מאמץ גדול</span></div>
+    <h4>מבחן קבוצתי חי: עונים לבד, משכנעים, עונים שוב</h4>
+    <p class="tagline">עונים לבד בטלפון עם הימור ביטחון, רואים התפלגות בלי שמות, מתווכחים 90 שניות כשהקבוצה חצויה, עונים שוב, ואז הסבר לכל תשובה. ומצב מירוץ עם נקודות, כשבוחרים בו.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>ויכוח בין עמיתים משפר הבנה גם כשאף אחד לא ידע את התשובה בהתחלה (<bdi dir="ltr">Smith</bdi> ושותפיו 2009; <bdi dir="ltr">Crouch &amp; Mazur 2001</bdi>). לענות לבד לפני הדיון מונע היגררות אחרי הקול הבטוח (<bdi dir="ltr">Stowell &amp; Nelson 2007</bdi>), והסבר לכל מסיח אחרי החשיפה מונע מהמסיחים להילמד (<bdi dir="ltr">Butler &amp; Roediger 2008</bdi>). בלי נקודות מהירות כברירת מחדל: טבלה פומבית מורידה מוטיבציה למי שבתחתית (<bdi dir="ltr">Hanus &amp; Fox 2015</bdi>).</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>כל תשובה ראשונה שגויה, גם אם תוקנה בוויכוח (׳הבנתי בדיון׳), נכנסת לתור הפרטי שלך עם הטיעון שניצח, וחוזרת אחרי יום ואחרי 3 ימים.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>התרגול הפרטי בוחר את השאלות, רק כספירה: מה שלפחות 3 מכם פספסו השבוע, שאלות שחצו את הקבוצה, וטעויות ׳על בטוח׳. בשלב 3 נכנסות גם מלכודות שחברי הקבוצה כתבו, והשם נחשף אחרי החשיפה.</span></li><li><span class="">עלות AI</span><span><bdi dir="ltr" class="nw">$0</bdi> למשחק: הוא משחק מהבנק השמור.</span></li><li><span class="">מה נכנס מתי</span><span>בשלב 3: סבבים מיוחדים (׳מי אני?⁠׳ עם רמזים מהקשה לקל, ׳המלכודות שלנו׳) וקרב הבוס כמצב מיוחד.</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>מבחן קבוצתי בזמן אמת · מבחן תחרותי בזמן אמת</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>11:31</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להרצאה</span><span class="t">מבחן קבוצתי</span><span class="a-chip busy">5 שאלות</span></div>
+    <div class="ph-sub"><bdi dir="ltr">Anti parasite</bdi><span>·</span><span>מלריה</span><span class="a-tag">ש׳ 19-33</span></div>
+    <div class="ph-body">
+      <div class="a-sec"><b>מצב</b></div>
+      <div class="a-opts">
+        <div class="a-opt picked"><span class="l"><svg width="12" height="12"><use href="#i-users"/></svg></span><span class="a-row between"><b>כולנו נגד המבחן</b><span class="a-chip busy">השיא: 90%</span></span><span class="x">בלי טבלה: ניקוד ההימור רק לך. 80% זה ׳עברנו׳.</span></div>
+        <div class="a-opt"><span class="l"><svg width="12" height="12"><use href="#i-bolt"/></svg></span><span><b>מירוץ</b></span><span class="x">נקודות וטבלה לשחקני המירוץ, רק במשחק.</span></div>
+      </div>
+      <div class="a-sec"><b>מי בפנים</b><span class="a-small a-muted">5 מתוך 6</span></div>
+      <div class="a-row"><span class="a-avatar c1">ש</span><span class="a-avatar c2">נ</span><span class="a-avatar c3">מ</span><span class="a-avatar c4">א</span><span class="a-avatar c5">ד</span><span class="a-small a-muted">מחכים לרוני</span></div>
+      <div class="a-sec"><b>החוקים</b></div>
+      <div class="a-list">
+        <div class="a-li"><div><b class="a-row"><svg width="13" height="13"><use href="#i-clock"/></svg>דקה לשאלה</b><span class="m">בלי נקודות על מהירות</span></div></div>
+        <div class="a-li"><div><b class="a-row"><svg width="13" height="13"><use href="#i-chat"/></svg>קודם לבד, עם הימור</b><span class="m">קבוצה חצויה? 90 שניות לשכנע, ואז עונים שוב</span></div></div>
+        <div class="a-li"><div><b class="a-row"><svg width="13" height="13"><use href="#i-user"/></svg>בלי שמות על התשובות</b><span class="m">כל טלפון רואה רק את ההימור והטעויות שלו</span></div></div>
+        <div class="a-li"><div><b class="a-row"><svg width="13" height="13"><use href="#i-award"/></svg>בסוף: ציון הקבוצה</b><span class="m">והשאלה ששברה את הקבוצה</span></div></div>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn"><svg width="12" height="12"><use href="#i-send"/></svg> קישור לוואטסאפ</span><span class="a-btn primary wide">להתחיל</span></div>
+  </div>
+  <figcaption><b>הלובי</b>. פותחים מבחן על מה שנקרא, בוחרים מצב, והשאר מצטרפים מהבאנר.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>11:36</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">שאלה 4 מתוך 5</span><span class="a-chip busy">כולנו נגד המבחן</span></div>
+    <div class="ph-body">
+      <div class="a-row between"><span class="a-chip group"><svg width="10" height="10"><use href="#i-clock"/></svg> 0:47</span><span class="a-small a-muted">ענו 4 מתוך 6</span></div>
+      <div class="a-timer"><i style="width: 78%"></i></div>
+      <div class="a-row between"><span class="a-chip">מקרה קליני</span><span class="a-small a-muted">מבוסס על ש׳ 27, 33, 38</span></div>
+      <p class="a-q">מטיילת בהיריון חוזרת מניגריה עם חום. במשטח: <bdi dir="ltr">P. falciparum</bdi> עמיד ל-<bdi dir="ltr">Chloroquine</bdi>. היא מקבלת <bdi dir="ltr">Quinine</bdi>. מה מצרפים?</p>
+      <div class="a-opts">
+        <div class="a-opt picked"><span class="l">א</span><span><bdi dir="ltr">Doxycycline</bdi></span></div>
+        <div class="a-opt"><span class="l">ב</span><span><bdi dir="ltr">Clindamycin</bdi></span></div>
+        <div class="a-opt"><span class="l">ג</span><span><bdi dir="ltr">Primaquine</bdi></span></div>
+        <div class="a-opt"><span class="l">ד</span><span><bdi dir="ltr">Sulfadoxine-pyrimethamine</bdi></span></div>
+      </div>
+      <div class="a-sec"><b>ההימור</b><span class="a-chip">רק לך</span></div>
+      <div class="a-row"><span class="a-btn wide">ניחוש</span><span class="a-btn wide">נראה לי</span><span class="a-btn wide" style="border-color: var(--accent); color: var(--accent)">על בטוח</span></div>
+      <p class="a-small a-muted">צודקים: <bdi dir="ltr">+1</bdi> · <bdi dir="ltr">+2</bdi> · <bdi dir="ltr">+3</bdi>. טועים: 0 · <bdi dir="ltr">−2</bdi> · <bdi dir="ltr">−6</bdi>.</p>
+      <div class="a-callout"><b>בלי שמות.</b> בחשיפה רואים רק כמה בחרו כל תשובה, ורק אם ענו לפחות 3.</div>
+    </div>
+    <div class="ph-foot"><span class="a-btn wide"><svg width="12" height="12"><use href="#i-check"/></svg> התשובה נעולה עד החשיפה</span></div>
+  </div>
+  <figcaption><b>שאלה: עונים לבד</b>. השאלה על כל הטלפונים: עונים לבד, מהמרים, והתשובות ננעלות עד החשיפה.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>11:39</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">שאלה 4 · החשיפה</span><span class="a-chip busy">כולנו נגד המבחן</span></div>
+    <div class="ph-body">
+      <div class="a-stack">
+        <div class="a-row between"><b class="a-small">סבב 1 · עונים לבד</b><span class="a-chip warn">חצויה: 90 שניות לשכנע</span></div>
+        <div class="a-bars">
+          <div class="r"><span><bdi dir="ltr">Doxycycline</bdi></span><div class="a-bar"><i style="width: 50%"></i></div><b>3</b></div>
+          <div class="r"><span><bdi dir="ltr">Clindamycin</bdi></span><div class="a-bar"><i style="width: 33%"></i></div><b>2</b></div>
+          <div class="r"><span><bdi dir="ltr">Primaquine</bdi></span><div class="a-bar"><i style="width: 17%"></i></div><b>1</b></div>
+        </div>
+      </div>
+      <div class="a-stack">
+        <div class="a-row between"><b class="a-small">סבב 2 · אחרי הוויכוח</b><span class="a-chip ok">83%, היה 33%</span></div>
+        <div class="a-bars">
+          <div class="r ok"><span><bdi dir="ltr">Clindamycin</bdi></span><div class="a-bar"><i style="width: 83%"></i></div><b>5</b></div>
+          <div class="r"><span><bdi dir="ltr">Doxycycline</bdi></span><div class="a-bar"><i style="width: 17%"></i></div><b>1</b></div>
+        </div>
+      </div>
+      <div class="a-opts">
+        <div class="a-opt correct"><span class="l">ב</span><span><bdi dir="ltr">Clindamycin</bdi></span><span class="x">בטוחה בהיריון ובילדים מתחת לגיל 8 <span class="a-tag">ש׳ 33</span></span></div>
+        <div class="a-opt wrong picked"><span class="l">א</span><span class="a-row between"><bdi dir="ltr">Doxycycline</bdi><span class="a-chip bad">המלכודת של הסבב</span></span><span class="x">השותפה של <bdi dir="ltr">Quinine</bdi>, אבל לא בהיריון <span class="a-tag">ש׳ 33</span></span></div>
+        <div class="a-opt"><span class="l">ג</span><span><bdi dir="ltr">Primaquine</bdi></span><span class="x">בשלב הדם היא רק חלשה <span class="a-tag">ש׳ 23</span></span></div>
+        <div class="a-opt"><span class="l">ד</span><span><bdi dir="ltr">Sulfadoxine-pyrimethamine</bdi></span><span class="x">בהיריון: טיפול מונע לסירוגין <span class="a-tag">ש׳ 32</span></span></div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-small"><b>׳על בטוח׳: <bdi dir="ltr">−6</bdi>.</b> השאלה חוזרת אליך מחר.</span><span class="a-chip">רק לך</span></div>
+      </div>
+      <div class="a-later" data-later="שלב 3"><p class="a-small a-muted">נכתבה ע״י רוני · נבדקה מול השקפים</p></div>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide">לשאלה הבאה</span></div>
+  </div>
+  <figcaption><b>החשיפה: לפני הוויכוח ואחריו</b>. התפלגות בלי שמות, 90 שניות לשכנע, הצבעה שנייה, והסבר לכל תשובה.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="live-quiz">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: מבחן קבוצתי חי: עונים לבד, משכנעים, עונים שוב">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-live-quiz" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: מבחן קבוצתי חי: עונים לבד, משכנעים, עונים שוב"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat" id="f-recordings">
+  <div class="feat-text">
+    <div class="badges"><span class="badge group">לימוד קבוצתי</span><span class="badge">שלב 2</span><span class="badge">מאמץ גדול</span></div>
+    <h4>ההקלטה בתוך הסיכום: הערות ׳מההקלטה׳</h4>
+    <p class="tagline">מעלים את קובץ התמלול מהזום, או מתמללים בדפדפן במחשב, ו-<bdi dir="ltr">Claude</bdi> מוסיף מתחת לכל פסקה רק מה שנאמר בהרצאה ולא כתוב בשקפים, עם הדקה בהקלטה.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>מה שמודגש בקול בהרצאה הוא הסימן הכי טוב למה שיישאל, ובדיוק מה שסיכום מהשקפים לא רואה. שוהם רוצה סיכום שמעביר את החומר ׳כמו שהם מועברים בשיעור ויותר׳. שכבה נפרדת עם דקות שומרת על האמון: כל שורה ניתנת לבדיקה מול המקור.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>העלאה אחת, וכל השישה מקבלים את השכבה המדוברת בסיכום, עם קפיצה לדקה. הערת ׳זה למבחן׳ מקדמת את הפסקה בתוכנית ובתור של כולם.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>מה ששומעים בהקלטה וההערות פספסו נכנס כתיקון, עם ׳מההקלטה׳ והדקה כמקור. ׳מה נאמר בהרצאה על…׳ עונה מההערות האלה.</span></li><li><span class="">עלות AI</span><span>תמלול בדפדפן: <bdi dir="ltr" class="nw">$0</bdi>. הערות: כ-<bdi dir="ltr" class="nw">$0.87</bdi> להרצאה של שעתיים (עד כ-<bdi dir="ltr" class="nw">$1.24</bdi> למצגת גדולה), רק בלחיצה ואחרי הערכת עלות. זו התוספת היקרה ביותר בתקציב.</span></li><li><span class="">מה נכנס מתי</span><span>בשלב 2: ייבוא קובץ תמלול והערות בלחיצה. בשלב 3: תמלול בדפדפן במחשב, אחרי מדידה על הרצאה אמיתית מלאה במונחים באנגלית. מוסתר עד שמדיניות האוניברסיטה נבדקת.</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>העלאת הקלטות ותמלול</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>20:05</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להרצאה</span><span class="t">הקלטה · <bdi dir="ltr">Anti parasite</bdi></span></div>
+    <div class="ph-body">
+      <b class="a-small a-muted">מאיפה התמלול?</b>
+      <div class="a-card" style="border-color: var(--accent)">
+        <div class="a-row between"><span class="a-row"><svg width="14" height="14"><use href="#i-chat"/></svg><b>קובץ תמלול מהזום</b></span><span class="a-chip busy">נבחר</span></div>
+        <span class="a-small a-muted"><bdi dir="ltr">VTT</bdi>, <bdi dir="ltr">SRT</bdi> או <bdi dir="ltr">TXT</bdi>, או להדביק את הטקסט</span>
+      </div>
+      <div class="a-later" data-later="שלב 3">
+        <div class="a-card flat">
+          <div class="a-row"><svg width="14" height="14"><use href="#i-mic"/></svg><b>קובץ שמע: תמלול בדפדפן במחשב</b></div>
+          <span class="a-small a-muted">התמלול רץ על המחשב עצמו. השמע לא יוצא מהמכשיר.</span>
+        </div>
+      </div>
+      <div class="a-list">
+        <div class="a-li"><div><b><bdi dir="ltr">anti-parasite-zoom.vtt</bdi></b><span class="m">כשעתיים · 120 מתוך 120 דקות נקלטו</span></div><span class="a-chip ok">מוכן ✓</span></div>
+        <div class="a-li"><span class="a-row"><svg width="14" height="14" style="color: var(--ok)"><use href="#i-check"/></svg><b class="a-small">ההקלטה היא של ההרצאה הזו, ומותר לקבוצה להשתמש בה.</b></span></div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><b>הערות ל-8 חלקים</b><b>כ-$0.90</b></div>
+        <span class="a-small a-muted">רק מה שנאמר בהרצאה ולא כתוב בשקפים, עם הדקה.</span>
+        <div class="a-bar"><i style="width: 48%"></i></div>
+        <div class="a-row between a-small a-muted"><span>תקציב הקבוצה החודש</span><span>$15.80 מתוך $33</span></div>
+        <span class="a-small a-muted">התוספת הכי יקרה באפליקציה, ולכן רק בלחיצה.</span>
+      </div>
+      <div class="a-row a-small a-muted"><svg width="14" height="14"><use href="#i-users"/></svg><span>העלאה אחת, וכל הקבוצה מקבלת את ההערות בתוך הסיכום.</span></div>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide"><svg width="14" height="14"><use href="#i-pen"/></svg>לכתוב הערות מההקלטה</span></div>
+  </div>
+  <figcaption><b>הוספת הקלטה</b>. ייבוא קובץ תמלול מהזום, אישור שימוש, ורק אז הערכת עלות וכתיבה.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:15</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לספרייה</span><span class="t"><bdi dir="ltr">Anti parasite</bdi> · סיכום המרצה</span></div>
+    <div class="ph-sub"><span>חלק 8 · סיכום ומקרים קליניים</span></div>
+    <div class="ph-body">
+      <p class="a-para">• להתאים את התרופה לשלב: כבד, דם או גמטוציטים. <bdi dir="ltr">Hypnozoites</bdi> דורשים <bdi dir="ltr">Primaquine</bdi> או <bdi dir="ltr">Tafenoquine</bdi>. <span class="a-tag">ש׳ 37</span></p>
+      <p class="a-para">• להבחין בין <bdi dir="ltr">luminal amebicides</bdi> ל-<bdi dir="ltr">tissue amebicides</bdi>. <span class="a-tag">ש׳ 37</span></p>
+      <p class="a-para marked">• להכיר את הדגלים האדומים: בדיקת <bdi dir="ltr">G6PD</bdi> לפני <bdi dir="ltr">Primaquine</bdi>, אין אלכוהול עם <bdi dir="ltr">Metronidazole</bdi>, ו-<bdi dir="ltr">Miltefosine</bdi> ו-<bdi dir="ltr">Benzimidazoles</bdi> טרטוגניות. <span class="a-tag">ש׳ 37</span></p>
+      <div class="a-callout rec">
+        <div class="a-row between"><span class="a-row"><svg width="14" height="14"><use href="#i-mic"/></svg><b>מההקלטה</b><span class="a-chip">מקום שמור</span></span><span class="a-btn">להאזין</span></div>
+        <p class="a-muted">‹כאן תופיע הערה אמיתית: מה שנאמר כשהשקף היה על המסך ולא כתוב בו, למשל הדגשה או ׳זה יופיע במבחן׳› <span class="a-tag">הקלטה 41:12</span></p>
+      </div>
+      <p class="a-small a-muted"><b>שקף שתוקן בעל-פה?</b> הופך להצעת תיקון, עם ׳מההקלטה׳ והדקה כמקור.</p>
+      <div class="a-stack">
+        <div class="a-bubble me">מה המרצה אמר על <bdi dir="ltr">G6PD</bdi>?</div>
+        <div class="a-bubble bot">בשקפים: בדיקת <bdi dir="ltr">G6PD</bdi> לפני <bdi dir="ltr">Primaquine</bdi>. <span class="a-tag">ש׳ 37</span> אין לי עדיין מידע על מה שנאמר בהרצאה עצמה: ההערות מההקלטה עוד לא נכתבו.</div>
+      </div>
+    </div>
+  </div>
+  <figcaption><b>הערה מההקלטה בתוך הסיכום</b>. מתחת לפסקה: רק מה שנאמר ולא כתוב בשקף, עם קפיצה לדקה. כאן מקום ההערה: ההקלטה הועלתה, וההערות ייכתבו אחרי הלחיצה.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="recordings">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: ההקלטה בתוך הסיכום: הערות ׳מההקלטה׳">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-recordings" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: ההקלטה בתוך הסיכום: הערות ׳מההקלטה׳"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat stack" id="f-corrections">
+  <div class="feat-text">
+    <div class="badges"><span class="badge group">לימוד קבוצתי</span><span class="badge">שלב 2</span><span class="badge">מאמץ בינוני</span></div>
+    <h4>תיקון שמתפשט, ו-<bdi dir="ltr">VAR</bdi> למחלוקות</h4>
+    <p class="tagline">מציעים תיקון לפסקה עם מקור; אחרי אישור נוסף מהקבוצה הסיכום מתעדכן לכולם, וגם השאלות והכרטיסים שנשענים עליו. כשיש ויכוח: כרטיס צהוב, ו-<bdi dir="ltr">VAR</bdi> בודק מול השקפים.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>שוהם: ׳אני צריכה להיות יחסית בטוחה בסיכום׳. טעות שנלמדה ממשיכה להשפיע גם אחרי תיקון שקט, ותיקון מפורש וחוזר מקטין את זה (<bdi dir="ltr">Lewandowsky</bdi> ושותפיו 2012), ולכן התיקון נשלח גם למי שכבר למד את הגרסה הישנה. ויכוח שנפתר עם ראיות מחזק הבנה (<bdi dir="ltr">Smith</bdi> ושותפיו 2009).</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>תיקון אחד מגיע לכל השישה, וגם לכרטיסים של מי שכבר חזרו על הגרסה הישנה: כרטיס ׳עדכון׳ אחד ב׳היום׳ עם השורה הישנה, החדשה והמקור. כל מחלוקת אמיתית הופכת לכרטיס מלכודת בתור של כולם.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>ספק שעולה בלימוד לבד (׳זה לא נשמע לי נכון׳) הופך לתיקון בדוק לכולם, עם מקור חובה: שקף, דקה בהקלטה או מקור חיצוני, כך שעריכות לא מכניסות טעויות חדשות.</span></li><li><span class="">עלות AI</span><span>תיקונים של אנשים: <bdi dir="ltr" class="nw">$0</bdi>. <bdi dir="ltr">VAR</bdi>: כ-<bdi dir="ltr" class="nw">$0.08</bdi> למחלוקת (20 בחודש ≈ <bdi dir="ltr" class="nw">$1.60</bdi>). בדיקת תיקון מול השקף שצוטט: כ-<bdi dir="ltr" class="nw">$0.01–0.02</bdi>, רשות.</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>סיכומים שכולן עורכות · זה צריך להיות אינטראקטיבי ומועיל לקבוצה</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:12</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לסיכום</span><span class="t">טבלה: תרופות נגד מלריה</span></div>
+    <div class="ph-body">
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-small a-muted">מטבלאות ההשוואה בסיכום</span><span class="a-tag">ש׳ 33</span></div>
+        <table class="a-table">
+          <thead><tr><th style="width: 26%">תרופה</th><th>שימוש</th><th style="width: 30%">רעילות עיקרית</th></tr></thead>
+          <tbody>
+            <tr><td><bdi dir="ltr">Doxycycline</bdi></td><td>עם <bdi dir="ltr">Quinine</bdi> ל-<bdi dir="ltr">P.&nbsp;falciparum</bdi> עמיד ל-<bdi dir="ltr">Chloroquine</bdi>; לבדה למניעה</td><td><s class="a-muted">—</s> <b style="color: var(--ok)">אסורה בהיריון ובילדים מתחת לגיל 8</b></td></tr>
+            <tr><td><bdi dir="ltr">Clindamycin</bdi></td><td>עם <bdi dir="ltr">Quinine</bdi>: חלופה בטוחה בהיריון ובילדים מתחת לגיל 8</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="a-card">
+        <div class="a-row between"><span class="a-row"><span class="a-avatar c3">מ</span><b>מאיה מציעה תיקון</b></span><span class="a-chip warn">ממתין לאישור</span></div>
+        <p class="a-small">ממלאת את התא הריק במה שכתוב בשקף 33.</p>
+        <div class="a-row"><b class="a-small">מקור (חובה)</b><span class="a-chip busy">שקף ✓</span><span class="a-chip">מההקלטה</span><span class="a-chip">חיצוני</span></div>
+        <div class="a-callout"><span class="a-small"><b>ש׳ 33:</b> <bdi dir="ltr">"tetracyclines are contraindicated (pregnant women, children &lt;8y old)"</bdi></span></div>
+      </div>
+      <p class="a-small a-muted">חסר עוד אישור אחד מהקבוצה, או אישור בקול בפגישה.</p>
+      <div class="a-card flat">
+        <b class="a-small">אחרי האישור, אצל כולם:</b>
+        <div class="a-row a-small"><svg width="14" height="14" style="color: var(--ok)"><use href="#i-check"/></svg><span>הטבלה מתעדכנת, עם היסטוריה וביטול</span></div>
+        <div class="a-row a-small"><svg width="14" height="14" style="color: var(--ok)"><use href="#i-check"/></svg><span>גם השאלות והכרטיסים שעל התא</span></div>
+        <div class="a-row a-small"><svg width="14" height="14" style="color: var(--ok)"><use href="#i-check"/></svg><span>׳עדכון׳ ב׳היום׳, אם הישן כבר נלמד</span></div>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn">לא מסכימים: כרטיס צהוב</span><span class="a-btn primary wide"><svg width="14" height="14"><use href="#i-check"/></svg>לאשר</span></div>
+  </div>
+  <figcaption><b>הצעת תיקון עם מקור</b>. תיקון לתא בטבלת המלריה: עם מקור, וממתין לאישור נוסף מהקבוצה.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:30</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לסיכום</span><span class="t">כרטיס צהוב · תרופות לפי שלב</span></div>
+    <div class="ph-body">
+      <div class="a-card flat">
+        <div class="a-row"><span class="a-avatar c2">נ</span><p class="a-para"><b>נועה:</b> ״אף תרופה אחת לא מסלקת גם את שלב הכבד וגם את שלב הדם.״ <span class="a-tag">ש׳ 20</span></p></div>
+        <div class="a-divider"></div>
+        <div class="a-row"><span class="a-avatar c4">א</span><p class="a-para"><b>איתי:</b> ״אבל <bdi dir="ltr">Atovaquone-proguanil</bdi> מסומנת ׳כן׳ גם בכבד וגם בדם.״ <span class="a-tag">ש׳ 23</span></p></div>
+      </div>
+      <div class="a-bars">
+        <b class="a-small">עם מי הצדק? גיבוי בלי שמות</b>
+        <div class="r"><span>נועה</span><div class="a-bar group"><i style="width: 60%"></i></div><b>3</b></div>
+        <div class="r"><span>איתי</span><div class="a-bar group"><i style="width: 40%"></i></div><b>2</b></div>
+      </div>
+      <div class="a-card" style="background: var(--extra-bg); border-color: var(--extra-line)">
+        <div class="a-row between"><b>פסיקת <bdi dir="ltr">VAR</bdi></b><span class="a-chip warn">ודאות: פרשנות</span></div>
+        <p class="a-small"><span class="a-chip ok">כתוב בשקף</span> שתי הטענות מופיעות, כל אחת בשקף שלה. <span class="a-tag">ש׳ 20,23</span></p>
+        <p class="a-small"><span class="a-chip warn">פרשנות</span> אם ׳שלב הכבד׳ כולל <bdi dir="ltr">hypnozoites</bdi>, אין סתירה: <bdi dir="ltr">Atovaquone-proguanil</bdi> לא מגיעה אליהם, ו-<bdi dir="ltr">Primaquine</bdi> ו-<bdi dir="ltr">Tafenoquine</bdi> רק חלשות בדם. <span class="a-tag">ש׳ 23</span></p>
+        <span class="a-small a-muted">כדאי לשמוע בהקלטה מה נאמר על זה.</span>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><b class="a-small">אחרי ׳לקבל׳</b><span class="a-chip group">לתור של כולם</span></div>
+        <p class="a-small a-muted">הפסיקה ננעצת בסיכום, ונוסף כרטיס מלכודת:</p>
+        <p class="a-small"><b>למה <bdi dir="ltr">Malarone</bdi> לא סותרת את שקף 20?</b> כבד ראשוני ודם כן, <bdi dir="ltr">hypnozoites</bdi> לא. <span class="a-tag">ש׳ 23,31</span></p>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn">בהרצאה נאמר אחרת</span><span class="a-btn primary wide">לקבל</span></div>
+  </div>
+  <figcaption><b>כרטיס צהוב ו-<bdi dir="ltr">VAR</bdi></b>. מחלוקת אמיתית מהשקפים: <bdi dir="ltr">VAR</bdi> מפריד בין מה שכתוב בשקף לבין פרשנות.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>07:55</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">היום · יום ד׳</span></div>
+    <div class="ph-body">
+      <div class="a-card" style="border-color: var(--accent)">
+        <div class="a-row between"><b>עדכון בסיכום · מלריה</b><span class="a-chip busy">תוקן אחרי שלמדת</span></div>
+        <div class="a-row"><span class="a-chip">היה</span><span class="a-small a-muted"><s><bdi dir="ltr">Doxycycline</bdi> · רעילות עיקרית: —</s></span></div>
+        <div class="a-row"><span class="a-chip ok">עכשיו</span><span class="a-small"><b>אסורה בהיריון ובילדים מתחת לגיל 8</b> <span class="a-tag">ש׳ 33</span></span></div>
+        <div class="a-row"><span class="a-avatar c3">מ</span><span class="a-small a-muted">תיקון: מאיה · אישור: שוהם · מקור: שקף 33</span></div>
+        <p class="a-small a-muted">הגיע אליך כי ביום ראשון חזרת על כרטיס שנשען על השורה הישנה. <span class="a-chip">רק לך</span></p>
+        <div class="a-row"><span class="a-btn primary wide">הבנתי</span><span class="a-btn">לפסקה</span></div>
+      </div>
+      <div class="a-sec"><b>מה עוד השתנה ב-<bdi dir="ltr">Anti parasite</bdi></b><span class="a-small a-muted">יומן התיקונים</span></div>
+      <div class="a-list">
+        <div class="a-li"><div><b>פסיקת <bdi dir="ltr">VAR</bdi>: כבד מול דם</b><span class="m">נועה מול איתי: שתי הטענות כתובות בשקפים <span class="a-tag">ש׳ 20,23</span></span></div><span class="a-chip warn">פרשנות</span></div>
+        <div class="a-li"><div><b>כרטיס צהוב לשקף 28</b><span class="m">הכותרת היא <bdi dir="ltr">mefloquine</bdi>, אבל רובו העתק של שקף 27 על <bdi dir="ltr">Quinine</bdi> <span class="a-tag">ש׳ 27-28</span></span></div></div>
+        <div class="a-li"><div><b>כרטיס צהוב לשקף 29</b><span class="m">כתוב ׳<bdi dir="ltr">pyridine synthesis</bdi>׳, אבל <bdi dir="ltr">DHOD</bdi> הוא אנזים בסינתזת <bdi dir="ltr">pyrimidines</bdi> <span class="a-tag">ש׳ 29,31</span></span></div></div>
+      </div>
+      <p class="a-small a-muted">כל שינוי ביומן: עם מקור, היסטוריה וביטול בלחיצה.</p>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab on"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>עדכון אחרי שכבר למדת</b>. כרטיס עדכון ב׳היום׳: הגרסה הישנה, החדשה והמקור, רק אם כבר חזרת על הישנה.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="corrections">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: תיקון שמתפשט, ו-VAR למחלוקות">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-corrections" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: תיקון שמתפשט, ו-VAR למחלוקות"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat" id="f-plan">
+  <div class="feat-text">
+    <div class="badges"><span class="badge group">לימוד קבוצתי</span><span class="badge">שלב 3</span><span class="badge">מאמץ בינוני</span></div>
+    <h4>מרתון עד המבחן: מסלול קבוצתי ומסלול פרטי</h4>
+    <p class="tagline">מזינים את מבחן הבלוק, והאפליקציה בונה את הלו״ז שהקבוצה בונה היום ביד: קודם סבב סיכומים משותף, אחר כך שחזורים ונקודות חולשה. בלוקים משותפים לכולם, ומסלול פרטי שמשלים את מה שחלש אצלך.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>למידה חוזרת במרווחים, עד הצלחה, נותנת שיפור גדול בציוני קורס ובזיכרון לטווח ארוך (<bdi dir="ltr">Rawson &amp; Dunlosky 2011</bdi>), והמרווחים צריכים לגדול לפי הזמן שנשאר למבחן (<bdi dir="ltr">Cepeda</bdi> ושותפיו 2008). תוכנית של ׳מתי ומה׳ מעלה ביצוע (<bdi dir="ltr">Gollwitzer &amp; Sheeran 2006</bdi>). וזה הלו״ז שהקבוצה בונה היום ביד: 3 שעות ביום מ-3 שבועות לפני, וכ-10 שעות ביום בחופש הלמידה.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>הבלוקים המשותפים קובעים מה נכנס ל׳היום׳ של כל אחד ואחת, והמסלול הפרטי ממלא את הזמן לבד בדיוק במה שחלש אצלך ובמה שפספסת.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>מה שכבר נקרא ונלמד (כמו ׳מי קרא מה׳ היום) והדופק האנונימי משנים את התוכנית: בלוק השלמה, יותר זמן לנושא חם. כשיום נופל, התוכנית זזה ומראה את המחיר, בלי אדום ובלי ׳מאחרים׳.</span></li><li><span class="">עלות AI</span><span><bdi dir="ltr" class="nw">$0</bdi>: תזמון קבוע מעל הבנק והכרטיסיות.</span></li><li><span class="">מה נכנס מתי</span><span>גרסה רזה עד אמצע דצמבר: בלוקים משותפים, מסלול פרטי והזזה. אחר כך: מוכנות לפי הרצאה וחלוקת זמן לפי ביטחון־יתר.</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>תכנון מרתוני למידה ויכולת למידה הדדית וסנכרון</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>08:40</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">מרתון · בלוק פתוגן-מאכסן</span><span class="a-chip">יום 6/14</span></div>
+    <div class="ph-sub"><span>חופש למידה</span><span>·</span><span>המבחן בתחילת ינואר</span></div>
+    <div class="ph-body">
+      <div class="a-meter">
+        <div class="a-row between"><span class="a-small"><b>ק״מ 21 ✓</b> כל הסיכומים נקראו</span><span class="a-small a-muted">ק״מ 42: המבחן</span></div>
+        <div class="a-bar group"><i style="width: 62%"></i></div>
+      </div>
+      <div class="a-sec"><b>המסלול הקבוצתי</b><span class="a-row"><span class="a-avatar c2">נ</span><span class="a-small a-muted">שינוי אחרון: נועה</span></span></div>
+      <div class="a-list" style="border-color: var(--group)">
+        <div class="a-li"><b class="a-small" style="width: 30px">09:00</b><div style="width: 100%"><b>פתיחה: 3 לקפה</b></div><span class="a-chip busy">בעוד 20 דק׳</span></div>
+        <div class="a-li"><b class="a-small" style="width: 30px">09:05</b><div style="width: 100%"><b><bdi dir="ltr">Amebiasis</bdi> ו-<bdi dir="ltr">Metronidazole</bdi></b><span class="m"><span class="a-tag">ש׳ 3-7</span> הקראה ומבחן קבוצתי, 5 שאלות</span></div></div>
+        <div class="a-li"><b class="a-small" style="width: 30px">10:00</b><div style="width: 100%"><b><bdi dir="ltr">Leishmaniasis</bdi></b><span class="m"><span class="a-tag">ש׳ 8-18</span> מבחן קבוצתי, ואז הפסקה</span></div></div>
+        <div class="a-li"><b class="a-small" style="width: 30px">11:00</b><div style="width: 100%"><b>מלריה</b><span class="m"><span class="a-tag">ש׳ 19-33</span> שני בלוקים, עד 12:40</span></div></div>
+        <div class="a-li"><b class="a-small" style="width: 30px">13:30</b><div style="width: 100%"><b><bdi dir="ltr">Helminths</bdi></b><span class="m"><span class="a-tag">ש׳ 34-36</span> שעה נוספת</span></div><span class="a-chip group">הוזז מאתמול</span></div>
+      </div>
+      <div class="a-sec"><b>המסלול שלך</b><span class="a-chip">רק לך</span></div>
+      <div class="a-list" style="border-color: var(--me)">
+        <div class="a-li"><b class="a-small" style="width: 30px">15:00</b><div style="width: 100%"><b>12 כרטיסים ו-3 טעויות פתוחות</b><span class="m"><span class="a-tag">ש׳ 23</span> הטעויות: איזו תרופה על איזה שלב</span></div></div>
+        <div class="a-li"><b class="a-small" style="width: 30px">16:00</b><div style="width: 100%"><b>מנגנוני התרופות במלריה</b><span class="m"><span class="a-tag">ש׳ 24</span> חלש אצלך, ולא אצל הקבוצה</span></div></div>
+      </div>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab on"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>יום מרתון</b>. יום בחופש הלמידה: בלוקים משותפים לכולם, והמסלול הפרטי שלך אחר הצהריים.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:20</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ למרתון</span><span class="t">תוכנית עד המבחן</span></div>
+    <div class="ph-body">
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-row"><svg width="14" height="14"><use href="#i-cal"/></svg><b>מבחן בלוק פתוגן-מאכסן</b></span><span class="a-muted"><svg width="14" height="14"><use href="#i-pen"/></svg></span></div>
+        <span class="a-small a-muted">תחילת ינואר · כל ההרצאות של הבלוק מסומנות. מכאן התוכנית נבנית לבד.</span>
+      </div>
+      <div class="a-list">
+        <div class="a-li"><div><b>מ-3 שבועות לפני</b><span class="m">סבב משותף על כל הסיכומים</span></div><span class="a-chip">כ-3 שעות ביום</span></div>
+        <div class="a-li"><div><b>בחופש הלמידה</b><span class="m">שחזורים, ומה שלא ישב טוב</span></div><span class="a-chip">כ-10 שעות ביום</span></div>
+      </div>
+      <div class="a-card flat">
+        <b>כל הרצאה חוזרת 3-4 פעמים</b>
+        <div class="a-row"><span class="a-chip ok">1</span><div class="a-divider" style="width: 5%"></div><span class="a-chip ok">2</span><div class="a-divider" style="width: 12%"></div><span class="a-chip busy">3</span><div class="a-divider" style="width: 22%"></div><span class="a-chip">4</span><div class="a-divider" style="width: 8%"></div><svg width="14" height="14"><use href="#i-flag"/></svg></div>
+        <span class="a-small a-muted">המרווחים גדלים עד המבחן, וסבב נגמר רק כשכל שאלת מפתח נענית נכון.</span>
+      </div>
+      <div class="a-card flat" style="background: var(--warn-bg); border-color: var(--warn-line)">
+        <div class="a-row between"><b>היום לא הספקנו את <bdi dir="ltr">Helminths</bdi></b><span class="a-tag">ש׳ 34-36</span></div>
+        <p class="a-small">הבלוק זז למחר. כדי לסיים בזמן, בוחרים מחיר:</p>
+        <div class="a-stack">
+          <span class="a-btn">עוד שעה ביום עד שישי</span>
+          <span class="a-btn">לוותר על יום חזרה אחד</span>
+        </div>
+      </div>
+      <p class="a-small a-muted">כולם יכולים לערוך, ועל כל שינוי יש שם.</p>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab on"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>בונים את המרתון, וכשיום נופל</b>. מזינים את המבחן פעם אחת; כשיום נופל, התוכנית זזה ומראה את המחיר, בלי אדום.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="plan">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: מרתון עד המבחן: מסלול קבוצתי ומסלול פרטי">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-plan" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: מרתון עד המבחן: מסלול קבוצתי ומסלול פרטי"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><div class="group-head" id="g-bridge"><span class="eyebrow me">3 פיצ׳רים</span><h3>הגשרים</h3><p class="muted">איך מה שהקבוצה מייצרת מזין את הלימוד האישי, ומה שכל אחד מגלה חוזר לקבוצה.</p></div><article class="feat" id="f-anchor">
+  <div class="feat-text">
+    <div class="badges"><span class="badge me">הגשרים</span><span class="badge">שלב 1</span><span class="badge">מאמץ בינוני</span><span class="badge new">רעיון חדש</span></div>
+    <h4>עוגן הפסקה: כל דבר יושב על פסקה</h4>
+    <p class="tagline">כל שאלה, כרטיס, אסוציאציה, תיקון והערה מההקלטה יושבים על פסקה אחת בסיכום, ומכל אחד מהם חוזרים בלחיצה לפסקה. ליד כל פסקה: מה הקבוצה בנתה עליה, ומה רק אצלך.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>מעבר ישר מתשובה שגויה לפסקה שמסבירה אותה הוא משוב עם הסבר, שעוזר לענות על שאלות חדשות יותר ממשוב שמראה רק את התשובה הנכונה (<bdi dir="ltr">Butler, Godbole &amp; Marsh 2013</bdi>). זה מסיים את הקפיצות ששוהם תיארה בין ׳מצגת ארוכה ולא ממוקדת׳, סיכום חסר, כרטיסיות לשינון, האינטרנט והצ׳אט. וזה שומר על עלות ה-<bdi dir="ltr">AI</bdi> קבועה: התוכן נוצר פעם אחת להרצאה, לשישה.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>פתיחת פסקה מראה את כל מה שהקבוצה בנתה עליה (שאלות, האסוציאציה המובילה, תיקונים, הערות מההקלטה), והשאלות והכרטיסים שלה זורמים לתרגול ולחפיסה שלך.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>שום דבר אישי לא מועתק לקבוצה: רק מה שבחרת לפרסם, בשמך, והאותות הפרטיים שלך כספירה אנונימית של ׳הפסקה הזאת קשה לנו׳.</span></li><li><span class="">עלות AI</span><span>אין.</span></li><li><span class="">מה נכנס מתי</span><span>בשלב 1: שאלות, כרטיסים ותגובות על הפסקה. אסוציאציות, תיקונים והערות מההקלטה מצטרפים בשלב 2.</span></li></ul>
+    
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:49</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לתרגול</span><span class="t"><bdi dir="ltr">Anti parasite</bdi> · מקרה 2</span></div>
+    <div class="ph-sub"><span>חלק 8 · סיכום ומקרים קליניים</span></div>
+    <div class="ph-body">
+      <div class="a-toast">מהשאלה שטעית בה, ישר לפסקה</div>
+      <p class="a-h2">מקרה 2: <bdi dir="ltr">P. vivax</bdi> אחרי טיול בתאילנד</p>
+      <p class="a-para"><b>המקרה:</b> זיהום ב-<bdi dir="ltr">P. vivax</bdi> אחרי טיול בתאילנד.</p>
+      <p class="a-para"><b>השאלה:</b> מה יש לעשות לפני מתן <bdi dir="ltr">Primaquine</bdi>?</p>
+      <p class="a-para marked"><b>התשובה:</b> יש לבדוק <bdi dir="ltr">G6PD</bdi>. <bdi dir="ltr">Primaquine</bdi> נדרשת כאן מפני של-<bdi dir="ltr">P. vivax</bdi> יש <bdi dir="ltr">hypnozoites</bdi> שגורמים להישנות, ו-<bdi dir="ltr">hypnozoites</bdi> דורשים <bdi dir="ltr">Primaquine</bdi> או <bdi dir="ltr">Tafenoquine</bdi>. <span class="a-tag">ש׳ 19-20,37-38</span></p>
+      <div class="a-wrap"><span class="a-chip">2 שאלות</span><span class="a-chip">2 כרטיסים</span><span class="a-chip fun">הפרימדונה</span><span class="a-chip">1 תגובה</span></div>
+      <div class="a-card flat"><div class="a-row between"><span class="a-small"><b>טעית כאן פעמיים.</b> השאלה חוזרת מחר.</span><span class="a-chip">רק לך</span></div></div>
+      <div class="a-divider"></div>
+      <p class="a-h2">מקרה 3: <bdi dir="ltr">Metronidazole</bdi> ובירה</p>
+      <p class="a-para"><b>המקרה:</b> מטופל שמקבל <bdi dir="ltr">Metronidazole</bdi> שותה בירה, ומופיעות אצלו הסמקה והקאות. <span class="a-tag">ש׳ 38</span></p>
+      <div class="a-wrap"><span class="a-chip">שאלה</span><span class="a-chip">כרטיס</span><span class="a-chip fun">אסוציאציה</span></div>
+      <p class="a-para"><b>השאלה:</b> מה המנגנון?</p>
+      <p class="a-small a-muted">בהקראה משותפת הצ׳יפים מתכווצים לנקודה, כדי לא להפריע למי שעוקב.</p>
+    </div>
+  </div>
+  <figcaption><b>פסקה, ומה שיושב עליה</b>. מהשאלה שטעית בה ישר לפסקה: מה הקבוצה בנתה עליה, ושורה אחת שגלויה רק לך.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:50</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לתרגול</span><span class="t"><bdi dir="ltr">Anti parasite</bdi> · מקרה 2</span></div>
+    <div class="ph-sub"><span>חלק 8 · סיכום ומקרים קליניים</span></div>
+    <div class="ph-body">
+      <p class="a-h2">מקרה 2: <bdi dir="ltr">P. vivax</bdi> אחרי טיול בתאילנד</p>
+      <p class="a-para"><b>המקרה:</b> זיהום ב-<bdi dir="ltr">P. vivax</bdi> אחרי טיול בתאילנד.</p>
+      <p class="a-para marked"><b>התשובה:</b> יש לבדוק <bdi dir="ltr">G6PD</bdi>. <bdi dir="ltr">Primaquine</bdi> נדרשת כאן מפני של-<bdi dir="ltr">P. vivax</bdi> יש <bdi dir="ltr">hypnozoites</bdi> שגורמים להישנות.</p>
+    </div>
+    <div class="a-scrim"></div>
+    <div class="a-sheet">
+      <div class="a-row between"><b>מה יושב על הפסקה</b><span class="a-row"><span class="a-tag">ש׳ 19-20,37-38</span><span class="a-btn ghost">✕</span></span></div>
+      <div class="a-row"><span class="a-chip">תגובות · 1</span><span class="a-chip">תיקון</span><span class="a-chip">אסוציאציה · 3</span><span class="a-chip busy">תרגול · 4</span></div>
+      <div class="a-row between"><span class="a-small a-muted">של הקבוצה: 2 שאלות, 2 כרטיסים</span><span class="a-row"><span class="a-small a-muted">הסימונים</span><span class="a-chip">רק לך</span></span></div>
+      <div class="a-list">
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><span class="m">שאלה · מקרה קליני</span><span class="a-chip bad">טעית פעמיים</span></span><b>מטייל חזר מתאילנד עם <bdi dir="ltr">P. vivax</bdi>. מה עוד לפני השחרור?</b></div></div>
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><span class="m">שאלה</span><span class="a-chip">עוד לא ענית</span></span><b>על אילו שלבים פועלות <bdi dir="ltr">Primaquine</bdi> ו-<bdi dir="ltr">Tafenoquine</bdi>?</b></div></div>
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><span class="m">כרטיס · בגב: ׳הפרימדונה׳ של שוהם</span><span class="a-chip busy">בחפיסה</span></span><b><bdi dir="ltr">P. vivax</bdi>: למה צריך גם <bdi dir="ltr">Primaquine</bdi>?</b></div></div>
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><span class="m">כרטיס</span><span class="a-chip">עוד לא בחפיסה</span></span><b>מה בודקים לפני <bdi dir="ltr">Primaquine</bdi>?</b></div></div>
+      </div>
+      <span class="a-btn primary wide">לתרגל את הפסקה · 2 שאלות</span>
+    </div>
+  </div>
+  <figcaption><b>הדף של הפסקה</b>. לשונית לכל מה שנבנה על הפסקה: תגובות, תיקון, אסוציאציה ותרגול.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="anchor">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: עוגן הפסקה: כל דבר יושב על פסקה">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-anchor" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: עוגן הפסקה: כל דבר יושב על פסקה"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat" id="f-progress-pulse">
+  <div class="feat-text">
+    <div class="badges"><span class="badge me">הגשרים</span><span class="badge">שלב 2</span><span class="badge">מאמץ בינוני</span></div>
+    <h4>ההתקדמות שלי, ודופק הקבוצה</h4>
+    <p class="tagline">דף פרטי שמראה מה יושב טוב ומה לא, עם ׳רשימת הסכנה׳ של טעויות ׳על בטוח׳. מאותם נתונים, בלי שמות ובלי מספרים, נבנה דופק של הקבוצה שקובע על מה הפגישה מתעכבת.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>סטודנטים בטוחים מדי מפסיקים ללמוד מוקדם מדי ומצליחים פחות (<bdi dir="ltr">Dunlosky &amp; Rawson 2012</bdi>), וטעות ׳על בטוח׳ שתוקנה היא החזרה הכי משתלמת (<bdi dir="ltr">Butterfield &amp; Metcalfe 2001</bdi>), ולכן היא בראש הרשימה וחוזרת אחרי השהיה. כשהתשובות קובעות את סדר היום, זמן הפגישה הולך למה שבאמת לא ברור (<bdi dir="ltr">Novak</bdi> ושותפיו 1999).</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>רשימת החולשות שלך נקראת מול זו של הקבוצה: ׳גם הקבוצה חלשה כאן, זה יעלה בפגישה׳, מול ׳רק אצלך: לתור האישי׳.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>התרגול הפרטי של כולם, נספר בלי שמות ורק איפה שלפחות 3 תרגלו, קובע על מה הפגישה מתעכבת, אילו כרטיסים צריכים אסוציאציה ואילו שאלות עולות למבחן הקבוצתי. אפשר לצאת מהספירה ב׳שלי׳.</span></li><li><span class="">עלות AI</span><span>אין: שאילתות על הנתונים, פעם בלילה.</span></li><li><span class="">מה נכנס מתי</span><span>הדף הפרטי יכול לצאת לפני הדופק. הדופק רק אחרי ההחלטה של שוהם.</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>מעקב התקדמות ונקודות חולשה · ציונים וטעויות ישארו חסויים ויראו רק למשתמש הנוכחי</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>22:10</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">ההתקדמות שלי</span><span class="a-chip">רק לך</span></div>
+    <div class="ph-body">
+      <div class="a-sec"><b>מוכנות לפי נושא</b><span class="a-small a-muted">טווח, לא ציון</span></div>
+      <div class="a-stack">
+        <div class="a-row"><span class="a-small" style="width: 32%"><bdi dir="ltr">Amebiasis</bdi></span><div class="a-bar" style="width: 46%"><i style="margin-inline-start: 70%; width: 15%"></i></div><b class="a-small"><bdi dir="ltr">70–85%</bdi></b></div>
+        <div class="a-row"><span class="a-small" style="width: 32%"><bdi dir="ltr">Leishmaniasis</bdi></span><div class="a-bar" style="width: 46%"><i style="margin-inline-start: 60%; width: 15%"></i></div><b class="a-small"><bdi dir="ltr">60–75%</bdi></b></div>
+        <div class="a-row"><span class="a-small" style="width: 32%">מלריה</span><div class="a-bar" style="width: 46%"><i style="margin-inline-start: 40%; width: 15%"></i></div><b class="a-small"><bdi dir="ltr">40–55%</bdi></b></div>
+      </div>
+      <div class="a-sec"><b>רשימת הסכנה</b><span class="a-chip warn">ענית ׳על בטוח׳ וטעית</span></div>
+      <div class="a-list" style="border-color: var(--warn-line)">
+        <div class="a-li"><div style="width: 100%"><b><bdi dir="ltr">Chloroquine</bdi>: מה ה-<bdi dir="ltr">t½</bdi> הסופי?</b><span class="a-row between"><span class="m">ענית ׳כ-18 שעות׳, אבל זה של <bdi dir="ltr">Quinine</bdi> <span class="a-tag">ש׳ 27</span>. נכון: 1-2 חודשים <span class="a-tag">ש׳ 26</span></span><span class="a-chip busy">מחר</span></span></div></div>
+        <div class="a-li"><div style="width: 100%"><b><bdi dir="ltr">Atovaquone-proguanil</bdi> על <bdi dir="ltr">hypnozoite</bdi>?</b><span class="a-row between"><span class="m">ענית ׳כן׳. נכון: רק כבד ראשוני ודם <span class="a-tag">ש׳ 23</span></span><span class="a-chip busy">מחר</span></span></div></div>
+        <div class="a-li"><div style="width: 100%"><b><bdi dir="ltr">Paromomycin</bdi>: <bdi dir="ltr">luminal</bdi> או <bdi dir="ltr">tissue</bdi>?</b><span class="a-row between"><span class="m">ענית ׳<bdi dir="ltr">tissue</bdi>׳. נכון: <bdi dir="ltr">luminal</bdi> <span class="a-tag">ש׳ 4</span></span><span class="a-chip busy">עוד 3 ימים</span></span></div></div>
+      </div>
+      <p class="a-small a-muted">חוזרות בניסוח אחר, עד פעמיים נכון ׳על בטוח׳.</p>
+      <div class="a-wrap"><b class="a-small">לפי היבט:</b><span class="a-chip warn">מנגנון: חם</span><span class="a-chip">אוכלוסיות מיוחדות: פושר</span><span class="a-chip ok">תופעות לוואי: יושב טוב</span></div>
+      <div class="a-row"><span class="a-ring" style="--p: 71%; min-width: 54px"><span>71%</span></span><span class="a-small"><b>במלריה, כשסימנת ׳על בטוח׳, צדקת ב-71% מהפעמים.</b> <span class="a-muted">מופיע אחרי כ-20 תשובות.</span></span></div>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab on"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>ההתקדמות שלי</b>. דף פרטי: מוכנות כטווח, רשימת הסכנה של טעויות ׳על בטוח׳, וחולשות לפי היבט.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>22:15</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">דופק הקבוצה · <bdi dir="ltr">Anti parasite</bdi></span></div>
+    <div class="ph-sub"><span>מתעדכן בלילה</span><span>·</span><span>בלי שמות, רק איפה ש-3 לפחות תרגלו</span></div>
+    <div class="ph-body">
+      <div class="a-sec"><b>חם</b><span class="a-row"><span class="a-small a-muted">אצלך</span><span class="a-chip">רק לך</span></span></div>
+      <div class="a-list">
+        <div class="a-li"><div><b>מה בודקים לפני <bdi dir="ltr">Primaquine</bdi> <span class="a-tag">ש׳ 37</span></b></div><span class="a-chip warn">חם</span></div>
+        <div class="a-li"><div><b><bdi dir="ltr">Miltefosine</bdi> בהיריון <span class="a-tag">ש׳ 16</span></b></div><span class="a-chip ok">יושב טוב</span></div>
+        <div class="a-li"><div><b>איזו תרופה על איזה שלב <span class="a-tag">ש׳ 23</span></b></div><span class="a-chip warn">חם</span></div>
+      </div>
+      <div class="a-sec"><b>פושר</b></div>
+      <div class="a-list">
+        <div class="a-li"><div><b><bdi dir="ltr">Luminal</bdi> מול <bdi dir="ltr">tissue</bdi> <span class="a-tag">ש׳ 4</span></b><span class="m">רק אצלך חם, אז זה נכנס לתור האישי</span></div><span class="a-chip warn">חם</span></div>
+      </div>
+      <div class="a-sec"><b>יושב טוב</b></div>
+      <div class="a-list">
+        <div class="a-li"><div><b><bdi dir="ltr">Metronidazole</bdi> ואלכוהול</b><span class="m"><span class="a-tag">ש׳ 7</span> <svg width="11" height="11"><use href="#i-award"/></svg> החור שנסגר השבוע</span></div><span class="a-chip ok">יושב טוב</span></div>
+      </div>
+      <div class="a-callout" style="border-color: var(--group); background: var(--group-soft)"><b>מחר בפגישה:</b> הנקודה החמה ׳איזו תרופה על איזה שלב׳, ובמבחן הקבוצתי ׳<bdi dir="ltr">P. vivax</bdi> אחרי טיול בתאילנד: מה לפני <bdi dir="ltr">Primaquine</bdi>?׳ <span class="a-tag">ש׳ 38</span></div>
+      <p class="a-small a-muted">אפשר לצאת מהספירה ב׳שלי׳.</p>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab on"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>דופק הקבוצה</b>. מה שהקבוצה מתקשה בו, בלי שמות ובלי מספרים, ומול כל שורה: איך זה אצלך. אם יהיה דופק בכלל: ההחלטה של שוהם.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="progress-pulse">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: ההתקדמות שלי, ודופק הקבוצה">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-progress-pulse" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: ההתקדמות שלי, ודופק הקבוצה"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat" id="f-ask">
+  <div class="feat-text">
+    <div class="badges"><span class="badge me">הגשרים</span><span class="badge">שלב 2</span><span class="badge">מאמץ בינוני</span></div>
+    <h4>לשאול את ההרצאה, ואז את הקבוצה</h4>
+    <p class="tagline">שואלים ומקבלים תשובה רק מהשקפים, מהסיכום ומההקלטה, עם מספרי שקפים, ו׳לא מופיע בשקפים׳ כשזה המצב. מה שלא נפתר עולה בלחיצה לקבוצה כשאלה על הפסקה, והתשובה חוזרת אליך ככרטיס.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>תשובה שנשענת רק על ההרצאה מונעת ׳נאמר בהרצאה׳ מומצא. שוהם תיארה השלמת פערים ׳מהאינטרנט והצאט׳; כאן ההשלמה נשארת צמודה לחומר. להסביר לחברים מחזק את ההבנה של מי שמסביר (<bdi dir="ltr">Fiorella &amp; Mayer 2013</bdi>), והשאלה חוזרת אחר כך ככרטיס, כלומר שליפה ולא רק הסבר.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>הסבר מהקבוצה ברגע הצורך, שנשמר על הפסקה לכולם, וכרטיס בתור שלך כששאלת. שאלות שנפתרו הופכות לשאלות נפוצות שגם <bdi dir="ltr">Claude</bdi> מצטט.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>בלבול פרטי הופך לשאלה פתוחה על הפסקה, שאחרים יכולים להשתמש בה. שאלה שפתוחה יותר מ-24 שעות נכנסת לסדר היום של הפגישה.</span></li><li><span class="">עלות AI</span><span>כ-<bdi dir="ltr" class="nw">$0.013</bdi> לתשובה כששואלים כמה שאלות ברצף על אותה הרצאה (כ-<bdi dir="ltr" class="nw">$0.04</bdi> לשאלה בודדת). 6 אנשים × 15 שאלות בחודש ≈ <bdi dir="ltr" class="nw">$3</bdi> גם אם רובן שאלות בודדות, עם תקרה יומית אישית.</span></li><li><span class="">מה נכנס מתי</span><span>׳מה נאמר בהרצאה׳ אמיתי רק כשיש הערות מההקלטה. מצב ׳למה?⁠׳, שבו <bdi dir="ltr">Claude</bdi> שואל אותך קודם, רק אם ירצו.</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>צ׳אט עם החומר (״מה נאמר בהרצאה על…״)</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>23:40</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להרצאה</span><span class="t">לשאול · <bdi dir="ltr">Anti parasite</bdi></span></div>
+    <div class="ph-sub"><svg width="12" height="12"><use href="#i-mic"/></svg><span>מה נאמר בהרצאה? עוד אין הקלטה להרצאה הזו</span></div>
+    <div class="ph-body">
+      <div class="a-stack">
+        <div class="a-bubble me">למה אף פעם לא נותנים <bdi dir="ltr">Artemisinins</bdi> לבד? ועם מה כן?</div>
+      </div>
+      <div class="a-card">
+        <div class="a-row between"><b class="a-small">תשובה מההרצאה</b><span class="a-small a-muted">רק שקפים וסיכום</span></div>
+        <p class="a-para">בשקף: <bdi dir="ltr">"Never monotherapy: combine with long-acting partner"</bdi>. ה-<bdi dir="ltr">t½</bdi> שלהן 1-2 שעות, והעוצמה שלהן <bdi dir="ltr">in vivo</bdi> גבוהה <span style="white-space: nowrap">פי 10-100</span> משל תרופות אחרות נגד מלריה. <span class="a-tag">ש׳ 30</span></p>
+        <p class="a-para"><b>איזה שותף בדיוק:</b> לא מופיע בשקפים.</p>
+        <div class="a-callout"><b>הרחבה (לא מהשקפים):</b> בגלל ה-<bdi dir="ltr">t½</bdi> הקצר, מונותרפיה משאירה טפילים ששורדים אחרי שהתרופה התפנתה. השותף ארוך הפעולה מחסל אותם.</div>
+        <div class="a-row"><span class="a-btn"><svg width="14" height="14"><use href="#i-book"/></svg>לפסקה: <bdi dir="ltr">Artemisinin</bdi> ונגזרותיה</span></div>
+      </div>
+      <div class="a-row"><span class="a-btn wide"><svg width="14" height="14"><use href="#i-users"/></svg>עדיין לא ברור? לשאול את הקבוצה</span></div>
+      <p class="a-small a-muted">השאלה עולה לפסקה, עם התשובה הזו. אם תישאר פתוחה 24 שעות, היא תעלה בפגישה.</p>
+    </div>
+    <div class="ph-foot"><span class="a-input" style="width: 100%">לשאול על ההרצאה…</span><span class="a-btn primary"><svg width="14" height="14"><use href="#i-send"/></svg></span></div>
+  </div>
+  <figcaption><b>שאלה בלילה</b>. תשובה רק מההרצאה, עם שקפים, ׳הרחבה׳ מסומנת, וכפתור לשאול את הקבוצה.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>08:12</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לספרייה</span><span class="t"><bdi dir="ltr">Anti parasite</bdi> · מלריה</span></div>
+    <div class="ph-sub"><span>חלק 7 · הובלת אלקטרונים, <bdi dir="ltr">Artemisinins</bdi> ועוד</span></div>
+    <div class="ph-body">
+      <p class="a-h2"><bdi dir="ltr">Artemisinin</bdi> ונגזרותיה</p>
+      <p class="a-para marked"><b>שימושים:</b> <bdi dir="ltr">Artemisinins</bdi> לעולם אינן ניתנות כמונותרפיה, אלא תמיד בשילוב עם תרופת שותף ארוכת פעולה. <span class="a-tag">ש׳ 30</span></p>
+    </div>
+    <div class="a-scrim"></div>
+    <div class="a-sheet">
+      <div class="a-row between"><span class="a-small a-muted">״<bdi dir="ltr">Artemisinins</bdi> לעולם אינן ניתנות כמונותרפיה…״</span><span class="a-small a-muted">✕</span></div>
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-row"><span class="a-avatar c3">מ</span><b>מאיה</b><span class="a-small a-muted">אתמול, 23:41</span></span><span class="a-chip ok">שאלה שנענתה</span></div>
+        <p class="a-para">הבנתי שצריך שותף, אבל למה דווקא ארוך טווח?</p>
+        <div class="a-row"><svg width="12" height="12"><use href="#i-chat"/></svg><span class="a-small a-muted">מצורף: הניסיון של <bdi dir="ltr">Claude</bdi> לענות</span><span class="a-tag">ש׳ 30</span></div>
+        <div class="a-divider"></div>
+        <div class="a-row"><span class="a-avatar c4">א</span><b>איתי</b><span class="a-small a-muted">08:10 · תשובה</span></div>
+        <p class="a-para">תחשבי על <bdi dir="ltr">Artemisinins</bdi> כמו על ספרינטרים: פי 10-100 יותר חזקות, אבל ה-<bdi dir="ltr">t½</bdi> שלהן שעה-שעתיים <span class="a-tag">ש׳ 30</span>. השותף הוא רץ המרתון שגומר את מי שנשאר.</p>
+      </div>
+      <div class="a-card flat" style="border-color: var(--me); background: var(--me-soft)">
+        <div class="a-row between"><span class="a-row"><svg width="14" height="14"><use href="#i-cards"/></svg><b class="a-small">נוסף כרטיס לתור שלך</b></span><span class="a-chip">רק לך</span></div>
+        <span class="a-small">׳<bdi dir="ltr">Artemisinins</bdi>: למה תמיד עם שותף ארוך טווח?׳</span>
+      </div>
+      <div class="a-row"><span class="a-btn wide"><svg width="14" height="14"><use href="#i-smile"/></svg>להעביר לקיר האסוציאציות</span></div>
+    </div>
+  </div>
+  <figcaption><b>התשובה מהקבוצה</b>. השאלה עלתה לפסקה, התשובה הגיעה בבוקר, ולמאיה נוסף כרטיס.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="ask">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: לשאול את ההרצאה, ואז את הקבוצה">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-ask" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: לשאול את ההרצאה, ואז את הקבוצה"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><div class="group-head" id="g-fun"><span class="eyebrow fun">3 פיצ׳רים</span><h3>שכבת הכיף</h3><p class="muted">דברים מצחיקים ויצירתיים שעוזרים לזכור, ושאנשים מעלים בעצמם.</p></div><article class="feat stack" id="f-wall">
+  <div class="feat-text">
+    <div class="badges"><span class="badge fun">שכבת הכיף</span><span class="badge">שלב 2</span><span class="badge">מאמץ בינוני</span></div>
+    <h4>קיר האסוציאציות: הכפתור, הקיר והמנצחת על הכרטיס</h4>
+    <p class="tagline">על כל פסקה: כפתור שנותן 3 טיוטות מצחיקות, וקיר שעליו מעלים משלכם, משפט, שרבוט מצולם או רמיקס של חבר, עם הצבעות ׳מצחיק׳ ו׳נתקע לי׳. המנצחת נכנסת לגב הכרטיס של כולם.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>אסוציאציות עוזרות בדיוק בקישורים השרירותיים, תרופה לרעילות, שהבנה לבדה לא פותרת (<bdi dir="ltr">Atkinson &amp; Raugh 1975</bdi>), ומשהו מצחיק או הזוי נזכר יותר כשהוא בולט (<bdi dir="ltr">Schmidt 1994</bdi>). מה שיוצרים בעצמם נזכר טוב יותר (<bdi dir="ltr">Slamecka &amp; Graf 1978</bdi>), וגם ציור עוזר לזכור (<bdi dir="ltr">Wammes</bdi> ושותפיו 2016). אסוציאציות נשכחות בלי חזרה, ולכן המנצחת רוכבת על הכרטיס המרווח.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>היצירתיות של שישה אנשים במקום אחד: האסוציאציה שהקבוצה בחרה נוחתת על הכרטיסים הפרטיים שלך ומופיעה כרמז בדיוק אחרי שכחה. אפשר לנעוץ אחרת כ׳שלי׳.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>בדיחה, שרבוט או רגע מצחיק מהפגישה (׳לנעוץ רגע׳) הופכים לנכס של הקבוצה. כרטיס שלפחות 3 מכם שוכחים מעלה בקיר ׳דרושה אסוציאציה׳, כך שהקבוצה יודעת איפה צריך עזרה.</span></li><li><span class="">עלות AI</span><span>כ-<bdi dir="ltr" class="nw">$0.024</bdi> ללחיצה על ׳תנו לי 3׳, שנשמרת על הפסקה לכל הקבוצה; בדיקה לפני כניסה לכרטיסים כ-<bdi dir="ltr" class="nw">$0.01</bdi>; בחודש רגיל <bdi dir="ltr" class="nw">$1–3</bdi>. הצבעות, צילומים ונעיצות: חינם.</span></li></ul>
+    <p class="asked">ביקשה שוהם: <q>כפתור שנותן אסוציאציות מצחיקות וזכירות למנגנונים מסובכים או דברים שקשים לזכירה</q></p>
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:20</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">אסוציאציות · <bdi dir="ltr">Anti parasite</bdi></span><span class="a-chip fun">14</span></div>
+    <div class="ph-sub"><b style="color: var(--ink)">הכי טובות</b><span>·</span><span>חדשות</span><span>·</span><span>דרושות</span><span>·</span><span>שלי</span></div>
+    <div class="ph-body">
+      <div class="a-card" style="border-color: var(--fun)">
+        <div class="a-row between"><span class="a-chip fun"><svg width="10" height="10"><use href="#i-award"/></svg> מנצחת השבוע</span><span class="a-chip busy"><svg width="10" height="10"><use href="#i-cards"/></svg> בגב הכרטיס של כולם</span></div>
+        <p class="a-para"><bdi dir="ltr">Quinine</bdi> = הופעה של <bdi dir="ltr">Queen</bdi>: טינטון, כאב ראש, בחילה, סחרחורת, ראייה מטושטשת. בדרך הביתה: סוכר נופל, <bdi dir="ltr">QT</bdi>&nbsp;ארוך. <span class="a-tag">ש׳ 27</span></p>
+        <div class="a-row between"><span class="a-row"><span class="a-avatar c5">ד</span><b>דניאל</b></span><span class="a-row"><span class="a-up on">מצחיק 5</span><span class="a-up on">נתקע לי 5</span></span></div>
+      </div>
+      <div class="a-card">
+        <p class="a-para"><bdi dir="ltr">Phlebotomus</bdi> אוכל פלאפל בעולם הישן, <bdi dir="ltr">Lutzomyia</bdi> רוקד סלסה בעולם החדש. <span class="a-tag">ש׳ 8</span></p>
+        <div class="a-row between"><span class="a-row"><span class="a-avatar c3">מ</span><b>מאיה</b><span class="a-chip">שרבוט</span></span><span class="a-row"><span class="a-up on">מצחיק 6</span><span class="a-up">נתקע לי 3</span></span></div>
+      </div>
+      <div class="a-card">
+        <p class="a-para"><bdi dir="ltr">Pentostam</bdi> = סוס טרויאני: <bdi dir="ltr">Sb(V)</bdi> תמימה, שבתוך הטפיל הופכת ל-<bdi dir="ltr">Sb(III)</bdi>. <span class="a-tag">ש׳ 17</span></p>
+        <div class="a-row between"><span class="a-row"><span class="a-avatar c2">נ</span><b>נועה</b><span class="a-chip busy">רמיקס</span></span><span class="a-row"><span class="a-up">מצחיק 2</span><span class="a-up on">נתקע לי 4</span></span></div>
+      </div>
+      <div class="a-callout warn">
+        <div class="a-stack">
+          <span><b>דרושה אסוציאציה.</b> כמה מכם שוכחים את זה: <bdi dir="ltr">Miltefosine</bdi>, אמצעי מניעה בטיפול ועוד 5 חודשים אחריו. <span class="a-tag">ש׳ 16</span></span>
+          <div class="a-row"><span class="a-btn"><svg width="12" height="12"><use href="#i-pen"/></svg> משלי</span><span class="a-btn primary" style="width: 100%"><svg width="12" height="12"><use href="#i-smile"/></svg> תנו לי 3 מצחיקות</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab on"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>הקיר של ההרצאה</b>. מה שהקבוצה העלתה, עם העובדה והשקף של כל אסוציאציה, מדורג לפי הצבעות.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:24</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לקיר</span><span class="t">תנו לי 3 · <bdi dir="ltr">Miltefosine</bdi></span></div>
+    <div class="ph-sub"><span>נכתבו פעם אחת, ונשמרות על הפסקה לכל הקבוצה</span></div>
+    <div class="ph-body">
+      <p class="a-para marked"><bdi dir="ltr">Miltefosine</bdi> טרטוגנית (<bdi dir="ltr">Black Box</bdi>): אמצעי מניעה בטיפול ועוד 5 חודשים אחריו. ה-<bdi dir="ltr">t½</bdi> שלה: 7-31 ימים. <span class="a-tag">ש׳ 16</span></p>
+      <div class="a-card flat" style="border-style: dashed; border-color: var(--accent)">
+        <div class="a-row between"><span class="a-chip busy">1 · משחק מילים</span><span class="a-small a-muted">טיוטה – תשפרו</span></div>
+        <p class="a-para"><bdi dir="ltr">Miltefosine</bdi> = מילואים: 28 יום בפנים, ואמצעי מניעה עוד 5 חודשים אחרי השחרור.</p>
+        <div class="a-row"><span class="a-btn"><svg width="12" height="12"><use href="#i-pen"/></svg> רמיקס</span><span class="a-btn primary">לפרסם כמו שהיא</span></div>
+      </div>
+      <div class="a-card flat" style="border-style: dashed">
+        <div class="a-row between"><span class="a-chip busy">2 · חרוז</span><span class="a-small a-muted">טיוטה – תשפרו</span></div>
+        <p class="a-para"><bdi dir="ltr">Miltefosine</bdi> בהיריון? אין דיון! וחמישה חודשים אחרי הסיום.</p>
+      </div>
+      <div class="a-card flat" style="border-style: dashed">
+        <div class="a-row between"><span class="a-chip busy">3 · סצנה הזויה</span><span class="a-small a-muted">טיוטה – תשפרו</span></div>
+        <p class="a-para"><bdi dir="ltr">Miltefosine</bdi> היא אורחת שלא הולכת: המסיבה נגמרה ביום 28, והיא עוד על הספה.</p>
+      </div>
+      <p class="a-small a-muted">שום דבר לא עולה לקיר בלי בן אדם, בשם או בלי שם. לפני שהמנצחת נכנסת לכרטיסים, היא נבדקת מול הפסקה.</p>
+    </div>
+    <div class="ph-foot"><span class="a-btn wide"><svg width="12" height="12"><use href="#i-pen"/></svg> לכתוב משלי</span><span class="a-btn wide"><svg width="12" height="12"><use href="#i-image"/></svg> צילום של שרבוט</span></div>
+  </div>
+  <figcaption><b>תנו לי 3: טיוטות לשפר</b>. <bdi dir="ltr">Claude</bdi> נותן שלוש טיוטות על העובדה של הפסקה, ושום דבר לא מתפרסם בלי בן אדם.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>09:48</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לספרייה</span><span class="t"><bdi dir="ltr">Metronidazole</bdi></span></div>
+    <div class="ph-sub"><span class="a-avatar c1">ש</span><b style="color: var(--ink)">מעקב: שוהם</b><span>·</span><span>כאן: 6</span></div>
+    <div class="ph-body">
+      <p class="a-para a-muted">…ה-<bdi dir="ltr">t½</bdi> כ-8 שעות, וכ-75% מופרשים בשתן כמטבוליטים. <span class="a-tag">ש׳ 6</span></p>
+      <p class="a-para marked"><b>תופעות לוואי:</b> כאב ראש, בחילה, יובש בפה, טעם מתכתי ושתן כהה. ומהחשובות: תגובה דמוית <bdi dir="ltr">Disulfiram</bdi>, ולכן בלי אלכוהול בטיפול ועד 48 שעות אחריו. <span class="a-tag">ש׳ 7</span></p>
+      <p class="a-para"><b>עמידות:</b> ירידה בפעילות ה-<bdi dir="ltr">PFOR</bdi> וירידה בקליטת התרופה. <span class="a-tag">ש׳ 7</span></p>
+    </div>
+    <div class="a-scrim"></div>
+    <div class="a-sheet">
+      <div class="a-row between"><b class="a-row"><svg width="14" height="14"><use href="#i-star"/></svg>לנעוץ רגע</b><span class="a-chip busy">לפסקה שמוקראת עכשיו</span></div>
+      <div class="a-input" style="color: var(--ink)"><bdi dir="ltr">Metronidazole</bdi> היא האקסית: אסור לשתות לידה כל עוד היא בבית, ועוד 48 שעות אחרי שעזבה.</div>
+      <span class="a-small a-muted">על מה זה? (חובה, שיהיה מובן גם בלי הפגישה)</span>
+      <div class="a-input" style="color: var(--ink)">בלי אלכוהול בטיפול ו-48 שעות אחריו <span class="a-tag">ש׳ 7</span></div>
+      <div class="a-row between"><span class="a-row"><span class="a-avatar c4">א</span><span class="a-small">לתת קרדיט לאיתי?</span></span><span class="a-chip warn">רק באישור שלו</span></div>
+      <div class="a-row between"><span class="a-small a-muted">גם בשקף: שיני זהב לטעם המתכתי <span class="a-tag">ש׳ 7</span></span><span class="a-btn ghost"><svg width="12" height="12"><use href="#i-image"/></svg>לצרף</span></div>
+      <span class="a-btn primary wide">לנעוץ</span>
+    </div>
+  </div>
+  <figcaption><b>לנעוץ רגע מהפגישה</b>. רגע מצחיק בהקראה ננעץ לפסקה שמוקראת עכשיו, עם שורת ׳על מה זה׳ חובה.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="wall">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: קיר האסוציאציות: הכפתור, הקיר והמנצחת על הכרטיס">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-wall" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: קיר האסוציאציות: הכפתור, הקיר והמנצחת על הכרטיס"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat" id="f-museum">
+  <div class="feat-text">
+    <div class="badges"><span class="badge fun">שכבת הכיף</span><span class="badge">שלב 3</span><span class="badge">מאמץ קטן</span><span class="badge">תלוי בהחלטה 1</span><span class="badge new">רעיון חדש</span></div>
+    <h4>מוזיאון המלכודות</h4>
+    <p class="tagline">טעות שלפחות 3 מכם עשו ׳על בטוח׳ הופכת למוצג בלי שמות, עם שלט מצחיק, האמת והשקף, ונכנסת ככרטיס מלכודת לתור של כולם, גם אם לא נפלת בה.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>טעות שנעשתה בביטחון מלא ותוקנה נזכרת טוב יותר מטעות של ניחוש (<bdi dir="ltr">Butterfield &amp; Metcalfe 2001</bdi>). טעויות משותפות ואנונימיות הופכות טעות לדבר נורמלי, ההפך מבושה, והכרטיס למי שעוד לא נפל עובד כמו חיסון.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>כל מוצג נכנס לתור של כולם ככרטיס מלכודת, ויוצא לפנסיה רק כשכל הקבוצה עונה נכון בבדיקה חוזרת ביומיים שונים.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>טעויות ׳על בטוח׳ פרטיות, שלא נראות אף פעם עם שם, הן חומר הגלם היחיד: מוצג נפתח רק כשלפחות 3 מכם עשו את אותה טעות, ויום אחרי. פגישה יכולה להיפתח במוצג אחד, 30 שניות.</span></li><li><span class="">עלות AI</span><span><bdi dir="ltr" class="nw">$0</bdi>: ספירה ותבניות. שלט שנון מ-<bdi dir="ltr">Claude</bdi>: כ-<bdi dir="ltr" class="nw">$0.01</bdi> למוצג, רשות. כל מוצג נבדק מול השקפים כמו שאלה.</span></li></ul>
+    
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>09:01</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">מוזיאון המלכודות · <bdi dir="ltr">Anti parasite</bdi></span><span class="a-chip fun">5</span></div>
+    <div class="ph-sub"><span>רק טעויות ׳על בטוח׳ של לפחות 3 מכם</span><span>·</span><b style="color: var(--ink)">בלי שמות</b></div>
+    <div class="ph-body">
+      <div class="a-card" style="border-color: var(--fun)">
+        <div class="a-row between"><span class="a-chip fun">מוצג מס׳ 3</span><span class="a-small a-muted">עדיין תלוי</span></div>
+        <p class="a-h2">׳<bdi dir="ltr">Quinine</bdi> משמשת למניעת מלריה׳</p>
+        <span class="a-small a-muted">אמנים: כמה מכם. חומרים: ביטחון עצמי, שקף 27.</span>
+        <div class="a-divider"></div>
+        <p class="a-para"><b>האמת:</b> לטיפול ולא למניעה, ובשילוב עם <bdi dir="ltr">Doxycycline</bdi> או <bdi dir="ltr">Clindamycin</bdi>. <span class="a-tag">ש׳ 27,33</span></p>
+        <p class="a-para"><b>מה בלבל:</b> <bdi dir="ltr">Doxycycline</bdi> לבדה כן משמשת למניעה. <span class="a-tag">ש׳ 33</span></p>
+      </div>
+      <div class="a-sec"><b>עוד במוזיאון</b><span class="a-small a-muted">פנסיה: כולם צודקים ביומיים שונים</span></div>
+      <div class="a-list">
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><b>׳<bdi dir="ltr">Mefloquine</bdi> כל יום׳</b><span class="a-chip busy">חדש</span></span><span class="m">האמת: פעם בשבוע, עם <bdi dir="ltr">t½</bdi> של כ-20 יום. <span class="a-tag">ש׳ 28</span></span></div></div>
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><b>׳<bdi dir="ltr">Niclosamide</bdi> אסורה בהיריון׳</b><span class="a-chip warn">עוד נופלים</span></span><span class="m">האמת: בטוחה בהיריון <span class="a-tag">ש׳ 36</span>. הטרטוגניות הן <bdi dir="ltr">Miltefosine</bdi> ו-<bdi dir="ltr">Benzimidazoles</bdi>. <span class="a-tag">ש׳ 37</span></span></div></div>
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><b>׳<bdi dir="ltr">Metronidazole</bdi> גם לאירובים׳</b><span class="a-chip ok">בפנסיה</span></span><span class="m">האמת: בתאים אירוביים ה-<bdi dir="ltr">O₂</bdi> מחמצן את הרדיקל בחזרה, והתרופה לא פעילה. <span class="a-tag">ש׳ 5</span></span></div></div>
+      </div>
+      <p class="a-small a-muted">מוצג נפתח רק למחרת, כדי שאי אפשר יהיה לנחש מי.</p>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab on"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>המוזיאון</b>. טעויות ׳על בטוח׳ שכמה מכם עשו, עם שלט, האמת והשקף. בלי שמות, אף פעם.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>07:56</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להיום</span><span class="t">התור שלי</span><span class="a-chip busy">5/14</span></div>
+    <div class="ph-sub"><span class="a-chip">רק לך</span><span>התשובות והקצב שלך לא גלויים לקבוצה</span></div>
+    <div class="ph-body">
+      <div class="a-row between"><span class="a-chip fun">חיסון · ממוזיאון המלכודות</span><span class="a-small a-muted">מוצג מס׳ 3</span></div>
+      <div class="a-flash">
+        <p class="front"><bdi dir="ltr">Quinine</bdi>: לטיפול או למניעה?<br>ועם מה משלבים?</p>
+        <div class="a-divider"></div>
+        <p class="a-para">לטיפול בלבד, בשילוב עם <bdi dir="ltr">Doxycycline</bdi> או <bdi dir="ltr">Clindamycin</bdi>. <span class="a-tag">ש׳ 27,33</span></p>
+        <p class="a-small a-muted">המלכודת: <bdi dir="ltr">Doxycycline</bdi> לבדה כן משמשת למניעה. <span class="a-tag">ש׳ 33</span></p>
+      </div>
+      <div class="a-grade"><span>שוב<small>10 דק׳</small></span><span>קשה<small>יומיים</small></span><span>טוב<small>4 ימים</small></span><span>קל<small>9 ימים</small></span></div>
+      <div class="a-callout"><b>למה זה כאן?</b> כמה מכם נפלו בזה ׳על בטוח׳, אז החיסון מגיע לכולם, גם אם לא נפלת בו. הוא יוצא לפנסיה כשכל הקבוצה עונה נכון ביומיים שונים.</div>
+      <div class="a-card flat" style="border-color: var(--group); background: var(--group-soft)">
+        <div class="a-row between"><b class="a-small">מחר ב-09:00, בפתיחת הפגישה</b><span class="a-chip group">30 שניות</span></div>
+        <span class="a-small">מוצג אחד מהמוזיאון, ואז ממשיכים בהקראה.</span>
+      </div>
+    </div>
+    <div class="ph-tabs"><span class="ph-tab on"><svg><use href="#i-home"/></svg>היום</span><span class="ph-tab"><svg><use href="#i-book"/></svg>ספרייה</span><span class="ph-tab"><svg><use href="#i-users"/></svg>יחד</span><span class="ph-tab"><svg><use href="#i-user"/></svg>שלי</span></div>
+  </div>
+  <figcaption><b>החיסון בתור שלך</b>. כל מוצג נכנס לתור של כולם ככרטיס מלכודת, גם אם לא נפלת בו.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="museum">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: מוזיאון המלכודות">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-museum" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: מוזיאון המלכודות"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article><article class="feat" id="f-boss">
+  <div class="feat-text">
+    <div class="badges"><span class="badge fun">שכבת הכיף</span><span class="badge">שלב 3</span><span class="badge">מאמץ בינוני</span><span class="badge">תלוי בהחלטה 1</span><span class="badge new">רעיון חדש</span></div>
+    <h4>קרב הבוס בסוף המרתון</h4>
+    <p class="tagline">קרב שיתופי חי מול בוס שבנוי מהנקודות החלשות של הקבוצה ומהמוזיאון. תשובה נכונה של הקבוצה מורידה לבוס חיים, טעות עולה לקבוצה, אף פעם לא לאדם אחד.</p>
+    <ul class="facts"><li><span class="">למה זה חשוב</span><span>שליפה מעורבבת על הנושאים החלשים, ממש לפני המבחן, היא <bdi dir="ltr">interleaving</bdi> ותרגול במבחנים בבת אחת (<bdi dir="ltr">Rohrer &amp; Taylor 2007</bdi>). המכניקה היא הפרמקולוגיה עצמה, כך שגם המשחק מלמד: ה-<bdi dir="ltr">Hypnozoite</bdi> חוזר (<bdi dir="ltr">relapse</bdi>) עד שעונים על <bdi dir="ltr">Primaquine</bdi>, ודילוג על <bdi dir="ltr">G6PD</bdi> עולה חיים.</span></li><li><span class="to-me">מהקבוצה לאישי</span><span>השלל: תוכנית פרטית ל-3 ימים עם הטעויות האישיות מהקרב, רק לך. קרב שהפסדנו פותח ׳סבב נקמה׳ למחרת במקום מסך הפסד.</span></li><li><span class="to-group">מהאישי לקבוצה</span><span>הבוס בנוי מהדופק האנונימי ומהמוזיאון: כל ראש של ההידרה הוא נושא שלפחות 3 מכם מתקשים בו.</span></li><li><span class="">עלות AI</span><span><bdi dir="ltr" class="nw">$0</bdi> על הבנק הקיים. שאלות בסגנון מבחן לבוס: כ-<bdi dir="ltr" class="nw">$0.50</bdi> למבחן, פעם אחת, רשות.</span></li></ul>
+    
+  </div>
+  <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>17:30</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">קרב הבוס · ההידרה של המלריה</span><span class="a-chip fun">ראש 3/4</span></div>
+    <div class="ph-sub"><span>יום מרתון 13</span><span>·</span><span>כל ראש: נושא שלפחות 3 מכם מתקשים בו</span></div>
+    <div class="ph-body">
+      <div class="a-card flat">
+        <div class="a-grid2">
+          <div class="a-meter"><div class="a-row between"><b class="a-small">הקבוצה</b><b class="a-small">80 <bdi dir="ltr">HP</bdi></b></div><div class="a-bar"><i style="width: 80%; background: var(--ok)"></i></div></div>
+          <div class="a-meter"><div class="a-row between"><b class="a-small">הבוס</b><b class="a-small">62 <bdi dir="ltr">HP</bdi></b></div><div class="a-bar"><i style="width: 62%; background: var(--bad)"></i></div></div>
+        </div>
+      </div>
+      <div class="a-wrap">
+        <span class="a-chip ok">✓ ה-<bdi dir="ltr">Sporozoite</bdi> הבלתי נגיע</span>
+        <span class="a-chip ok">✓ מעכבי ה-<bdi dir="ltr">heme</bdi></span>
+        <span class="a-chip fun"><bdi dir="ltr">Artemisinin</bdi> היהירה</span>
+        <span class="a-chip">ה-<bdi dir="ltr">Hypnozoite</bdi> הרדום</span>
+      </div>
+      <p class="a-small a-muted">בראש הרביעי ה-<bdi dir="ltr">Hypnozoite</bdi> חוזר לחיים (<bdi dir="ltr">relapse</bdi>) עד שעונים נכון על <bdi dir="ltr">Primaquine</bdi>. <span class="a-tag">ש׳ 19-20</span></p>
+      <div class="a-callout warn"><b><bdi dir="ltr">Artemisinin</bdi> תוקפת:</b> ׳אני לבד מספיקה! אני חזקה פי 10-100 מכל השאר!׳</div>
+      <div class="a-row between"><span class="a-small a-muted">מה עונים לה? · מבוסס על ש׳ 30</span><span class="a-chip group"><svg width="10" height="10"><use href="#i-clock"/></svg> 0:41</span></div>
+      <div class="a-timer"><i style="width: 68%"></i></div>
+      <div class="a-opts">
+        <div class="a-opt"><span class="l">א</span><span>צודקת, מונותרפיה מספיקה</span></div>
+        <div class="a-opt picked"><span class="l">ב</span><span>לעולם לא לבד: <bdi dir="ltr">t½</bdi> של 1-2 שעות, תמיד עם שותף ארוך פעולה</span></div>
+        <div class="a-opt"><span class="l">ג</span><span>רק <bdi dir="ltr">Artesunate IV</bdi>, תמיד</span></div>
+        <div class="a-opt"><span class="l">ד</span><span>רק בשילוב עם <bdi dir="ltr">Primaquine</bdi></span></div>
+      </div>
+      <div class="a-row between"><span class="a-small a-muted">ענו 5 מתוך 6 · עונים לבד</span><span class="a-chip">רק לך</span></div>
+      <p class="a-small a-muted">תשובה נכונה מורידה לבוס חיים. טעות עולה לקבוצה, אף פעם לא לאדם אחד.</p>
+    </div>
+  </div>
+  <figcaption><b>הקרב</b>. כל הקבוצה נגד הבוס: עונים לבד, ותשובה נכונה של הקבוצה מורידה לבוס חיים.</figcaption>
+</figure>
+<figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>18:05</span><span>100%</span></div>
+    <div class="ph-head"><span class="t">קרב הבוס · ההידרה של המלריה</span><span class="a-chip ok">ניצחון</span></div>
+    <div class="ph-body">
+      <div class="a-card" style="border-color: var(--fun); background: var(--fun-soft)">
+        <div class="a-row between">
+          <span class="a-stack"><span class="a-h1">הבוס הובס!</span><span class="a-small">הקבוצה סיימה עם 45 <bdi dir="ltr">HP</bdi> מתוך 100.</span></span>
+          <span class="a-ring" style="--p: 45%; min-width: 54px"><span>45</span></span>
+        </div>
+        <p class="a-para"><bdi dir="ltr">Artemisinin</bdi> נתנה את המכה האחרונה, עם שותף ארוך פעולה כמו שצריך. <span class="a-tag">ש׳ 30</span></p>
+        <div class="a-row"><span class="a-avatar c1">ש</span><span class="a-avatar c2">נ</span><span class="a-avatar c3">מ</span><span class="a-avatar c4">א</span><span class="a-avatar c5">ד</span><span class="a-avatar c6">ר</span></div>
+        <span class="a-small"><svg width="11" height="11"><use href="#i-award"/></svg> <b>מדליית מרתון:</b> על השתתפות, לא על ציון.</span>
+      </div>
+      <div class="a-sec"><b>רגעי הקרב</b><span class="a-small a-muted">של הקבוצה, בלי שמות</span></div>
+      <div class="a-list">
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><b>ה-<bdi dir="ltr">Hypnozoite</bdi> חזר פעמיים</b><span class="a-chip warn"><bdi dir="ltr">relapse</bdi></span></span><span class="m">עד שנענתה שאלת ה-<bdi dir="ltr">Primaquine</bdi>. <span class="a-tag">ש׳ 19-20</span></span></div></div>
+        <div class="a-li"><div style="width: 100%"><span class="a-row between"><b><bdi dir="ltr">Primaquine</bdi> בלי בדיקת <bdi dir="ltr">G6PD</bdi></b><span class="a-chip bad"><bdi dir="ltr">−20 HP</bdi></span></span><span class="m">עלה לקבוצה 20 <bdi dir="ltr">HP</bdi>. <span class="a-tag">ש׳ 37</span></span></div></div>
+      </div>
+      <div class="a-card flat" style="border-color: var(--accent)">
+        <div class="a-row between"><b>השלל שלך: 4 טעויות, 3 ימים</b><span class="a-chip">רק לך</span></div>
+        <div class="a-row between"><span class="a-small"><b>מחר</b> · איזו תרופה על איזה שלב ×2</span><span class="a-tag">ש׳ 23</span></div>
+        <div class="a-row between"><span class="a-small"><b>מחרתיים</b> · <bdi dir="ltr">Mefloquine</bdi>: למי אסור</span><span class="a-tag">ש׳ 28</span></div>
+        <div class="a-row between"><span class="a-small"><b>בעוד 3 ימים</b> · מה בודקים לפני <bdi dir="ltr">Primaquine</bdi></span><span class="a-tag">ש׳ 37</span></div>
+      </div>
+      <p class="a-small a-muted">ואם מפסידים? למחרת נפתח ׳סבב נקמה׳, בלי מסך הפסד.</p>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide">לתוכנית שלי</span></div>
+  </div>
+  <figcaption><b>ניצחון, והשלל</b>. אחרי הקרב: סיכום קבוצתי, ושלל פרטי של תוכנית ל-3 ימים מהטעויות שלך.</figcaption>
+</figure>
+</div>
+  <div class="vote" data-feature="boss">
+  <span class="vote-q">מה עושים עם זה?</span>
+  <div class="vote-opts" role="group" aria-label="הצבעה: קרב הבוס בסוף המרתון">
+    <button type="button" data-v="build" aria-pressed="false">לבנות</button>
+    <button type="button" data-v="talk" aria-pressed="false">לדבר על זה</button>
+    <button type="button" data-v="skip" aria-pressed="false">לא עכשיו</button>
+  </div>
+  <p class="vote-msg"></p>
+  <textarea id="note-boss" rows="1" placeholder="הערה (לא חובה)" aria-label="הערה: קרב הבוס בסוף המרתון"></textarea>
+  <div class="vote-tally" aria-live="polite"></div>
+</div>
+</article>
+  </section>
+
+  <section class="block" id="nav">
+    <header><span class="eyebrow">באפליקציה</span><h2>איך זה מסודר בטלפון</h2></header>
+    <div class="navtabs"><div class="navtab"><svg width="20" height="20"><use href="#i-home"/></svg><b>היום</b><span class="muted">הפגישה של היום ומה קורה עכשיו, התור האישי לפי הזמן שיש (10 · 20 · 45 דק׳), השלמה של פגישה שפספסת, ותרגול חופשי.</span></div><div class="navtab"><svg width="20" height="20"><use href="#i-book"/></svg><b>ספרייה</b><span class="muted">ההרצאות לפי קורס, העלאה, ושורת ׳לשאול או לחפש בהרצאות…׳. בכל הרצאה: תרגול · כרטיסיות · מבחן קבוצתי · לשאול · הקלטה · אסוציאציות.</span></div><div class="navtab"><svg width="20" height="20"><use href="#i-users"/></svg><b>יחד</b><span class="muted">ההקראה שעכשיו והמבחן הפתוח, שאלות פתוחות, דופק הקבוצה, קיר האסוציאציות, מוזיאון המלכודות ותוכנית המרתון.</span></div><div class="navtab"><svg width="20" height="20"><use href="#i-user"/></svg><b>שלי</b><span class="muted">גלוי רק לך: ההתקדמות שלי ורשימת הסכנה, הטעויות שלי, המסלול הפרטי במרתון, הגדרות (<bdi dir="ltr">Anki</bdi>, כרטיסים חדשים ביום, יציאה מהדופק), תקציב הקבוצה, עזרה ופרטיות.</span></div></div>
+  </section>
+
+  <section class="block" id="phases">
+    <header><span class="eyebrow">סדר העבודה</span><h2>שלבים</h2>
+    <p>התאריכים מכוונים למבחן הבלוק בתחילת ינואר ולמרתון שמתחיל בערך ב-14 בדצמבר. יועד ושוהם קובעים מה נכנס לכל שלב, לפי ההצבעות; ׳לדבר על זה׳ נסגר בשיחה לפני שהשלב מתחיל. על הפיצ׳רים של שלב 1 כדאי להצביע עד 16 בנובמבר, כשהוא מתחיל.</p></header>
+    <div class="phases"><div class="phase"><h3>שלב 1</h3><span class="when"><bdi dir="ltr" class="nw">16–22</bdi> בנובמבר</span><p>הלולאה הבסיסית: הקראה עם ׳לא ברור׳, מבחן קבוצתי עם ויכוח והצבעה שנייה, טעויות שמחכות בפרטיות, תרגול עם נתיחה, ייצוא ל-<bdi dir="ltr">Anki</bdi>, ופתיחה עם שאלות על אתמול. לפני הכול: מונה התקציב עם התקרה. הטעויות נשמרות בפרטיות מהיום הראשון, לפי הטלפון שממנו כל אחד ואחת הצטרפו; רשימת ׳הטעויות שלי׳ נפתחת אחרי שמירת חשבון עם קוד במייל, בשלב 2 (החלטה 12).</p><ul><li><a href="#f-anchor">עוגן הפסקה: כל דבר יושב על פסקה</a></li><li><a href="#f-practice">תרגול: שאלות עם נתיחה לכל מסיח</a></li><li><a href="#f-live-quiz">מבחן קבוצתי חי: עונים לבד, משכנעים, עונים שוב</a></li><li><a href="#f-cards">כרטיסיות: חפיסה משותפת, זיכרון פרטי</a></li><li><a href="#f-meeting">הפגישה היומית: 3 לקפה, ׳לא ברור׳ ותשובות שנדלקות</a></li></ul></div><div class="phase"><h3>שלב 2</h3><span class="when">23 בנובמבר – 6 בדצמבר</span><p>אמון, זיכרון ודופק: תיקונים ו-<bdi dir="ltr">VAR</bdi>, ׳היום׳ עם חזרה באפליקציה, קיר האסוציאציות, לשאול, ההתקדמות והדופק, והערות מההקלטה.</p><ul><li><a href="#f-corrections">תיקון שמתפשט, ו-<bdi dir="ltr">VAR</bdi> למחלוקות</a></li><li><a href="#f-today">היום: הבית האישי שמתחיל מהקבוצה</a></li><li><a href="#f-wall">קיר האסוציאציות: הכפתור, הקיר והמנצחת על הכרטיס</a></li><li><a href="#f-ask">לשאול את ההרצאה, ואז את הקבוצה</a></li><li><a href="#f-progress-pulse">ההתקדמות שלי, ודופק הקבוצה</a></li><li><a href="#f-recordings">ההקלטה בתוך הסיכום: הערות ׳מההקלטה׳</a></li></ul></div><div class="phase"><h3>שלב 3</h3><span class="when"><bdi dir="ltr" class="nw">7–13</bdi> בדצמבר, לפני שהמרתון מתחיל</span><p>מוכנים למרתון: תוכנית עם שני מסלולים, קרב הבוס, מוזיאון המלכודות, ותוספות לפי השימוש: טבלה ריקה, מלכודות מהקבוצה, ׳מי אני?⁠׳.</p><ul><li><a href="#f-plan">מרתון עד המבחן: מסלול קבוצתי ומסלול פרטי</a></li><li><a href="#f-boss">קרב הבוס בסוף המרתון</a></li><li><a href="#f-museum">מוזיאון המלכודות</a></li></ul></div><div class="phase blocked"><h3>מחכה</h3><span class="when">כשתיקיית הדרייב תחזור</span><p>מבחני עבר: שחזורים, תג ׳נשאל ב-&lt;שנה&gt;׳ על פסקאות, ושאלות בסגנון הקורס.</p></div></div>
+  </section>
+
+  <section class="block" id="cut">
+    <header><span class="eyebrow">בכוונה</span><h2>מה לא נכנס, ולמה</h2></header>
+    <ul class="cutlist"><li class="cut"><b>מאצ׳! היכרויות לתרופות</b><span class="muted">החלקה ימינה או שמאלה לא יכולה להגיד ׳רק אחרי <bdi dir="ltr">G6PD</bdi>׳ או ׳לשלב אחר׳, והיא משכפלת את המקרים שכבר בבנק. המקרים נשארים שאלות עם הסבר לכל תשובה.</span></li><li class="cut"><b>מצאו את הטפיל: טעויות שתולות בהקראה</b><span class="muted">היא שותלת משפטים שגויים בתוך הטקסט שהקבוצה צריכה לסמוך עליו, וקוראים סופגים שקר גם כשמזהירים אותם. ׳איזה משפט שגוי׳ נשאר כסוג שאלה בבנק.</span></li><li class="cut"><b>שידור חוזר: הצ׳אט של התרופות ושדרן ספורט</b><span class="muted">קריאה חוזרת בתחפושת ולא שליפה, וכל שכתוב של הסיכום הוא עוד טקסט לבדוק. מי שרוצה כותב צ׳אט כזה בעצמו על הקיר.</span></li><li class="cut"><b>עונות, מטבעות, נקודות עזרה וכוחות</b><span class="muted">קבוצה שנפגשת כל יום לא צריכה מטבע כדי לעזור, וספירת נקודות מצטברת בין שישה חברים מזמינה השוואה. נשארים רק להבה פרטית של 4 מתוך 7 ימים ב׳היום׳, נקודות בתוך משחק מירוץ בלבד, ומדליית השתתפות בסוף המרתון.</span></li><li class="cut"><b>בורסת הניחושים</b><span class="muted">עוד צעד לפני כל משחק, ומה שהיא מודדת כבר נמדד בהימור הביטחון על כל שאלה.</span></li><li class="cut"><b>פרזיטדקס: אוסף קלפים, ׳מי התרופה?⁠׳ וקרבות</b><span class="muted">פרויקט צד גדול שמשכפל את השליטה בכרטיסיות. טבלת התכונות עם תגיות השקפים אולי תחזור כתצוגת עיון.</span></li><li class="cut"><b>מורה לחלק ותפקידים מתחלפים</b><span class="muted">הכנה יומית היא שיעורי בית ואדמיניסטרציה, ושוהם לא בחרה בחלוקת הרצאות. בקבוצה כבר מסבירים זה לזה באופן טבעי.</span></li><li class="cut"><b>מסיכות על תמונות, סימון אזורים בתרשים וגרירת תרופה לשלב</b><span class="muted">עורך מסיכות וגרירה בטלפון הוא עבודה גדולה. בינתיים שאלות בבנק מציגות את תרשים השקף, ו׳טבלה ריקה׳ מתרגלת תרופה לפי שלב.</span></li><li class="cut"><b>׳מה ציירתי?⁠׳ חי בטלפון ומבקר אמנות של <bdi dir="ltr">AI</bdi></b><span class="muted">שישה אנשים ליד שולחן אחד מציירים על נייר. נשאר ׳צילום של שרבוט׳ על קיר האסוציאציות.</span></li><li class="cut"><b>חידת ערב בהתראה</b><span class="muted">עוד התראה, ובאייפון התראות דורשות התקנה למסך הבית. ׳מי אני?⁠׳ עובר לסבב במבחן הקבוצתי.</span></li><li class="cut"><b>טקס סגירה וכרטיס יום לוואטסאפ</b><span class="muted">בסוף יום ארוך מדלגים עליו, והמבחן הקבוצתי כבר סוגר את הפגישה. חבילת ההשלמה לפגישה שפספסת עברה ל׳היום׳.</span></li><li class="cut"><b>דירוג ׳נדבק׳ לפי זיכרון נמדד</b><span class="muted">שישה אנשים לא מייצרים מספיק חזרות כדי למדוד, עוד חודשים. האסוציאציות מדורגות לפי הצבעות.</span></li><li class="cut"><b>ליגה עם קבוצות מתחלפות וכינויים</b><span class="muted">מחכה עד שהקבוצה תשחק כמה שבועות. בקבוצה של שישה היא מוסיפה עבודה וחושפת אנשים יותר משהיא מלמדת.</span></li><li class="cut"><b>שליפה חופשית מוקלדת בעצירות</b><span class="muted">הקלדה בטלפון איטית ומאריכה את ההקראה ב-<bdi dir="ltr" class="nw">15–20</bdi> דקות. עצירה היא שאלה אחת בסוף פרק.</span></li><li class="cut"><b>הנמסיס האישי</b><span class="muted">חופף למסיחים מאותה הרצאה ולכרטיסי ההשוואה. זוגות הבלבול נשמרים כנתון שבוחר שאלות לתרגול ולמבחן.</span></li><li class="cut"><b>דף ׳הלילה שלפני׳ כמחולל <bdi dir="ltr">AI</bdi> נפרד</b><span class="muted">שורות קצרות מוחקות הסתייגויות כמו ׳חלשה׳ או ׳שלבים מוקדמים׳. במקומו תהיה תצוגת ייצוא מאוחרת: שקף 37 כמו שהוא, האסוציאציות הנעוצות והטעויות ׳על בטוח׳ שלך.</span></li><li class="cut"><b>האזנה לסיכום וציטוט לכל משפט</b><span class="muted">סומנו בצהוב בעדיפויות של שוהם ולא נכנסים לסבב הזה. תגיות השקפים כבר נותנות את רוב מה שציטוטים היו נותנים.</span></li></ul>
+  </section>
+
+  <section class="block" id="budget">
+    <header><span class="eyebrow">עלות</span><h2>כמה זה עולה בחודש</h2>
+    <p>חודש לדוגמה: 20 הרצאות ו-8 הקלטות. התקרה שהציעה שוהם: ₪20 לאדם, כלומר כ-$33 לכל הקבוצה. אלה הערכות מתוך התכנון. אחרי השבוע הראשון יהיו מספרים אמיתיים.</p></header>
+    <div class="table-wrap"><table class="budget">
+      <thead><tr><th>מה</th><th>מחיר מלא</th><th>במצב חסכוני</th></tr></thead>
+      <tbody><tr><td>סיכומים, 20 הרצאות (קיים היום)</td><td class="num"><bdi dir="ltr" class="nw">$20</bdi></td><td class="num"><bdi dir="ltr" class="nw">$20</bdi></td></tr><tr><td>בנקי שאלות, 20 × (<bdi dir="ltr" class="nw">$0.28</bdi> + בדיקה <bdi dir="ltr" class="nw">$0.10</bdi>)</td><td class="num"><bdi dir="ltr" class="nw">$7.60</bdi></td><td class="num">כ-<bdi dir="ltr" class="nw">$3.80</bdi></td></tr><tr><td>חפיסות כרטיסיות, 20 × <bdi dir="ltr" class="nw">$0.21</bdi></td><td class="num"><bdi dir="ltr" class="nw">$4.20</bdi></td><td class="num">כ-<bdi dir="ltr" class="nw">$2.10</bdi></td></tr><tr><td>טיוטות אסוציאציה ובדיקות</td><td class="num"><bdi dir="ltr" class="nw">$1–3</bdi></td><td class="num"><bdi dir="ltr" class="nw">$1–3</bdi></td></tr><tr><td>׳לשאול׳: 6 אנשים × 15 שאלות</td><td class="num">כ-<bdi dir="ltr" class="nw">$3</bdi></td><td class="num">כ-<bdi dir="ltr" class="nw">$3</bdi></td></tr><tr><td><bdi dir="ltr">VAR</bdi>, כ-20 מחלוקות</td><td class="num">כ-<bdi dir="ltr" class="nw">$1.60</bdi></td><td class="num">כ-<bdi dir="ltr" class="nw">$1.60</bdi></td></tr><tr><td>הערות מהקלטה, 8 × <bdi dir="ltr" class="nw">$0.87</bdi> (רק בלחיצה)</td><td class="num">כ-<bdi dir="ltr" class="nw">$7</bdi></td><td class="num">כ-<bdi dir="ltr" class="nw">$7</bdi></td></tr><tr><td>מבחן קבוצתי, הפגישה, עוגן הפסקה, היום, התקדמות, דופק, תוכנית, מוזיאון, בוס (בלי תוספות רשות)</td><td class="num"><bdi dir="ltr" class="nw">$0</bdi></td><td class="num"><bdi dir="ltr" class="nw">$0</bdi></td></tr></tbody>
+      <tfoot><tr><td>סך הכול, עם 8 הקלטות</td><td class="num">כ-$46</td><td class="num">כ-$40</td></tr><tr><td>סך הכול, בלי הקלטות</td><td class="num">כ-$39</td><td class="num">כ-$33</td></tr></tfoot>
+    </table></div>
+    <p class="muted">לכן: שאלות וכרטיסיות נכתבות במצב חסכוני (<bdi dir="ltr">Batch API</bdi>: חצי מחיר, והתוצאה מגיעה באיחור, לרוב תוך שעה ולכל היותר תוך יממה), אבל רק כשהכתיבה בשרת פועלת; עד אז מחיר מלא, כ-<bdi dir="ltr" class="nw">$39</bdi> בחודש גם בלי הקלטות. הערות מהקלטה רק בלחיצה אחרי הערכת עלות, וכל פיצ׳ר בודק את אותה תקרה. כשמגיעים לתקרה, כתיבה חדשה נעצרת עד תחילת החודש הבא, גם של סיכומים.</p>
+    <p class="muted">הקלטות: בלי הקלטות כבר מגיעים לכ-<bdi dir="ltr" class="nw">$33</bdi>, וכל הקלטה מוסיפה כ-<bdi dir="ltr" class="nw">$0.87</bdi> במצב החסכוני. לכן ₪25 לאדם (כ-<bdi dir="ltr" class="nw">$41</bdi>) מכסה כ-8 הקלטות בחודש, והקלטה של כמעט כל הרצאה (כ-<bdi dir="ltr" class="nw">$50</bdi>) דורשת כ-₪30 לאדם או קיצוב הערות (החלטה 4).</p>
+  </section>
+
+  <section class="block" id="decisions">
+    <header><span class="eyebrow">רק אתם יכולים להחליט</span><h2>החלטות פתוחות</h2>
+    <p>החלטות 2, 3, 4, 7 ו-8 צריכות תשובה עד תחילת שלב 1 ב-16 בנובמבר; 1, 5, 6, 9, 10 ו-12 עד תחילת שלב 2 ב-23 בנובמבר; ו-11 עד תחילת שלב 3 ב-7 בדצמבר. בלי תשובה אחרת עד אז, ההמלצה היא מה שנבנה. תשובה אחרת: בהערה של הפיצ׳ר הקשור.</p></header>
+    <ul class="decisions"><li class="decision"><div class="dec-head"><span class="dec-n">1</span><b>להציג לקבוצה ׳דופק׳ אנונימי של נקודות חולשה?</b><span class="badge">שוהם</span></div><span class="def">ההמלצה: <b>כן, בשלוש דרגות (חם · פושר · יושב טוב), בלי מספרים ובלי שמות, רק בנושאים שלפחות 3 תרגלו, מתעדכן בלילה, ועם יציאה אישית. אותה תשובה קובעת גם את ספירת הניחושים במסך ההקראה, את המוזיאון, את ׳דרושה אסוציאציה׳, את הנקודות החמות בסדר היום ואת הנושאים של קרב הבוס.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">2</span><b>מבחן תחרותי: על מה מקבלים נקודות?</b><span class="badge">שוהם</span></div><span class="def">ההמלצה: <b>על תשובה נכונה ועל ההימור (נכון <bdi dir="ltr" class="nw">+1/+2/+3</bdi>, טעות <bdi dir="ltr" class="nw">0/−2/−6</bdi>); מהירות רק לשובר שוויון. הטבלה רק לשחקני המירוץ ורק בתוך המשחק. ברירת המחדל במבחן: ׳כולנו נגד המבחן׳.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">3</span><b>שאלות וכרטיסיות: אוטומטית עם כל סיכום, או בלחיצה?</b><span class="badge">יועד</span></div><span class="def">ההמלצה: <b>אוטומטית, במצב החסכוני (כ-<bdi dir="ltr" class="nw">$0.30</bdi> להרצאה), כדי שיהיו מוכנות לפני הפגישה. במצב הזה התוצאה חוזרת לרוב תוך שעה ולכל היותר תוך יממה, ולכן ההרצאה עולה עד הערב שלפני; אם התוצאה לא חזרה עד הפגישה, כותבים רגיל, במחיר מלא (כ-<bdi dir="ltr" class="nw">$0.59</bdi>). עד שהכתיבה בשרת מופעלת: שאלה אחת בהעלאה, ׳להכין גם שאלות וכרטיסיות?⁠׳ בתכנון הטכני נבחר כרגע ׳רק בלחיצה׳: זה שומר יותר על התקרה, אבל בלי חצי המחיר, והשאלות לא מוכנות מראש. מה שיוחלט כאן יקבע.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">4</span><b>תקרת התקציב החודשית</b><span class="badge">יועד ושוהם</span></div><span class="def">ההמלצה: <b>₪20 לאדם, כ-<bdi dir="ltr" class="nw">$33</bdi> לקבוצה (בהגדרות השרת: 33 במקום 40), שמספיק בקושי לחודש בלי הקלטות, ורק כשהכתיבה בשרת פועלת. הערות מההקלטה רק בלחיצה. עם עד 8 הקלטות בחודש: ₪25 לאדם, כ-<bdi dir="ltr" class="nw">$41</bdi>. הקלטה של כמעט כל הרצאה: כ-₪30 לאדם, כ-<bdi dir="ltr" class="nw">$50</bdi>, או קיצוב הערות.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">5</span><b>מי מאשר תיקון בסיכום?</b><span class="badge">שוהם</span></div><span class="def">ההמלצה: <b>אישור אחד נוסף מהקבוצה, או אישור בקול בפגישה. תמיד עם מקור, היסטוריה וביטול בלחיצה.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">6</span><b>מסך הבית: ׳היום׳ במקום הלשונית ׳תרגול׳?</b><span class="badge">יועד</span></div><span class="def">ההמלצה: <b>כן. ארבע לשוניות: היום · ספרייה · יחד · שלי. התרגול נפתח מ׳היום׳ ומכל הרצאה.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">7</span><b>כמה טקסים בפגישה?</b><span class="badge">שוהם</span></div><span class="def">ההמלצה: <b>לכל היותר שניים ביום: ׳3 לקפה׳ (5 דקות, אפשר לדלג) ומבחן קבוצתי בסוף (5 שאלות, כ-10 דקות). עצירה של שאלה אחת רק בסוף פרק, ורק אם מחליטים עליה בהקראה.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">8</span><b>כמה כרטיסי <bdi dir="ltr">AI</bdi> להרצאה?</b><span class="badge">שוהם</span></div><span class="def">ההמלצה: <b>החפיסה המלאה (54 בהרצאה הזו), אבל מוסיפים לחפיסה האישית חלק אחרי חלק, עד 20 כרטיסים חדשים ביום.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">9</span><b>הקלטות: מדיניות האוניברסיטה והסכמה</b><span class="badge">יועד</span></div><span class="def">ההמלצה: <b>מוסתר עד שנבדקת המדיניות של בן-גוריון. מתחילים מייבוא קובץ תמלול מהזום, עם שורת הסכמה של מי שמעלה.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">10</span><b>אסוציאציות בלי שם, וכללי הומור</b><span class="badge">שוהם</span></div><span class="def">ההמלצה: <b>מותר בלי שם (השם נשמר רק לצורך מחיקה). כלל הבית: צולים את התרופה, אף פעם לא אנשים או מטופלים. שם של מישהו בנעיצה רק באישורו.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">11</span><b>׳הקבוצה צריכה אותך׳: להפנות שאלה פתוחה למי שהנושא יושב אצלו טוב?</b><span class="badge">שוהם</span></div><span class="def">ההמלצה: <b>רק בהסכמה, כבוי כברירת מחדל. רק מי שנבחר רואה למה.</b></span></li><li class="decision"><div class="dec-head"><span class="dec-n">12</span><b>שמירת חשבון עם קוד במייל: מתי, ועם איזה שירות מייל?</b><span class="badge">יועד</span></div><span class="def">ההמלצה: <b>בשלב 2, לפני המסכים הפרטיים: הטעויות שלי, ההתקדמות וחזרה על כרטיסים באפליקציה. עד אז כל אחד ואחת מזוהים לפי הטלפון שממנו הצטרפו, וכששומרים חשבון מאותו טלפון, כל מה שנשמר עד אז נשאר שלהם. בשביל הקודים צריך שירות לשליחת מיילים ודומיין בשליטת יועד (הכתובת הנוכחית של האתר ב-<bdi dir="ltr">Vercel</bdi> לא מתאימה); המחיר עוד לא נבדק.</b></span></li></ul>
+  </section>
+
+  <section class="block" id="votes">
+    <header><span class="eyebrow">מתעדכן בזמן אמת</span><h2>מה כולם בחרו</h2>
+    <p>כל אחד רואה את הבחירות וההערות של כולם. כל אחד יכול לשנות רק את שלו.</p></header>
+    <div class="table-wrap"><table>
+      <thead><tr><th>פיצ׳ר</th><th>לבנות</th><th>לדבר</th><th>לא עכשיו</th></tr></thead>
+      <tbody id="vote-summary-body"><tr><td colspan="4" class="muted">ההצבעות יופיעו כאן.</td></tr></tbody>
+    </table></div>
+  </section>
+</div>
+<script>
+/* Votes: one document per person at votes/<their id> holding
+   { choices: {featureId: "build"|"talk"|"skip"}, notes: {featureId: text}, at }.
+   Everyone who can open the page reads all votes; each person writes only
+   their own (rules declared at publish). Names come from the user
+   capability at render time and are never stored. */
+(function () {
+  var LABEL = { build: "לבנות", talk: "לדבר על זה", skip: "לא עכשיו" };
+  var boxes = Array.prototype.slice.call(document.querySelectorAll(".vote[data-feature]"));
+  var statusEl = document.getElementById("vote-status");
+  var summaryBody = document.getElementById("vote-summary-body");
+  var NAMES = {};
+  var me = null;
+  var user = null;
+  var ref = null;
+  var mine = { choices: {}, notes: {} };
+  var all = new Map();
+  var writing = Promise.resolve();
+  var readOnly = true;
+  var noteTimers = {};
+  var refused = false;
+  var lastSaved = { choices: {}, notes: {} };
+  function clone(d) { return { choices: Object.assign({}, d && d.choices), notes: Object.assign({}, d && d.notes) }; }
+
+  function setStatus(text, box) {
+    if (statusEl) statusEl.textContent = text;
+    (box ? [box] : boxes).forEach(function (b) { var m = b.querySelector(".vote-msg"); if (m) m.textContent = box || readOnly ? text : ""; });
+  }
+  function featureName(id) {
+    var h = document.querySelector('#f-' + id + ' h4');
+    return h ? h.textContent : id;
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function lockInputs(locked) {
+    readOnly = locked;
+    boxes.forEach(function (box) {
+      box.querySelectorAll("button[data-v]").forEach(function (b) { b.disabled = locked; });
+      var ta = box.querySelector("textarea");
+      if (ta) ta.disabled = locked;
+    });
+  }
+
+  async function resolveNames(ids) {
+    var missing = ids.filter(function (id) { return !(id in NAMES); });
+    if (!missing.length || !user) return;
+    try {
+      var ps = await user.profiles(missing);
+      missing.forEach(function (id) { NAMES[id] = (ps && ps[id] && ps[id].name) || "מישהו"; });
+    } catch (e) {
+      missing.forEach(function (id) { NAMES[id] = "מישהו"; });
+    }
+  }
+  function who(id) { return (NAMES[id] || "מישהו") + (id === me ? " (אני)" : ""); }
+
+  async function render() {
+    await resolveNames(Array.from(all.keys()));
+    var rows = [];
+    boxes.forEach(function (box) {
+      var f = box.dataset.feature;
+      var pick = mine.choices && mine.choices[f];
+      box.querySelectorAll("button[data-v]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.v === pick)); });
+      var ta = box.querySelector("textarea");
+      if (ta && document.activeElement !== ta) ta.value = (mine.notes && mine.notes[f]) || "";
+      var tally = { build: [], talk: [], skip: [] };
+      var notes = [];
+      all.forEach(function (d, id) {
+        var v = d && d.choices && d.choices[f];
+        if (tally[v]) tally[v].push(who(id));
+        var n = d && d.notes && d.notes[f];
+        if (n && id !== me) notes.push("<b>" + esc(NAMES[id] || "מישהו") + ":</b> " + esc(n));
+      });
+      var parts = ["build", "talk", "skip"].filter(function (k) { return tally[k].length; }).map(function (k) {
+        return "<span><b>" + LABEL[k] + ":</b> " + esc(tally[k].join(", ")) + "</span>";
+      });
+      var el = box.querySelector(".vote-tally");
+      if (el) el.innerHTML = parts.join("") + (notes.length ? '<span style="flex-basis:100%">' + notes.join(" · ") + "</span>" : "");
+      rows.push({ f: f, build: tally.build.length, talk: tally.talk.length, skip: tally.skip.length, notes: notes });
+    });
+    if (summaryBody) {
+      rows.sort(function (a, b) { return b.build - a.build || b.talk - a.talk; });
+      summaryBody.innerHTML = rows.map(function (r) {
+        return '<tr><td><a href="#f-' + r.f + '">' + esc(featureName(r.f)) + '</a>' + (r.notes.length ? '<div class="muted" style="font-size:.82rem">' + r.notes.join("<br>") + '</div>' : '') + '</td><td class="num">' + r.build + '</td><td class="num">' + r.talk + '</td><td class="num">' + r.skip + "</td></tr>";
+      }).join("");
+    }
+  }
+
+  function save(box) {
+    if (!ref || readOnly) return;
+    var body = { choices: Object.assign({}, mine.choices), notes: Object.assign({}, mine.notes), at: new Date().toISOString() };
+    writing = writing.then(function () { return ref.set(body); }).then(function () {
+      lastSaved = clone(body);
+      setStatus("נשמר. כל מי שפותח את העמוד רואה את הבחירות שלך.", box);
+    }).catch(function (e) {
+      mine = clone(lastSaved);
+      if (me) all.set(me, mine);
+      render();
+      if (e && (e.code === "invalid_argument" || e.code === "not_granted")) {
+        refused = true;
+        lockInputs(true);
+        setStatus("אפשר לקרוא את העמוד, אבל אין לך הרשאה להצביע בו. מי ששיתף אותו יכול לתת הרשאת Contributor.");
+      } else {
+        setStatus("השמירה לא הצליחה. כדאי לנסות שוב בעוד רגע.", box);
+      }
+    });
+  }
+
+  boxes.forEach(function (box) {
+    var f = box.dataset.feature;
+    box.querySelectorAll("button[data-v]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (readOnly) return;
+        var v = b.dataset.v;
+        mine.choices = Object.assign({}, mine.choices);
+        if (mine.choices[f] === v) delete mine.choices[f]; else mine.choices[f] = v;
+        if (me) all.set(me, mine);
+        render();
+        save(box);
+      });
+    });
+    var ta = box.querySelector("textarea");
+    if (ta) ta.addEventListener("input", function () {
+      if (readOnly) return;
+      mine.notes = Object.assign({}, mine.notes);
+      var t = ta.value.trim();
+      if (t) mine.notes[f] = t.slice(0, 600); else delete mine.notes[f];
+      clearTimeout(noteTimers[f]);
+      noteTimers[f] = setTimeout(function () {
+        /* Re-read the field: a snapshot from someone else's vote may have replaced `mine` meanwhile. */
+        mine.notes = Object.assign({}, mine.notes);
+        var t2 = ta.value.trim();
+        if (t2) mine.notes[f] = t2.slice(0, 600); else delete mine.notes[f];
+        if (me) all.set(me, mine); render(); save(box);
+      }, 900);
+    });
+  });
+
+  lockInputs(true);
+  var c = window.claude;
+  if (!c || typeof c.use !== "function") {
+    setStatus("ההצבעה פועלת כשפותחים את העמוד ב-claude.ai. אפשר לקרוא הכול גם כאן.");
+    return;
+  }
+  setStatus("טוען את ההצבעות…");
+  Promise.all([c.use("db"), c.use("user")]).then(async function (caps) {
+    var db = caps[0];
+    user = caps[1];
+    if (!db || !user) {
+      var off = "כדי להצביע צריך להתחבר ל-claude.ai ולפתוח את העמוד מהקישור ששותף. בינתיים אפשר לקרוא הכול.";
+      setStatus(off);
+      if (summaryBody) summaryBody.innerHTML = '<tr><td colspan="4" class="muted">' + esc(off) + "</td></tr>";
+      return;
+    }
+    me = await user.id();
+    if (!me) { setStatus("כדי להצביע צריך להתחבר ל-claude.ai."); return; }
+    var can = null;
+    try { can = await user.can("data.write"); } catch (e) { can = null; }
+    ref = db.doc("votes/" + me);
+    var loaded = false;
+    var timer = setTimeout(function () { if (!loaded) setStatus("ההצבעות עוד לא נטענו. אם זה נמשך, כדאי לרענן."); }, 10000);
+    db.collection("votes").onSnapshot(function (snap) {
+      var next = new Map();
+      snap.docs.forEach(function (d) { next.set(d.id, d.data() || {}); });
+      all = next;
+      if (all.has(me) && !snap.metadata.hasPendingWrites) { mine = clone(all.get(me)); lastSaved = clone(all.get(me)); }
+      if (!snap.metadata.fromCache) {
+        var first = !loaded;
+        loaded = true;
+        clearTimeout(timer);
+        if (can === false) { lockInputs(true); if (first) setStatus("אפשר לראות את ההצבעות, אבל אין לך הרשאה להצביע. מי ששיתף את העמוד יכול לתת הרשאת Contributor."); }
+        else if (refused) lockInputs(true);
+        else if (first) { lockInputs(false); setStatus(all.size ? "ההצבעות נטענו. הבחירה נשמרת מיד." : "עוד אין הצבעות. הבחירה הראשונה נשמרת מיד."); }
+      }
+      render();
+    }, function (err) {
+      clearTimeout(timer);
+      setStatus(err && err.code === "revoked" ? "הגישה לעמוד השתנתה." : "ההצבעות לא נטענו. אפשר לקרוא הכול.");
+    });
+  });
+})();
+</script>
+

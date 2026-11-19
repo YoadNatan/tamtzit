@@ -1,0 +1,15086 @@
+-- ═══════════════════════════════════════════════════════════════════════
+--  תמצית — lecture summaries for a small study group.
+--  Run once: Supabase → SQL Editor → New query → paste → Run.
+--  Safe to run again: everything is create-if-not-exists / drop-then-create.
+--
+--  Lives in the same project as the other boards and only touches names that
+--  start with study_ — with ONE deliberate exception, the board trigger patch
+--  at the end of this file (see there).
+--
+--  Access model
+--  ────────────
+--  Every member signs in with a Supabase anonymous session (no password, no
+--  email), whose user metadata carries app = 'study' and the member's name.
+--  A member belongs to a group through study_members. Row Level Security is
+--  the whole protection: you only ever see, add or change lectures of a group
+--  you are a member of, and the summary API reads and writes with the
+--  member's own token, so it can never reach another group's data either.
+--
+--  Joining: the first person creates the group and gets a 6-letter code to
+--  share on WhatsApp; the others join with that code and their name. Codes are
+--  never readable through the API; study_join() checks them.
+--
+--  Needs anonymous sign-ins enabled (Authentication → Sign In / Providers →
+--  "Allow anonymous sign-ins"), which /board already requires.
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ── Groups and members ──
+create table if not exists public.study_groups (
+  id         uuid        primary key default gen_random_uuid(),
+  name       text        not null check (char_length(name) between 1 and 80),
+  join_code  text        not null unique,
+  created_by uuid        not null references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.study_members (
+  group_id  uuid        not null references public.study_groups (id) on delete cascade,
+  user_id   uuid        not null references auth.users (id) on delete cascade,
+  name      text        not null check (char_length(name) between 1 and 60),
+  joined_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+create index if not exists study_members_user on public.study_members (user_id);
+
+-- ── Lectures and their summaries ──
+-- slides: the deck as read in the browser, one object per slide:
+--   { n, title, lines[], tables[][][], notes, figures: [{ k, path, w, h }] }
+-- figure k = 0 is a render of the whole page (PDF); k ≥ 1 are pictures
+-- embedded in a PowerPoint slide, in order.
+create table if not exists public.study_lectures (
+  id           uuid        primary key default gen_random_uuid(),
+  group_id     uuid        not null references public.study_groups (id) on delete cascade,
+  course       text        not null default '' check (char_length(course) <= 120),
+  title        text        not null check (char_length(title) between 1 and 200),
+  lecturer     text        not null default '' check (char_length(lecturer) <= 120),
+  lecture_date date,
+  source_name  text        not null default '',
+  source_kind  text        not null check (source_kind in ('pptx', 'pdf')),
+  slides       jsonb       not null,
+  outline      jsonb,
+  status       text        not null default 'new'
+                           check (status in ('new', 'outlining', 'writing', 'ready', 'failed')),
+  error        text,
+  created_by   uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists study_lectures_group on public.study_lectures (group_id, created_at desc);
+
+create table if not exists public.study_sections (
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  idx        int         not null check (idx >= 0),
+  title      text        not null default '',
+  slide_from int         not null,
+  slide_to   int         not null,
+  markdown   text        not null default '',
+  status     text        not null default 'pending'
+                         check (status in ('pending', 'writing', 'ready', 'failed')),
+  model      text,
+  usage      jsonb,
+  error      text,
+  updated_at timestamptz not null default now(),
+  primary key (lecture_id, idx)
+);
+
+-- ── Studying together ──
+-- Shoham: the group studies everything together, one reads aloud and the
+-- others follow on their own phones, and "anything that improves group
+-- learning is the most essential part". Two shared records support that (the
+-- live "follow the reader" itself needs no table: it is a Realtime channel).
+--
+-- study_reads: who has read which lecture. Shared inside the group, as she
+-- asked ("לראות מה כל אחת כבר למדה"); scores and mistakes will stay private.
+-- Its own id as the primary key: Realtime sends a deleted row's primary key
+-- to every subscriber without checking RLS, and that key should say nothing.
+create table if not exists public.study_reads (
+  id         uuid        primary key default gen_random_uuid(),
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  read_at    timestamptz not null default now(),
+  unique (lecture_id, user_id)
+);
+
+-- study_comments: a comment or a question on one paragraph of a summary part.
+-- anchor = the paragraph's position in its part (0, 1, 2 ...); quote = its
+-- first words, so a thread can be re-placed if the part is ever rewritten.
+-- A reply has parent_id set and carries its parent's part and anchor.
+create table if not exists public.study_comments (
+  id         uuid        primary key default gen_random_uuid(),
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null check (part_idx >= 0),
+  anchor     int         not null check (anchor >= 0),
+  quote      text        not null default '' check (length(quote) <= 200),
+  kind       text        not null default 'comment' check (kind in ('comment', 'question')),
+  body       text        not null check (length(btrim(body)) between 1 and 2000),
+  parent_id  uuid        references public.study_comments (id) on delete cascade,
+  resolved   boolean     not null default false,
+  author_id  uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+create index if not exists study_comments_lecture on public.study_comments (lecture_id, part_idx, anchor);
+
+-- ── Helpers (security definer, so RLS can ask "am I a member?" cheaply) ──
+create or replace function public.study_is_member(g uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.study_members m where m.group_id = g and m.user_id = auth.uid());
+$$;
+
+create or replace function public.study_lecture_group(l uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select group_id from public.study_lectures where id = l;
+$$;
+
+-- Two private Realtime channels, members only. "Follow the reader" runs on
+-- "study-read-<lecture id>" (members of the lecture's group); the app shell
+-- uses "study-group-<group id>" (members of the group), which carries only
+-- what members chose to share (who is reading aloud, an open group quiz).
+-- A malformed name is simply "no", never an error.
+create or replace function public.study_can_use_topic(topic text)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare l uuid;
+begin
+  if topic like 'study-group-%' then
+    begin
+      l := substr(topic, length('study-group-') + 1)::uuid;
+    exception when others then
+      return false;
+    end;
+    return public.study_is_member(l);
+  end if;
+  if topic is null or topic not like 'study-read-%' then
+    return false;
+  end if;
+  begin
+    l := substr(topic, length('study-read-') + 1)::uuid;
+  exception when others then
+    return false;
+  end;
+  return public.study_is_member(public.study_lecture_group(l));
+end;
+$$;
+-- Members only. An existing project lets anon call new functions in public
+-- by default, so anon is revoked here too (review m5).
+revoke execute on function public.study_can_use_topic(text) from public, anon;
+grant execute on function public.study_can_use_topic(text) to authenticated;
+
+-- The lecture a comment belongs to, for checking that a reply stays in its thread.
+create or replace function public.study_comment_lecture(c uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select lecture_id from public.study_comments where id = c;
+$$;
+revoke execute on function public.study_comment_lecture(uuid) from public, anon;
+grant execute on function public.study_comment_lecture(uuid) to authenticated;
+
+-- Storage paths are "<group id>/<lecture id>/<file>"; a malformed first folder
+-- just means "not a member", never an error.
+create or replace function public.study_is_member_path(object_name text)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare g uuid;
+begin
+  begin
+    g := (string_to_array(object_name, '/'))[1]::uuid;
+  exception when others then
+    return false;
+  end;
+  return public.study_is_member(g);
+end;
+$$;
+
+-- A code that is easy to type on a phone and read aloud: no 0/O, 1/I/L.
+create or replace function public.study_new_code()
+returns text language plpgsql volatile set search_path = public as $$
+declare
+  alphabet constant text := 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  code text;
+begin
+  loop
+    code := '';
+    for i in 1..6 loop
+      code := code || substr(alphabet, 1 + floor(random() * length(alphabet))::int, 1);
+    end loop;
+    exit when not exists (select 1 from public.study_groups where join_code = code);
+  end loop;
+  return code;
+end;
+$$;
+
+-- Both functions return columns named like the table's (id, name, join_code),
+-- so column references are qualified and conflicts resolve to the column.
+create or replace function public.study_create_group(p_group_name text, p_member_name text)
+returns table (id uuid, name text, join_code text)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare g public.study_groups;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  -- One group only: anyone can open the app, and each group spends the same
+  -- Anthropic key. To allow more groups, raise this limit deliberately.
+  perform pg_advisory_xact_lock(hashtext('study_create_group'));
+  if (select count(*) from public.study_groups) >= 1 then
+    raise exception 'groups closed';
+  end if;
+  insert into public.study_groups (name, join_code, created_by)
+  values (trim(p_group_name), public.study_new_code(), auth.uid())
+  returning * into g;
+  insert into public.study_members (group_id, user_id, name)
+  values (g.id, auth.uid(), trim(p_member_name));
+  return query select g.id, g.name, g.join_code;
+end;
+$$;
+
+create or replace function public.study_join(p_code text, p_member_name text)
+returns table (id uuid, name text, join_code text)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare g public.study_groups;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select sg.* into g from public.study_groups sg where sg.join_code = upper(trim(p_code));
+  if not found then raise exception 'wrong code'; end if;
+  insert into public.study_members (group_id, user_id, name)
+  values (g.id, auth.uid(), trim(p_member_name))
+  on conflict (group_id, user_id) do update set name = excluded.name;
+  return query select g.id, g.name, g.join_code;
+end;
+$$;
+
+-- The code is shown to members (to invite the next friend), never to others.
+create or replace function public.study_group_code(g uuid)
+returns text language sql stable security definer set search_path = public as $$
+  select join_code from public.study_groups where id = g and public.study_is_member(g);
+$$;
+
+revoke all on function public.study_new_code() from public, anon, authenticated;
+-- Members' functions: each checks auth.uid(), and anon, which an existing
+-- project lets call new functions in public by default, is revoked (review m5).
+revoke execute on function public.study_create_group(text, text), public.study_join(text, text),
+  public.study_group_code(uuid) from public, anon;
+grant execute on function public.study_create_group(text, text) to authenticated;
+grant execute on function public.study_join(text, text) to authenticated;
+grant execute on function public.study_group_code(uuid) to authenticated;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_groups   enable row level security;
+alter table public.study_members  enable row level security;
+alter table public.study_lectures enable row level security;
+alter table public.study_sections enable row level security;
+alter table public.study_reads    enable row level security;
+alter table public.study_comments enable row level security;
+
+do $$
+declare p record;
+begin
+  for p in
+    select schemaname, tablename, policyname from pg_policies
+    where schemaname = 'public' and tablename like 'study\_%'
+  loop
+    execute format('drop policy %I on %I.%I', p.policyname, p.schemaname, p.tablename);
+  end loop;
+end $$;
+
+-- Groups: members see their group (the join code column is not selected by
+-- the app; study_group_code() returns it to members only).
+create policy "study groups read" on public.study_groups
+  for select using (public.study_is_member(id));
+create policy "study groups rename" on public.study_groups
+  for update using (public.study_is_member(id)) with check (public.study_is_member(id));
+
+-- Members: see the people in your groups; rename or leave yourself only.
+create policy "study members read" on public.study_members
+  for select using (public.study_is_member(group_id));
+create policy "study members rename self" on public.study_members
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "study members leave" on public.study_members
+  for delete using (user_id = auth.uid());
+
+-- Lectures: everything inside your groups.
+create policy "study lectures read" on public.study_lectures
+  for select using (public.study_is_member(group_id));
+create policy "study lectures add" on public.study_lectures
+  for insert with check (public.study_is_member(group_id) and created_by = auth.uid());
+create policy "study lectures update" on public.study_lectures
+  for update using (public.study_is_member(group_id)) with check (public.study_is_member(group_id));
+create policy "study lectures delete" on public.study_lectures
+  for delete using (public.study_is_member(group_id));
+
+-- Privileges. Supabase no longer grants new tables in public to anon and
+-- authenticated on its own (new projects from 30 May 2026, existing projects
+-- from 30 Oct 2026), so everything the app needs is granted here, and RLS
+-- then decides which rows. Signed-out visitors (anon) get nothing.
+-- Column lists matter too, since policies cannot restrict columns: without
+-- them "rename yourself" would also let a member move their own row into
+-- another group without its code, and a lecture's author could be rewritten.
+revoke all on public.study_groups, public.study_members, public.study_lectures, public.study_sections,
+  public.study_reads, public.study_comments
+  from anon, authenticated;
+grant select on public.study_groups to authenticated;
+grant update (name) on public.study_groups to authenticated;
+grant select, delete on public.study_members to authenticated;
+grant update (name) on public.study_members to authenticated;
+grant select, insert, delete on public.study_lectures to authenticated;
+grant update (title, lecturer, course, lecture_date, outline, status, error, updated_at)
+  on public.study_lectures to authenticated;
+grant select, insert, update, delete on public.study_sections to authenticated;
+-- Reads: add or remove your own mark. Comments: write, delete your own, and
+-- mark a question answered (resolved is the only column anyone may change).
+-- Inserts name only the columns the app sends; ids, authors, timestamps and
+-- "resolved" always take their defaults.
+grant select, delete on public.study_reads to authenticated;
+grant insert (lecture_id) on public.study_reads to authenticated;
+grant select, delete on public.study_comments to authenticated;
+grant insert (lecture_id, part_idx, anchor, quote, kind, body, parent_id) on public.study_comments to authenticated;
+grant update (resolved) on public.study_comments to authenticated;
+-- The helpers the policies call (storage policies run for every role).
+grant execute on function public.study_is_member(uuid) to anon, authenticated;
+grant execute on function public.study_lecture_group(uuid) to anon, authenticated;
+grant execute on function public.study_is_member_path(text) to anon, authenticated;
+grant execute on function public.study_comment_lecture(uuid) to authenticated;
+grant execute on function public.study_can_use_topic(text) to authenticated;
+
+-- Sections follow their lecture.
+create policy "study sections read" on public.study_sections
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study sections add" on public.study_sections
+  for insert with check (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study sections update" on public.study_sections
+  for update using (public.study_is_member(public.study_lecture_group(lecture_id)))
+  with check (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study sections delete" on public.study_sections
+  for delete using (public.study_is_member(public.study_lecture_group(lecture_id)));
+
+-- Reads: the group sees who read what; each member marks only themselves.
+create policy "study reads read" on public.study_reads
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study reads add" on public.study_reads
+  for insert with check (user_id = auth.uid() and public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study reads remove" on public.study_reads
+  for delete using (user_id = auth.uid());
+
+-- Comments: the group reads and writes them; a reply stays in its parent's
+-- lecture; only the author deletes; any member can mark a question answered.
+create policy "study comments read" on public.study_comments
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study comments add" on public.study_comments
+  for insert with check (
+    author_id = auth.uid()
+    and public.study_is_member(public.study_lecture_group(lecture_id))
+    and (parent_id is null or public.study_comment_lecture(parent_id) = lecture_id)
+  );
+create policy "study comments resolve" on public.study_comments
+  for update using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study comments delete" on public.study_comments
+  for delete using (author_id = auth.uid());
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Storage: slide pictures, private to the group (served by signed URLs)
+-- ═══════════════════════════════════════════════════════════════════════
+insert into storage.buckets (id, name, public)
+values ('study', 'study', false)
+on conflict (id) do nothing;
+
+drop policy if exists "study files read"   on storage.objects;
+drop policy if exists "study files add"    on storage.objects;
+drop policy if exists "study files delete" on storage.objects;
+create policy "study files read" on storage.objects
+  for select using (bucket_id = 'study' and public.study_is_member_path(name));
+create policy "study files add" on storage.objects
+  for insert with check (bucket_id = 'study' and public.study_is_member_path(name));
+create policy "study files delete" on storage.objects
+  for delete using (bucket_id = 'study' and public.study_is_member_path(name));
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Realtime: a lecture written by one member shows up for the others,
+--  sections appear as they are finished, and comments and read marks arrive
+--  live. ("Follow the reader" uses a Realtime broadcast channel, no table.)
+-- ═══════════════════════════════════════════════════════════════════════
+do $$
+declare t text;
+begin
+  foreach t in array array['study_lectures', 'study_sections', 'study_reads', 'study_comments'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then
+      null;
+    end;
+  end loop;
+end $$;
+
+-- Private channel for "follow the reader": who may hear and send presence on
+-- study-read-<lecture id>. Skipped on a project without Realtime
+-- Authorization (no realtime.messages); the app then cannot join the channel,
+-- and everything except following the reader keeps working.
+do $$
+begin
+  if to_regclass('realtime.messages') is null or to_regproc('realtime.topic') is null then
+    raise notice 'realtime.messages not found: skipping the reading-channel policies';
+    return;
+  end if;
+  execute 'drop policy if exists "study reading room hear" on realtime.messages';
+  execute 'drop policy if exists "study reading room send" on realtime.messages';
+  execute $p$create policy "study reading room hear" on realtime.messages
+    for select to authenticated
+    using (extension = 'presence' and public.study_can_use_topic((select realtime.topic())))$p$;
+  execute $p$create policy "study reading room send" on realtime.messages
+    for insert to authenticated
+    with check (extension = 'presence' and public.study_can_use_topic((select realtime.topic())))$p$;
+end $$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  The one change outside study_: /board's sign-up trigger
+--  ─────────────────────────────────────────────────────────
+--  /board adds EVERY new auth user to board_teachers, and the very first one
+--  becomes the board's teacher. Study members are auth users too, so without
+--  this they would show up in the board's staff list (or, on a board nobody
+--  has opened yet, take its teacher seat). The function below is the board's
+--  own, plus the first `if`, which skips users created by תמצית (app = 'study').
+--  Keep it identical to board_handle_new_user() in the board app's
+--  board-schema.sql (a test copy: supabase/tests/board-schema.sql).
+-- ═══════════════════════════════════════════════════════════════════════
+create or replace function public.board_handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  first_user boolean;
+begin
+  if coalesce(new.raw_user_meta_data ->> 'app', '') = 'study' then
+    return new;
+  end if;
+
+  select count(*) = 0 into first_user from public.board_teachers;
+
+  insert into public.board_teachers (user_id, email, name, role)
+  values (
+    new.id,
+    coalesce(nullif(new.email, ''), nullif(new.raw_user_meta_data ->> 'email', ''), ''),
+    coalesce(
+      nullif(new.raw_user_meta_data ->> 'full_name', ''),
+      nullif(new.raw_user_meta_data ->> 'name', ''),
+      split_part(coalesce(new.email, new.raw_user_meta_data ->> 'email', ''), '@', 1),
+      'אורח'
+    ),
+    case when first_user then 'teacher' else 'guest' end
+  )
+  on conflict (user_id) do nothing;
+
+  return new;
+end;
+$$;
+
+-- ════ BEGIN SECTION F · foundation (package F) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION F · FOUNDATION: columns, the spend ledger, the group channel, hooks   (owned by package F)
+--  Appended to supabase/study-schema.sql after the board trigger patch.
+--  Safe to run again: add-if-missing, create-or-replace, drop-then-create.
+--
+--  F1. Columns on existing tables that the client reads from the first
+--      release (lecture.queued_at; a part's lease, attempts, retry time,
+--      writer, rev and gen). Inert until package W (server writing) and
+--      package K (corrections) use them.
+--  F2. One spend ledger (decision 14): before every Claude call the server
+--      reserves the call's worst-case cost (study_reserve, under a per-group
+--      lock: the budget, the 80% line, one member's share and the daily
+--      limits are checked there), and settles it after the call
+--      (study_settle, or study_finish/study_outline_done for summaries). A
+--      call that never settles keeps its estimate. The monthly cap is summed
+--      by study_spent(). Members read only the total and their own share.
+--  F3. The server key (Vault, the same value as STUDY_WORKER_KEY on Vercel):
+--      every function that writes Claude's output or spends the budget
+--      requires it, so a member's token alone cannot forge a summary, a
+--      question or a card, or spend the month (review B1).
+--  F3b. Server-side switches (recordings, exams) that the SQL and the
+--      functions obey whatever the app's flags say (review M10), and the
+--      schema registry the app and /api/study/health read (review FE-2).
+--  F3c. Lectures are deleted softly: hidden for 30 days with "שחזור", then
+--      purged (review M2). Members cannot delete a lecture row directly.
+--  F3d. The group's members: names unique in the group, a new invite code
+--      and removing a member, by the group's creator (review M4).
+--  F4. The group channel study-group-<group id> for the app shell (in
+--      study_can_use_topic(), defined in place above).
+--  F5. Hooks later sections fill: study_corrections_of() answers [] until
+--      package K's section replaces it; study_part_corrections() lets the
+--      device writer (package W) read them from the first release.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ── F1. Columns the client reads (leases: package W; rev/gen: package K) ──
+alter table public.study_lectures
+  add column if not exists queued_at   timestamptz,          -- the server owns the writing from here on
+  add column if not exists lease_id    uuid,                 -- the outline's writer
+  add column if not exists lease_until timestamptz,
+  add column if not exists attempts    int not null default 0;
+
+alter table public.study_sections
+  add column if not exists lease_id    uuid,
+  add column if not exists lease_until timestamptz,
+  add column if not exists attempts    int not null default 0,
+  add column if not exists retry_at    timestamptz,
+  add column if not exists writer      text check (writer in ('server', 'device'));
+
+-- rev: +1 whenever the part's text changes; gen: +1 whenever the part starts
+-- being written. Kept by package K's trigger study_sections_versions().
+alter table public.study_sections
+  add column if not exists rev int not null default 0,
+  add column if not exists gen int not null default 0;
+
+-- ── F2. The spend ledger ──
+-- Append-only. A deleted lecture keeps its rows (the money was spent).
+-- Members cannot read rows (they would show who practised how much);
+-- study_spent() gives the group's total, study_charge() adds a row.
+create table if not exists public.study_usage (
+  id         bigint        generated always as identity primary key,
+  group_id   uuid          not null references public.study_groups (id) on delete cascade,
+  lecture_id uuid          references public.study_lectures (id) on delete set null,
+  user_id    uuid          references auth.users (id) on delete set null,   -- null: the server worker
+  kind       text          not null check (kind ~ '^[a-z][a-z_]{1,23}$'),  -- outline, part, notes, practice, cards, ask, mnemonic, exam ...
+  ref        text          check (char_length(ref) <= 80),
+  model      text          check (char_length(model) <= 80),
+  usage      jsonb,
+  cost_usd   numeric(10,5) not null check (cost_usd >= 0 and cost_usd < 100),
+  created_at timestamptz   not null default now()
+);
+create index if not exists study_usage_group_month on public.study_usage (group_id, created_at);
+
+-- Once: what the parts already spent (study_sections.usage) becomes ledger
+-- rows, priced at the summary model's rates ($4 in, $20 out, $5 cache write, $0.20 hit).
+-- settled_at: when the call's real cost was written; null = a reservation
+-- (study_reserve) whose call has not settled (yet, or ever: it keeps its estimate).
+alter table public.study_usage add column if not exists settled_at timestamptz;
+
+insert into public.study_usage (group_id, lecture_id, kind, ref, model, usage, cost_usd, created_at, settled_at)
+select l.group_id, s.lecture_id, 'part', s.idx::text, s.model, s.usage,
+       round((coalesce((s.usage ->> 'input_tokens')::numeric, 0) * 4
+            + coalesce((s.usage ->> 'output_tokens')::numeric, 0) * 20
+            + coalesce((s.usage ->> 'cache_creation_input_tokens')::numeric, 0) * 5
+            + coalesce((s.usage ->> 'cache_read_input_tokens')::numeric, 0) * 0.2) / 1000000, 5),
+       s.updated_at, s.updated_at
+  from public.study_sections s join public.study_lectures l on l.id = s.lecture_id
+ where s.usage is not null
+   and not exists (select 1 from public.study_usage u where u.lecture_id = s.lecture_id and u.kind = 'part' and u.ref = s.idx::text);
+
+-- ── F3. The worker key (Vault). Not reachable through the API. ──
+create schema if not exists study_private;
+revoke all on schema study_private from public;
+
+-- A Vault secret by name; null without Vault or without the secret.
+create or replace function study_private.secret(p_name text)
+returns text language plpgsql stable security definer set search_path = public as $$
+declare v text;
+begin
+  if to_regclass('vault.decrypted_secrets') is null then return null; end if;
+  execute 'select decrypted_secret from vault.decrypted_secrets where name = $1 limit 1' into v using p_name;
+  return v;
+end;
+$$;
+
+-- The worker's key: at least 32 characters, and only an exact match.
+create or replace function study_private.is_worker(p_key text)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare k text;
+begin
+  if p_key is null then return false; end if;
+  k := study_private.secret('study_worker_key');
+  return coalesce(length(k) >= 32 and p_key = k, false);
+end;
+$$;
+
+revoke all on function study_private.secret(text), study_private.is_worker(text) from public;
+
+-- The group's spend this calendar month (UTC), for every feature's budget check.
+create or replace function public.study_spent(p_group uuid, p_key text default null)
+returns numeric language plpgsql stable security definer set search_path = public as $$
+begin
+  if not (study_private.is_worker(p_key) or (p_key is null and coalesce(public.study_is_member(p_group), false))) then
+    raise exception 'forbidden';
+  end if;
+  return coalesce((select sum(u.cost_usd) from public.study_usage u
+                    where u.group_id = p_group
+                      and u.created_at >= (date_trunc('month', now() at time zone 'utc') at time zone 'utc')), 0);
+end;
+$$;
+
+-- ── F3b. Server-side switches. The VITE_STUDY_* flags only hide screens;
+-- these decide what the database and the functions accept. Yoad turns one
+-- on in the SQL editor: update study_private.features set enabled = true,
+-- changed_at = now() where name = 'recordings';
+create table if not exists study_private.features (
+  name       text        primary key check (name ~ '^[a-z][a-z_]{1,30}$'),
+  enabled    boolean     not null default false,
+  changed_at timestamptz not null default now()
+);
+insert into study_private.features (name) values ('recordings'), ('exams') on conflict (name) do nothing;
+
+-- A name without a row has no switch: on.
+create or replace function study_private.feature_on(p_name text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select f.enabled from study_private.features f where f.name = p_name), true)
+$$;
+-- Which switch a ledger kind obeys.
+create or replace function study_private.kind_on(p_kind text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select case p_kind when 'notes' then study_private.feature_on('recordings')
+                     when 'exam'  then study_private.feature_on('exams')
+                     else true end
+$$;
+-- For members' policies and the app (true/false per switch; nothing secret).
+create or replace function public.study_feature_on(p_name text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select study_private.feature_on(p_name)
+$$;
+create or replace function public.study_features()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_object_agg(f.name, f.enabled), '{}'::jsonb) from study_private.features f
+$$;
+
+-- The schema registry: each section records its version as its last
+-- statement. The app and /api/study/health compare it with what the
+-- deployed code needs (§9.1: the SQL runs before the merge).
+create table if not exists study_private.schema_sections (
+  section   text        primary key,
+  version   int         not null,
+  loaded_at timestamptz not null default now()
+);
+create or replace function public.study_schema()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_object_agg(s.section, s.version), '{}'::jsonb) from study_private.schema_sections s
+$$;
+
+-- ── The spend, reserved before each call and settled after it ──
+-- Only the Vercel functions call these, with the server key; with a
+-- member's token as well (the ops and the device path) the row names that
+-- member, who must belong to the group.
+--   p_estimate      the call's worst-case cost (budget.ts estimateUsd)
+--   p_cap           STUDY_MONTHLY_USD
+--   p_share         this kind stops at share × cap ('reserve'): 0.8 for every
+--                   optional kind, so the last 20% stays for summaries
+--   p_member_share  one member's optional spend this month stays under
+--                   member_share × cap ('member_share')
+--   p_daily         at most this many rows of this kind (and p_daily_ref)
+--                   per member per day, Israel time ('daily_limit')
+-- Errors: 'forbidden', 'off' (the kind's switch), 'budget', 'reserve',
+-- 'member_share', 'daily_limit'.
+create or replace function public.study_reserve(p_group uuid, p_lecture uuid, p_kind text, p_ref text,
+  p_estimate numeric, p_cap numeric, p_share numeric default 1, p_member_share numeric default null,
+  p_daily int default null, p_daily_ref text default null, p_key text default null)
+returns bigint language plpgsql volatile security definer set search_path = public as $$
+declare
+  me      uuid := auth.uid();
+  v_month timestamptz := date_trunc('month', now() at time zone 'utc') at time zone 'utc';
+  v_est   numeric := round(least(greatest(coalesce(p_estimate, 0), 0), 99.99999), 5);
+  v_spent numeric;
+  v_mine  numeric;
+  v_id    bigint;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if me is not null and not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  if p_lecture is not null and not exists (select 1 from public.study_lectures l where l.id = p_lecture and l.group_id = p_group) then
+    raise exception 'forbidden';
+  end if;
+  if not study_private.kind_on(p_kind) then raise exception 'off'; end if;
+  if coalesce(p_cap, 0) <= 0 then raise exception 'budget'; end if;
+  -- One reservation at a time per group: parallel calls cannot all pass.
+  perform pg_advisory_xact_lock(hashtext('study_budget:' || p_group::text));
+  select coalesce(sum(u.cost_usd), 0) into v_spent
+    from public.study_usage u where u.group_id = p_group and u.created_at >= v_month;
+  if v_spent + v_est > p_cap then raise exception 'budget'; end if;
+  if coalesce(p_share, 1) < 1 and v_spent + v_est > p_cap * p_share then raise exception 'reserve'; end if;
+  if me is not null and p_member_share is not null then
+    select coalesce(sum(u.cost_usd), 0) into v_mine
+      from public.study_usage u
+     where u.group_id = p_group and u.user_id = me and u.created_at >= v_month
+       and u.kind not in ('outline', 'part', 'notes');
+    if v_mine + v_est > p_cap * p_member_share then raise exception 'member_share'; end if;
+  end if;
+  if me is not null and p_daily is not null
+     and (select count(*) from public.study_usage u
+           where u.group_id = p_group and u.user_id = me and u.kind = p_kind
+             and (p_daily_ref is null or u.ref = p_daily_ref)
+             and u.created_at >= (date_trunc('day', now() at time zone 'Asia/Jerusalem') at time zone 'Asia/Jerusalem')) >= p_daily then
+    raise exception 'daily_limit';
+  end if;
+  insert into public.study_usage (group_id, lecture_id, user_id, kind, ref, usage, cost_usd)
+  values (p_group, p_lecture, me, p_kind, left(p_ref, 80), '{"estimated": true}'::jsonb, v_est)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- After the call (also a failed or stopped one): the real cost replaces the
+-- estimate, once. False: no such open reservation (already settled).
+create or replace function public.study_settle(p_id bigint, p_model text, p_usage jsonb, p_cost numeric, p_key text default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  update public.study_usage u
+     set model = left(p_model, 80), usage = p_usage,
+         cost_usd = round(least(greatest(coalesce(p_cost, 0), 0), 99.99999), 5), settled_at = now()
+   where u.id = p_id and u.settled_at is null
+     and (auth.uid() is null or u.user_id is not distinct from auth.uid());
+  return found;
+end;
+$$;
+
+-- The caller's own optional spend this month (practice, cards, exams, לשאול,
+-- memory aids): "נוצל על ידך החודש" on every estimate. Summaries and notes
+-- are the group's and count for nobody's share.
+create or replace function public.study_my_spent(p_group uuid)
+returns numeric language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  return coalesce((select sum(u.cost_usd) from public.study_usage u
+                    where u.group_id = p_group and u.user_id = auth.uid() and u.kind not in ('outline', 'part', 'notes')
+                      and u.created_at >= (date_trunc('month', now() at time zone 'utc') at time zone 'utc')), 0);
+end;
+$$;
+
+revoke all on function study_private.feature_on(text), study_private.kind_on(text) from public;
+revoke all on function public.study_feature_on(text), public.study_features(), public.study_schema() from public;
+revoke all on function public.study_spent(uuid, text) from public;
+revoke all on function public.study_reserve(uuid, uuid, text, text, numeric, numeric, numeric, numeric, int, text, text) from public;
+revoke all on function public.study_settle(bigint, text, jsonb, numeric, text) from public;
+revoke all on function public.study_my_spent(uuid) from public, anon;
+grant execute on function public.study_feature_on(text), public.study_features(), public.study_schema() to anon, authenticated;
+grant execute on function public.study_spent(uuid, text) to anon, authenticated;
+-- Both need the server key inside; the grant only lets the call reach them.
+grant execute on function public.study_reserve(uuid, uuid, text, text, numeric, numeric, numeric, numeric, int, text, text) to anon, authenticated;
+grant execute on function public.study_settle(bigint, text, jsonb, numeric, text) to anon, authenticated;
+grant execute on function public.study_my_spent(uuid) to authenticated;
+
+alter table public.study_usage enable row level security;
+revoke all on public.study_usage from anon, authenticated;
+-- study_usage: no grants at all (study_spent, study_my_spent; the server's study_reserve/study_settle).
+
+-- ── F3c. Deleting a lecture hides it for 30 days ──
+-- One member's tap must not erase the others' private answers, card memory
+-- and reading progress on that lecture (they cascade from it). The row stays,
+-- marked; the library leaves it out and lists it under "נמחקו לאחרונה" with
+-- "שחזור"; the server functions refuse it. After 30 days the app purges it
+-- (its files first: only the Storage API removes files).
+alter table public.study_lectures
+  add column if not exists deleted_at timestamptz,
+  add column if not exists deleted_by uuid references auth.users (id) on delete set null;
+drop policy if exists "study lectures delete" on public.study_lectures;
+revoke delete on public.study_lectures from authenticated;
+
+-- The pictures stay with their lecture. Members remove files through the
+-- Storage API, so the rule lives on storage.objects (it replaces the policy
+-- of the same name above): a slide picture (s<n>-<k>.jpg, the name the app
+-- gives every one) of a lecture that is still there, or was hidden less than
+-- 30 days ago, cannot be deleted. The app of before this release deletes a
+-- lecture's files first and its row second, so its "מחיקה" now removes
+-- neither. After 30 days the app's purge removes the pictures, then the row
+-- (study_purge_lecture). Other files (a recording's audio, which the server
+-- deletes once it is transcribed; a cached PDF) and files of no lecture stay
+-- deletable by the group's members.
+drop policy if exists "study files delete" on storage.objects;
+create policy "study files delete" on storage.objects
+  for delete using (
+    bucket_id = 'study' and public.study_is_member_path(name)
+    and not (split_part(name, '/', 3) ~ '^s[0-9]+-[0-9]+\.jpg$'
+             and exists (select 1 from public.study_lectures l
+                          where l.id::text = split_part(name, '/', 2)
+                            and (l.deleted_at is null or l.deleted_at > now() - interval '30 days'))));
+
+-- p_delete true: hide (once; returns when); false: put back within 30 days.
+create or replace function public.study_delete_lecture(p_lecture uuid, p_delete boolean default true)
+returns timestamptz language plpgsql volatile security definer set search_path = public as $$
+declare l public.study_lectures;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into l from public.study_lectures x where x.id = p_lecture for update;
+  if not found or not coalesce(public.study_is_member(l.group_id), false) then raise exception 'lecture not found'; end if;
+  if p_delete then
+    if l.deleted_at is null then
+      update public.study_lectures x set deleted_at = now(), deleted_by = auth.uid() where x.id = p_lecture;
+      if to_regclass('study_private.jobs') is not null then
+        delete from study_private.jobs j where j.lecture_id = p_lecture;   -- the server stops writing it
+      end if;
+    end if;
+    return coalesce(l.deleted_at, now());
+  end if;
+  if l.deleted_at is null then return null; end if;
+  if l.deleted_at < now() - interval '30 days' then raise exception 'too old'; end if;
+  update public.study_lectures x set deleted_at = null, deleted_by = null where x.id = p_lecture;
+  return null;
+end;
+$$;
+
+-- After 30 days: the lecture and everything hanging on it go for good.
+create or replace function public.study_purge_lecture(p_lecture uuid)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  delete from public.study_lectures l
+   where l.id = p_lecture and coalesce(public.study_is_member(l.group_id), false)
+     and l.deleted_at is not null and l.deleted_at <= now() - interval '30 days';
+  return found;
+end;
+$$;
+revoke all on function public.study_delete_lecture(uuid, boolean), public.study_purge_lecture(uuid) from public, anon;
+grant execute on function public.study_delete_lecture(uuid, boolean), public.study_purge_lecture(uuid) to authenticated;
+
+-- ── F3d. The group's members ──
+-- A name is unique in its group (case and outer spaces ignored), so nobody
+-- can join as "שוהם" a second time. Rows from before are not re-checked.
+create or replace function public.study_members_name_check()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.study_members m
+              where m.group_id = new.group_id and m.user_id <> new.user_id
+                and lower(btrim(m.name)) = lower(btrim(new.name))) then
+    raise exception 'name taken';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.study_members_name_check() from public, anon, authenticated;
+drop trigger if exists study_members_name_check on public.study_members;
+create trigger study_members_name_check before insert or update of name on public.study_members
+  for each row execute function public.study_members_name_check();
+
+-- The group's creator replaces the invite code (a forwarded link stops working).
+create or replace function public.study_rotate_code(p_group uuid)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare v text;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not exists (select 1 from public.study_groups g where g.id = p_group and g.created_by = auth.uid()) then
+    raise exception 'not the creator';
+  end if;
+  v := public.study_new_code();
+  update public.study_groups g set join_code = v where g.id = p_group;
+  return v;
+end;
+$$;
+
+-- The group's creator removes a member (never themself: "יציאה" is for that).
+-- Their comments and corrections stay. Realtime keeps reaching them until
+-- their access token expires (at most an hour); the API refuses at once.
+create or replace function public.study_remove_member(p_group uuid, p_user uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not exists (select 1 from public.study_groups g where g.id = p_group and g.created_by = auth.uid()) then
+    raise exception 'not the creator';
+  end if;
+  if p_user = auth.uid() then raise exception 'not yourself'; end if;
+  delete from public.study_members m where m.group_id = p_group and m.user_id = p_user;
+  if not found then raise exception 'member not found'; end if;
+end;
+$$;
+
+-- Which members saved their account (the "שמור" mark next to a name).
+create or replace function public.study_member_saved(p_group uuid)
+returns table (user_id uuid, saved boolean) language sql stable security definer set search_path = public as $$
+  select m.user_id, not coalesce(u.is_anonymous, true)
+    from public.study_members m left join auth.users u on u.id = m.user_id
+   where m.group_id = p_group and public.study_is_member(p_group)
+$$;
+revoke all on function public.study_rotate_code(uuid), public.study_remove_member(uuid, uuid), public.study_member_saved(uuid) from public, anon;
+grant execute on function public.study_rotate_code(uuid), public.study_remove_member(uuid, uuid), public.study_member_saved(uuid) to authenticated;
+
+-- ── F4. The group channel (app shell): "study-group-<group id>", members only ──
+-- study_can_use_topic() is defined in place, above the realtime policies that
+-- call it (§3.1): the reading room as before, plus the group's own channel.
+
+-- ── F5. Hooks ──
+-- The corrections a rewrite of a part must keep (design-collab §2.5). Package
+-- K's section replaces this with the real query over study_edits; until then
+-- a rewritten part has none. Same name, arguments and result, so
+-- create-or-replace swaps the body on every run of this file.
+create or replace function public.study_corrections_of(p_lecture uuid, p_part int)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select '[]'::jsonb
+$$;
+revoke all on function public.study_corrections_of(uuid, int) from public, anon, authenticated;
+
+-- The device writer (section.ts, member token) reads them right after it has
+-- claimed the part (design-collab §2.5). Defined here, not in section K, so
+-- package W can call it before package K ships.
+create or replace function public.study_part_corrections(p_lecture uuid, p_part int)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then
+    raise exception 'forbidden';
+  end if;
+  return public.study_corrections_of(p_lecture, p_part);
+end;
+$$;
+revoke all on function public.study_part_corrections(uuid, int) from public, anon;
+grant execute on function public.study_part_corrections(uuid, int) to authenticated;
+
+-- The repo's own functions (study_create_group, study_join, study_group_code,
+-- study_comment_lecture, study_can_use_topic) are revoked from anon next to
+-- their definitions above (review m5; check F27).
+
+-- ── The schema registry: section F is in ──
+insert into study_private.schema_sections (section, version) values ('F', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION F, its end · WALL PHOTOS AND THE BUCKET'S LIMITS   (package F,
+--  F1Δ; spec §12.2.6). Appended at the end of section F, inside its
+--  markers, after F0's rule "the pictures stay with their lecture" (check
+--  F28), which it repeats word for word and extends by one condition: the
+--  last "study files delete" in the file is the one in force, so the
+--  condition has to join section F's rule, not the storage block's above
+--  it. F keeps its version (1). Re-runnable.
+--
+--  Review SEC-14: a wall photo (<group>/wall/<uuid>.jpg) is deleted only by
+--  whoever uploaded it (the wall's "only the author deletes"; Supabase
+--  records the uploader in storage.objects.owner_id). Every other file
+--  keeps F0's rule. The bucket gets a size limit and the types the app
+--  uploads (slide pictures and exam pages as JPEG, wall photos as JPEG or
+--  WebP, the PDF cache), so the Storage API refuses anything else whatever
+--  a phone sends. W5's pull request adds the audio types and raises the
+--  limit to 50 MB if it stores audio (spec §12.3.W).
+-- ════════════════════════════════════════════════════════════════════════
+drop policy if exists "study files delete" on storage.objects;
+create policy "study files delete" on storage.objects
+  for delete using (
+    bucket_id = 'study' and public.study_is_member_path(name)
+    and not (split_part(name, '/', 3) ~ '^s[0-9]+-[0-9]+\.jpg$'
+             and exists (select 1 from public.study_lectures l
+                          where l.id::text = split_part(name, '/', 2)
+                            and (l.deleted_at is null or l.deleted_at > now() - interval '30 days')))
+    and (split_part(name, '/', 2) <> 'wall' or owner_id = auth.uid()::text));
+update storage.buckets
+   set file_size_limit = 26214400,                                   -- 25 MB: a long lecture's PDF
+       allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+ where id = 'study';
+-- ════ END SECTION F ════
+
+-- ════ BEGIN SECTION A · identity (package A) ════
+-- ════ END SECTION A ════
+
+-- ════ BEGIN SECTION W · writing on the server, recordings (package W) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION W · WRITING ON THE SERVER AND RECORDINGS   (owned by package W)
+--  design-platform.md §2. Leases and a private job queue that Supabase owns
+--  (pg_net kicks, a pg_cron sweeper), and RPCs that both writers (the Vercel
+--  worker with its key, a member's phone with its token) go through, so two
+--  writers never write one part. Recordings: transcripts in blocks,
+--  "מההקלטה" notes per part. Needs section F (ledger, worker key).
+--  Without pg_net, pg_cron or the study_site_url secret everything still
+--  installs: study_queue() answers false and the phones keep writing, as
+--  today, through section.ts, which holds the server key (review B1: no
+--  write here is open to a member's token alone).
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ── 2. Recordings ──
+-- One recording per lecture. The audio never reaches the server: a transcript
+-- file is parsed in the browser, and audio is transcribed in the browser.
+create table if not exists public.study_recordings (
+  id          uuid        primary key default gen_random_uuid(),   -- published: its own key (a DELETE event shows only this)
+  lecture_id  uuid        not null unique references public.study_lectures (id) on delete cascade,
+  source      text        not null check (source in ('file', 'paste', 'browser')),
+  engine      text        not null default '' check (char_length(engine) <= 80),
+  source_name text        not null default '' check (char_length(source_name) <= 200),
+  link_url    text        check (link_url ~ '^https://' and char_length(link_url) <= 500),
+  link_set_by uuid        references auth.users (id) on delete set null,   -- shown beside the link (review M9)
+  duration_s  int         check (duration_s between 0 and 21600),
+  done_s      int         not null default 0 check (done_s >= 0),
+  has_times   boolean     not null default false,
+  status      text        not null default 'transcribing' check (status in ('transcribing', 'ready', 'failed')),
+  error       text        check (char_length(error) <= 200),
+  chars       int         not null default 0 check (chars between 0 and 2000000),
+  consented   boolean     not null check (consented),      -- "the group may use this recording"
+  created_by  uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+-- The transcript, in blocks of about five minutes (or 4,000 characters of
+-- untimed text): saved as they are made, so a closed tab resumes, and never
+-- one big row. lines = prompt lines "[41:10] ..."; segments = [{s, e, t}].
+create table if not exists public.study_transcript_blocks (
+  lecture_id uuid         not null references public.study_recordings (lecture_id) on delete cascade,
+  idx        int          not null check (idx between 0 and 299),
+  start_s    numeric(8,2) check (start_s >= 0),
+  end_s      numeric(8,2) check (end_s >= 0),
+  lines      text         not null check (length(lines) <= 40000),
+  segments   jsonb        not null default '[]'::jsonb check (jsonb_typeof(segments) = 'array'),
+  primary key (lecture_id, idx)
+);
+
+-- "מההקלטה" notes of one summary part, written by Claude like a part:
+-- items = [{ "anchor": 3, "quote": "...", "at_s": 2470, "text": "..." }]
+-- (anchor = the paragraph's data-blk in the part; -1 = the end of the part).
+create table if not exists public.study_recording_notes (
+  id          uuid        primary key default gen_random_uuid(),   -- published: its own key
+  lecture_id  uuid        not null references public.study_recordings (lecture_id) on delete cascade,
+  part_idx    int         not null check (part_idx >= 0),
+  items       jsonb       not null default '[]'::jsonb check (jsonb_typeof(items) = 'array'),
+  status      text        not null default 'pending' check (status in ('pending', 'writing', 'ready', 'failed')),
+  error       text,
+  model       text,
+  usage       jsonb,
+  lease_id    uuid,
+  lease_until timestamptz,
+  attempts    int         not null default 0,
+  retry_at    timestamptz,
+  updated_at  timestamptz not null default now(),
+  unique (lecture_id, part_idx)
+);
+
+-- A person's "המשך כתיבה" restarts failed units at most 3 times a day per
+-- lecture (review M6: a failure that repeats is paid on every tap).
+alter table public.study_lectures
+  add column if not exists retry_day date,
+  add column if not exists retries   int not null default 0;
+
+-- The hosts a recording link may point to (review M9): the university's own
+-- video and course sites. Yoad adds a host in the SQL editor:
+--   insert into study_private.link_hosts values ('<host>');
+-- A row also allows its subdomains.
+create table if not exists study_private.link_hosts (host text primary key check (host ~ '^[a-z0-9.-]+$'));
+insert into study_private.link_hosts (host) values ('bgu.ac.il') on conflict do nothing;
+
+create or replace function public.study_recordings_link()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare h text;
+begin
+  if tg_op = 'INSERT' or new.link_url is distinct from old.link_url then
+    if new.link_url is not null then
+      h := lower(substring(new.link_url from '^https://([^/:?#@]+)(:[0-9]+)?(/|$)'));
+      if h is null or not exists (select 1 from study_private.link_hosts x where h = x.host or h like '%.' || x.host) then
+        raise exception 'link host';
+      end if;
+    end if;
+    new.link_set_by := case when new.link_url is null then null else auth.uid() end;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.study_recordings_link() from public, anon, authenticated;
+drop trigger if exists study_recordings_link on public.study_recordings;
+create trigger study_recordings_link before insert or update on public.study_recordings
+  for each row execute function public.study_recordings_link();
+
+-- ── The private queue ──
+-- Not reachable through the API: no grants, and the schema is not exposed.
+-- A lecture the server is writing. figure_urls: storage path → signed URL,
+-- signed for 48 h by the member who queued it (the worker has no Storage
+-- access of its own); they go to Anthropic with each part, as today.
+create table if not exists study_private.jobs (
+  lecture_id        uuid        primary key references public.study_lectures (id) on delete cascade,
+  figure_urls       jsonb       not null default '{}'::jsonb,
+  urls_until        timestamptz,
+  queued_by         uuid        references auth.users (id) on delete set null,
+  queued_at         timestamptz not null default now(),
+  last_kick_at      timestamptz,
+  kicks_since_claim int         not null default 0
+);
+
+-- Server writing is on when pg_net, the key and the site URL are all there.
+create or replace function study_private.server_on()
+returns boolean language plpgsql stable security definer set search_path = public as $$
+begin
+  return exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                  where n.nspname = 'net' and p.proname = 'http_post')
+     and coalesce(length(study_private.secret('study_worker_key')) >= 32, false)
+     and coalesce(study_private.secret('study_site_url') like 'https://%', false);
+end;
+$$;
+
+-- Who may drive the writing of a lecture: only the Vercel functions, which
+-- hold the server key. The worker calls with the key alone; the device path
+-- (outline.ts, section.ts) with the key and the member's own token, and that
+-- member must belong to the lecture's group. A member's token without the
+-- key is refused (review B1: otherwise a member could save any text as
+-- Claude's part, or hijack a lease).
+create or replace function study_private.may_write(p_lecture uuid, p_key text)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then return false; end if;
+  if auth.uid() is not null then
+    return coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false);
+  end if;
+  return true;
+end;
+$$;
+
+-- Writers holding a live lease in a group (outlines, parts, notes). Rows
+-- written by older code have no lease: "writing" counts for 6 minutes after
+-- its last save, as isStuck() did; an outline for 3.
+create or replace function study_private.group_live(p_group uuid)
+returns int language sql stable security definer set search_path = public as $$
+  select ((select count(*) from public.study_sections s join public.study_lectures l on l.id = s.lecture_id
+            where l.group_id = p_group and s.status = 'writing'
+              and coalesce(s.lease_until, s.updated_at + interval '6 minutes') > now())
+        + (select count(*) from public.study_recording_notes n join public.study_lectures l on l.id = n.lecture_id
+            where l.group_id = p_group and n.status = 'writing' and n.lease_until > now())
+        + (select count(*) from public.study_lectures l
+            where l.group_id = p_group and l.status = 'outlining'
+              and coalesce(l.lease_until, l.updated_at + interval '3 minutes') > now()))::int
+$$;
+
+-- Notes rows appear once both the transcript and the parts exist.
+create or replace function study_private.ensure_notes(p_lecture uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.study_recordings r where r.lecture_id = p_lecture and r.status = 'ready') then
+    insert into public.study_recording_notes (lecture_id, part_idx)
+    select s.lecture_id, s.idx from public.study_sections s where s.lecture_id = p_lecture
+    on conflict do nothing;
+  end if;
+end;
+$$;
+
+-- What can be written next, and how many writers the caps allow now.
+--   p_server: the worker asks. A failed unit waits for its retry time; a
+--   member's device may take it at once (a person tapped "המשך כתיבה").
+--   Caps: the first unit of a phase alone (it writes the prompt cache that
+--   the others read), then two per lecture; three writers per group.
+create or replace function study_private.plan(p_lecture uuid, p_server boolean, p_kind text default null, p_idx int default null)
+returns table (kind text, idx int, free int)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_variable
+declare
+  l public.study_lectures;
+  g_live int;
+  n_all int; n_ready int; n_live int; n_claim int;
+  v_cap int; v_free int; v_idx int;
+begin
+  select * into l from public.study_lectures x where x.id = p_lecture;
+  if not found or l.deleted_at is not null then return; end if;
+  g_live := study_private.group_live(l.group_id);
+  select count(*), count(*) filter (where s.status = 'ready'),
+         count(*) filter (where s.status = 'writing' and coalesce(s.lease_until, s.updated_at + interval '6 minutes') > now())
+    into n_all, n_ready, n_live
+    from public.study_sections s where s.lecture_id = p_lecture;
+
+  -- 1. the outline, once
+  if n_all = 0 then
+    if (p_kind is null or p_kind = 'outline') and g_live < 3
+       and (l.status in ('new', 'writing')
+            or (l.status = 'outlining' and coalesce(l.lease_until, l.updated_at + interval '3 minutes') <= now() and l.attempts < 3)) then
+      return query select 'outline'::text, null::int, 1;
+    end if;
+    return;
+  end if;
+
+  -- 2. the parts
+  if n_ready < n_all then
+    if p_kind is not null and p_kind <> 'part' then return; end if;
+    v_cap := case when n_ready = 0 then 1 else 2 end;
+    v_free := least(v_cap - n_live, 3 - g_live);
+    if v_free <= 0 then return; end if;
+    select min(s.idx), count(*) filter (where s.status <> 'failed' or s.retry_at <= now())
+      into v_idx, n_claim
+      from public.study_sections s
+     where s.lecture_id = p_lecture and (p_idx is null or s.idx = p_idx)
+       and (s.status = 'pending'
+            or (s.status = 'writing' and coalesce(s.lease_until, s.updated_at + interval '6 minutes') <= now() and s.attempts < 4)
+            or (s.status = 'failed' and s.attempts < 4 and (not p_server or s.retry_at <= now())));
+    if v_idx is null then return; end if;
+    return query select 'part'::text, v_idx, least(v_free, greatest(n_claim, 1));
+    return;
+  end if;
+
+  -- 3. the recording's notes, once every part is written
+  if (p_kind is not null and p_kind <> 'notes')
+     or not study_private.feature_on('recordings')          -- review M10: switched off, no transcript goes anywhere
+     or not exists (select 1 from public.study_recordings r where r.lecture_id = p_lecture and r.status = 'ready') then
+    return;
+  end if;
+  select count(*) filter (where n.status = 'ready'),
+         count(*) filter (where n.status = 'writing' and n.lease_until > now())
+    into n_ready, n_live
+    from public.study_recording_notes n where n.lecture_id = p_lecture;
+  v_cap := case when n_ready = 0 then 1 else 2 end;
+  v_free := least(v_cap - n_live, 3 - g_live);
+  if v_free <= 0 then return; end if;
+  select min(n.part_idx), count(*) filter (where n.status <> 'failed' or n.retry_at <= now())
+    into v_idx, n_claim
+    from public.study_recording_notes n
+   where n.lecture_id = p_lecture and (p_idx is null or n.part_idx = p_idx)
+     and (n.status = 'pending'
+          or (n.status = 'writing' and n.lease_until <= now() and n.attempts < 4)
+          or (n.status = 'failed' and n.attempts < 4 and (not p_server or n.retry_at <= now())));
+  if v_idx is null then return; end if;
+  return query select 'notes'::text, v_idx, least(v_free, greatest(n_claim, 1));
+end;
+$$;
+
+-- Is anything of this lecture being written, waiting, or due for a retry?
+create or replace function study_private.waiting(p_lecture uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.study_lectures l where l.id = p_lecture
+                   and (l.status in ('new', 'outlining')
+                        or (l.status = 'writing' and not exists (select 1 from public.study_sections s where s.lecture_id = l.id))))
+      or exists (select 1 from public.study_sections s where s.lecture_id = p_lecture
+                   and (s.status in ('pending', 'writing') or (s.status = 'failed' and s.attempts < 4 and s.retry_at is not null)))
+      or exists (select 1 from public.study_recording_notes n where n.lecture_id = p_lecture
+                   and (n.status in ('pending', 'writing') or (n.status = 'failed' and n.attempts < 4 and n.retry_at is not null)))
+$$;
+
+-- A writer that died after its claim (killed, out of memory, a thrown RPC)
+-- leaves its unit "writing" with an expired lease. It is taken again while
+-- attempts remain; after the last one it fails as 'lost', the sweeper stops
+-- kicking it, and "המשך כתיבה" can start it over (review FE-1). The dead
+-- attempt's spend stays in the ledger at its reservation's estimate.
+create or replace function study_private.give_up(p_lecture uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  update public.study_sections s
+     set status = 'failed', error = 'lost', retry_at = null, lease_id = null, lease_until = null, writer = null, updated_at = now()
+   where s.lecture_id = p_lecture and s.status = 'writing' and s.attempts >= 4
+     and coalesce(s.lease_until, s.updated_at + interval '6 minutes') <= now();
+  update public.study_recording_notes n
+     set status = 'failed', error = 'lost', retry_at = null, lease_id = null, lease_until = null, updated_at = now()
+   where n.lecture_id = p_lecture and n.status = 'writing' and n.attempts >= 4 and n.lease_until <= now();
+  update public.study_lectures l
+     set status = 'failed', error = 'lost', lease_id = null, lease_until = null, updated_at = now()
+   where l.id = p_lecture and l.status = 'outlining' and l.attempts >= 3
+     and coalesce(l.lease_until, l.updated_at + interval '3 minutes') <= now();
+end;
+$$;
+
+-- When a failed unit may be tried again by the server (null: only by hand).
+create or replace function study_private.retry_at(p_status text, p_error text, p_attempts int)
+returns timestamptz language sql stable as $$
+  select case
+    when p_status <> 'failed' then null
+    when p_error = 'timeout' then now() + interval '1 minute'
+    when p_error in ('rate_limited', 'overloaded', 'network', 'empty', 'api_500', 'api_502', 'api_503', 'api_504', 'api_529')
+      then now() + make_interval(mins => least(30, (2 ^ greatest(p_attempts, 1))::int))
+    else null
+  end
+$$;
+
+-- Kick the worker for each queued lecture with work the caps allow now.
+-- p_now: called by queue/finish (kick at once); the sweeper waits 2 minutes
+-- between kicks of one lecture, and stops after 15 kicks nobody claimed
+-- (the worker is down or misconfigured) until someone queues it again.
+create or replace function study_private.dispatch(p_lecture uuid default null, p_now boolean default false)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  j record; v_url text; v_key text; v_n int; v_total int := 0;
+begin
+  if not study_private.server_on() then return 0; end if;
+  v_url := rtrim(study_private.secret('study_site_url'), '/') || '/api/study/work';
+  v_key := study_private.secret('study_worker_key');
+  for j in select jb.lecture_id, jb.last_kick_at, jb.kicks_since_claim
+             from study_private.jobs jb
+            where p_lecture is null or jb.lecture_id = p_lecture
+            order by jb.queued_at
+  loop
+    perform study_private.give_up(j.lecture_id);
+    perform study_private.ensure_notes(j.lecture_id);
+    if not study_private.waiting(j.lecture_id) then
+      delete from study_private.jobs where lecture_id = j.lecture_id;   -- done: nothing to write
+      continue;
+    end if;
+    v_n := coalesce((select p.free from study_private.plan(j.lecture_id, true) p limit 1), 0);
+    if v_n <= 0
+       or (not p_now and j.last_kick_at > now() - interval '2 minutes')
+       or j.kicks_since_claim >= 15 then
+      continue;
+    end if;
+    for i in 1..v_n loop
+      perform net.http_post(
+        url := v_url,
+        body := jsonb_build_object('lectureId', j.lecture_id),
+        headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || v_key),
+        timeout_milliseconds := 10000);
+    end loop;
+    update study_private.jobs set last_kick_at = now(), kicks_since_claim = kicks_since_claim + v_n
+     where lecture_id = j.lecture_id;
+    v_total := v_total + v_n;
+  end loop;
+  return v_total;
+end;
+$$;
+
+revoke all on all functions in schema study_private from public;
+
+-- ── The RPCs (both writers use them) ──
+
+-- After a lecture is saved, and on "המשך כתיבה": hand the writing to the
+-- server. Answers false when server writing is not set up (the phone writes).
+create or replace function public.study_queue(p_lecture uuid, p_figures jsonb default '{}'::jsonb,
+                                              p_until timestamptz default null, p_retry_failed boolean default false)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare
+  l     public.study_lectures;
+  v_day date := ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date;
+  k     text;
+  v     text;
+begin
+  if auth.uid() is null then raise exception 'forbidden'; end if;
+  -- The lecture's row is locked, so taps of "המשך כתיבה" on it (two phones at
+  -- the same instant) run one after the other: the second sees what the
+  -- first started over (W2).
+  select * into l from public.study_lectures x where x.id = p_lecture for update;
+  if not found or not coalesce(public.study_is_member(l.group_id), false) then raise exception 'forbidden'; end if;
+  if l.deleted_at is not null then raise exception 'lecture not found'; end if;
+  if p_figures is not null and (jsonb_typeof(p_figures) <> 'object' or length(p_figures::text) > 300000) then
+    raise exception 'bad figures';
+  end if;
+  -- Review M7: a picture link must be one of THIS lecture's figures, signed
+  -- by Supabase Storage for that same path. (work.ts also checks the host:
+  -- it must be the project's own URL.)
+  for k, v in select e.key, e.value from jsonb_each_text(coalesce(p_figures, '{}'::jsonb)) e loop
+    if not exists (select 1 from jsonb_array_elements(l.slides) s, jsonb_array_elements(coalesce(s -> 'figures', '[]'::jsonb)) f
+                    where f ->> 'path' = k)
+       or v !~ '^https://[^/?#@]+/storage/v1/object/sign/study/[^?#]+\?token=[A-Za-z0-9._-]+$'
+       or right(split_part(v, '?', 1), char_length('/storage/v1/object/sign/study/' || k)) <> '/storage/v1/object/sign/study/' || k then
+      raise exception 'bad figures';
+    end if;
+  end loop;
+  -- A person asked ("המשך כתיבה"): failed units start over, now, whether or
+  -- not the server writes (review FE-4: the phone path needs it too), at most
+  -- 3 times a study day per lecture (review M6). Only a tap that finds
+  -- something to start over counts (W2): two phones tapping the same failed
+  -- part at once restart it once and spend one of the three, since the
+  -- second tap finds it already started over (failed with no attempts and a
+  -- retry time: only a restart leaves a unit so, as every claim counts an
+  -- attempt) or the outline already back to 'new'.
+  if p_retry_failed and (
+       exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.status = 'failed'
+                  and not (s.attempts = 0 and s.retry_at is not null))
+    or exists (select 1 from public.study_recording_notes n where n.lecture_id = p_lecture and n.status = 'failed'
+                  and not (n.attempts = 0 and n.retry_at is not null))
+    or (not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture)
+        and (l.status = 'failed' or (l.status = 'outlining' and coalesce(l.lease_until, l.updated_at + interval '3 minutes') <= now())))
+  ) then
+    if l.retry_day is distinct from v_day then
+      update public.study_lectures x set retry_day = v_day, retries = 0 where x.id = p_lecture;
+      l.retries := 0;
+    end if;
+    if l.retries >= 3 then raise exception 'retry limit'; end if;
+    update public.study_lectures x set retries = x.retries + 1 where x.id = p_lecture;
+    update public.study_lectures set status = 'new', error = null, attempts = 0
+     where id = p_lecture
+       and not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture)
+       and (status = 'failed' or (status = 'outlining' and coalesce(lease_until, updated_at + interval '3 minutes') <= now()));
+    update public.study_sections set attempts = 0, retry_at = now() where lecture_id = p_lecture and status = 'failed';
+    update public.study_recording_notes set attempts = 0, retry_at = now() where lecture_id = p_lecture and status = 'failed';
+  end if;
+  if not study_private.server_on() then return false; end if;
+  insert into study_private.jobs as j (lecture_id, figure_urls, urls_until, queued_by)
+  values (p_lecture, coalesce(p_figures, '{}'::jsonb), p_until, auth.uid())
+  on conflict (lecture_id) do update
+     set figure_urls = case when excluded.figure_urls = '{}'::jsonb then j.figure_urls else excluded.figure_urls end,
+         urls_until = case when excluded.figure_urls = '{}'::jsonb then j.urls_until else excluded.urls_until end,
+         queued_by = excluded.queued_by, queued_at = now(), kicks_since_claim = 0;
+  update public.study_lectures set queued_at = coalesce(queued_at, now()) where id = p_lecture;
+  perform study_private.dispatch(p_lecture, true);
+  return true;
+end;
+$$;
+
+-- Take the next unit (or the one asked for) under a new lease. Nothing back:
+-- nothing to do, or another writer holds it (section.ts answers 409 "busy").
+create or replace function public.study_claim(p_lecture uuid, p_kind text default null, p_idx int default null, p_key text default null)
+returns table (kind text, idx int, lease uuid, effort text)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_variable
+declare
+  v_group uuid; v_kind text; v_idx int; v_prev text;
+  v_lease uuid := gen_random_uuid();
+  v_server boolean := auth.uid() is null;   -- the worker; with a member's token it is the device path (a person's tap)
+begin
+  if not study_private.may_write(p_lecture, p_key) then raise exception 'forbidden'; end if;
+  select l.group_id into v_group from public.study_lectures l where l.id = p_lecture;
+  if v_group is null then return; end if;
+  perform 1 from public.study_groups g where g.id = v_group for update;   -- one claim at a time per group
+  perform study_private.give_up(p_lecture);
+  perform study_private.ensure_notes(p_lecture);
+  select p.kind, p.idx into v_kind, v_idx from study_private.plan(p_lecture, v_server, p_kind, p_idx) p limit 1;
+  if v_kind is null then return; end if;
+  if v_server then update study_private.jobs set kicks_since_claim = 0 where lecture_id = p_lecture; end if;
+  if v_kind = 'outline' then
+    update public.study_lectures l
+       set status = 'outlining', error = null, lease_id = v_lease, lease_until = now() + interval '330 seconds',
+           attempts = l.attempts + 1, updated_at = now()
+     where l.id = p_lecture;
+    return query select 'outline'::text, null::int, v_lease, 'low'::text;
+  elsif v_kind = 'part' then
+    select s.error into v_prev from public.study_sections s where s.lecture_id = p_lecture and s.idx = v_idx;
+    update public.study_sections s
+       set status = 'writing', error = null, markdown = '', lease_id = v_lease, lease_until = now() + interval '330 seconds',
+           attempts = s.attempts + 1, retry_at = null, writer = case when v_server then 'server' else 'device' end,
+           updated_at = now()
+     where s.lecture_id = p_lecture and s.idx = v_idx;
+    return query select 'part'::text, v_idx, v_lease, case when v_prev = 'timeout' then 'medium' else 'high' end;
+  else
+    select n.error into v_prev from public.study_recording_notes n where n.lecture_id = p_lecture and n.part_idx = v_idx;
+    update public.study_recording_notes n
+       set status = 'writing', error = null, lease_id = v_lease, lease_until = now() + interval '330 seconds',
+           attempts = n.attempts + 1, retry_at = null, updated_at = now()
+     where n.lecture_id = p_lecture and n.part_idx = v_idx;
+    return query select 'notes'::text, v_idx, v_lease, case when v_prev = 'timeout' then 'low' else 'medium' end;
+  end if;
+end;
+$$;
+
+-- The text so far, every ~15 s, so the group sees it grow. False: the lease
+-- is gone (expired and taken by another writer); stop.
+create or replace function public.study_progress(p_lecture uuid, p_idx int, p_lease uuid, p_text text, p_key text default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.may_write(p_lecture, p_key) then raise exception 'forbidden'; end if;
+  update public.study_sections
+     set markdown = left(coalesce(p_text, ''), 200000), updated_at = now()
+   where lecture_id = p_lecture and idx = p_idx and lease_id = p_lease and status = 'writing';
+  return found;
+end;
+$$;
+
+-- A part or a part's notes is done (ready or failed). The cost is recorded
+-- even when the lease was lost: that writer still spent the money.
+create or replace function public.study_finish(
+  p_lecture uuid, p_kind text, p_idx int, p_lease uuid, p_status text, p_error text,
+  p_text text default null, p_items jsonb default null,
+  p_model text default null, p_usage jsonb default null, p_cost numeric default 0, p_key text default null,
+  p_charge bigint default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare v_group uuid; v_ok boolean := false;
+begin
+  if not study_private.may_write(p_lecture, p_key) then raise exception 'forbidden'; end if;
+  if p_kind not in ('part', 'notes') or p_status not in ('ready', 'failed') then raise exception 'bad finish'; end if;
+  select group_id into v_group from public.study_lectures where id = p_lecture;
+  if v_group is null then return false; end if;
+  -- The cost: the call's reservation (study_reserve) gets its real cost; a
+  -- call that was not reserved adds a row. Recorded even when the lease was lost.
+  if p_charge is not null then
+    update public.study_usage u
+       set model = left(p_model, 80), usage = p_usage, settled_at = now(),
+           cost_usd = round(least(greatest(coalesce(p_cost, 0), 0), 99.99999), 5)
+     where u.id = p_charge and u.group_id = v_group and u.settled_at is null;
+  elsif coalesce(p_cost, 0) > 0 then
+    insert into public.study_usage (group_id, lecture_id, user_id, kind, ref, model, usage, cost_usd, settled_at)
+    values (v_group, p_lecture, auth.uid(), p_kind, p_idx::text, left(p_model, 80), p_usage, round(p_cost, 5), now());
+  end if;
+  if p_kind = 'part' then
+    update public.study_sections s
+       set markdown = left(coalesce(p_text, ''), 200000), status = p_status, error = left(p_error, 200),
+           model = left(p_model, 80), usage = p_usage,
+           retry_at = study_private.retry_at(p_status, p_error, s.attempts),
+           lease_id = null, lease_until = null, writer = null, updated_at = now()
+     where s.lecture_id = p_lecture and s.idx = p_idx and s.lease_id = p_lease;
+    v_ok := found;
+    if v_ok and not exists (select 1 from public.study_sections where lecture_id = p_lecture and status <> 'ready') then
+      update public.study_lectures set status = 'ready', updated_at = now() where id = p_lecture;
+    end if;
+  else
+    update public.study_recording_notes n
+       set items = coalesce(p_items, '[]'::jsonb), status = p_status, error = left(p_error, 200),
+           model = left(p_model, 80), usage = p_usage,
+           retry_at = study_private.retry_at(p_status, p_error, n.attempts),
+           lease_id = null, lease_until = null, updated_at = now()
+     where n.lecture_id = p_lecture and n.part_idx = p_idx and n.lease_id = p_lease;
+    v_ok := found;
+  end if;
+  if v_ok then perform study_private.dispatch(p_lecture, true); end if;
+  return v_ok;
+end;
+$$;
+
+-- The outline is done: the parts are inserted once (never deleted, never
+-- doubled), or the lecture fails (no slides, too many, budget).
+create or replace function public.study_outline_done(
+  p_lecture uuid, p_lease uuid, p_parts jsonb, p_error text default null,
+  p_model text default null, p_usage jsonb default null, p_cost numeric default 0, p_key text default null,
+  p_charge bigint default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare v_group uuid;
+begin
+  if not study_private.may_write(p_lecture, p_key) then raise exception 'forbidden'; end if;
+  select group_id into v_group from public.study_lectures where id = p_lecture;
+  if v_group is null then return false; end if;
+  if p_charge is not null then
+    update public.study_usage u
+       set model = left(p_model, 80), usage = p_usage, settled_at = now(),
+           cost_usd = round(least(greatest(coalesce(p_cost, 0), 0), 99.99999), 5)
+     where u.id = p_charge and u.group_id = v_group and u.settled_at is null;
+  elsif coalesce(p_cost, 0) > 0 then
+    insert into public.study_usage (group_id, lecture_id, user_id, kind, ref, model, usage, cost_usd, settled_at)
+    values (v_group, p_lecture, auth.uid(), 'outline', null, left(p_model, 80), p_usage, round(p_cost, 5), now());
+  end if;
+  if p_parts is null or jsonb_typeof(p_parts) <> 'array' or jsonb_array_length(p_parts) = 0 then
+    update public.study_lectures
+       set status = 'failed', error = left(coalesce(p_error, 'outline'), 200), lease_id = null, lease_until = null, updated_at = now()
+     where id = p_lecture and lease_id = p_lease;
+    return found;
+  end if;
+  update public.study_lectures
+     set outline = p_parts, status = 'writing', error = null, lease_id = null, lease_until = null, updated_at = now()
+   where id = p_lecture and lease_id = p_lease;
+  if not found then return false; end if;
+  insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to)
+  select p_lecture, (e.ord - 1)::int, left(coalesce(e.v ->> 'heading', ''), 120), (e.v ->> 'from')::int, (e.v ->> 'to')::int
+    from jsonb_array_elements(p_parts) with ordinality as e(v, ord)
+   where not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture)
+  on conflict do nothing;
+  perform study_private.dispatch(p_lecture, true);
+  return true;
+end;
+$$;
+
+-- Everything a writer needs, for the worker (which cannot read the tables)
+-- and the device path alike.
+create or replace function public.study_writing_input(p_lecture uuid, p_with_transcript boolean default false, p_key text default null)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if not study_private.may_write(p_lecture, p_key) then raise exception 'forbidden'; end if;
+  return (
+    select jsonb_build_object(
+      'lecture', jsonb_build_object('id', l.id, 'group_id', l.group_id, 'course', l.course, 'title', l.title,
+                                    'lecturer', l.lecturer, 'lecture_date', l.lecture_date,
+                                    'source_kind', l.source_kind, 'slides', l.slides),
+      'sections', coalesce((select jsonb_agg(jsonb_build_object('idx', s.idx, 'title', s.title, 'slide_from', s.slide_from,
+                                                                 'slide_to', s.slide_to, 'status', s.status, 'error', s.error,
+                                                                 'markdown', s.markdown,
+                                                                 -- the group's corrections a rewrite must keep (design-collab §2.5)
+                                                                 'corrections', public.study_corrections_of(s.lecture_id, s.idx)) order by s.idx)
+                              from public.study_sections s where s.lecture_id = l.id), '[]'::jsonb),
+      'figures', coalesce((select j.figure_urls from study_private.jobs j where j.lecture_id = l.id), '{}'::jsonb),
+      'figures_until', (select j.urls_until from study_private.jobs j where j.lecture_id = l.id),
+      'recording', (select jsonb_build_object('has_times', r.has_times, 'duration_s', r.duration_s, 'status', r.status)
+                      from public.study_recordings r where r.lecture_id = l.id),
+      'transcript', case when p_with_transcript then
+                      (select string_agg(b.lines, E'\n' order by b.idx) from public.study_transcript_blocks b where b.lecture_id = l.id)
+                    end)
+    from public.study_lectures l where l.id = p_lecture);
+end;
+$$;
+
+revoke all on function public.study_queue(uuid, jsonb, timestamptz, boolean) from public, anon;
+revoke all on function public.study_claim(uuid, text, int, text) from public;
+revoke all on function public.study_progress(uuid, int, uuid, text, text) from public;
+revoke all on function public.study_finish(uuid, text, int, uuid, text, text, text, jsonb, text, jsonb, numeric, text, bigint) from public;
+revoke all on function public.study_outline_done(uuid, uuid, jsonb, text, text, jsonb, numeric, text, bigint) from public;
+revoke all on function public.study_writing_input(uuid, boolean, text) from public;
+grant execute on function public.study_queue(uuid, jsonb, timestamptz, boolean) to authenticated;
+-- The worker calls these as anon with its key; the device path (section.ts,
+-- outline.ts) with the key and the member's token. Without the key: 'forbidden'.
+grant execute on function public.study_claim(uuid, text, int, text) to anon, authenticated;
+grant execute on function public.study_progress(uuid, int, uuid, text, text) to anon, authenticated;
+grant execute on function public.study_finish(uuid, text, int, uuid, text, text, text, jsonb, text, jsonb, numeric, text, bigint) to anon, authenticated;
+grant execute on function public.study_outline_done(uuid, uuid, jsonb, text, text, jsonb, numeric, text, bigint) to anon, authenticated;
+grant execute on function public.study_writing_input(uuid, boolean, text) to anon, authenticated;
+
+-- ── Row Level Security for the new tables ──
+alter table public.study_recordings        enable row level security;
+alter table public.study_transcript_blocks enable row level security;
+alter table public.study_recording_notes   enable row level security;
+
+revoke all on public.study_recordings, public.study_transcript_blocks, public.study_recording_notes
+  from anon, authenticated;
+grant select, delete on public.study_recordings to authenticated;
+grant insert (lecture_id, source, engine, source_name, link_url, duration_s, done_s, has_times, status, chars, consented)
+  on public.study_recordings to authenticated;
+grant update (engine, source_name, link_url, duration_s, done_s, has_times, status, error, chars, updated_at)
+  on public.study_recordings to authenticated;
+grant select, delete on public.study_transcript_blocks to authenticated;
+grant insert (lecture_id, idx, start_s, end_s, lines, segments) on public.study_transcript_blocks to authenticated;
+grant update (start_s, end_s, lines, segments) on public.study_transcript_blocks to authenticated;
+grant select on public.study_recording_notes to authenticated;       -- written only through study_finish()
+
+drop policy if exists "study recordings read"   on public.study_recordings;
+drop policy if exists "study recordings add"    on public.study_recordings;
+drop policy if exists "study recordings change" on public.study_recordings;
+drop policy if exists "study recordings delete" on public.study_recordings;
+drop policy if exists "study transcript read"   on public.study_transcript_blocks;
+drop policy if exists "study transcript add"    on public.study_transcript_blocks;
+drop policy if exists "study transcript change" on public.study_transcript_blocks;
+drop policy if exists "study transcript delete" on public.study_transcript_blocks;
+drop policy if exists "study notes read"        on public.study_recording_notes;
+
+create policy "study recordings read" on public.study_recordings
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+-- Review M10: while the server switch 'recordings' is off nothing new comes in.
+-- Review M2: hours of transcription are deleted only by whoever added them.
+create policy "study recordings add" on public.study_recordings
+  for insert with check (created_by = auth.uid() and public.study_is_member(public.study_lecture_group(lecture_id))
+                         and public.study_feature_on('recordings'));
+create policy "study recordings change" on public.study_recordings
+  for update using (public.study_is_member(public.study_lecture_group(lecture_id)))
+  with check (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study recordings delete" on public.study_recordings
+  for delete using (created_by = auth.uid() and public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study transcript read" on public.study_transcript_blocks
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study transcript add" on public.study_transcript_blocks
+  for insert with check (public.study_is_member(public.study_lecture_group(lecture_id)) and public.study_feature_on('recordings'));
+create policy "study transcript change" on public.study_transcript_blocks
+  for update using (public.study_is_member(public.study_lecture_group(lecture_id)))
+  with check (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study transcript delete" on public.study_transcript_blocks
+  for delete using (exists (select 1 from public.study_recordings r
+                             where r.lecture_id = study_transcript_blocks.lecture_id and r.created_by = auth.uid()));
+create policy "study notes read" on public.study_recording_notes
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+
+-- ── Realtime: recordings and their notes arrive live (not the blocks: large rows) ──
+do $$
+declare t text;
+begin
+  foreach t in array array['study_recordings', 'study_recording_notes'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then
+      null;
+    end;
+  end loop;
+end $$;
+
+-- ── The sweeper, and what is missing ──
+do $$
+begin
+  if to_regnamespace('cron') is null then
+    raise notice 'pg_cron is off: no sweeper. Integrations → Cron → enable pg_cron, then run this file again.';
+  else
+    perform cron.schedule('study-dispatch', '* * * * *', 'select study_private.dispatch()');
+    perform cron.schedule('study-cron-cleanup', '17 3 * * *',
+      $c$delete from cron.job_run_details where jobid in (select jobid from cron.job where jobname in ('study-dispatch', 'study-cron-cleanup')) and end_time < now() - interval '2 days'$c$);
+  end if;
+  if not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'net' and p.proname = 'http_post') then
+    raise notice 'pg_net is off: lectures keep being written from the phone. Database → Extensions → pg_net.';
+  end if;
+  if coalesce(length(study_private.secret('study_worker_key')), 0) < 32 then
+    raise notice 'Vault secret study_worker_key is missing (32+ characters, the same value as STUDY_WORKER_KEY on Vercel).';
+  end if;
+  if coalesce(study_private.secret('study_site_url'), '') not like 'https://%' then
+    raise notice 'Vault secret study_site_url is missing (the app''s address, such as https://tamtzit.vercel.app; docs/MOVE.md).';
+  end if;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('W', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION W, its end · HARDENING (package W, milestone W2)
+--  Appended at the END of section W by W's follow-up pull request, once
+--  W-1's server code is live (§9.1 step 4.7). From then on no code writes a
+--  part or a lecture's writing state with a member's token (the browser never
+--  did: src/study/lib/api.ts only reads study_sections; outline.ts and
+--  section.ts now go through the RPCs with the server key). These lines come
+--  after the file's own grants (study-schema.sql L301-L306), so every later
+--  run of the file keeps them. Corrections (VITE_STUDY_CORRECTIONS) wait for
+--  this: a correction's author and undo mean nothing if a member's token can
+--  rewrite or delete the part directly (review M1).
+-- ════════════════════════════════════════════════════════════════════════
+revoke insert, update, delete on public.study_sections from authenticated;
+grant select on public.study_sections to authenticated;
+revoke update on public.study_lectures from authenticated;
+grant update (title, lecturer, course, lecture_date, updated_at) on public.study_lectures to authenticated;
+-- Nor at its birth: a member inserts a lecture with the columns the upload
+-- sends (createLecture in src/study/lib/api.ts, the same nine since F0) and
+-- no others. Its writing state (status, error, outline, attempts, the leases,
+-- queued_at, and the restarts' retries and retry_day), its author and its
+-- deletion marks take their defaults, so no member can start a lecture with
+-- a restart count of their own choosing (review W-R1: retries -1000000
+-- lifted the limit of three "המשך כתיבה" restarts a day). A column the
+-- upload adds must be added here too.
+revoke insert on public.study_lectures from authenticated;
+grant insert (id, group_id, title, lecturer, course, lecture_date, source_name, source_kind, slides)
+  on public.study_lectures to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('W', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION W ════
+
+-- ════ BEGIN SECTION Q · practice questions, past exams (package Q) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Q · PRACTICE QUESTIONS AND PAST EXAMS   (owned by package Q)
+--  design-questions.md §2.2, with design-quiz.md §2.3 merged in: an open
+--  live-quiz round holds its question's key (study_question_keys.held_until),
+--  and the five functions that hand out or change a key refuse it meanwhile.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  practice questions (תרגול) and past
+--  exams for תמצית. To be appended to supabase/study-schema.sql, after the
+--  "Row Level Security" section (whose loop drops every study_ policy, so
+--  the policies below are recreated on every run). Re-runnable.
+--
+--  Who sees what
+--  ─────────────
+--  Shared inside the group: the questions (stem, vignette, options, slide
+--  numbers, topic), who generated them, the generation rounds, flags on bad
+--  questions, and uploaded past exams.
+--  Private to each member: their answers. Scores, mistakes and weak points
+--  are computed from study_answers, which only its owner can read
+--  (Shoham: "יראו רק למשתמש הנוכחי").
+--  Hidden from every client: the answer key and the explanations
+--  (study_question_keys has RLS on and no grants at all). They come back only
+--  from study_answer_question (right after an answer, which it records) and
+--  study_question_feedback (for questions the caller has already answered).
+--  The live group quiz reveals them through its own definer function when a
+--  round closes, so nobody can read the quiz ahead.
+--
+--  Writes go through security-definer functions (generation rounds, saving a
+--  question, answering, retiring), so the state machine and the private
+--  answer rows cannot be bent from the browser. What only Claude may write
+--  (claiming a batch, saving a question with its key, finishing a batch,
+--  explanations of exam items) also needs the server key that only the
+--  /api/study functions hold; they pass it together with the member's own
+--  token (review B1).
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ── Past exams (item 8). pages: one object per page, as read in the browser:
+--   { n, path, w, h, lines[] }  (path = "<group>/exams/<exam id>/p<n>.jpg")
+create table if not exists public.study_exams (
+  id          uuid        primary key default gen_random_uuid(),
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  course      text        not null default '' check (char_length(course) <= 120),
+  title       text        not null check (char_length(title) between 1 and 200),
+  year        int         check (year between 1990 and 2100),
+  source_name text        not null default '' check (char_length(source_name) <= 300),
+  pages       jsonb       not null default '[]'::jsonb,
+  -- where the answers are: marked in the exam, in a separate key (uploaded
+  -- as extra pages), none, or not said yet
+  key_source  text        not null default 'unknown' check (key_source in ('marked', 'separate', 'none', 'unknown')),
+  status      text        not null default 'new' check (status in ('new', 'reading', 'ready', 'failed')),
+  error       text,
+  created_by  uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists study_exams_group on public.study_exams (group_id, course);
+-- At most 60 pages an exam (review M6: exam_read pays per page); the app says "too many pages" first.
+alter table public.study_exams drop constraint if exists study_exams_pages_max;
+alter table public.study_exams add constraint study_exams_pages_max check (jsonb_array_length(pages) <= 60);
+
+-- ── Generation rounds: one row per lecture part per round. A round is
+--  planned by study_question_round(); each row is claimed by one
+--  /api/study/questions call (study_question_claim), so two phones never
+--  write the same part twice, and its progress is visible to the group.
+create table if not exists public.study_question_batches (
+  id         uuid          primary key default gen_random_uuid(),
+  lecture_id uuid          not null references public.study_lectures (id) on delete cascade,
+  round      int           not null check (round between 1 and 50),
+  part_idx   int           not null check (part_idx >= 0),
+  heading    text          not null default '' check (char_length(heading) <= 200),
+  slide_from int           not null,
+  slide_to   int           not null,
+  wanted     int           not null check (wanted between 1 and 5),
+  status     text          not null default 'pending' check (status in ('pending', 'writing', 'ready', 'failed')),
+  made       int           not null default 0 check (made >= 0),
+  rejected   int           not null default 0 check (rejected >= 0),
+  model      text,
+  cost_usd   numeric(10,4) not null default 0 check (cost_usd >= 0),
+  error      text,
+  created_by uuid          default auth.uid() references auth.users (id) on delete set null,
+  created_at timestamptz   not null default now(),
+  updated_at timestamptz   not null default now(),
+  unique (lecture_id, round, part_idx),
+  check (slide_to >= slide_from)
+);
+-- Paid tries of a batch: at most 3 (review M6), as the summary's units have 4.
+alter table public.study_question_batches add column if not exists attempts int not null default 0;
+
+-- ── The questions (public part). options are stored in display order
+--  (shuffled on the server); which one is right lives in study_question_keys.
+--  aspect: a fixed list, so weak points add up across lectures.
+create table if not exists public.study_questions (
+  id          uuid        primary key default gen_random_uuid(),
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id  uuid        references public.study_lectures (id) on delete cascade,
+  batch_id    uuid        references public.study_question_batches (id) on delete set null,
+  exam_id     uuid        references public.study_exams (id) on delete cascade,
+  exam_no     int         check (exam_no between 1 and 500),
+  -- a past-exam item: the lecture whose slides explain it (none: no lecture
+  -- covers it yet). Its own column, so deleting that lecture unlinks the
+  -- item instead of deleting it.
+  ref_lecture uuid        references public.study_lectures (id) on delete set null,
+  source      text        not null default 'ai' check (source in ('ai', 'exam')),
+  part_idx    int         check (part_idx >= 0),
+  kind        text        not null check (kind in ('mcq', 'case')),
+  difficulty  smallint    not null default 2 check (difficulty between 1 and 3),
+  vignette    text        not null default '' check (char_length(vignette) <= 2500),
+  question    text        not null check (char_length(btrim(question)) between 5 and 600),
+  options     text[]      not null check (cardinality(options) between 2 and 6),
+  slides      int[]       not null default '{}',
+  topic       text        not null default '' check (char_length(topic) <= 120),
+  aspect      text        not null default 'other' check (aspect in (
+                'mechanism', 'uses', 'pk', 'adverse', 'contra', 'interactions', 'resistance', 'dosing',
+                'classification', 'epidemiology', 'lifecycle', 'pathogenesis', 'clinical', 'diagnosis',
+                'treatment', 'prevention', 'other')),
+  has_key     boolean     not null default true,
+  model       text,
+  created_by  uuid        default auth.uid() references auth.users (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  retired_at  timestamptz,
+  retired_by  uuid        references auth.users (id) on delete set null,
+  retire_note text        not null default '' check (char_length(retire_note) <= 300),
+  check (source = 'exam' or lecture_id is not null),
+  check (source = 'ai' or (exam_id is not null and lecture_id is null)),
+  check (source = 'exam' or ref_lecture is null)
+);
+create index if not exists study_questions_lecture on public.study_questions (lecture_id, created_at);
+create index if not exists study_questions_group on public.study_questions (group_id, created_at);
+create index if not exists study_questions_exam on public.study_questions (exam_id, exam_no);
+create index if not exists study_questions_ref on public.study_questions (ref_lecture) where ref_lecture is not null;
+
+-- ── The key: hidden. No policy and no grant: only the functions below read it.
+create table if not exists public.study_question_keys (
+  question_id  uuid        primary key references public.study_questions (id) on delete cascade,
+  answer       smallint    check (answer >= 0),          -- null: a past-exam item nobody has keyed yet
+  explanations text[]      not null default '{}',        -- one per option, in display order (or none yet)
+  takeaway     text        not null default '' check (char_length(takeaway) <= 600),
+  key_by       uuid        references auth.users (id) on delete set null,  -- a member who keyed an exam item
+  key_at       timestamptz,
+  held_until   timestamptz                                  -- an open live-quiz round holds the key (design-quiz §2.3)
+);
+alter table public.study_question_keys add column if not exists held_until timestamptz;  -- databases from before the hold
+
+-- ── Answers: private to their owner. Own id as the primary key (the table is
+--  not in the Realtime publication anyway; nothing here should ever be broadcast).
+create table if not exists public.study_answers (
+  id          uuid        primary key default gen_random_uuid(),
+  user_id     uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  question_id uuid        not null references public.study_questions (id) on delete cascade,
+  choice      smallint    check (choice >= 0),           -- null: "לא יודעים"
+  correct     boolean     not null,
+  mode        text        not null default 'lecture' check (mode in ('lecture', 'course', 'mistakes', 'quiz', 'exam')),
+  ms          int         check (ms between 0 and 3600000),
+  answered_at timestamptz not null default now()
+);
+create index if not exists study_answers_mine on public.study_answers (user_id, question_id, answered_at desc);
+
+-- ── Flags: "this question is wrong / not from the slides / unclear", for the group.
+create table if not exists public.study_question_flags (
+  id          uuid        primary key default gen_random_uuid(),
+  question_id uuid        not null references public.study_questions (id) on delete cascade,
+  user_id     uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  reason      text        not null check (reason in ('wrong_key', 'not_in_slides', 'two_answers', 'unclear', 'duplicate', 'other')),
+  note        text        not null default '' check (char_length(note) <= 500),
+  created_at  timestamptz not null default now(),
+  unique (question_id, user_id)
+);
+create index if not exists study_question_flags_q on public.study_question_flags (question_id);
+
+-- ── Helpers ──
+create or replace function public.study_question_group(q uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select group_id from public.study_questions where id = q;
+$$;
+
+create or replace function public.study_exam_group(e uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select group_id from public.study_exams where id = e;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Generation: plan a round, claim a part, save each question, finish
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Plans the next round for a lecture: about one question per 2.5 slides
+-- (6 to 25 a round), shared out over the summary's parts by slide count
+-- (largest remainder, at most 5 per part). Before the lecture has an
+-- outline, parts are six-slide chunks. If the latest round still has parts
+-- pending or being written, that round is returned instead (fresh = false),
+-- so two members tapping at once drive the same round.
+create or replace function public.study_question_round(p_lecture uuid)
+returns table (round int, batches int, fresh boolean)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  g uuid := public.study_lecture_group(p_lecture);
+  r int;
+  open_n int;
+  made_n int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not public.study_is_member(g) then raise exception 'lecture not found'; end if;
+  if exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_question_round:' || p_lecture::text));
+  -- A batch whose 3 tries all died stops holding its round open.
+  update public.study_question_batches b set status = 'failed', error = 'gave up', updated_at = now()
+   where b.lecture_id = p_lecture and b.status = 'writing' and b.attempts >= 3 and b.updated_at < now() - interval '6 minutes';
+  select max(b.round) into r from public.study_question_batches b where b.lecture_id = p_lecture;
+  if r is not null then
+    select count(*) into open_n from public.study_question_batches b
+     where b.lecture_id = p_lecture and b.round = r and b.status in ('pending', 'writing');
+    if open_n > 0 then
+      return query select r, open_n, false;
+      return;
+    end if;
+  end if;
+  -- 80 active, and 120 ever generated: retiring questions does not free paid rounds (review M6).
+  if (select count(*) from public.study_questions q where q.lecture_id = p_lecture and q.retired_at is null) >= 80
+     or (select count(*) from public.study_questions q where q.lecture_id = p_lecture and q.source = 'ai') >= 120 then
+    raise exception 'enough questions';
+  end if;
+  r := coalesce(r, 0) + 1;
+  with parts as (
+    select s.idx as part_idx, s.title as heading, s.slide_from, s.slide_to
+    from public.study_sections s
+    where s.lecture_id = p_lecture
+    union all
+    select ((x.o - 1) / 6)::int, '', min(x.n), max(x.n)
+    from (select (sl ->> 'n')::int as n, row_number() over (order by (sl ->> 'n')::int) as o
+          from public.study_lectures l, jsonb_array_elements(l.slides) sl
+          where l.id = p_lecture) x
+    where not exists (select 1 from public.study_sections s2 where s2.lecture_id = p_lecture)
+    group by (x.o - 1) / 6
+  ),
+  sized as (select p.*, (p.slide_to - p.slide_from + 1)::numeric as n from parts p),
+  tgt as (select least(25, greatest(6, round(sum(n) / 2.5)))::int as t, sum(n) as total from sized),
+  base as (
+    select s.*, floor(t.t * s.n / t.total)::int as fl, (t.t * s.n / t.total) - floor(t.t * s.n / t.total) as rem
+    from sized s, tgt t
+  ),
+  ranked as (
+    select b.*, row_number() over (order by b.rem desc, b.part_idx) as rk,
+           (select t from tgt) - (select sum(fl) from base) as extra
+    from base b
+  )
+  insert into public.study_question_batches (lecture_id, round, part_idx, heading, slide_from, slide_to, wanted)
+  select p_lecture, r, k.part_idx, left(k.heading, 200), k.slide_from, k.slide_to,
+         least(5, k.fl + case when k.rk <= k.extra then 1 else 0 end)
+  from ranked k
+  where least(5, k.fl + case when k.rk <= k.extra then 1 else 0 end) > 0;
+  get diagnostics made_n = row_count;
+  if made_n = 0 then raise exception 'no slides'; end if;
+  return query select r, made_n, true;
+end;
+$$;
+
+-- Takes one part to write. A part is free when pending, failed (a tap on
+-- "המשך"), or "writing" with no sign of life for six minutes (a phone that
+-- slept). Raises 'busy' otherwise. A part whose last try timed out is
+-- written at medium effort, which finishes sooner.
+create or replace function public.study_question_claim(p_batch uuid, p_key text default null)
+returns table (lecture_id uuid, round int, part_idx int, heading text, slide_from int, slide_to int, wanted int, effort text)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare b public.study_question_batches;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into b from public.study_question_batches x where x.id = p_batch;
+  if not found or not public.study_is_member(public.study_lecture_group(b.lecture_id))
+     or exists (select 1 from public.study_lectures l where l.id = b.lecture_id and l.deleted_at is not null) then
+    raise exception 'batch not found';
+  end if;
+  update public.study_question_batches x
+     set status = 'writing', attempts = x.attempts + 1, updated_at = now()
+   where x.id = p_batch and x.attempts < 3
+     and (x.status in ('pending', 'failed') or (x.status = 'writing' and x.updated_at < now() - interval '6 minutes'));
+  if not found then
+    if b.attempts >= 3 and b.status <> 'ready' then raise exception 'gave up'; end if;
+    raise exception 'busy';
+  end if;
+  return query select b.lecture_id, b.round, b.part_idx, b.heading, b.slide_from, b.slide_to, b.wanted - b.made,
+                      case when b.error = 'timeout' then 'medium' else 'high' end;
+end;
+$$;
+
+-- Saves one question with its key. Exactly one of p_batch (generated) and
+-- p_exam (a past-exam item) is given. p_q:
+--   { kind, difficulty, vignette, question, options[], answer, explanations[],
+--     takeaway, slides[], topic, aspect, model, exam_no }
+-- The API has already validated the item (one correct option, explanations,
+-- style); these checks are the ones the database must not trust anyone on.
+create or replace function public.study_save_question(p_batch uuid, p_exam uuid, p_q jsonb, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  b    public.study_question_batches;
+  e    public.study_exams;
+  g    uuid;
+  lec  uuid;
+  part int;
+  src  text;
+  opts text[] := array(select jsonb_array_elements_text(coalesce(p_q -> 'options', '[]'::jsonb)));
+  expl text[] := array(select jsonb_array_elements_text(coalesce(p_q -> 'explanations', '[]'::jsonb)));
+  sl   int[]  := array(select (jsonb_array_elements_text(coalesce(p_q -> 'slides', '[]'::jsonb)))::int);
+  ans  int    := (p_q ->> 'answer')::int;
+  have int[];
+  qid  uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;   -- only the server saves Claude's items (review B1)
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if (p_batch is null) = (p_exam is null) then raise exception 'batch or exam'; end if;
+  if p_exam is not null and not study_private.feature_on('exams') then raise exception 'off'; end if;   -- review M10
+  if cardinality(opts) not between 2 and 6 then raise exception 'bad options'; end if;
+  if ans is not null and (ans < 0 or ans >= cardinality(opts)) then raise exception 'bad answer'; end if;
+  if p_batch is not null then
+    select * into b from public.study_question_batches x where x.id = p_batch;
+    if not found then raise exception 'batch not found'; end if;
+    lec := b.lecture_id;
+    g := public.study_lecture_group(lec);
+    if not public.study_is_member(g) then raise exception 'batch not found'; end if;
+    if b.status <> 'writing' then raise exception 'batch not writing'; end if;
+    if b.made >= b.wanted then raise exception 'part full'; end if;
+    src := 'ai';
+    part := b.part_idx;
+    if ans is null then raise exception 'bad answer'; end if;
+    if cardinality(expl) <> cardinality(opts) then raise exception 'explanations do not match options'; end if;
+    select coalesce(array_agg((sl2 ->> 'n')::int), '{}') into have
+      from public.study_lectures l, jsonb_array_elements(l.slides) sl2 where l.id = lec;
+    if cardinality(sl) = 0 or not (sl <@ have) then raise exception 'unknown slide'; end if;
+    if not exists (select 1 from unnest(sl) s where s between b.slide_from and b.slide_to) then
+      raise exception 'outside the part';
+    end if;
+    if (select count(*) from public.study_questions q where q.lecture_id = lec and q.retired_at is null) >= 80 then
+      raise exception 'enough questions';
+    end if;
+  else
+    select * into e from public.study_exams x where x.id = p_exam;
+    if not found or not public.study_is_member(e.group_id) then raise exception 'exam not found'; end if;
+    g := e.group_id;
+    src := 'exam';
+    if cardinality(expl) not in (0, cardinality(opts)) then raise exception 'explanations do not match options'; end if;
+  end if;
+  insert into public.study_questions (group_id, lecture_id, batch_id, exam_id, exam_no, source, part_idx, kind,
+                                      difficulty, vignette, question, options, slides, topic, aspect, has_key, model)
+  values (g, lec, p_batch, p_exam, (p_q ->> 'exam_no')::int, src, part, p_q ->> 'kind',
+          coalesce((p_q ->> 'difficulty')::int, 2), coalesce(p_q ->> 'vignette', ''), p_q ->> 'question', opts, sl,
+          left(coalesce(p_q ->> 'topic', ''), 120), coalesce(p_q ->> 'aspect', 'other'), ans is not null, p_q ->> 'model')
+  returning id into qid;
+  insert into public.study_question_keys (question_id, answer, explanations, takeaway)
+  values (qid, ans, expl, left(coalesce(p_q ->> 'takeaway', ''), 600));
+  if p_batch is not null then
+    update public.study_question_batches x set made = x.made + 1, updated_at = now() where x.id = p_batch;
+  end if;
+  return qid;
+end;
+$$;
+
+-- Ends a claimed part: ready (even with fewer questions than wanted) or failed.
+create or replace function public.study_question_finish(p_batch uuid, p_status text, p_rejected int,
+  p_model text, p_cost numeric, p_error text, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if p_status not in ('ready', 'failed') then raise exception 'bad status'; end if;
+  update public.study_question_batches x
+     set status = p_status,
+         rejected = x.rejected + greatest(0, coalesce(p_rejected, 0)),
+         model = coalesce(p_model, x.model),
+         cost_usd = x.cost_usd + greatest(0, coalesce(p_cost, 0)),
+         error = left(p_error, 200),
+         updated_at = now()
+   where x.id = p_batch
+     and x.status = 'writing'
+     and public.study_is_member(public.study_lecture_group(x.lecture_id));
+  if not found then raise exception 'batch not writing'; end if;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Practising: answer (recorded privately, key revealed), review, retire
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Records the caller's answer and returns the key with every option's
+-- explanation. p_choice null = "לא יודעים" (counts as a mistake).
+create or replace function public.study_answer_question(p_question uuid, p_choice int, p_mode text default 'lecture', p_ms int default null)
+returns table (answer int, explanations text[], takeaway text, correct boolean)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  q  public.study_questions;
+  k  public.study_question_keys;
+  ok boolean;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into q from public.study_questions x where x.id = p_question;
+  if not found or not public.study_is_member(q.group_id) then raise exception 'question not found'; end if;
+  if q.retired_at is not null then raise exception 'retired'; end if;
+  select * into k from public.study_question_keys x where x.question_id = p_question;
+  if k.held_until > now() then raise exception 'in quiz'; end if;                 -- quiz: added
+  if k.answer is null then raise exception 'no key'; end if;
+  if p_choice is not null and (p_choice < 0 or p_choice >= cardinality(q.options)) then raise exception 'bad choice'; end if;
+  if coalesce(p_mode, '') not in ('lecture', 'course', 'mistakes', 'quiz', 'exam') then raise exception 'bad mode'; end if;
+  ok := coalesce(p_choice = k.answer, false);
+  insert into public.study_answers (user_id, question_id, choice, correct, mode, ms)
+  values (auth.uid(), p_question, p_choice, ok, p_mode, case when p_ms between 0 and 3600000 then p_ms end);
+  return query select k.answer::int, k.explanations, k.takeaway, ok;
+end;
+$$;
+
+-- The key and explanations of questions the caller has already answered
+-- (reviewing a finished session, or the mistakes list). Others: no row.
+create or replace function public.study_question_feedback(p_ids uuid[])
+returns table (question_id uuid, answer int, explanations text[], takeaway text)
+language sql stable security definer set search_path = public as $$
+  select k.question_id, k.answer::int, k.explanations, k.takeaway
+  from public.study_question_keys k
+  join public.study_questions q on q.id = k.question_id
+  where k.question_id = any (p_ids)
+    and public.study_is_member(q.group_id)
+    and (k.held_until is null or k.held_until <= now())                          -- quiz: added
+    and exists (select 1 from public.study_answers a where a.question_id = k.question_id and a.user_id = auth.uid());
+$$;
+
+-- Takes a question out of practice for the whole group, or puts it back
+-- (undo); the row says who and when. Only the owner may call it: members
+-- lost it (review finding Q2, SEC-13; the revoke after the grants below).
+create or replace function public.study_retire_question(p_question uuid, p_retire boolean, p_note text default '')
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_questions q
+     set retired_at = case when p_retire then now() end,
+         retired_by = case when p_retire then auth.uid() end,
+         retire_note = case when p_retire then left(coalesce(p_note, ''), 300) else '' end
+   where q.id = p_question and public.study_is_member(q.group_id);
+  if not found then raise exception 'question not found'; end if;
+end;
+$$;
+
+-- Past exams: a member marks (or clears) the right answer of an item that
+-- came without one. Explanations depend on the key, so they are cleared and
+-- written again by /api/study/explain.
+create or replace function public.study_set_exam_key(p_question uuid, p_answer int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare q public.study_questions;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into q from public.study_questions x where x.id = p_question;
+  if not found or not public.study_is_member(q.group_id) or q.source <> 'exam' then raise exception 'question not found'; end if;
+  if p_answer is not null and (p_answer < 0 or p_answer >= cardinality(q.options)) then raise exception 'bad answer'; end if;
+  if exists (select 1 from public.study_question_keys k                         -- quiz: added
+              where k.question_id = p_question and k.held_until > now()) then
+    raise exception 'in quiz';
+  end if;
+  update public.study_question_keys k
+     set answer = p_answer, key_by = auth.uid(), key_at = now(), explanations = '{}', takeaway = ''
+   where k.question_id = p_question;
+  update public.study_questions x set has_key = p_answer is not null where x.id = p_question;
+end;
+$$;
+
+-- Past exams: explanations written from a lecture's slides (/api/study/explain).
+-- p_lecture links the item to the lecture that covers it (or null: none does).
+create or replace function public.study_set_explanations(p_question uuid, p_explanations text[], p_takeaway text,
+  p_slides int[], p_lecture uuid, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare q public.study_questions;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;   -- written by op exam_explain only
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into q from public.study_questions x where x.id = p_question;
+  if not found or not public.study_is_member(q.group_id) or q.source <> 'exam' then raise exception 'question not found'; end if;
+  if cardinality(coalesce(p_explanations, '{}')) <> cardinality(q.options) then raise exception 'explanations do not match options'; end if;
+  if p_lecture is not null and public.study_lecture_group(p_lecture) is distinct from q.group_id then raise exception 'lecture not found'; end if;
+  if exists (select 1 from public.study_question_keys k                         -- quiz: added
+              where k.question_id = p_question and k.held_until > now()) then
+    raise exception 'in quiz';
+  end if;
+  update public.study_question_keys k
+     set explanations = p_explanations, takeaway = left(coalesce(p_takeaway, ''), 600)
+   where k.question_id = p_question and k.answer is not null;
+  if not found then raise exception 'no key'; end if;
+  update public.study_questions x set ref_lecture = p_lecture, slides = coalesce(p_slides, '{}') where x.id = p_question;
+end;
+$$;
+
+-- Past exams: what /api/study/ai (op exam_explain) needs to explain keyed
+-- items. Only past-exam items come out here (their key is in the exam, known
+-- to whoever read or keyed it); a generated question's key never does.
+create or replace function public.study_exam_items_for_explain(p_ids uuid[])
+returns table (id uuid, exam_no int, vignette text, question text, options text[], answer int)
+language sql stable security definer set search_path = public as $$
+  select q.id, q.exam_no, q.vignette, q.question, q.options, k.answer::int
+  from public.study_questions q
+  join public.study_question_keys k on k.question_id = q.id
+  where q.id = any (p_ids) and q.source = 'exam' and k.answer is not null
+    and (k.held_until is null or k.held_until <= now())                          -- quiz: added
+    and public.study_is_member(q.group_id);
+$$;
+
+-- ── The caller's own results (security invoker: RLS on study_answers keeps
+--  them to the owner; the explicit user filter is for the index). These are
+--  the contract with progress and weak points (item 7).
+-- A question is one of "הטעויות שלי" from a wrong answer ("לא יודעים" too)
+-- until it is answered right on a LATER study day than its last wrong answer
+-- (a study day starts at 04:00, Israel time, as study_day() and studyDay()).
+-- A right answer minutes after reading the explanations does not clear it:
+-- that is memory of the screen, not of the fact (review UX-2).
+create or replace function public.study_open_mistakes(p_group uuid)
+returns table (question_id uuid, wrong_at timestamptz)
+language sql stable set search_path = public as $$
+  with mine as (
+    select a.question_id, a.correct, a.answered_at,
+           ((a.answered_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date as day
+      from public.study_answers a
+     where a.user_id = auth.uid()
+  ), wrong as (
+    select m.question_id, max(m.answered_at) as wrong_at, max(m.day) as wrong_day
+      from mine m where not m.correct group by m.question_id
+  )
+  select w.question_id, w.wrong_at
+    from wrong w
+    join public.study_questions q on q.id = w.question_id
+   where q.group_id = p_group and q.retired_at is null
+     and not exists (select 1 from mine r where r.question_id = w.question_id and r.correct and r.day > w.wrong_day);
+$$;
+
+create or replace function public.study_my_mistakes(p_group uuid, p_lecture uuid default null)
+returns table (question_id uuid, wrong_at timestamptz)
+language sql stable set search_path = public as $$
+  select o.question_id, o.wrong_at
+  from public.study_open_mistakes(p_group) o
+  join public.study_questions q on q.id = o.question_id
+  where p_lecture is null or coalesce(q.lecture_id, q.ref_lecture) = p_lecture
+  order by o.wrong_at;
+$$;
+
+create or replace function public.study_my_topic_stats(p_group uuid)
+returns table (lecture_id uuid, course text, topic text, aspect text, questions int, answered int, correct_now int, last_at timestamptz)
+language sql stable set search_path = public as $$
+  with latest as (
+    select distinct on (a.question_id) a.question_id, a.correct, a.answered_at
+    from public.study_answers a
+    where a.user_id = auth.uid()
+    order by a.question_id, a.answered_at desc
+  )
+  select coalesce(q.lecture_id, q.ref_lecture), coalesce(lec.course, ex.course, ''), q.topic, q.aspect,
+         count(*)::int, count(lt.question_id)::int, (count(*) filter (where lt.correct))::int, max(lt.answered_at)
+  from public.study_questions q
+  left join latest lt on lt.question_id = q.id
+  left join public.study_lectures lec on lec.id = coalesce(q.lecture_id, q.ref_lecture)
+  left join public.study_exams ex on ex.id = q.exam_id
+  where q.group_id = p_group and q.retired_at is null and q.has_key
+  group by coalesce(q.lecture_id, q.ref_lecture), coalesce(lec.course, ex.course, ''), q.topic, q.aspect;
+$$;
+
+-- The practice hub in one call: per lecture (or past exam), how many active
+-- questions the group has, and how many of them the caller has answered and
+-- has wrong right now. Shared counts plus the caller's own numbers only.
+create or replace function public.study_practice_overview(p_group uuid)
+returns table (lecture_id uuid, exam_id uuid, questions int, answered int, wrong_now int, last_at timestamptz)
+language sql stable set search_path = public as $$
+  with latest as (
+    select distinct on (a.question_id) a.question_id, a.correct, a.answered_at
+    from public.study_answers a
+    where a.user_id = auth.uid()
+    order by a.question_id, a.answered_at desc
+  )
+  select q.lecture_id, q.exam_id, count(*)::int, count(lt.question_id)::int,
+         (count(*) filter (where o.question_id is not null))::int, max(lt.answered_at)
+  from public.study_questions q
+  left join latest lt on lt.question_id = q.id
+  left join public.study_open_mistakes(p_group) o on o.question_id = q.id   -- the same rule as "הטעויות שלי"
+  where q.group_id = p_group and q.retired_at is null and q.has_key
+  group by q.lecture_id, q.exam_id;
+$$;
+
+-- The latest answer per question, for choosing what a session asks next
+-- (new first, then mistakes, then the longest unseen).
+create or replace function public.study_my_latest(p_group uuid)
+returns table (question_id uuid, correct boolean, answered_at timestamptz, times int)
+language sql stable set search_path = public as $$
+  select distinct on (a.question_id) a.question_id, a.correct, a.answered_at,
+         (count(*) over (partition by a.question_id))::int
+  from public.study_answers a
+  join public.study_questions q on q.id = a.question_id
+  where a.user_id = auth.uid() and q.group_id = p_group
+  order by a.question_id, a.answered_at desc;
+$$;
+
+create or replace function public.study_my_daily(p_group uuid, p_days int default 30)
+returns table (day date, answered int, correct int)
+language sql stable set search_path = public as $$
+  select (a.answered_at at time zone 'Asia/Jerusalem')::date, count(*)::int, (count(*) filter (where a.correct))::int
+  from public.study_answers a
+  join public.study_questions q on q.id = a.question_id
+  where a.user_id = auth.uid() and q.group_id = p_group
+    and a.answered_at >= now() - make_interval(days => greatest(1, least(coalesce(p_days, 30), 366)))
+  group by 1
+  order by 1;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security and privileges
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_exams            enable row level security;
+alter table public.study_question_batches enable row level security;
+alter table public.study_questions        enable row level security;
+alter table public.study_question_keys    enable row level security;
+alter table public.study_answers          enable row level security;
+alter table public.study_question_flags   enable row level security;
+
+-- (When this lands in study-schema.sql, the file's loop has already dropped
+-- these; the drops keep this file re-runnable on its own.)
+drop policy if exists "study exams read"   on public.study_exams;
+drop policy if exists "study exams add"    on public.study_exams;
+drop policy if exists "study exams update" on public.study_exams;
+drop policy if exists "study exams delete" on public.study_exams;
+drop policy if exists "study question batches read" on public.study_question_batches;
+drop policy if exists "study questions read" on public.study_questions;
+drop policy if exists "study answers read own"   on public.study_answers;
+drop policy if exists "study answers delete own" on public.study_answers;
+drop policy if exists "study question flags read"   on public.study_question_flags;
+drop policy if exists "study question flags add"    on public.study_question_flags;
+drop policy if exists "study question flags remove" on public.study_question_flags;
+
+create policy "study exams read" on public.study_exams
+  for select using (public.study_is_member(group_id));
+-- Review M10: exams come in only while the server switch 'exams' is on.
+-- Review M2: an exam's items carry every member's private answers; only its
+-- uploader may delete it, on the day it was uploaded (a wrong file). Later,
+-- Yoad deletes it in the SQL editor if it must go.
+create policy "study exams add" on public.study_exams
+  for insert with check (public.study_is_member(group_id) and created_by = auth.uid() and public.study_feature_on('exams'));
+create policy "study exams update" on public.study_exams
+  for update using (public.study_is_member(group_id)) with check (public.study_is_member(group_id));
+create policy "study exams delete" on public.study_exams
+  for delete using (created_by = auth.uid() and created_at > now() - interval '24 hours' and public.study_is_member(group_id));
+
+create policy "study question batches read" on public.study_question_batches
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study questions read" on public.study_questions
+  for select using (public.study_is_member(group_id));
+-- study_question_keys: no policy on purpose.
+create policy "study answers read own" on public.study_answers
+  for select using (user_id = auth.uid());
+create policy "study answers delete own" on public.study_answers
+  for delete using (user_id = auth.uid());
+create policy "study question flags read" on public.study_question_flags
+  for select using (public.study_is_member(public.study_question_group(question_id)));
+create policy "study question flags add" on public.study_question_flags
+  for insert with check (user_id = auth.uid() and public.study_is_member(public.study_question_group(question_id)));
+create policy "study question flags remove" on public.study_question_flags
+  for delete using (user_id = auth.uid());
+
+revoke all on public.study_exams, public.study_question_batches, public.study_questions, public.study_question_keys,
+  public.study_answers, public.study_question_flags from anon, authenticated;
+grant select, delete on public.study_exams to authenticated;
+grant insert (id, group_id, course, title, year, source_name, pages, key_source) on public.study_exams to authenticated;
+grant update (course, title, year, key_source, status, error, updated_at) on public.study_exams to authenticated;
+grant select on public.study_question_batches to authenticated;
+grant select on public.study_questions to authenticated;
+grant select, delete on public.study_answers to authenticated;
+grant select, delete on public.study_question_flags to authenticated;
+grant insert (question_id, reason, note) on public.study_question_flags to authenticated;
+
+revoke all on function public.study_question_group(uuid), public.study_exam_group(uuid),
+  public.study_question_round(uuid), public.study_question_claim(uuid, text), public.study_save_question(uuid, uuid, jsonb, text),
+  public.study_question_finish(uuid, text, int, text, numeric, text, text), public.study_answer_question(uuid, int, text, int),
+  public.study_question_feedback(uuid[]), public.study_retire_question(uuid, boolean, text),
+  public.study_set_exam_key(uuid, int), public.study_set_explanations(uuid, text[], text, int[], uuid, text),
+  public.study_exam_items_for_explain(uuid[]), public.study_open_mistakes(uuid),
+  public.study_my_mistakes(uuid, uuid), public.study_my_topic_stats(uuid), public.study_my_latest(uuid),
+  public.study_my_daily(uuid, int), public.study_practice_overview(uuid)
+  from public, anon;
+-- The four server-only ones need the server key inside; the grant only lets the op's call reach them.
+grant execute on function public.study_question_group(uuid), public.study_exam_group(uuid),
+  public.study_question_round(uuid), public.study_question_claim(uuid, text), public.study_save_question(uuid, uuid, jsonb, text),
+  public.study_question_finish(uuid, text, int, text, numeric, text, text), public.study_answer_question(uuid, int, text, int),
+  public.study_question_feedback(uuid[]),
+  public.study_set_exam_key(uuid, int), public.study_set_explanations(uuid, text[], text, int[], uuid, text),
+  public.study_exam_items_for_explain(uuid[]), public.study_open_mistakes(uuid),
+  public.study_my_mistakes(uuid, uuid), public.study_my_topic_stats(uuid), public.study_my_latest(uuid),
+  public.study_my_daily(uuid, int), public.study_practice_overview(uuid)
+  to authenticated;
+-- No member retires a question for everyone, or puts one back, with one call
+-- (package Q's review, finding Q2; the addendum's SEC-13): study_retire_question
+-- stays for the owner (Yoad, in the SQL editor) and no app calls it. An
+-- existing project grants EXECUTE on new functions to authenticated by
+-- default, and an earlier run of this file granted it too, so it is revoked
+-- here on every run.
+revoke execute on function public.study_retire_question(uuid, boolean, text) from authenticated;
+
+-- ── Realtime: questions appear on every phone as they are written, the
+--  round's progress and flags show live. Never the keys or the answers.
+do $$
+declare t text;
+begin
+  foreach t in array array['study_exams', 'study_question_batches', 'study_questions', 'study_question_flags'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then
+      null;
+    end;
+  end loop;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('Q', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Q, its end · ANCHORS, TEASERS, THE BET, "מתי כן", ANOTHER WORDING,
+--  TWO FLAGS HIDE, THE DIAGRAM, OPTION TAGS, THE WORKER PATH, MARKS AFTER A
+--  CORRECTION   (package Q, milestone Q-1; spec §12.3.Q)
+--  Appended at the END of section Q, inside its markers. Q becomes version 2.
+--
+--  A1  every question sits on one paragraph of its part (data-blk), with the
+--      paragraph's first words for re-anchoring after a rewrite.
+--  M1  a teaser (one line, written with the bank) for the meeting's opening.
+--  P2 / Q3  the bet (study_answers.confidence: 1 ניחוש · 2 נראה לי · 3 על
+--      בטוח), written by practice (study_answer_question) and by the live
+--      quiz's reveal (section Z's end), never by a member's 'quiz' answer.
+--  P3  "מתי כן" per option, kept with the key, returned only after an answer.
+--  P4  a miss returns in another wording (study_my_rewordings).
+--  P5  two members' counting flags hide a question from everyone, everywhere
+--      (hidden_at), until a member fixes it with a slide citation; only a
+--      hidden question opens the fix sheet, and never while a live quiz holds
+--      its key (review SEC-2, SEC-13).
+--  P7  the blind solver's rejections, counted per batch.
+--  P13 the slide's diagram (figure). Q12 the options' drugs (option_tags).
+--  R2  a correction approved on the paragraph marks the question stale
+--      (section V's trigger) until "עדיין נכון" or new questions.
+--  D3  the worker path: section B's worker plans, claims, saves and
+--      finishes batches with the key alone; a part the Batch API holds
+--      (hold_until) is busy for a tap.
+-- ════════════════════════════════════════════════════════════════════════
+alter table public.study_questions
+  add column if not exists anchor     int  check (anchor between 0 and 9999),
+  add column if not exists quote      text not null default '' check (char_length(quote) <= 200),
+  add column if not exists part_gen   int  check (part_gen >= 0),
+  add column if not exists teaser     text not null default '' check (char_length(teaser) <= 120),
+  add column if not exists stale_at   timestamptz,
+  add column if not exists stale_edit uuid,                 -- study_edits.id (section K is later: no foreign key)
+  add column if not exists checked_by uuid references auth.users (id) on delete set null,
+  add column if not exists checked_at timestamptz;
+create index if not exists study_questions_anchor on public.study_questions (lecture_id, part_idx, anchor) where anchor is not null;
+
+alter table public.study_answers
+  add column if not exists confidence smallint check (confidence between 1 and 3);
+
+
+-- "עדיין נכון": a member checked a question that a correction marked, and
+-- it goes back into practice and quizzes for everyone. The row says who.
+create or replace function public.study_question_still_true(p_question uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_questions q
+     set stale_at = null, stale_edit = null, checked_by = auth.uid(), checked_at = now()
+   where q.id = p_question and public.study_is_member(q.group_id) and q.stale_at is not null;
+  if not found and not exists (select 1 from public.study_questions q where q.id = p_question and public.study_is_member(q.group_id)) then
+    raise exception 'question not found';
+  end if;
+end;
+$$;
+revoke all on function public.study_question_still_true(uuid) from public, anon;
+grant execute on function public.study_question_still_true(uuid) to authenticated;
+
+-- ── New columns ──
+alter table public.study_question_batches
+  add column if not exists via        text not null default 'tap' check (via in ('tap', 'batch', 'server')),
+  add column if not exists hold_until timestamptz,                       -- the Batch API holds the part until then
+  add column if not exists solver_rejected int not null default 0 check (solver_rejected >= 0);
+alter table public.study_question_keys
+  add column if not exists whens text[] not null default '{}';           -- "מתי כן" per option ('' for the key)
+alter table public.study_questions
+  add column if not exists figure      text   not null default '' check (figure = '' or figure ~ '^fig:[0-9]{1,4}-[0-9]{1,3}$'),
+  add column if not exists option_tags text[] not null default '{}',     -- the drug or organism of each option
+  add column if not exists hidden_at   timestamptz,                      -- two flags: out of everyone's practice
+  add column if not exists fixed_by    uuid references auth.users (id) on delete set null,
+  add column if not exists fixed_at    timestamptz,
+  add column if not exists fix_slides  int[]  not null default '{}',
+  add column if not exists fix_note    text   not null default '' check (char_length(fix_note) <= 300);
+create index if not exists study_questions_hidden on public.study_questions (lecture_id) where hidden_at is not null;
+
+-- ── Who may drive a batch: the op (the key and a member of the lecture's
+--    group) or the server's worker (the key alone, no member token; it is
+--    reached only through section B's functions, which anon may call). ──
+create or replace function study_private.may_bank(p_lecture uuid, p_key text)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then return false; end if;
+  if auth.uid() is null then return true; end if;
+  return coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false);
+end;
+$$;
+revoke all on function study_private.may_bank(uuid, text) from public;
+
+-- ── D3: plan a round (a member's tap, or the worker with the key) ──
+drop function if exists public.study_question_round(uuid);
+create or replace function public.study_question_round(p_lecture uuid, p_key text default null)
+returns table (round int, batches int, fresh boolean)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  g uuid := public.study_lecture_group(p_lecture);
+  r int;
+  open_n int;
+  made_n int;
+begin
+  if auth.uid() is null then
+    if not study_private.is_worker(p_key) then raise exception 'not signed in'; end if;   -- the worker (section B)
+    if g is null then raise exception 'lecture not found'; end if;
+  elsif g is null or not public.study_is_member(g) then
+    raise exception 'lecture not found';
+  end if;
+  if exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_question_round:' || p_lecture::text));
+  update public.study_question_batches b set status = 'failed', error = 'gave up', updated_at = now()
+   where b.lecture_id = p_lecture and b.status = 'writing' and b.attempts >= 3 and b.updated_at < now() - interval '6 minutes'
+     and (b.hold_until is null or b.hold_until <= now());
+  select max(b.round) into r from public.study_question_batches b where b.lecture_id = p_lecture;
+  if r is not null then
+    select count(*) into open_n from public.study_question_batches b
+     where b.lecture_id = p_lecture and b.round = r and b.status in ('pending', 'writing');
+    if open_n > 0 then
+      return query select r, open_n, false;
+      return;
+    end if;
+  end if;
+  if (select count(*) from public.study_questions q where q.lecture_id = p_lecture and q.retired_at is null) >= 80
+     or (select count(*) from public.study_questions q where q.lecture_id = p_lecture and q.source = 'ai') >= 120 then
+    raise exception 'enough questions';
+  end if;
+  r := coalesce(r, 0) + 1;
+  with parts as (
+    select s.idx as part_idx, s.title as heading, s.slide_from, s.slide_to
+    from public.study_sections s
+    where s.lecture_id = p_lecture
+    union all
+    select ((x.o - 1) / 6)::int, '', min(x.n), max(x.n)
+    from (select (sl ->> 'n')::int as n, row_number() over (order by (sl ->> 'n')::int) as o
+          from public.study_lectures l, jsonb_array_elements(l.slides) sl
+          where l.id = p_lecture) x
+    where not exists (select 1 from public.study_sections s2 where s2.lecture_id = p_lecture)
+    group by (x.o - 1) / 6
+  ),
+  sized as (select p.*, (p.slide_to - p.slide_from + 1)::numeric as n from parts p),
+  tgt as (select least(25, greatest(6, round(sum(n) / 2.5)))::int as t, sum(n) as total from sized),
+  base as (
+    select s.*, floor(t.t * s.n / t.total)::int as fl, (t.t * s.n / t.total) - floor(t.t * s.n / t.total) as rem
+    from sized s, tgt t
+  ),
+  ranked as (
+    select b.*, row_number() over (order by b.rem desc, b.part_idx) as rk,
+           (select t from tgt) - (select sum(fl) from base) as extra
+    from base b
+  )
+  insert into public.study_question_batches (lecture_id, round, part_idx, heading, slide_from, slide_to, wanted)
+  select p_lecture, r, k.part_idx, left(k.heading, 200), k.slide_from, k.slide_to,
+         least(5, k.fl + case when k.rk <= k.extra then 1 else 0 end)
+  from ranked k
+  where least(5, k.fl + case when k.rk <= k.extra then 1 else 0 end) > 0;
+  get diagnostics made_n = row_count;
+  if made_n = 0 then raise exception 'no slides'; end if;
+  return query select r, made_n, true;
+end;
+$$;
+
+-- ── D3: claim a part. A part the Batch API holds is busy for a member
+--    until its hold ends (then a tap writes it at full price). ──
+create or replace function public.study_question_claim(p_batch uuid, p_key text default null)
+returns table (lecture_id uuid, round int, part_idx int, heading text, slide_from int, slide_to int, wanted int, effort text)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare b public.study_question_batches;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;   -- only the op or the worker (review B1)
+  select * into b from public.study_question_batches x where x.id = p_batch;
+  if not found or not study_private.may_bank(b.lecture_id, p_key)
+     or exists (select 1 from public.study_lectures l where l.id = b.lecture_id and l.deleted_at is not null) then
+    raise exception 'batch not found';
+  end if;
+  if auth.uid() is not null and b.hold_until > now() then raise exception 'busy'; end if;
+  update public.study_question_batches x
+     set status = 'writing', attempts = x.attempts + 1, updated_at = now()
+   where x.id = p_batch and x.attempts < 3
+     and (x.status in ('pending', 'failed') or (x.status = 'writing' and x.updated_at < now() - interval '6 minutes'));
+  if not found then
+    if b.attempts >= 3 and b.status <> 'ready' then raise exception 'gave up'; end if;
+    raise exception 'busy';
+  end if;
+  return query select b.lecture_id, b.round, b.part_idx, b.heading, b.slide_from, b.slide_to, b.wanted - b.made,
+                      case when b.error = 'timeout' then 'medium' else 'high' end;
+end;
+$$;
+
+-- ── Saves one question with its key: the meeting block's version (the
+--    paragraph, its quote, the part's generation, the teaser) plus the
+--    worker path, "מתי כן" (whens), the diagram (figure) and option tags.
+--    p_q adds: whens[] and option_tags[] (empty, or one per option), figure.
+create or replace function public.study_save_question(p_batch uuid, p_exam uuid, p_q jsonb, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  b    public.study_question_batches;
+  e    public.study_exams;
+  g    uuid;
+  lec  uuid;
+  part int;
+  src  text;
+  opts text[] := array(select jsonb_array_elements_text(coalesce(p_q -> 'options', '[]'::jsonb)));
+  expl text[] := array(select jsonb_array_elements_text(coalesce(p_q -> 'explanations', '[]'::jsonb)));
+  whn  text[] := array(select left(x, 300) from jsonb_array_elements_text(coalesce(p_q -> 'whens', '[]'::jsonb)) x);
+  tags text[] := array(select left(btrim(x), 80) from jsonb_array_elements_text(coalesce(p_q -> 'option_tags', '[]'::jsonb)) x);
+  sl   int[]  := array(select (jsonb_array_elements_text(coalesce(p_q -> 'slides', '[]'::jsonb)))::int);
+  ans  int    := (p_q ->> 'answer')::int;
+  para int    := case when jsonb_typeof(p_q -> 'para') = 'number' and (p_q ->> 'para') ~ '^[0-9]{1,4}$' then (p_q ->> 'para')::int end;
+  fig  text   := coalesce(p_q ->> 'figure', '');
+  pgen int;
+  have int[];
+  qid  uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;   -- only the server saves Claude's items (review B1)
+  if (p_batch is null) = (p_exam is null) then raise exception 'batch or exam'; end if;
+  if p_exam is not null and auth.uid() is null then raise exception 'not signed in'; end if;   -- exams: the op only
+  if p_exam is not null and not study_private.feature_on('exams') then raise exception 'off'; end if;   -- review M10
+  if cardinality(opts) not between 2 and 6 then raise exception 'bad options'; end if;
+  if ans is not null and (ans < 0 or ans >= cardinality(opts)) then raise exception 'bad answer'; end if;
+  if cardinality(whn) not in (0, cardinality(opts)) then raise exception 'whens do not match options'; end if;
+  if cardinality(tags) not in (0, cardinality(opts)) then raise exception 'tags do not match options'; end if;
+  if p_batch is not null then
+    select * into b from public.study_question_batches x where x.id = p_batch;
+    if not found then raise exception 'batch not found'; end if;
+    lec := b.lecture_id;
+    g := public.study_lecture_group(lec);
+    if not study_private.may_bank(lec, p_key) then raise exception 'batch not found'; end if;
+    if b.status <> 'writing' then raise exception 'batch not writing'; end if;
+    if b.made >= b.wanted then raise exception 'part full'; end if;
+    src := 'ai';
+    part := b.part_idx;
+    if ans is null then raise exception 'bad answer'; end if;
+    if cardinality(expl) <> cardinality(opts) then raise exception 'explanations do not match options'; end if;
+    select coalesce(array_agg((sl2 ->> 'n')::int), '{}') into have
+      from public.study_lectures l, jsonb_array_elements(l.slides) sl2 where l.id = lec;
+    if cardinality(sl) = 0 or not (sl <@ have) then raise exception 'unknown slide'; end if;
+    if not exists (select 1 from unnest(sl) s where s between b.slide_from and b.slide_to) then
+      raise exception 'outside the part';
+    end if;
+    if (select count(*) from public.study_questions q where q.lecture_id = lec and q.retired_at is null) >= 80 then
+      raise exception 'enough questions';
+    end if;
+    select s.gen into pgen from public.study_sections s where s.lecture_id = lec and s.idx = part;
+    -- P13: a diagram that is not one of this lecture's pictures is dropped, not raised (the question stays good).
+    if fig <> '' and (fig !~ '^fig:[0-9]{1,4}-[0-9]{1,3}$'
+        or not exists (select 1 from public.study_lectures l, jsonb_array_elements(l.slides) s,
+                              jsonb_array_elements(coalesce(s -> 'figures', '[]'::jsonb)) f
+                        where l.id = lec and (s ->> 'n')::int = split_part(substr(fig, 5), '-', 1)::int
+                          and (f ->> 'k')::int = split_part(substr(fig, 5), '-', 2)::int)) then
+      fig := '';
+    end if;
+  else
+    select * into e from public.study_exams x where x.id = p_exam;
+    if not found or not public.study_is_member(e.group_id) then raise exception 'exam not found'; end if;
+    g := e.group_id;
+    src := 'exam';
+    para := null;
+    fig := '';
+    if cardinality(expl) not in (0, cardinality(opts)) then raise exception 'explanations do not match options'; end if;
+  end if;
+  insert into public.study_questions (group_id, lecture_id, batch_id, exam_id, exam_no, source, part_idx, kind,
+                                      difficulty, vignette, question, options, slides, topic, aspect, has_key, model,
+                                      anchor, quote, part_gen, teaser, figure, option_tags, created_by)
+  values (g, lec, p_batch, p_exam, (p_q ->> 'exam_no')::int, src, part, p_q ->> 'kind',
+          coalesce((p_q ->> 'difficulty')::int, 2), coalesce(p_q ->> 'vignette', ''), p_q ->> 'question', opts, sl,
+          left(coalesce(p_q ->> 'topic', ''), 120), coalesce(p_q ->> 'aspect', 'other'), ans is not null, p_q ->> 'model',
+          para, case when para is null then '' else left(coalesce(p_q ->> 'quote', ''), 200) end,
+          case when para is null then null else pgen end,
+          left(btrim(coalesce(p_q ->> 'teaser', '')), 120), fig, tags, auth.uid())
+  returning id into qid;
+  insert into public.study_question_keys (question_id, answer, explanations, takeaway, whens)
+  values (qid, ans, expl, left(coalesce(p_q ->> 'takeaway', ''), 600), whn);
+  if p_batch is not null then
+    update public.study_question_batches x set made = x.made + 1, updated_at = now() where x.id = p_batch;
+  end if;
+  return qid;
+end;
+$$;
+
+-- ── Ends a claimed part (the op or the worker). P7: p_solver_rejected
+--    counts the items the blind solver answered differently from the key.
+drop function if exists public.study_question_finish(uuid, text, int, text, numeric, text, text);
+create or replace function public.study_question_finish(p_batch uuid, p_status text, p_rejected int,
+  p_model text, p_cost numeric, p_error text, p_key text default null, p_solver_rejected int default 0)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if p_status not in ('ready', 'failed') then raise exception 'bad status'; end if;
+  update public.study_question_batches x
+     set status = p_status,
+         rejected = x.rejected + greatest(0, coalesce(p_rejected, 0)),
+         solver_rejected = x.solver_rejected + greatest(0, coalesce(p_solver_rejected, 0)),
+         model = coalesce(p_model, x.model),
+         cost_usd = x.cost_usd + greatest(0, coalesce(p_cost, 0)),
+         error = left(p_error, 200),
+         hold_until = null,
+         updated_at = now()
+   where x.id = p_batch
+     and x.status = 'writing'
+     and study_private.may_bank(x.lecture_id, p_key);
+  if not found then raise exception 'batch not writing'; end if;
+end;
+$$;
+
+-- ── P2 + P3 + P5: answering. The bet is stored with the answer (never
+--    shown to anyone else); the reply adds "מתי כן"; a hidden question
+--    cannot be answered in practice.
+drop function if exists public.study_answer_question(uuid, int, text, int);
+create or replace function public.study_answer_question(p_question uuid, p_choice int, p_mode text default 'lecture',
+  p_ms int default null, p_confidence int default null)
+returns table (answer int, explanations text[], takeaway text, correct boolean, whens text[])
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  q  public.study_questions;
+  k  public.study_question_keys;
+  ok boolean;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into q from public.study_questions x where x.id = p_question;
+  if not found or not public.study_is_member(q.group_id) then raise exception 'question not found'; end if;
+  if q.retired_at is not null then raise exception 'retired'; end if;
+  if coalesce(p_mode, '') not in ('lecture', 'course', 'mistakes', 'exam') then raise exception 'bad mode'; end if;   -- review SEC-7
+  if q.hidden_at is not null then raise exception 'hidden'; end if;
+  select * into k from public.study_question_keys x where x.question_id = p_question;
+  if k.held_until > now() then raise exception 'in quiz'; end if;
+  if k.answer is null then raise exception 'no key'; end if;
+  if p_choice is not null and (p_choice < 0 or p_choice >= cardinality(q.options)) then raise exception 'bad choice'; end if;
+  if p_confidence is not null and p_confidence not between 1 and 3 then raise exception 'bad bet'; end if;
+  ok := coalesce(p_choice = k.answer, false);
+  insert into public.study_answers (user_id, question_id, choice, correct, mode, ms, confidence)
+  values (auth.uid(), p_question, p_choice, ok, p_mode, case when p_ms between 0 and 3600000 then p_ms end, p_confidence);
+  return query select k.answer::int, k.explanations, k.takeaway, ok, k.whens;
+end;
+$$;
+
+-- "מתי כן" of questions the caller has already answered (reviewing a
+-- session or the mistakes list), beside section Q's study_question_feedback,
+-- whose result stays as it is. Others: no row.
+create or replace function public.study_question_whens(p_ids uuid[])
+returns table (question_id uuid, whens text[])
+language sql stable security definer set search_path = public as $$
+  select k.question_id, k.whens
+  from public.study_question_keys k
+  join public.study_questions q on q.id = k.question_id
+  where k.question_id = any (p_ids)
+    and public.study_is_member(q.group_id)
+    and (k.held_until is null or k.held_until <= now())
+    and exists (select 1 from public.study_answers a where a.question_id = k.question_id and a.user_id = auth.uid());
+$$;
+
+-- ── P5: two flags hide a question for everyone until it is fixed ──
+-- Flags that count: wrong_key, not_in_slides, two_answers, unclear, from two
+-- different members, given after the question's last fix. "duplicate" and
+-- "other" stay notes for the group.
+create or replace function study_private.question_flags_now(p_question uuid)
+returns int language sql stable security definer set search_path = public as $$
+  select count(distinct f.user_id)::int
+    from public.study_question_flags f join public.study_questions q on q.id = f.question_id
+   where f.question_id = p_question
+     and f.reason in ('wrong_key', 'not_in_slides', 'two_answers', 'unclear')
+     and f.created_at > coalesce(q.fixed_at, '-infinity'::timestamptz)
+$$;
+create or replace function public.study_question_flags_hide()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare q uuid := coalesce(new.question_id, old.question_id);
+begin
+  if study_private.question_flags_now(q) >= 2 then
+    update public.study_questions x set hidden_at = coalesce(x.hidden_at, now()) where x.id = q and x.hidden_at is null;
+  else
+    update public.study_questions x set hidden_at = null where x.id = q and x.hidden_at is not null;   -- a flag taken back
+  end if;
+  return null;
+end;
+$$;
+revoke all on function study_private.question_flags_now(uuid), public.study_question_flags_hide() from public, anon, authenticated;
+drop trigger if exists study_question_flags_hide on public.study_question_flags;
+create trigger study_question_flags_hide after insert or delete on public.study_question_flags
+  for each row execute function public.study_question_flags_hide();
+
+-- A member fixes a hidden question (two different members' counting flags;
+-- one member's flag never retires a question for everyone, review SEC-13):
+-- 'keep' with the slides that show the key is right (a citation is
+-- required), or 'retire' it for good. Never while a live quiz holds the key.
+-- The flags before the fix stop counting; the row says who, when and why.
+create or replace function public.study_question_fix(p_question uuid, p_verdict text, p_slides int[], p_note text default '')
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  q    public.study_questions;
+  have int[];
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into q from public.study_questions x where x.id = p_question for update;
+  if not found or not public.study_is_member(q.group_id) then raise exception 'question not found'; end if;
+  if coalesce(p_verdict, '') not in ('keep', 'retire') then raise exception 'bad verdict'; end if;
+  if q.hidden_at is null then raise exception 'not flagged'; end if;                      -- review SEC-13: two members' flags
+  if exists (select 1 from public.study_question_keys k where k.question_id = p_question and k.held_until > now()) then
+    raise exception 'in quiz';                                                            -- review SEC-2
+  end if;
+  if char_length(coalesce(p_note, '')) > 300 then raise exception 'too long'; end if;
+  select coalesce(array_agg((s ->> 'n')::int), '{}') into have
+    from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = coalesce(q.lecture_id, q.ref_lecture);
+  if p_verdict = 'keep' and (cardinality(coalesce(p_slides, '{}')) not between 1 and 6 or not (p_slides <@ have)) then
+    raise exception 'bad source';
+  end if;
+  update public.study_questions x
+     set hidden_at = null, fixed_by = auth.uid(), fixed_at = now(),
+         fix_slides = coalesce(p_slides, '{}'), fix_note = btrim(coalesce(p_note, '')),
+         retired_at = case when p_verdict = 'retire' then now() else x.retired_at end,
+         retired_by = case when p_verdict = 'retire' then auth.uid() else x.retired_by end,
+         retire_note = case when p_verdict = 'retire' then left(btrim(coalesce(p_note, '')), 300) else x.retire_note end
+   where x.id = p_question;
+end;
+$$;
+
+-- The fix sheet ("לבדוק מול השקף"): the key, explanations and flags of a
+-- HIDDEN question (two different members' counting flags), for any member of
+-- its group. The one place a key is shown before an answer: a hidden question
+-- is out of practice, quizzes, the meeting and Today while it waits
+-- (review F-6), and checking it needs the key. One's own flag of any reason
+-- opens nothing, and a key a live quiz holds stays held (review SEC-2).
+create or replace function public.study_question_for_fix(p_question uuid)
+returns table (answer int, explanations text[], takeaway text, whens text[], hidden boolean, flags jsonb)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare q public.study_questions;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into q from public.study_questions x where x.id = p_question;
+  if not found or not public.study_is_member(q.group_id) then raise exception 'question not found'; end if;
+  if q.hidden_at is null then raise exception 'not flagged'; end if;                      -- review SEC-2: two members' flags
+  if exists (select 1 from public.study_question_keys k where k.question_id = p_question and k.held_until > now()) then
+    raise exception 'in quiz';                                                            -- review SEC-2: the quiz's hold
+  end if;
+  return query
+  select k.answer::int, k.explanations, k.takeaway, k.whens, q.hidden_at is not null,
+         coalesce((select jsonb_agg(jsonb_build_object('reason', f.reason, 'note', f.note, 'at', f.created_at) order by f.created_at)
+                     from public.study_question_flags f where f.question_id = p_question), '[]'::jsonb)
+    from public.study_question_keys k where k.question_id = p_question;
+end;
+$$;
+
+-- ── P4: another wording ──
+-- A question is one of "הטעויות שלי" until, on a LATER study day than its
+-- last wrong answer, the caller answers it right, or answers right another
+-- question on the same paragraph (the same fact in another wording).
+create or replace function public.study_open_mistakes(p_group uuid)
+returns table (question_id uuid, wrong_at timestamptz)
+language sql stable set search_path = public as $$
+  with mine as (
+    select a.question_id, a.correct, a.answered_at,
+           ((a.answered_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date as day
+      from public.study_answers a
+     where a.user_id = auth.uid()
+  ), wrong as (
+    select m.question_id, max(m.answered_at) as wrong_at, max(m.day) as wrong_day
+      from mine m where not m.correct group by m.question_id
+  )
+  select w.question_id, w.wrong_at
+    from wrong w
+    join public.study_questions q on q.id = w.question_id
+   where q.group_id = p_group and q.retired_at is null and q.hidden_at is null
+     and not exists (select 1 from mine r where r.question_id = w.question_id and r.correct and r.day > w.wrong_day)
+     and not exists (select 1 from mine r join public.study_questions s on s.id = r.question_id
+                      where r.correct and r.day > w.wrong_day and q.anchor is not null and s.id <> q.id
+                        and s.lecture_id = q.lecture_id and s.part_idx = q.part_idx and s.anchor = q.anchor);
+$$;
+
+-- What to ask instead, for each open mistake from an earlier study day: a
+-- question on the same paragraph the caller has not answered right since the
+-- miss (the least recently seen), else a card on that paragraph, else the
+-- question itself. $0: the bank and the deck already hold the wordings.
+create or replace function public.study_my_rewordings(p_group uuid, p_now timestamptz default now())
+returns table (question_id uuid, wrong_at timestamptz, ask_kind text, ask_question uuid, ask_card uuid)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  return query
+  with o as (
+    select m.question_id, m.wrong_at, q.lecture_id, q.part_idx, q.anchor
+      from public.study_open_mistakes(p_group) m join public.study_questions q on q.id = m.question_id
+     where public.study_day(m.wrong_at) < public.study_day(p_now)
+  )
+  select o.question_id, o.wrong_at,
+         case when s.id is not null then 'question' when c.id is not null then 'card' else 'same' end,
+         coalesce(s.id, case when c.id is null then o.question_id end), c.id
+    from o
+    left join lateral (
+      select q2.id from public.study_questions q2
+       where o.anchor is not null and q2.lecture_id = o.lecture_id and q2.part_idx = o.part_idx and q2.anchor = o.anchor
+         and q2.id <> o.question_id and q2.retired_at is null and q2.hidden_at is null and q2.stale_at is null and q2.has_key
+         and not exists (select 1 from public.study_answers a where a.user_id = auth.uid() and a.question_id = q2.id
+                           and a.correct and a.answered_at > o.wrong_at)
+       order by (select max(a.answered_at) from public.study_answers a where a.user_id = auth.uid() and a.question_id = q2.id) nulls first,
+                q2.created_at
+       limit 1) s on true
+    left join lateral (
+      select cd.id from public.study_cards cd
+       where s.id is null and o.anchor is not null and cd.lecture_id = o.lecture_id and cd.part_idx = o.part_idx
+         and (to_jsonb(cd) ->> 'anchor')::int = o.anchor and cd.deleted_at is null
+         and (to_jsonb(cd) ->> 'stale_at') is null
+       order by cd.created_at limit 1) c on to_regclass('public.study_cards') is not null
+   order by o.wrong_at;
+end;
+$$;
+
+-- ── Q12: the pairs the caller confuses (her own wrong answers whose chosen
+--    option and key both carry a tag), newest last 60 days, most often first.
+create or replace function public.study_my_confusions(p_group uuid, p_now timestamptz default now())
+returns table (right_tag text, chosen_tag text, times int, last_at timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  return query
+  select q.option_tags[k.answer + 1], q.option_tags[a.choice + 1], count(*)::int, max(a.answered_at)
+    from public.study_answers a
+    join public.study_questions q on q.id = a.question_id and q.group_id = p_group
+    join public.study_question_keys k on k.question_id = q.id
+   where a.user_id = auth.uid() and not a.correct and a.choice is not null
+     and a.answered_at > p_now - interval '60 days' and a.answered_at <= p_now
+     and cardinality(q.option_tags) = cardinality(q.options)
+     and coalesce(q.option_tags[k.answer + 1], '') <> '' and coalesce(q.option_tags[a.choice + 1], '') <> ''
+     and lower(q.option_tags[k.answer + 1]) <> lower(q.option_tags[a.choice + 1])
+   group by 1, 2
+   order by 3 desc, 4 desc
+   limit 20;
+end;
+$$;
+
+revoke all on function public.study_question_round(uuid, text), public.study_question_claim(uuid, text),
+  public.study_save_question(uuid, uuid, jsonb, text),
+  public.study_question_finish(uuid, text, int, text, numeric, text, text, int),
+  public.study_answer_question(uuid, int, text, int, int), public.study_question_whens(uuid[]),
+  public.study_question_fix(uuid, text, int[], text), public.study_question_for_fix(uuid), public.study_open_mistakes(uuid),
+  public.study_my_rewordings(uuid, timestamptz), public.study_my_confusions(uuid, timestamptz)
+  from public, anon;
+-- The server-only ones need the key inside; members reach them through the ops,
+-- the worker only through section B's functions (no anon grant here).
+grant execute on function public.study_question_round(uuid, text), public.study_question_claim(uuid, text),
+  public.study_save_question(uuid, uuid, jsonb, text),
+  public.study_question_finish(uuid, text, int, text, numeric, text, text, int),
+  public.study_answer_question(uuid, int, text, int, int), public.study_question_whens(uuid[]),
+  public.study_question_fix(uuid, text, int[], text), public.study_question_for_fix(uuid), public.study_open_mistakes(uuid),
+  public.study_my_rewordings(uuid, timestamptz), public.study_my_confusions(uuid, timestamptz)
+  to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('Q', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Q, practice 2.0 · POINTS TO KNOW, REQUESTS WITH OPTIONS, DRAFTS
+--  REVIEWED BEFORE THE BANK, THE BLIND SOLVER'S VERDICT, THE SESSION
+--  BUILDER'S COUNTS   (package Q; docs/study/proposal/practice-2/DECISIONS.md,
+--  the API in docs/study/practice-2-api.md)
+--  Appended at the END of section Q, after Q's end, inside its markers. Q
+--  stays at version 2 (registered again below). Re-runnable, and safe on a
+--  database at release 1 (F, Q, C and K at version 1): nothing here changes
+--  what release 1's app reads. A question waiting for review is a draft, in
+--  its own table: never in study_questions, so never in a picker, a count,
+--  a quiz or release 1's lists, until a member keeps it.
+--
+--  P2-1 Points to know (study_points): read once per lecture for the whole
+--       group from the summary, part by part, each with its kind, its
+--       paragraph (anchor and quote), its slides, a red-flag mark and a
+--       weight. A part's points are current while its Markdown is the text
+--       they were read from (md5): a rewrite or a correction makes them
+--       stale, and the next read keeps the ids of the points that stayed.
+--  P2-2 A request (study_question_requests): a member's options (level,
+--       count, parts, styles, difficulty, the style read back from an
+--       example, the focus line), planned by the server into batches of at
+--       most 5 questions, each with the points it must cover and the style of
+--       each of its questions (study_question_batches gains request_id, seq,
+--       points and styles; a part may have several batches in a round).
+--  P2-3 Drafts (study_question_drafts): what a request's batches write,
+--       visible to the group with their public fields; the key, the
+--       explanations, "מתי כן" and the blind solver's answer are hidden
+--       (study_question_draft_keys: no policy, no grant). The solver's
+--       verdict is check_state; a draft it got wrong is rewritten by the
+--       server (bounded) or rejected. A member keeps, keeps all, removes, or
+--       asks the server to reword one; only a kept draft enters the bank.
+--  P2-4 The session builder's counts (study_session_counts): per part, style,
+--       state (new, wrong, right) and the caller's own flag, private.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ── P2-1. Points to know ──
+-- One row per part of the summary: which text its points were read from
+-- (src_md5), and the read in progress (a lease, as the question batches').
+create table if not exists public.study_point_parts (
+  lecture_id  uuid          not null,
+  part_idx    int           not null check (part_idx >= 0),
+  src_md5     text          not null default '' check (src_md5 ~ '^([0-9a-f]{32})?$'),   -- '' = never read
+  try_md5     text          not null default '' check (try_md5 ~ '^([0-9a-f]{32})?$'),   -- the text of the last tries
+  status      text          not null default 'pending' check (status in ('pending', 'writing', 'ready', 'failed')),
+  attempts    int           not null default 0 check (attempts >= 0),
+  lease_until timestamptz,
+  error       text          check (char_length(error) <= 200),
+  model       text          check (char_length(model) <= 80),
+  cost_usd    numeric(10,4) not null default 0 check (cost_usd >= 0),
+  updated_at  timestamptz   not null default now(),
+  primary key (lecture_id, part_idx),
+  foreign key (lecture_id, part_idx) references public.study_sections (lecture_id, idx) on delete cascade
+);
+
+-- kind: drug (which drug, of which class, the drug of choice), mechanism,
+-- indication, adverse (an adverse effect), contra (a contraindication or a
+-- precaution), number (a number worth remembering). weight: 3 core, 2
+-- standard, 1 detail. n orders the part's points (the paragraph order).
+create table if not exists public.study_points (
+  id         uuid        primary key default gen_random_uuid(),
+  lecture_id uuid        not null,
+  part_idx   int         not null,
+  n          int         not null check (n between 1 and 999),
+  kind       text        not null check (kind in ('drug', 'mechanism', 'indication', 'adverse', 'contra', 'number')),
+  subject    text        not null default '' check (char_length(subject) <= 120),
+  text       text        not null check (char_length(btrim(text)) between 3 and 300),
+  anchor     int         check (anchor between 0 and 9999),
+  quote      text        not null default '' check (char_length(quote) <= 200),
+  slides     int[]       not null check (cardinality(slides) between 1 and 20),
+  red_flag   boolean     not null default false,
+  weight     smallint    not null default 2 check (weight between 1 and 3),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  foreign key (lecture_id, part_idx) references public.study_point_parts (lecture_id, part_idx) on delete cascade
+);
+create index if not exists study_points_part on public.study_points (lecture_id, part_idx, n);
+
+-- Claims the parts whose points are not current, for one reader (op
+-- "questions", action "points": the key and a member's token). Parts whose
+-- summary is not written yet are skipped; no written part at all is 'no
+-- summary' or 'summary not ready'; a read in progress on another phone is
+-- 'busy'; a part read three times on the same text without success waits for
+-- a new text ('gave up', when nothing else is stale). No rows: every point is
+-- current, and nothing is spent.
+create or replace function public.study_points_claim(p_lecture uuid, p_key text default null)
+returns table (part_idx int, heading text, slide_from int, slide_to int, md5 text)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  g uuid := public.study_lecture_group(p_lecture);
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not public.study_is_member(g)
+     or exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  if not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture) then raise exception 'no summary'; end if;
+  if not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.status = 'ready') then
+    raise exception 'summary not ready';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_points:' || p_lecture::text));
+  insert into public.study_point_parts (lecture_id, part_idx)
+  select s.lecture_id, s.idx from public.study_sections s where s.lecture_id = p_lecture
+  on conflict do nothing;
+  if exists (select 1 from public.study_point_parts pp
+              where pp.lecture_id = p_lecture and pp.status = 'writing' and pp.lease_until > now()) then
+    raise exception 'busy';
+  end if;
+  if exists (select 1 from public.study_point_parts pp join public.study_sections s on s.lecture_id = pp.lecture_id and s.idx = pp.part_idx
+              where pp.lecture_id = p_lecture and s.status = 'ready' and pp.src_md5 <> md5(s.markdown))
+     and not exists (select 1 from public.study_point_parts pp join public.study_sections s on s.lecture_id = pp.lecture_id and s.idx = pp.part_idx
+                      where pp.lecture_id = p_lecture and s.status = 'ready' and pp.src_md5 <> md5(s.markdown)
+                        and not (pp.try_md5 = md5(s.markdown) and pp.attempts >= 3)) then
+    raise exception 'gave up';
+  end if;
+  return query
+  with s as (
+    select x.idx, x.title, x.slide_from, x.slide_to, md5(x.markdown) as h
+      from public.study_sections x where x.lecture_id = p_lecture and x.status = 'ready'
+  ), claimed as (
+    update public.study_point_parts pp
+       set status = 'writing', lease_until = now() + interval '6 minutes',
+           attempts = case when pp.try_md5 = s.h then pp.attempts + 1 else 1 end,
+           try_md5 = s.h, error = null, updated_at = now()
+      from s
+     where pp.lecture_id = p_lecture and pp.part_idx = s.idx and pp.src_md5 <> s.h
+       and not (pp.try_md5 = s.h and pp.attempts >= 3)
+    returning pp.part_idx as idx, s.title, s.slide_from, s.slide_to, s.h
+  )
+  select c.idx, left(c.title, 200), c.slide_from, c.slide_to, c.h from claimed c order by c.idx;
+end;
+$$;
+
+-- Saves a claimed part's points (the op, with the key): the part's points
+-- become exactly these, in this order. A point that names the id of one of
+-- the part's points keeps that row (and so its coverage by questions);
+-- the part's other points go. p_md5 is the text the claim gave.
+--   p_points: [{ id?, kind, subject, text, anchor, quote, slides[], red_flag, weight }]
+create or replace function public.study_points_save(p_lecture uuid, p_part int, p_md5 text, p_points jsonb,
+  p_model text default null, p_cost numeric default 0, p_key text default null)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  pp   public.study_point_parts;
+  have int[];
+  x    jsonb;
+  sl   int[];
+  anc  int;
+  pid  uuid;
+  keep uuid[] := '{}';
+  i    int := 0;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  -- The op (the key and a member of the lecture's group), or the worker alone
+  -- (the key, no member): section B's read ahead saves the parts it claimed.
+  if not study_private.may_bank(p_lecture, p_key) or public.study_lecture_group(p_lecture) is null then raise exception 'lecture not found'; end if;
+  select * into pp from public.study_point_parts y where y.lecture_id = p_lecture and y.part_idx = p_part for update;
+  if not found or pp.status <> 'writing' then raise exception 'part not writing'; end if;
+  if coalesce(p_md5, '') !~ '^[0-9a-f]{32}$' or p_md5 <> pp.try_md5 then raise exception 'bad points'; end if;
+  if jsonb_typeof(p_points) is distinct from 'array' or jsonb_array_length(p_points) > 60 then raise exception 'bad points'; end if;
+  select coalesce(array_agg((s ->> 'n')::int), '{}') into have
+    from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = p_lecture;
+  for x in select e from jsonb_array_elements(p_points) e loop
+    i := i + 1;
+    if jsonb_typeof(x) is distinct from 'object' or jsonb_typeof(x -> 'slides') is distinct from 'array'
+       or exists (select 1 from jsonb_array_elements_text(x -> 'slides') v where v !~ '^[0-9]{1,4}$') then
+      raise exception 'bad points';
+    end if;
+    sl := array(select v::int from jsonb_array_elements_text(x -> 'slides') v);
+    if coalesce(x ->> 'kind', '') not in ('drug', 'mechanism', 'indication', 'adverse', 'contra', 'number')
+       or char_length(btrim(coalesce(x ->> 'text', ''))) not between 3 and 300
+       or char_length(btrim(coalesce(x ->> 'subject', ''))) > 120
+       or cardinality(sl) not between 1 and 20 or not (sl <@ have)
+       or coalesce(x ->> 'weight', '2') not in ('1', '2', '3')
+       or coalesce(x ->> 'red_flag', 'false') not in ('true', 'false') then
+      raise exception 'bad points';
+    end if;
+    anc := case when jsonb_typeof(x -> 'anchor') = 'number' and (x ->> 'anchor') ~ '^[0-9]{1,4}$' then (x ->> 'anchor')::int end;
+    pid := case when coalesce(x ->> 'id', '') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (x ->> 'id')::uuid end;
+    if pid is not null and not (pid = any (keep))
+       and exists (select 1 from public.study_points p where p.id = pid and p.lecture_id = p_lecture and p.part_idx = p_part) then
+      update public.study_points p
+         set n = i, kind = x ->> 'kind', subject = btrim(coalesce(x ->> 'subject', '')), text = btrim(x ->> 'text'),
+             anchor = anc, quote = case when anc is null then '' else left(coalesce(x ->> 'quote', ''), 200) end,
+             slides = sl, red_flag = coalesce((x ->> 'red_flag')::boolean, false), weight = coalesce((x ->> 'weight')::smallint, 2),
+             updated_at = now()
+       where p.id = pid;
+    else
+      insert into public.study_points (lecture_id, part_idx, n, kind, subject, text, anchor, quote, slides, red_flag, weight)
+      values (p_lecture, p_part, i, x ->> 'kind', btrim(coalesce(x ->> 'subject', '')), btrim(x ->> 'text'), anc,
+              case when anc is null then '' else left(coalesce(x ->> 'quote', ''), 200) end, sl,
+              coalesce((x ->> 'red_flag')::boolean, false), coalesce((x ->> 'weight')::smallint, 2))
+      returning id into pid;
+    end if;
+    keep := keep || pid;
+  end loop;
+  delete from public.study_points p where p.lecture_id = p_lecture and p.part_idx = p_part and not (p.id = any (keep));
+  update public.study_point_parts y
+     set status = 'ready', src_md5 = p_md5, lease_until = null, error = null, attempts = 0,
+         model = coalesce(left(p_model, 80), y.model), cost_usd = y.cost_usd + greatest(0, coalesce(p_cost, 0)), updated_at = now()
+   where y.lecture_id = p_lecture and y.part_idx = p_part;
+  return i;
+end;
+$$;
+
+-- A read that did not save (a model error, a refusal, the deadline): the
+-- claimed parts fail with the reason and free their lease; the call's cost
+-- is shared among them. p_refused: the model was never called for these
+-- parts (a refused reservation, 402/429; parts the deadline never reached),
+-- so the claim's try is given back: only paid tries count toward 'gave up'.
+drop function if exists public.study_points_fail(uuid, int[], text, numeric, text);
+create or replace function public.study_points_fail(p_lecture uuid, p_parts int[], p_error text, p_cost numeric default 0,
+  p_key text default null, p_refused boolean default false)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  -- The op, or the worker alone (section B's read ahead), as study_points_save.
+  if not study_private.may_bank(p_lecture, p_key) or public.study_lecture_group(p_lecture) is null then raise exception 'lecture not found'; end if;
+  update public.study_point_parts y
+     set status = 'failed', lease_until = null, error = left(coalesce(nullif(p_error, ''), 'failed'), 200),
+         attempts = case when coalesce(p_refused, false) then greatest(0, y.attempts - 1) else y.attempts end,
+         cost_usd = y.cost_usd + greatest(0, coalesce(p_cost, 0)) / greatest(1, cardinality(p_parts)), updated_at = now()
+   where y.lecture_id = p_lecture and y.part_idx = any (coalesce(p_parts, '{}')) and y.status = 'writing';
+end;
+$$;
+
+-- The setup screen's numbers ("46 נקודות שצריך לדעת", each part's count),
+-- for any member, before anything is created: per part of the summary, its
+-- points and red flags, whether they are current (read from the part's
+-- text as it is now), and a read in progress (busy) or its last failure.
+create or replace function public.study_points_state(p_lecture uuid)
+returns table (part_idx int, title text, slide_from int, slide_to int, summary text, points int, red_flags int,
+               status text, current boolean, busy boolean, error text)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false)
+     or exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  return query
+  select s.idx, s.title, s.slide_from, s.slide_to, s.status,
+         (select count(*)::int from public.study_points p where p.lecture_id = p_lecture and p.part_idx = s.idx),
+         (select count(*)::int from public.study_points p where p.lecture_id = p_lecture and p.part_idx = s.idx and p.red_flag),
+         coalesce(pp.status, 'pending'),
+         coalesce(s.status = 'ready' and pp.src_md5 = md5(s.markdown), false),
+         coalesce(pp.status = 'writing' and pp.lease_until > now(), false),
+         pp.error
+    from public.study_sections s
+    left join public.study_point_parts pp on pp.lecture_id = s.lecture_id and pp.part_idx = s.idx
+   where s.lecture_id = p_lecture
+   order by s.idx;
+end;
+$$;
+
+-- ── P2-2. Requests: a member's options, planned into batches ──
+create table if not exists public.study_question_requests (
+  id            uuid        primary key default gen_random_uuid(),
+  group_id      uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id    uuid        not null references public.study_lectures (id) on delete cascade,
+  round         int         not null check (round between 1 and 50),
+  level         text        not null check (level in ('focused', 'full', 'deep', 'custom')),
+  count         int         not null check (count between 1 and 40),
+  parts         int[]       not null check (cardinality(parts) between 1 and 60),
+  styles        text[]      not null check (cardinality(styles) between 1 and 7
+                              and styles <@ array['case', 'mechanism', 'drug_choice', 'adverse_contra', 'compare', 'not_true', 'blank_table']),
+  difficulty    text        not null check (difficulty in ('easy', 'exam', 'hard')),
+  style_note    text        not null default '' check (char_length(style_note) <= 400),     -- "ככה השאלות ייכתבו: …"
+  style_example text        not null default '' check (char_length(style_example) <= 2000), -- the example as text
+  focus         text        not null default '' check (char_length(focus) <= 200),
+  points        uuid[]      not null default '{}',                                          -- the points the request covers
+  created_by    uuid        default auth.uid() references auth.users (id) on delete set null,
+  created_at    timestamptz not null default now(),
+  unique (lecture_id, round)
+);
+
+alter table public.study_question_batches
+  add column if not exists request_id uuid references public.study_question_requests (id) on delete cascade,
+  add column if not exists seq        int    not null default 0 check (seq between 0 and 99),
+  add column if not exists points     uuid[] not null default '{}',   -- the points the batch's questions must cover
+  add column if not exists styles     text[] not null default '{}';   -- the style of each question it writes
+create index if not exists study_question_batches_request on public.study_question_batches (request_id) where request_id is not null;
+-- A part may have several batches in one round (more than 5 questions): one per seq.
+do $$
+begin
+  if exists (select 1 from pg_constraint where conname = 'study_question_batches_lecture_id_round_part_idx_key'
+               and conrelid = 'public.study_question_batches'::regclass) then
+    alter table public.study_question_batches drop constraint study_question_batches_lecture_id_round_part_idx_key;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'study_question_batches_part_seq'
+                   and conrelid = 'public.study_question_batches'::regclass) then
+    alter table public.study_question_batches add constraint study_question_batches_part_seq unique (lecture_id, round, part_idx, seq);
+  end if;
+end $$;
+
+alter table public.study_questions
+  add column if not exists style      text   check (style is null or style in ('case', 'mechanism', 'drug_choice', 'adverse_contra',
+                                                                               'compare', 'not_true', 'blank_table')),
+  add column if not exists points     uuid[] not null default '{}',   -- the points it covers (study_points; no foreign key)
+  add column if not exists request_id uuid references public.study_question_requests (id) on delete set null;
+
+-- Creates a request and its batches (the op, with the key, after it planned
+-- them from the lecture's current points). p_request: { level, count, parts[],
+-- styles[], difficulty, style_note, style_example, focus }; p_batches:
+-- [{ part_idx, seq, wanted (1-5), points[] (the part's), styles[] (one per
+-- question, of the request's) }], their wanted adding up to count. The round
+-- is the lecture's next. A lecture keeps at most 150 active questions and
+-- 400 drafts ever ('enough questions').
+create or replace function public.study_request_create(p_lecture uuid, p_request jsonb, p_batches jsonb, p_key text default null)
+returns table (request_id uuid, round int, batch_id uuid, part_idx int, seq int, wanted int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  g      uuid := public.study_lecture_group(p_lecture);
+  sty    constant text[] := array['case', 'mechanism', 'drug_choice', 'adverse_contra', 'compare', 'not_true', 'blank_table'];
+  total  int;
+  parts  int[];
+  styles text[];
+  r      int;
+  rid    uuid;
+  b      jsonb;
+  bp     uuid[];
+  bs     text[];
+  bw     int;
+  bq     int;
+  sec    public.study_sections;
+  pts    uuid[] := '{}';
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not public.study_is_member(g)
+     or exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  if jsonb_typeof(p_request) is distinct from 'object' or jsonb_typeof(p_request -> 'parts') is distinct from 'array'
+     or jsonb_typeof(p_request -> 'styles') is distinct from 'array' or coalesce(p_request ->> 'count', '') !~ '^[0-9]{1,2}$'
+     or exists (select 1 from jsonb_array_elements_text(p_request -> 'parts') v where v !~ '^[0-9]{1,3}$')
+     or jsonb_typeof(p_batches) is distinct from 'array' or jsonb_array_length(p_batches) not between 1 and 40 then
+    raise exception 'bad request';
+  end if;
+  total := (p_request ->> 'count')::int;
+  parts := array(select distinct v::int from jsonb_array_elements_text(p_request -> 'parts') v);
+  styles := array(select distinct v from jsonb_array_elements_text(p_request -> 'styles') v);
+  if coalesce(p_request ->> 'level', '') not in ('focused', 'full', 'deep', 'custom')
+     or coalesce(p_request ->> 'difficulty', '') not in ('easy', 'exam', 'hard')
+     or total not between 1 and 40 or cardinality(parts) not between 1 and 60
+     or cardinality(styles) not between 1 and 7 or not (styles <@ sty)
+     or char_length(coalesce(p_request ->> 'style_note', '')) > 400
+     or char_length(coalesce(p_request ->> 'style_example', '')) > 2000
+     or char_length(btrim(coalesce(p_request ->> 'focus', ''))) > 200 then
+    raise exception 'bad request';
+  end if;
+  if exists (select 1 from unnest(parts) p
+              where not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.idx = p)) then
+    raise exception 'bad parts';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_question_round:' || p_lecture::text));
+  if (select count(*) from public.study_questions q where q.lecture_id = p_lecture and q.retired_at is null) >= 150
+     or (select count(*) from public.study_question_drafts d where d.lecture_id = p_lecture) + total > 400 then
+    raise exception 'enough questions';
+  end if;
+  select coalesce(max(x.round), 0) + 1 into r from public.study_question_batches x where x.lecture_id = p_lecture;
+  if r > 50 then raise exception 'enough questions'; end if;
+  insert into public.study_question_requests (group_id, lecture_id, round, level, count, parts, styles, difficulty,
+                                              style_note, style_example, focus, created_by)
+  values (g, p_lecture, r, p_request ->> 'level', total, parts, styles, p_request ->> 'difficulty',
+          coalesce(p_request ->> 'style_note', ''), coalesce(p_request ->> 'style_example', ''),
+          btrim(coalesce(p_request ->> 'focus', '')), auth.uid())
+  returning id into rid;
+  bq := 0;
+  for b in select e from jsonb_array_elements(p_batches) e loop
+    if jsonb_typeof(b) is distinct from 'object' or coalesce(b ->> 'wanted', '') !~ '^[0-9]$' or coalesce(b ->> 'seq', '') !~ '^[0-9]{1,2}$'
+       or coalesce(b ->> 'part_idx', '') !~ '^[0-9]{1,3}$'
+       or jsonb_typeof(b -> 'points') is distinct from 'array' or jsonb_typeof(b -> 'styles') is distinct from 'array'
+       or exists (select 1 from jsonb_array_elements_text(b -> 'points') v
+                   where v !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') then
+      raise exception 'bad request';
+    end if;
+    sec := null;
+    select * into sec from public.study_sections s where s.lecture_id = p_lecture and s.idx = (b ->> 'part_idx')::int;
+    bw := (b ->> 'wanted')::int;
+    bp := array(select v::uuid from jsonb_array_elements_text(b -> 'points') v);
+    bs := array(select v from jsonb_array_elements_text(b -> 'styles') v);
+    if sec.idx is null or not (sec.idx = any (parts)) or bw not between 1 and 5
+       or cardinality(bs) <> bw or not (bs <@ styles)
+       or exists (select 1 from unnest(bp) p
+                   where not exists (select 1 from public.study_points y where y.id = p and y.lecture_id = p_lecture and y.part_idx = sec.idx)) then
+      raise exception 'bad request';
+    end if;
+    insert into public.study_question_batches (lecture_id, round, part_idx, seq, heading, slide_from, slide_to, wanted,
+                                               request_id, points, styles)
+    values (p_lecture, r, sec.idx, (b ->> 'seq')::int, left(sec.title, 200), sec.slide_from, sec.slide_to, bw, rid, bp, bs);
+    bq := bq + bw;
+    pts := pts || bp;
+  end loop;
+  if bq <> total then raise exception 'bad request'; end if;
+  update public.study_question_requests x set points = array(select distinct u from unnest(pts) u) where x.id = rid;
+  return query
+  select rid, r, x.id, x.part_idx, x.seq, x.wanted
+    from public.study_question_batches x where x.request_id = rid order by x.part_idx, x.seq;
+end;
+$$;
+
+-- ── P2-3. Drafts: written for review, kept into the bank ──
+create table if not exists public.study_question_drafts (
+  id          uuid        primary key default gen_random_uuid(),
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id  uuid        not null references public.study_lectures (id) on delete cascade,
+  request_id  uuid        not null references public.study_question_requests (id) on delete cascade,
+  batch_id    uuid        references public.study_question_batches (id) on delete set null,
+  part_idx    int         not null check (part_idx >= 0),
+  style       text        not null check (style in ('case', 'mechanism', 'drug_choice', 'adverse_contra', 'compare', 'not_true', 'blank_table')),
+  points      uuid[]      not null default '{}',
+  kind        text        not null check (kind in ('mcq', 'case')),
+  difficulty  smallint    not null default 2 check (difficulty between 1 and 3),
+  vignette    text        not null default '' check (char_length(vignette) <= 2500),
+  question    text        not null check (char_length(btrim(question)) between 5 and 600),
+  options     text[]      not null check (cardinality(options) between 2 and 6),
+  slides      int[]       not null default '{}',
+  topic       text        not null default '' check (char_length(topic) <= 120),
+  aspect      text        not null default 'other' check (aspect in (
+                'mechanism', 'uses', 'pk', 'adverse', 'contra', 'interactions', 'resistance', 'dosing',
+                'classification', 'epidemiology', 'lifecycle', 'pathogenesis', 'clinical', 'diagnosis',
+                'treatment', 'prevention', 'other')),
+  anchor      int         check (anchor between 0 and 9999),
+  quote       text        not null default '' check (char_length(quote) <= 200),
+  part_gen    int         check (part_gen >= 0),
+  teaser      text        not null default '' check (char_length(teaser) <= 120),
+  figure      text        not null default '' check (figure = '' or figure ~ '^fig:[0-9]{1,4}-[0-9]{1,3}$'),
+  option_tags text[]      not null default '{}',
+  -- pending: waiting for a member; kept: in the bank (question_id); removed: a
+  -- member took it out; replaced: reworded (the new draft names it in
+  -- replaces); rejected: the blind solver got it wrong after the rewrite.
+  status      text        not null default 'pending' check (status in ('pending', 'kept', 'removed', 'replaced', 'rejected')),
+  -- the blind solver: checking (not yet), ok (it chose the key, and no other
+  -- option was defensible), failed (it did not), unchecked (it could not run).
+  check_state text        not null default 'checking' check (check_state in ('checking', 'ok', 'failed', 'unchecked')),
+  rewrites    int         not null default 0 check (rewrites between 0 and 20),   -- versions before this one
+  replaces    uuid        references public.study_question_drafts (id) on delete set null,
+  lease_until timestamptz,                                                      -- a reword in progress
+  question_id uuid        references public.study_questions (id) on delete set null,
+  model       text        check (char_length(model) <= 80),
+  created_by  uuid        references auth.users (id) on delete set null,       -- who asked for the request
+  decided_by  uuid        references auth.users (id) on delete set null,
+  decided_at  timestamptz,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists study_question_drafts_request on public.study_question_drafts (request_id, part_idx, created_at);
+create index if not exists study_question_drafts_lecture on public.study_question_drafts (lecture_id, status);
+
+-- The draft's key: hidden, as study_question_keys. No policy and no grant.
+create table if not exists public.study_question_draft_keys (
+  draft_id         uuid     primary key references public.study_question_drafts (id) on delete cascade,
+  answer           smallint not null check (answer >= 0),
+  explanations     text[]   not null,
+  takeaway         text     not null default '' check (char_length(takeaway) <= 600),
+  whens            text[]   not null default '{}',
+  solver_choice    smallint,                -- what the blind solver chose (null: not asked)
+  solver_ambiguous boolean
+);
+
+-- One draft from the writer's item (the op's checks already ran): the same
+-- rules as study_save_question, the style one of the request's, the points
+-- the batch's. Shared by the save and the rewrite.
+create or replace function study_private.draft_insert(b public.study_question_batches, rq public.study_question_requests,
+  p_q jsonb, p_style text, p_replaces uuid, p_rewrites int)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  opts text[] := array(select jsonb_array_elements_text(coalesce(p_q -> 'options', '[]'::jsonb)));
+  expl text[] := array(select jsonb_array_elements_text(coalesce(p_q -> 'explanations', '[]'::jsonb)));
+  whn  text[] := array(select left(x, 300) from jsonb_array_elements_text(coalesce(p_q -> 'whens', '[]'::jsonb)) x);
+  tags text[] := array(select left(btrim(x), 80) from jsonb_array_elements_text(coalesce(p_q -> 'option_tags', '[]'::jsonb)) x);
+  sl   int[];
+  pts  uuid[];
+  ans  int    := case when coalesce(p_q ->> 'answer', '') ~ '^[0-5]$' then (p_q ->> 'answer')::int end;
+  para int    := case when jsonb_typeof(p_q -> 'para') = 'number' and (p_q ->> 'para') ~ '^[0-9]{1,4}$' then (p_q ->> 'para')::int end;
+  fig  text   := coalesce(p_q ->> 'figure', '');
+  sty  text   := coalesce(p_style, p_q ->> 'style', '');
+  have int[];
+  pgen int;
+  did  uuid;
+begin
+  if exists (select 1 from jsonb_array_elements_text(coalesce(p_q -> 'slides', '[]'::jsonb)) v where v !~ '^[0-9]{1,4}$')
+     or exists (select 1 from jsonb_array_elements_text(coalesce(p_q -> 'points', '[]'::jsonb)) v
+                 where v !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') then
+    raise exception 'bad points';
+  end if;
+  sl := array(select v::int from jsonb_array_elements_text(coalesce(p_q -> 'slides', '[]'::jsonb)) v);
+  pts := array(select v::uuid from jsonb_array_elements_text(coalesce(p_q -> 'points', '[]'::jsonb)) v);
+  if coalesce(p_q ->> 'kind', '') not in ('mcq', 'case') then raise exception 'bad kind'; end if;
+  if cardinality(opts) not between 2 and 6 then raise exception 'bad options'; end if;
+  if ans is null or ans >= cardinality(opts) then raise exception 'bad answer'; end if;
+  if cardinality(expl) <> cardinality(opts) then raise exception 'explanations do not match options'; end if;
+  if cardinality(whn) not in (0, cardinality(opts)) then raise exception 'whens do not match options'; end if;
+  if cardinality(tags) not in (0, cardinality(opts)) then raise exception 'tags do not match options'; end if;
+  if not (sty = any (rq.styles)) then raise exception 'bad style'; end if;
+  if not (pts <@ b.points) then raise exception 'bad points'; end if;
+  select coalesce(array_agg((s ->> 'n')::int), '{}') into have
+    from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = b.lecture_id;
+  if cardinality(sl) = 0 or not (sl <@ have) then raise exception 'unknown slide'; end if;
+  if not exists (select 1 from unnest(sl) s where s between b.slide_from and b.slide_to) then raise exception 'outside the part'; end if;
+  select s.gen into pgen from public.study_sections s where s.lecture_id = b.lecture_id and s.idx = b.part_idx;
+  -- A diagram that is not one of this lecture's pictures is dropped (as Q's end's save).
+  if fig <> '' and (fig !~ '^fig:[0-9]{1,4}-[0-9]{1,3}$'
+      or not exists (select 1 from public.study_lectures l, jsonb_array_elements(l.slides) s,
+                            jsonb_array_elements(coalesce(s -> 'figures', '[]'::jsonb)) f
+                      where l.id = b.lecture_id and (s ->> 'n')::int = split_part(substr(fig, 5), '-', 1)::int
+                        and (f ->> 'k')::int = split_part(substr(fig, 5), '-', 2)::int)) then
+    fig := '';
+  end if;
+  insert into public.study_question_drafts (group_id, lecture_id, request_id, batch_id, part_idx, style, points, kind, difficulty,
+                                            vignette, question, options, slides, topic, aspect, anchor, quote, part_gen, teaser,
+                                            figure, option_tags, rewrites, replaces, model, created_by)
+  values (rq.group_id, b.lecture_id, rq.id, b.id, b.part_idx, sty, pts, p_q ->> 'kind',
+          case when coalesce(p_q ->> 'difficulty', '') ~ '^[1-3]$' then (p_q ->> 'difficulty')::int else 2 end,
+          coalesce(p_q ->> 'vignette', ''), p_q ->> 'question', opts, sl, left(coalesce(p_q ->> 'topic', ''), 120),
+          coalesce(p_q ->> 'aspect', 'other'), para,
+          case when para is null then '' else left(coalesce(p_q ->> 'quote', ''), 200) end,
+          case when para is null then null else pgen end,
+          left(btrim(coalesce(p_q ->> 'teaser', '')), 120), fig, tags, coalesce(p_rewrites, 0), p_replaces,
+          left(p_q ->> 'model', 80), rq.created_by)
+  returning id into did;
+  insert into public.study_question_draft_keys (draft_id, answer, explanations, takeaway, whens)
+  values (did, ans, expl, left(coalesce(p_q ->> 'takeaway', ''), 600), whn);
+  return did;
+end;
+$$;
+
+-- Saves one draft of a request's batch (the op, with the key and a member's
+-- token). A release-1 batch (no request) saves through study_save_question.
+create or replace function public.study_draft_save(p_batch uuid, p_q jsonb, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  b   public.study_question_batches;
+  rq  public.study_question_requests;
+  did uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into b from public.study_question_batches x where x.id = p_batch for update;
+  if not found or b.request_id is null or not public.study_is_member(public.study_lecture_group(b.lecture_id))
+     or exists (select 1 from public.study_lectures l where l.id = b.lecture_id and l.deleted_at is not null) then
+    raise exception 'batch not found';
+  end if;
+  if b.status <> 'writing' then raise exception 'batch not writing'; end if;
+  if b.made >= b.wanted then raise exception 'part full'; end if;
+  select * into rq from public.study_question_requests x where x.id = b.request_id;
+  did := study_private.draft_insert(b, rq, p_q, null, null, 0);
+  update public.study_question_batches x set made = x.made + 1, updated_at = now() where x.id = p_batch;
+  return did;
+end;
+$$;
+
+-- The blind solver's answer to a draft (the op, with the key): ok when it
+-- chose the key and called no other option defensible, failed otherwise,
+-- unchecked when it could not run (p_choice null). The database compares
+-- with the key it holds; the answer stays hidden with the key.
+create or replace function public.study_draft_check(p_draft uuid, p_choice int, p_ambiguous boolean, p_key text default null)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare
+  d  public.study_question_drafts;
+  k  public.study_question_draft_keys;
+  st text;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_question_drafts x where x.id = p_draft for update;
+  if not found or not public.study_is_member(d.group_id) then raise exception 'draft not found'; end if;
+  if d.status <> 'pending' then raise exception 'not pending'; end if;
+  select * into k from public.study_question_draft_keys x where x.draft_id = p_draft;
+  st := case when p_choice is null then 'unchecked'
+             when p_choice = k.answer and p_ambiguous is false then 'ok'
+             else 'failed' end;
+  update public.study_question_draft_keys x
+     set solver_choice = case when p_choice between 0 and 9 then p_choice end, solver_ambiguous = p_ambiguous
+   where x.draft_id = p_draft;
+  update public.study_question_drafts x set check_state = st, updated_at = now() where x.id = p_draft;
+  return st;
+end;
+$$;
+
+-- A member's "↻ לנסח מחדש": the op claims the draft for 330 seconds (the
+-- op's whole lifetime, 300 s, and a margin, as the writer's leases) and
+-- reads its key (the writer keeps the fact); a reword in progress on another
+-- phone is 'busy'. A draft may be reworded until it has had 4 versions.
+create or replace function public.study_draft_reword(p_draft uuid, p_key text default null)
+returns table (answer int, explanations text[], takeaway text, whens text[], rewrites int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare d public.study_question_drafts;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_question_drafts x where x.id = p_draft for update;
+  if not found or not public.study_is_member(d.group_id)
+     or exists (select 1 from public.study_lectures l where l.id = d.lecture_id and l.deleted_at is not null) then
+    raise exception 'draft not found';
+  end if;
+  if d.status <> 'pending' then raise exception 'not pending'; end if;
+  if d.lease_until > now() then raise exception 'busy'; end if;
+  if d.rewrites >= 4 then raise exception 'reword limit'; end if;
+  update public.study_question_drafts x set lease_until = now() + interval '330 seconds', updated_at = now() where x.id = p_draft;
+  return query select k.answer::int, k.explanations, k.takeaway, k.whens, d.rewrites
+                 from public.study_question_draft_keys k where k.draft_id = p_draft;
+end;
+$$;
+
+-- A reword that wrote nothing (a model error, a refusal, a rewrite that
+-- failed its checks) frees the draft at once, so keep and remove go on.
+create or replace function public.study_draft_release(p_draft uuid, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_question_drafts x set lease_until = null, updated_at = now()
+   where x.id = p_draft and x.status = 'pending' and public.study_is_member(x.group_id);
+end;
+$$;
+
+-- The new version of a pending draft (the op, with the key): p_auto for the
+-- server's rewrite of a draft the solver got wrong (at most 2 in a draft's
+-- history), else a member's reword (at most 4). The new draft keeps the
+-- request, batch, part and style; the old one is 'replaced'.
+create or replace function public.study_draft_replace(p_draft uuid, p_q jsonb, p_auto boolean default false, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  d   public.study_question_drafts;
+  b   public.study_question_batches;
+  rq  public.study_question_requests;
+  nid uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_question_drafts x where x.id = p_draft for update;
+  if not found or not public.study_is_member(d.group_id) then raise exception 'draft not found'; end if;
+  if d.status <> 'pending' then raise exception 'not pending'; end if;
+  if coalesce(p_auto, false) and (d.check_state <> 'failed' or d.rewrites >= 2) then raise exception 'rewrite limit'; end if;
+  if not coalesce(p_auto, false) and d.rewrites >= 4 then raise exception 'reword limit'; end if;
+  select * into b from public.study_question_batches x where x.id = d.batch_id;
+  if not found then raise exception 'batch not found'; end if;
+  select * into rq from public.study_question_requests x where x.id = d.request_id;
+  nid := study_private.draft_insert(b, rq, p_q, d.style, d.id, d.rewrites + 1);
+  update public.study_question_drafts x set status = 'replaced', lease_until = null, updated_at = now() where x.id = p_draft;
+  return nid;
+end;
+$$;
+
+-- A draft the solver still got wrong after the rewrite (the op, with the
+-- key): rejected, its batch's count goes back down (a later call may write
+-- another), and the batch counts it as the solver's.
+create or replace function public.study_draft_reject(p_draft uuid, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare d public.study_question_drafts;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_question_drafts x where x.id = p_draft for update;
+  if not found or not public.study_is_member(d.group_id) then raise exception 'draft not found'; end if;
+  if d.status <> 'pending' then raise exception 'not pending'; end if;
+  if d.check_state <> 'failed' then raise exception 'not failed'; end if;
+  update public.study_question_drafts x set status = 'rejected', lease_until = null, updated_at = now() where x.id = p_draft;
+  update public.study_question_batches x
+     set made = greatest(0, x.made - 1), solver_rejected = x.solver_rejected + 1, updated_at = now()
+   where x.id = d.batch_id;
+end;
+$$;
+
+-- A kept draft becomes a question of the bank, with its key (no checks
+-- here: the callers' are the rules).
+create or replace function study_private.draft_to_bank(d public.study_question_drafts)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  k   public.study_question_draft_keys;
+  qid uuid;
+begin
+  select * into k from public.study_question_draft_keys x where x.draft_id = d.id;
+  insert into public.study_questions (group_id, lecture_id, batch_id, source, part_idx, kind, difficulty, vignette, question,
+                                      options, slides, topic, aspect, has_key, model, anchor, quote, part_gen, teaser, figure,
+                                      option_tags, style, points, request_id, created_by)
+  values (d.group_id, d.lecture_id, d.batch_id, 'ai', d.part_idx, d.kind, d.difficulty, d.vignette, d.question,
+          d.options, d.slides, d.topic, d.aspect, true, d.model, d.anchor, d.quote, d.part_gen, d.teaser, d.figure,
+          d.option_tags, d.style, d.points, d.request_id, d.created_by)
+  returning id into qid;
+  insert into public.study_question_keys (question_id, answer, explanations, takeaway, whens)
+  values (qid, k.answer, k.explanations, k.takeaway, k.whens);
+  update public.study_question_drafts x
+     set status = 'kept', question_id = qid, decided_by = auth.uid(), decided_at = now(), lease_until = null, updated_at = now()
+   where x.id = d.id;
+  return qid;
+end;
+$$;
+
+-- "✓ להשאיר": any member keeps a pending draft the solver passed (or could
+-- not check), and it enters the group's bank. A draft being reworded is
+-- 'busy'; one the solver got wrong, or not yet checked, is 'not checked'.
+create or replace function public.study_draft_keep(p_draft uuid)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  lec uuid;
+  d   public.study_question_drafts;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select x.lecture_id into lec from public.study_question_drafts x where x.id = p_draft;
+  if lec is null then raise exception 'draft not found'; end if;
+  perform pg_advisory_xact_lock(hashtext('study_question_round:' || lec::text));   -- before the row, as keep all
+  select * into d from public.study_question_drafts x where x.id = p_draft for update;
+  if not public.study_is_member(d.group_id) then raise exception 'draft not found'; end if;
+  if exists (select 1 from public.study_lectures l where l.id = d.lecture_id and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  if d.status <> 'pending' then raise exception 'not pending'; end if;
+  if d.check_state not in ('ok', 'unchecked') then raise exception 'not checked'; end if;
+  if d.lease_until > now() then raise exception 'busy'; end if;
+  if (select count(*) from public.study_questions q where q.lecture_id = d.lecture_id and q.retired_at is null) >= 150 then
+    raise exception 'enough questions';
+  end if;
+  return study_private.draft_to_bank(d);
+end;
+$$;
+
+-- "להוסיף הכול": every pending draft of the request the solver passed (or
+-- could not check) and nobody is rewording, in part order, up to the
+-- lecture's 150 active questions. Returns what was kept.
+create or replace function public.study_draft_keep_all(p_request uuid)
+returns table (draft_id uuid, question_id uuid)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  rq   public.study_question_requests;
+  d    public.study_question_drafts;
+  room int;
+  n    int := 0;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into rq from public.study_question_requests x where x.id = p_request;
+  if not found or not public.study_is_member(rq.group_id) then raise exception 'request not found'; end if;
+  if exists (select 1 from public.study_lectures l where l.id = rq.lecture_id and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_question_round:' || rq.lecture_id::text));
+  room := 150 - (select count(*)::int from public.study_questions q where q.lecture_id = rq.lecture_id and q.retired_at is null);
+  for d in select * from public.study_question_drafts x
+            where x.request_id = p_request and x.status = 'pending' and x.check_state in ('ok', 'unchecked')
+              and (x.lease_until is null or x.lease_until <= now())
+            order by x.part_idx, x.created_at, x.id
+            for update loop
+    if n >= room then
+      if n = 0 then raise exception 'enough questions'; end if;
+      exit;
+    end if;
+    draft_id := d.id;
+    question_id := study_private.draft_to_bank(d);
+    n := n + 1;
+    return next;
+  end loop;
+end;
+$$;
+
+-- "✕": any member removes a pending draft (it never enters the bank).
+create or replace function public.study_draft_remove(p_draft uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare d public.study_question_drafts;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_question_drafts x where x.id = p_draft for update;
+  if not found or not public.study_is_member(d.group_id) then raise exception 'draft not found'; end if;
+  if d.status <> 'pending' then raise exception 'not pending'; end if;
+  if d.lease_until > now() then raise exception 'busy'; end if;
+  update public.study_question_drafts x
+     set status = 'removed', decided_by = auth.uid(), decided_at = now(), updated_at = now()
+   where x.id = p_draft;
+end;
+$$;
+
+-- "הבנק נבנה": per part of the request, its points and how many of them the
+-- request's drafts cover (pending or kept, and not failed by the blind
+-- solver), the questions wanted and made,
+-- kept, waiting, being checked, failed, and whether a batch is still open.
+create or replace function public.study_request_progress(p_request uuid)
+returns table (part_idx int, title text, points int, covered int, wanted int, made int, kept int, pending int,
+               checking int, failed int, open boolean)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare rq public.study_question_requests;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into rq from public.study_question_requests x where x.id = p_request;
+  if not found or not public.study_is_member(rq.group_id) then raise exception 'request not found'; end if;
+  return query
+  select p.idx, coalesce(s.title, ''),
+         (select count(*)::int from public.study_points y where y.id = any (rq.points) and y.lecture_id = rq.lecture_id and y.part_idx = p.idx),
+         (select count(distinct u)::int from public.study_question_drafts d, unnest(d.points) u
+           where d.request_id = rq.id and d.part_idx = p.idx and d.status in ('pending', 'kept') and d.check_state <> 'failed'
+             and u = any (rq.points)),
+         (select coalesce(sum(b.wanted), 0)::int from public.study_question_batches b where b.request_id = rq.id and b.part_idx = p.idx),
+         (select count(*)::int from public.study_question_drafts d where d.request_id = rq.id and d.part_idx = p.idx and d.status in ('pending', 'kept')),
+         (select count(*)::int from public.study_question_drafts d where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'kept'),
+         (select count(*)::int from public.study_question_drafts d where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'pending'),
+         (select count(*)::int from public.study_question_drafts d
+           where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'pending' and d.check_state = 'checking'),
+         (select count(*)::int from public.study_question_drafts d
+           where d.request_id = rq.id and d.part_idx = p.idx and d.status = 'pending' and d.check_state = 'failed'),
+         exists (select 1 from public.study_question_batches b where b.request_id = rq.id and b.part_idx = p.idx and b.status in ('pending', 'writing'))
+    from unnest(rq.parts) as p(idx)
+    left join public.study_sections s on s.lecture_id = rq.lecture_id and s.idx = p.idx
+   order by p.idx;
+end;
+$$;
+
+-- Saves a question of a release-1 round straight into the bank, as Q's end's
+-- (its paragraph, teaser, "מתי כן", diagram and option tags), and now also its
+-- style (one of the seven, or none) and the points it covers (the batch's).
+-- A request's batch writes drafts (study_draft_save), never here.
+create or replace function public.study_save_question(p_batch uuid, p_exam uuid, p_q jsonb, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  b    public.study_question_batches;
+  e    public.study_exams;
+  g    uuid;
+  lec  uuid;
+  part int;
+  src  text;
+  opts text[] := array(select jsonb_array_elements_text(coalesce(p_q -> 'options', '[]'::jsonb)));
+  expl text[] := array(select jsonb_array_elements_text(coalesce(p_q -> 'explanations', '[]'::jsonb)));
+  whn  text[] := array(select left(x, 300) from jsonb_array_elements_text(coalesce(p_q -> 'whens', '[]'::jsonb)) x);
+  tags text[] := array(select left(btrim(x), 80) from jsonb_array_elements_text(coalesce(p_q -> 'option_tags', '[]'::jsonb)) x);
+  sl   int[]  := array(select (jsonb_array_elements_text(coalesce(p_q -> 'slides', '[]'::jsonb)))::int);
+  ans  int    := (p_q ->> 'answer')::int;
+  para int    := case when jsonb_typeof(p_q -> 'para') = 'number' and (p_q ->> 'para') ~ '^[0-9]{1,4}$' then (p_q ->> 'para')::int end;
+  fig  text   := coalesce(p_q ->> 'figure', '');
+  sty  text   := nullif(coalesce(p_q ->> 'style', ''), '');
+  pts  uuid[] := '{}';
+  pgen int;
+  have int[];
+  qid  uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;   -- only the server saves Claude's items (review B1)
+  if (p_batch is null) = (p_exam is null) then raise exception 'batch or exam'; end if;
+  if p_exam is not null and auth.uid() is null then raise exception 'not signed in'; end if;   -- exams: the op only
+  if p_exam is not null and not study_private.feature_on('exams') then raise exception 'off'; end if;   -- review M10
+  if cardinality(opts) not between 2 and 6 then raise exception 'bad options'; end if;
+  if ans is not null and (ans < 0 or ans >= cardinality(opts)) then raise exception 'bad answer'; end if;
+  if cardinality(whn) not in (0, cardinality(opts)) then raise exception 'whens do not match options'; end if;
+  if cardinality(tags) not in (0, cardinality(opts)) then raise exception 'tags do not match options'; end if;
+  if sty is not null and sty not in ('case', 'mechanism', 'drug_choice', 'adverse_contra', 'compare', 'not_true', 'blank_table') then
+    sty := null;   -- an unknown style is dropped, not raised (the question stays good)
+  end if;
+  if p_batch is not null then
+    select * into b from public.study_question_batches x where x.id = p_batch;
+    if not found then raise exception 'batch not found'; end if;
+    lec := b.lecture_id;
+    g := public.study_lecture_group(lec);
+    if not study_private.may_bank(lec, p_key) then raise exception 'batch not found'; end if;
+    if b.request_id is not null then raise exception 'bad batch'; end if;   -- a request's batch writes drafts for review
+    if b.status <> 'writing' then raise exception 'batch not writing'; end if;
+    if b.made >= b.wanted then raise exception 'part full'; end if;
+    src := 'ai';
+    part := b.part_idx;
+    if ans is null then raise exception 'bad answer'; end if;
+    if cardinality(expl) <> cardinality(opts) then raise exception 'explanations do not match options'; end if;
+    select coalesce(array_agg((sl2 ->> 'n')::int), '{}') into have
+      from public.study_lectures l, jsonb_array_elements(l.slides) sl2 where l.id = lec;
+    if cardinality(sl) = 0 or not (sl <@ have) then raise exception 'unknown slide'; end if;
+    if not exists (select 1 from unnest(sl) s where s between b.slide_from and b.slide_to) then
+      raise exception 'outside the part';
+    end if;
+    if (select count(*) from public.study_questions q where q.lecture_id = lec and q.retired_at is null) >= 80 then
+      raise exception 'enough questions';
+    end if;
+    if jsonb_typeof(p_q -> 'points') = 'array' then
+      if exists (select 1 from jsonb_array_elements_text(p_q -> 'points') v
+                  where v !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') then
+        raise exception 'bad points';
+      end if;
+      pts := array(select v::uuid from jsonb_array_elements_text(p_q -> 'points') v);
+      if not (pts <@ b.points) then raise exception 'bad points'; end if;
+    end if;
+    select s.gen into pgen from public.study_sections s where s.lecture_id = lec and s.idx = part;
+    -- P13: a diagram that is not one of this lecture's pictures is dropped, not raised (the question stays good).
+    if fig <> '' and (fig !~ '^fig:[0-9]{1,4}-[0-9]{1,3}$'
+        or not exists (select 1 from public.study_lectures l, jsonb_array_elements(l.slides) s,
+                              jsonb_array_elements(coalesce(s -> 'figures', '[]'::jsonb)) f
+                        where l.id = lec and (s ->> 'n')::int = split_part(substr(fig, 5), '-', 1)::int
+                          and (f ->> 'k')::int = split_part(substr(fig, 5), '-', 2)::int)) then
+      fig := '';
+    end if;
+  else
+    select * into e from public.study_exams x where x.id = p_exam;
+    if not found or not public.study_is_member(e.group_id) then raise exception 'exam not found'; end if;
+    g := e.group_id;
+    src := 'exam';
+    para := null;
+    fig := '';
+    sty := null;
+    if cardinality(expl) not in (0, cardinality(opts)) then raise exception 'explanations do not match options'; end if;
+  end if;
+  insert into public.study_questions (group_id, lecture_id, batch_id, exam_id, exam_no, source, part_idx, kind,
+                                      difficulty, vignette, question, options, slides, topic, aspect, has_key, model,
+                                      anchor, quote, part_gen, teaser, figure, option_tags, style, points, created_by)
+  values (g, lec, p_batch, p_exam, (p_q ->> 'exam_no')::int, src, part, p_q ->> 'kind',
+          coalesce((p_q ->> 'difficulty')::int, 2), coalesce(p_q ->> 'vignette', ''), p_q ->> 'question', opts, sl,
+          left(coalesce(p_q ->> 'topic', ''), 120), coalesce(p_q ->> 'aspect', 'other'), ans is not null, p_q ->> 'model',
+          para, case when para is null then '' else left(coalesce(p_q ->> 'quote', ''), 200) end,
+          case when para is null then null else pgen end,
+          left(btrim(coalesce(p_q ->> 'teaser', '')), 120), fig, tags, sty, pts, auth.uid())
+  returning id into qid;
+  insert into public.study_question_keys (question_id, answer, explanations, takeaway, whens)
+  values (qid, ans, expl, left(coalesce(p_q ->> 'takeaway', ''), 600), whn);
+  if p_batch is not null then
+    update public.study_question_batches x set made = x.made + 1, updated_at = now() where x.id = p_batch;
+  end if;
+  return qid;
+end;
+$$;
+
+-- ── P2-4. "סבב חדש": what the caller can practise, counted ──
+-- Per lecture, part, style, the caller's state (new: never answered; wrong:
+-- an open mistake, the rule of "הטעויות שלי"; right: answered, no open
+-- mistake) and whether the caller flagged it. Only questions a session may
+-- ask: active, keyed, not hidden by two flags, not marked by a correction.
+-- Security invoker: RLS keeps the answers to their owner and the questions
+-- to the group; another group's lecture gives nothing. A question without a
+-- style (release 1's) counts as 'case' when it is a case, else 'other'.
+create or replace function public.study_session_counts(p_lectures uuid[])
+returns table (lecture_id uuid, part_idx int, style text, state text, flagged boolean, n int)
+language sql stable set search_path = public as $$
+  with qs as (
+    select q.id, q.lecture_id, q.group_id, coalesce(q.part_idx, -1) as part_idx,
+           coalesce(q.style, case when q.kind = 'case' then 'case' else 'other' end) as style
+      from public.study_questions q
+     where q.lecture_id = any (p_lectures) and q.retired_at is null and q.hidden_at is null
+       and q.stale_at is null and q.has_key
+  ), groups as (
+    select distinct qs.group_id from qs
+  ), wrong as (
+    select o.question_id from groups g cross join lateral public.study_open_mistakes(g.group_id) o
+  ), answered as (
+    select distinct a.question_id from public.study_answers a where a.user_id = auth.uid() and a.question_id in (select qs.id from qs)
+  ), mine as (
+    select f.question_id from public.study_question_flags f where f.user_id = auth.uid() and f.question_id in (select qs.id from qs)
+  )
+  select qs.lecture_id, qs.part_idx, qs.style,
+         case when qs.id in (select w.question_id from wrong w) then 'wrong'
+              when qs.id in (select a.question_id from answered a) then 'right'
+              else 'new' end,
+         qs.id in (select m.question_id from mine m),
+         count(*)::int
+    from qs
+   group by 1, 2, 3, 4, 5
+   order by 1, 2, 3, 4, 5;
+$$;
+
+-- ── Row Level Security and privileges (the file's loop drops every study_
+--  policy first, so the policies are made again on every run) ──
+alter table public.study_point_parts         enable row level security;
+alter table public.study_points              enable row level security;
+alter table public.study_question_requests   enable row level security;
+alter table public.study_question_drafts     enable row level security;
+alter table public.study_question_draft_keys enable row level security;
+drop policy if exists "study point parts read" on public.study_point_parts;
+drop policy if exists "study points read" on public.study_points;
+drop policy if exists "study question requests read" on public.study_question_requests;
+drop policy if exists "study question drafts read" on public.study_question_drafts;
+create policy "study point parts read" on public.study_point_parts
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study points read" on public.study_points
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study question requests read" on public.study_question_requests
+  for select using (public.study_is_member(group_id));
+-- Pending drafts are the group's: anyone in it reviews them.
+create policy "study question drafts read" on public.study_question_drafts
+  for select using (public.study_is_member(group_id));
+-- study_question_draft_keys: no policy on purpose.
+revoke all on public.study_point_parts, public.study_points, public.study_question_requests, public.study_question_drafts,
+  public.study_question_draft_keys from anon, authenticated;
+grant select on public.study_point_parts, public.study_points, public.study_question_requests, public.study_question_drafts
+  to authenticated;
+
+revoke all on function study_private.draft_insert(public.study_question_batches, public.study_question_requests, jsonb, text, uuid, int),
+  study_private.draft_to_bank(public.study_question_drafts) from public;
+revoke all on function public.study_points_claim(uuid, text), public.study_points_save(uuid, int, text, jsonb, text, numeric, text),
+  public.study_points_fail(uuid, int[], text, numeric, text, boolean), public.study_points_state(uuid),
+  public.study_request_create(uuid, jsonb, jsonb, text), public.study_draft_save(uuid, jsonb, text),
+  public.study_draft_check(uuid, int, boolean, text), public.study_draft_reword(uuid, text),
+  public.study_draft_release(uuid, text),
+  public.study_draft_replace(uuid, jsonb, boolean, text), public.study_draft_reject(uuid, text),
+  public.study_draft_keep(uuid), public.study_draft_keep_all(uuid), public.study_draft_remove(uuid),
+  public.study_request_progress(uuid), public.study_save_question(uuid, uuid, jsonb, text), public.study_session_counts(uuid[])
+  from public, anon;
+-- The server-only ones need the key inside; the grant only lets the op's call reach them.
+grant execute on function public.study_points_claim(uuid, text), public.study_points_save(uuid, int, text, jsonb, text, numeric, text),
+  public.study_points_fail(uuid, int[], text, numeric, text, boolean), public.study_points_state(uuid),
+  public.study_request_create(uuid, jsonb, jsonb, text), public.study_draft_save(uuid, jsonb, text),
+  public.study_draft_check(uuid, int, boolean, text), public.study_draft_reword(uuid, text),
+  public.study_draft_release(uuid, text),
+  public.study_draft_replace(uuid, jsonb, boolean, text), public.study_draft_reject(uuid, text),
+  public.study_draft_keep(uuid), public.study_draft_keep_all(uuid), public.study_draft_remove(uuid),
+  public.study_request_progress(uuid), public.study_save_question(uuid, uuid, jsonb, text), public.study_session_counts(uuid[])
+  to authenticated;
+
+-- ── Realtime: the points as they are read, the bank as it is built (drafts
+--  appear, are checked, kept), on every phone. Never a key.
+do $$
+declare t text;
+begin
+  foreach t in array array['study_point_parts', 'study_points', 'study_question_requests', 'study_question_drafts'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then
+      null;
+    end;
+  end loop;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('Q', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+
+-- ════ END SECTION Q ════
+
+-- ════ BEGIN SECTION Z · the live quiz (package Z) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Z in this file (package Z; release 2): two blocks, in order
+--   1. section Z as the spec prints it (spec §3.3; docs/study/spec/sql/
+--      50-quiz.sql): the tables, the functions, Realtime; version 1;
+--   2. section Z's end (spec §12.3.Z; docs/study/spec/addendum/sql/
+--      55-quiz-end.sql), as the addendum prints it: decision 2, the bet,
+--      Mazur's revote, counts only from 3 answers, the team's score and the
+--      group's record; version 2.
+--  The app of release 2 uses modes 'coop' ("כולנו נגד המבחן", the default)
+--  and 'race' ("מירוץ"), with preset 'free' (a part range of one lecture
+--  optional). The hook points of packages that are not built yet stay, and
+--  do nothing until those sections replace them or exist:
+--   - presets 'coffee' ("3 לקפה") and 'stop' need a meeting (section M):
+--     study_quiz_create refuses them with 'meeting not found' until
+--     study_meetings exists; study_quiz__pick_preset (the opening's picker)
+--     returns null. Preset 'end' (the meeting's closing, decision 7: one a
+--     study day for the group) is accepted without a meeting; the app opens
+--     it only from M's screens;
+--   - a round's trap is named to its players at the reveal; it becomes a
+--     group trap card only through section C's end (study_private.trap_card),
+--     so until then study_quiz__trap_card makes nothing;
+--   - study_quiz__signal (U's nightly signal), study_quiz__pick_boss,
+--     __after_reveal and __boss_state (H's battle, mode 'boss'), and
+--     study_quiz__revealed (E's members' traps): no-ops.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Z · THE LIVE GROUP QUIZ   (owned by package Z)
+--  design-quiz.md §2.2. After section Q (it reads and writes its tables).
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  the live group quiz, "מבחן קבוצתי"
+--  (mode 'coop') and "מבחן תחרותי" (mode 'race'). To be appended to
+--  supabase/study-schema.sql AFTER the practice-questions block
+--  (design-questions.md): it reads study_questions, study_question_keys and
+--  study_question_flags, and writes study_answers. Re-runnable.
+--
+--  The database is the referee
+--  ───────────────────────────
+--  The clock, the answer key and the scores stay in Postgres until their
+--  time. A phone sends one thing, "option 2 for question 4", through
+--  study_quiz_answer(); the server stamps the time itself and keeps the
+--  first answer only. The key is read only inside the reveal, which scores
+--  everyone at once, closes the round for good and copies each answer into
+--  its owner's private study_answers (mode 'quiz'), so a quiz answer counts
+--  in that member's own mistakes and weak points, as practice does. While a
+--  round is open its key is "held" (study_question_keys.held_until), so the
+--  practice functions refuse to hand it out (questions-hold.sql).
+--
+--  Who sees what
+--  ─────────────
+--  study_quizzes (the whole group): that a quiz is open or was held, its
+--    lectures, settings, state, host, how many play and how many answered.
+--    Nothing secret, so the library banner reads it and Realtime sends it.
+--  study_quiz_rounds / _players / _answers: no grants at all.
+--    study_quiz_state() hands each caller what they may see: the question
+--    while it is open, never its key; after the reveal the key, every
+--    option's explanation and the anonymous count per option; the others'
+--    scores only in a race and only to its players; in a group quiz each
+--    player's result only to that player.
+--
+--  Realtime: only study_quizzes is published. Everything a phone must react
+--  to (a join, a question opening, the answer count, the reveal, a new host,
+--  the end) changes that one row; Postgres Changes, checked against its RLS
+--  for every subscriber, tells the phones, and they read study_quiz_state().
+--  version changes on every step; an answer only moves answered_n.
+--
+--  Times: a question opens 3 s after the host's tap (every phone has it by
+--  then and counts down to the same server instant); answers are taken until
+--  1.5 s after its deadline (a tap sent in time is not lost in transit); a
+--  round still open 3 s after that is revealed by whichever phone asks next;
+--  a player not seen for 30 s is "away" (not waited for; a host who is away
+--  can be replaced); a quiz untouched for 20 minutes is over.
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ── A quiz: one row per game. idx = the round on screen (-1 in the lobby);
+--  opens_at/closes_at repeat that round's times so a phone can start counting
+--  down from the Realtime event alone.
+create table if not exists public.study_quizzes (
+  id          uuid        primary key default gen_random_uuid(),
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  mode        text        not null check (mode in ('coop', 'race')),
+  title       text        not null check (char_length(title) between 1 and 200),
+  lecture_ids uuid[]      not null check (cardinality(lecture_ids) between 1 and 40),
+  kinds       text        not null default 'all' check (kinds in ('all', 'mcq', 'case')),
+  n_wanted    int         not null check (n_wanted between 3 and 30),
+  seconds     int         not null check (seconds between 15 and 120),
+  state       text        not null default 'lobby'
+                          check (state in ('lobby', 'question', 'reveal', 'ended', 'cancelled')),
+  idx         int         not null default -1 check (idx between -1 and 29),
+  n_total     int         not null default 0 check (n_total between 0 and 30),
+  opens_at    timestamptz,
+  closes_at   timestamptz,
+  answered_n  int         not null default 0 check (answered_n >= 0),
+  players_n   int         not null default 0 check (players_n >= 0),
+  version     int         not null default 0,
+  host_id     uuid        references auth.users (id) on delete set null,
+  created_by  uuid        default auth.uid() references auth.users (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  started_at  timestamptz,
+  ended_at    timestamptz,
+  updated_at  timestamptz not null default now()
+);
+create index if not exists study_quizzes_group on public.study_quizzes (group_id, created_at desc);
+-- One live quiz per group: the banner shows "the" open quiz.
+create unique index if not exists study_quizzes_one_open on public.study_quizzes (group_id)
+  where state in ('lobby', 'question', 'reveal');
+
+-- ── Its questions, chosen when it starts. seconds: the host's setting, or
+--  more for a long question (study_quiz__seconds). answer: the key as it was
+--  at the reveal (history stays right if an exam item is re-keyed later).
+--  A question deleted with its lecture leaves the round without one: a round
+--  not yet open is skipped, an open one is voided at its reveal.
+create table if not exists public.study_quiz_rounds (
+  id          uuid        primary key default gen_random_uuid(),
+  quiz_id     uuid        not null references public.study_quizzes (id) on delete cascade,
+  idx         int         not null check (idx between 0 and 29),
+  question_id uuid        references public.study_questions (id) on delete set null,
+  seconds     int         not null check (seconds between 15 and 240),
+  opens_at    timestamptz,
+  closes_at   timestamptz,
+  revealed_at timestamptz,
+  answer      smallint,
+  voided_at   timestamptz,
+  voided_by   uuid        references auth.users (id) on delete set null,
+  unique (quiz_id, idx)
+);
+create index if not exists study_quiz_rounds_question on public.study_quiz_rounds (question_id);
+
+-- ── Who plays. seen_at: the last sign of life (every answer, host action
+--  and the phone's ping every 15 s while the screen is on). joined_idx: the
+--  round on screen when they joined (-1: from the lobby).
+create table if not exists public.study_quiz_players (
+  quiz_id    uuid        not null references public.study_quizzes (id) on delete cascade,
+  user_id    uuid        not null references auth.users (id) on delete cascade,
+  joined_at  timestamptz not null default now(),
+  joined_idx int         not null default -1,
+  seen_at    timestamptz not null default now(),
+  left_at    timestamptz,
+  score      int         not null default 0 check (score >= 0),
+  correct_n  int         not null default 0 check (correct_n >= 0),
+  answered_n int         not null default 0 check (answered_n >= 0),
+  primary key (quiz_id, user_id)
+);
+create index if not exists study_quiz_players_user on public.study_quiz_players (user_id);
+
+-- ── One answer per player per round, the first one. choice null = "לא
+--  יודעים" (group quiz only). ms: from the round's opening to the server's
+--  receipt, capped at the round's time. correct and points are set by the
+--  reveal, never before.
+create table if not exists public.study_quiz_answers (
+  round_id    uuid        not null references public.study_quiz_rounds (id) on delete cascade,
+  user_id     uuid        not null references auth.users (id) on delete cascade,
+  choice      smallint    check (choice >= 0),
+  ms          int         not null check (ms between 0 and 240000),
+  answered_at timestamptz not null,
+  correct     boolean,
+  points      int         not null default 0 check (points between 0 and 1000),
+  primary key (round_id, user_id)
+);
+create index if not exists study_quiz_answers_user on public.study_quiz_answers (user_id);
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Internal helpers (no grants: only the functions below call them, as
+--  their owner). The public functions take the quiz row lock first
+--  (select ... for update), so answers, reveals and moves of one quiz run
+--  one at a time and each sees the others' result.
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Seconds for one question: the host's setting, or more for a long one
+-- (reading about 15 characters a second, plus 10 seconds to choose).
+create or replace function public.study_quiz__seconds(p_setting int, p_chars int)
+returns int language sql immutable set search_path = public as $$
+  select least(240, greatest(p_setting, ceil(coalesce(p_chars, 0) / 15.0)::int + 10));
+$$;
+
+-- The caller is playing (joined and not left).
+create or replace function public.study_quiz__playing(p_quiz uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.study_quiz_players p
+                  where p.quiz_id = p_quiz and p.user_id = auth.uid() and p.left_at is null);
+$$;
+
+-- The host is still playing and was seen in the last 30 seconds.
+create or replace function public.study_quiz__host_here(p_quiz uuid)
+returns boolean language sql volatile security definer set search_path = public as $$
+  select exists (select 1 from public.study_quizzes z
+                   join public.study_quiz_players p on p.quiz_id = z.id and p.user_id = z.host_id
+                  where z.id = p_quiz and p.left_at is null
+                    and p.seen_at > clock_timestamp() - interval '30 seconds');
+$$;
+
+create or replace function public.study_quiz__seen(p_quiz uuid)
+returns void language sql volatile security definer set search_path = public as $$
+  update public.study_quiz_players p set seen_at = clock_timestamp()
+   where p.quiz_id = p_quiz and p.user_id = auth.uid() and p.left_at is null;
+$$;
+
+-- Everyone still playing and not away (seen in the last 30 s) has answered
+-- round p_idx. A player whose phone locked is not waited for; the deadline
+-- still closes the round.
+create or replace function public.study_quiz__all_answered(p_quiz uuid, p_idx int)
+returns boolean language sql volatile security definer set search_path = public as $$
+  select not exists (
+    select 1 from public.study_quiz_players p
+     where p.quiz_id = p_quiz and p.left_at is null
+       and p.seen_at > clock_timestamp() - interval '30 seconds'
+       and not exists (select 1 from public.study_quiz_answers a
+                         join public.study_quiz_rounds r on r.id = a.round_id
+                        where r.quiz_id = p_quiz and r.idx = p_idx and a.user_id = p.user_id));
+$$;
+
+-- Chooses the questions when the quiz starts (the players are known then):
+-- keyed and not retired, from the chosen lectures and kinds; spread over the
+-- summary's parts; questions flagged as wrong last; then those the fewest of
+-- these players have answered before (counted from their private answers,
+-- used only for the order, never returned); then at random. A group quiz
+-- follows the lectures' order; a race is shuffled.
+create or replace function public.study_quiz__pick(p_quiz uuid)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  z public.study_quizzes;
+  n int;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  delete from public.study_quiz_rounds r where r.quiz_id = p_quiz;
+  with pool as (
+    select q.id,
+           char_length(q.vignette) + char_length(q.question)
+             + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0) as chars,
+           array_position(z.lecture_ids, coalesce(q.lecture_id, q.ref_lecture)) as lec_pos,
+           coalesce(q.part_idx, -1) as part_idx,
+           exists (select 1 from public.study_question_flags f
+                    where f.question_id = q.id and f.reason in ('wrong_key', 'two_answers', 'not_in_slides')) as flagged,
+           (select count(distinct a.user_id)
+              from public.study_answers a
+              join public.study_quiz_players p on p.user_id = a.user_id and p.quiz_id = p_quiz and p.left_at is null
+             where a.question_id = q.id) as seen,
+           random() as rnd
+      from public.study_questions q
+     where q.group_id = z.group_id
+       and coalesce(q.lecture_id, q.ref_lecture) = any (z.lecture_ids)
+       and q.retired_at is null
+       and q.has_key
+       and (z.kinds = 'all' or q.kind = z.kinds)
+  ),
+  ranked as (
+    select p.*, row_number() over (partition by p.lec_pos, p.part_idx order by p.flagged, p.seen, p.rnd) as rk
+      from pool p
+  ),
+  chosen as (
+    select c.* from ranked c order by c.flagged, c.rk, c.seen, c.rnd limit z.n_wanted
+  )
+  insert into public.study_quiz_rounds (quiz_id, idx, question_id, seconds)
+  select p_quiz,
+         (row_number() over (order by case when z.mode = 'coop' then c.lec_pos end,
+                                      case when z.mode = 'coop' then c.part_idx end,
+                                      c.rnd))::int - 1,
+         c.id,
+         public.study_quiz__seconds(z.seconds, c.chars::int)
+    from chosen c;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- Ends the quiz: an open round is revealed first (its answers count), then
+-- the quiz is 'ended' ('cancelled' if it never left the lobby).
+create or replace function public.study_quiz__finish(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare z public.study_quizzes;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.state not in ('lobby', 'question', 'reveal') then return; end if;
+  if z.state = 'question' then
+    perform public.study_quiz__reveal(p_quiz, z.idx);
+  end if;
+  update public.study_quizzes x
+     set state = case when z.state = 'lobby' then 'cancelled' else 'ended' end, ended_at = now(),
+         opens_at = null, closes_at = null, version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+end;
+$$;
+
+-- Opens the first round at or after p_idx that still has its question,
+-- 3 seconds from now, or ends the quiz when none is left. The round's key
+-- is held until its reveal (ten minutes past the deadline at most).
+create or replace function public.study_quiz__open(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  r  public.study_quiz_rounds;
+  t0 timestamptz := clock_timestamp() + interval '3 seconds';
+begin
+  select * into r from public.study_quiz_rounds x
+   where x.quiz_id = p_quiz and x.idx >= p_idx and x.question_id is not null
+   order by x.idx limit 1;
+  if not found then
+    perform public.study_quiz__finish(p_quiz);
+    return;
+  end if;
+  update public.study_quiz_rounds x
+     set opens_at = t0, closes_at = t0 + make_interval(secs => x.seconds)
+   where x.id = r.id;
+  update public.study_question_keys k
+     set held_until = t0 + make_interval(secs => r.seconds) + interval '10 minutes'
+   where k.question_id = r.question_id;
+  update public.study_quizzes z
+     set state = 'question', idx = r.idx, opens_at = t0, closes_at = t0 + make_interval(secs => r.seconds),
+         answered_n = 0, version = z.version + 1, updated_at = now()
+   where z.id = p_quiz;
+end;
+$$;
+
+-- Scores round p_idx if it is the one open, and closes it: the key is read
+-- here and nowhere before. Points (race): a right answer is worth 500, plus
+-- up to 500 more for speed; a wrong one, "לא יודעים" or none, 0. A round
+-- whose question was deleted meanwhile is voided.
+create or replace function public.study_quiz__reveal(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  z   public.study_quizzes;
+  r   public.study_quiz_rounds;
+  k   smallint;
+  t   timestamptz := clock_timestamp();
+  lim int;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.state <> 'question' or z.idx <> p_idx then return; end if;
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = p_idx;
+  if r.question_id is not null then
+    select x.answer into k from public.study_question_keys x where x.question_id = r.question_id;
+    update public.study_question_keys x set held_until = null where x.question_id = r.question_id;
+  end if;
+  if k is null then
+    -- No question or no key any more: nothing is scored or recorded.
+    update public.study_quiz_rounds x set revealed_at = t, voided_at = t, closes_at = least(x.closes_at, t)
+     where x.id = r.id;
+  else
+    lim := r.seconds * 1000;
+    update public.study_quiz_answers a
+       set correct = (a.choice is not null and a.choice = k),
+           points = case when z.mode = 'race' and a.choice is not null and a.choice = k
+                         then 500 + floor(500.0 * (lim - least(a.ms, lim)) / lim)::int
+                         else 0 end
+     where a.round_id = r.id;
+    update public.study_quiz_players p
+       set score = p.score + a.points,
+           correct_n = p.correct_n + case when a.correct then 1 else 0 end,
+           answered_n = p.answered_n + 1
+      from public.study_quiz_answers a
+     where a.round_id = r.id and p.quiz_id = p_quiz and p.user_id = a.user_id;
+    -- Each answer also lands in its owner's private practice record.
+    insert into public.study_answers (user_id, question_id, choice, correct, mode, ms, answered_at)
+    select a.user_id, r.question_id, a.choice, a.correct, 'quiz', a.ms, a.answered_at
+      from public.study_quiz_answers a
+     where a.round_id = r.id;
+    update public.study_quiz_rounds x set revealed_at = t, answer = k, closes_at = least(x.closes_at, t)
+     where x.id = r.id;
+  end if;
+  update public.study_quizzes x
+     set state = 'reveal', closes_at = least(x.closes_at, t),
+         answered_n = (select count(*) from public.study_quiz_answers a where a.round_id = r.id),
+         version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+end;
+$$;
+
+-- A round whose time ran out (plus the grace and 3 s) and that nobody
+-- revealed (every phone asleep) is revealed by whoever asks next.
+create or replace function public.study_quiz__due(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare z public.study_quizzes;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if found and z.state = 'question' and clock_timestamp() > z.closes_at + interval '4.5 seconds' then
+    perform public.study_quiz__reveal(p_quiz, z.idx);
+  end if;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  What the phones call
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Opens a quiz in the lobby, with the caller as host and first player.
+-- Errors: 'group not found', 'bad mode', 'bad kinds', 'bad count',
+-- 'bad seconds', 'lecture not found', 'quiz open' (join that one instead).
+create or replace function public.study_quiz_create(p_group uuid, p_mode text, p_lectures uuid[],
+  p_count int, p_seconds int, p_kinds text default 'all')
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  me     uuid := auth.uid();
+  lec    uuid[];
+  t      text;
+  course text;
+  stale  uuid;
+  qid    uuid;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_group is null or not public.study_is_member(p_group) then raise exception 'group not found'; end if;
+  if coalesce(p_mode, '') not in ('coop', 'race') then raise exception 'bad mode'; end if;
+  if coalesce(p_kinds, '') not in ('all', 'mcq', 'case') then raise exception 'bad kinds'; end if;
+  if p_count is null or p_count not between 3 and 30 then raise exception 'bad count'; end if;
+  if p_seconds is null or p_seconds not between 15 and 120 then raise exception 'bad seconds'; end if;
+  -- The lectures, once each, in the order given, every one of them in this group.
+  select array_agg(x.l order by x.o) into lec
+    from (select u.l, min(u.o) as o
+            from unnest(p_lectures) with ordinality as u(l, o)
+           where u.l is not null
+           group by u.l) x;
+  if lec is null or cardinality(lec) > 40
+     or exists (select 1 from unnest(lec) as l(id) where public.study_lecture_group(l.id) is distinct from p_group) then
+    raise exception 'lecture not found';
+  end if;
+  -- Two members tapping at once get one quiz and one 'quiz open', not an error from the index.
+  perform pg_advisory_xact_lock(hashtext('study_quiz_create:' || p_group::text));
+  -- A quiz nobody has touched for 20 minutes is over (its open round still counts).
+  for stale in
+    select x.id from public.study_quizzes x
+     where x.group_id = p_group and x.state in ('lobby', 'question', 'reveal')
+       and x.updated_at < now() - interval '20 minutes'
+       and not exists (select 1 from public.study_quiz_players p
+                        where p.quiz_id = x.id and p.seen_at > now() - interval '20 minutes')
+  loop
+    perform 1 from public.study_quizzes x where x.id = stale for update;
+    perform public.study_quiz__finish(stale);
+  end loop;
+  if exists (select 1 from public.study_quizzes x
+              where x.group_id = p_group and x.state in ('lobby', 'question', 'reveal')) then
+    raise exception 'quiz open';
+  end if;
+  -- Title: the lecture's; or "<course> · n הרצאות" when they share a course; or the titles.
+  select case when count(distinct btrim(l.course)) = 1 then min(btrim(l.course)) end into course
+    from public.study_lectures l where l.id = any (lec);
+  if cardinality(lec) = 1 then
+    select l.title into t from public.study_lectures l where l.id = lec[1];
+  elsif coalesce(course, '') <> '' then
+    t := course || ' · ' || cardinality(lec) || ' הרצאות';
+  else
+    select string_agg(l.title, ' · ' order by u.o) into t
+      from unnest(lec) with ordinality as u(id, o)
+      join public.study_lectures l on l.id = u.id;
+  end if;
+  insert into public.study_quizzes (group_id, mode, title, lecture_ids, kinds, n_wanted, seconds,
+                                    host_id, created_by, players_n, version)
+  values (p_group, p_mode, left(coalesce(nullif(btrim(t), ''), 'מבחן'), 200), lec, p_kinds, p_count, p_seconds,
+          me, me, 1, 1)
+  returning id into qid;
+  insert into public.study_quiz_players (quiz_id, user_id) values (qid, me);
+  return qid;
+end;
+$$;
+
+-- Joins (or re-joins) a quiz that is not over: from the lobby or mid-game
+-- (a late joiner starts with the round on screen). A quiz left without a
+-- host gets the newcomer as host. Errors: 'quiz not found', 'quiz over'.
+create or replace function public.study_quiz_join(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+  n  int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.state not in ('lobby', 'question', 'reveal') then raise exception 'quiz over'; end if;
+  if public.study_quiz__playing(p_quiz) then
+    perform public.study_quiz__seen(p_quiz);
+    return;
+  end if;
+  insert into public.study_quiz_players (quiz_id, user_id, joined_idx) values (p_quiz, me, z.idx)
+  on conflict (quiz_id, user_id) do update set left_at = null, seen_at = clock_timestamp();
+  select count(*) into n from public.study_quiz_players p where p.quiz_id = p_quiz and p.left_at is null;
+  update public.study_quizzes x
+     set players_n = n, host_id = coalesce(x.host_id, me), version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+end;
+$$;
+
+-- Leaves. A leaving host hands over to the player seen most recently; the
+-- last one out ends the quiz; if everyone left has answered, the round is
+-- revealed at once.
+create or replace function public.study_quiz_leave(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me   uuid := auth.uid();
+  z    public.study_quizzes;
+  n    int;
+  heir uuid;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  update public.study_quiz_players p set left_at = clock_timestamp()
+   where p.quiz_id = p_quiz and p.user_id = me and p.left_at is null;
+  if not found or z.state not in ('lobby', 'question', 'reveal') then return; end if;
+  select count(*) into n from public.study_quiz_players p where p.quiz_id = p_quiz and p.left_at is null;
+  if n = 0 then
+    update public.study_quizzes x set players_n = 0 where x.id = p_quiz;
+    perform public.study_quiz__finish(p_quiz);
+    return;
+  end if;
+  if z.host_id = me then
+    select p.user_id into heir from public.study_quiz_players p
+     where p.quiz_id = p_quiz and p.left_at is null
+     order by p.seen_at desc, p.joined_at
+     limit 1;
+  end if;
+  update public.study_quizzes x
+     set players_n = n, host_id = coalesce(heir, x.host_id), version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+  if z.state = 'question' and public.study_quiz__all_answered(p_quiz, z.idx) then
+    perform public.study_quiz__reveal(p_quiz, z.idx);
+  end if;
+end;
+$$;
+
+-- Host only. From the lobby (p_from = -1) it chooses the questions and opens
+-- the first; after a reveal it opens the next, or ends the quiz after the
+-- last. p_from is the round on the host's screen: a second tap, or a tap
+-- after someone else moved on, does nothing.
+-- Errors: 'not host', 'not revealed', 'no questions', 'quiz over'.
+create or replace function public.study_quiz_next(p_quiz uuid, p_from int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+  n  int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.state not in ('lobby', 'question', 'reveal') then raise exception 'quiz over'; end if;
+  if z.host_id is distinct from me then raise exception 'not host'; end if;
+  perform public.study_quiz__seen(p_quiz);
+  if z.idx <> p_from then return; end if;
+  if z.state = 'question' then raise exception 'not revealed'; end if;
+  if z.state = 'lobby' then
+    n := public.study_quiz__pick(p_quiz);
+    if n = 0 then raise exception 'no questions'; end if;
+    update public.study_quizzes x set n_total = n, started_at = now() where x.id = p_quiz;
+    perform public.study_quiz__open(p_quiz, 0);
+  else
+    perform public.study_quiz__open(p_quiz, z.idx + 1);
+  end if;
+end;
+$$;
+
+-- The one thing a player sends. Returns the answer kept (a retry after a
+-- lost response gets the first one back), never whether it is right. The
+-- time is the transaction's start (now()): when the request reached the
+-- database, so waiting for the quiz row behind another answer costs nothing.
+-- Errors: 'not playing', 'not open' (before the countdown ends), 'closed'
+-- (revealed, moved on, or more than 1.5 s after the deadline), 'bad choice'.
+create or replace function public.study_quiz_answer(p_quiz uuid, p_idx int, p_choice int)
+returns table (idx int, choice int, ms int, answered_at timestamptz)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me   uuid := auth.uid();
+  t    timestamptz := now();
+  z    public.study_quizzes;
+  r    public.study_quiz_rounds;
+  nopt int;
+  took int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if not public.study_quiz__playing(p_quiz) then raise exception 'not playing'; end if;
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = p_idx;
+  if found and exists (select 1 from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me) then
+    return query select p_idx, a.choice::int, a.ms, a.answered_at
+                   from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me;
+    return;
+  end if;
+  if z.state <> 'question' or z.idx <> p_idx then raise exception 'closed'; end if;
+  if t < r.opens_at then raise exception 'not open'; end if;
+  if t > r.closes_at + interval '1.5 seconds' then raise exception 'closed'; end if;
+  select cardinality(q.options) into nopt from public.study_questions q where q.id = r.question_id;
+  if nopt is null then raise exception 'closed'; end if;
+  if p_choice is null then
+    if z.mode <> 'coop' then raise exception 'bad choice'; end if;
+  elsif p_choice < 0 or p_choice >= nopt then
+    raise exception 'bad choice';
+  end if;
+  took := least(r.seconds * 1000, greatest(0, floor(extract(epoch from (t - r.opens_at)) * 1000)::int));
+  insert into public.study_quiz_answers (round_id, user_id, choice, ms, answered_at)
+  values (r.id, me, p_choice, took, t);
+  update public.study_quiz_players p set seen_at = clock_timestamp() where p.quiz_id = p_quiz and p.user_id = me;
+  if public.study_quiz__all_answered(p_quiz, p_idx) then
+    perform public.study_quiz__reveal(p_quiz, p_idx);
+  else
+    update public.study_quizzes x
+       set answered_n = (select count(*) from public.study_quiz_answers a where a.round_id = r.id),
+           updated_at = now()
+     where x.id = p_quiz;
+  end if;
+  return query select p_idx, p_choice, took, t;
+end;
+$$;
+
+-- Closes the open round and shows the answer. Any player once the time and
+-- the grace are over (so a host whose phone locked never stalls the round);
+-- in a group quiz the host also earlier ("לחשוף עכשיו"; a race waits for
+-- the clock or for everyone's answer). Revealing a round already revealed
+-- does nothing. Errors: 'not playing', 'not open', 'too early'.
+create or replace function public.study_quiz_reveal(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.state <> 'question' or z.idx <> p_idx then return; end if;
+  if not public.study_quiz__playing(p_quiz) then raise exception 'not playing'; end if;
+  if clock_timestamp() < z.opens_at then raise exception 'not open'; end if;
+  if clock_timestamp() < z.closes_at + interval '1.5 seconds'
+     and not (z.mode = 'coop' and z.host_id = me) then
+    raise exception 'too early';
+  end if;
+  perform public.study_quiz__seen(p_quiz);
+  perform public.study_quiz__reveal(p_quiz, p_idx);
+end;
+$$;
+
+-- Host only: ends the quiz (an open round is revealed first, so its answers
+-- count). In the lobby this cancels it.
+create or replace function public.study_quiz_end(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.state not in ('lobby', 'question', 'reveal') then return; end if;
+  if z.host_id is distinct from me then raise exception 'not host'; end if;
+  perform public.study_quiz__finish(p_quiz);
+end;
+$$;
+
+-- A player takes over a host who left or has not been seen for 30 seconds
+-- (phone locked, battery, closed tab). Error 'host here' otherwise.
+create or replace function public.study_quiz_take_host(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.state not in ('lobby', 'question', 'reveal') then raise exception 'quiz over'; end if;
+  if not public.study_quiz__playing(p_quiz) then raise exception 'not playing'; end if;
+  if z.host_id = me then return; end if;
+  if public.study_quiz__host_here(p_quiz) then raise exception 'host here'; end if;
+  update public.study_quizzes x set host_id = me, version = x.version + 1, updated_at = now() where x.id = p_quiz;
+  perform public.study_quiz__seen(p_quiz);
+end;
+$$;
+
+-- Host only, after a reveal: the question was wrong ("ביטול השאלה"). Its
+-- points come off everyone's score and its answers leave the private
+-- practice records (they were copied with the same time stamp). The round
+-- says who voided it.
+create or replace function public.study_quiz_void(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+  r  public.study_quiz_rounds;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.host_id is distinct from me then raise exception 'not host'; end if;
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = p_idx;
+  if not found or r.revealed_at is null then raise exception 'not revealed'; end if;
+  if r.voided_at is not null then return; end if;
+  -- In a race the host also plays: a round is voided only while it is the
+  -- current one, never after the scores have moved on (review m3).
+  if z.mode = 'race' and z.idx is distinct from p_idx then raise exception 'too late'; end if;
+  update public.study_quiz_players p
+     set score = greatest(0, p.score - a.points),
+         correct_n = greatest(0, p.correct_n - case when a.correct then 1 else 0 end),
+         answered_n = greatest(0, p.answered_n - 1)
+    from public.study_quiz_answers a
+   where a.round_id = r.id and p.quiz_id = p_quiz and p.user_id = a.user_id;
+  delete from public.study_answers s
+   using public.study_quiz_answers a
+   where a.round_id = r.id and s.user_id = a.user_id and s.question_id = r.question_id
+     and s.mode = 'quiz' and s.answered_at = a.answered_at;
+  update public.study_quiz_answers a set points = 0 where a.round_id = r.id;
+  update public.study_quiz_rounds x set voided_at = clock_timestamp(), voided_by = me where x.id = r.id;
+  update public.study_quizzes x set version = x.version + 1, updated_at = now() where x.id = p_quiz;
+end;
+$$;
+
+-- Every 15 s while the quiz screen is visible, and when it comes back:
+-- a sign of life, the server's clock (the phone keeps its offset), and the
+-- version (an event missed while the socket was down shows up here).
+create or replace function public.study_quiz_ping(p_quiz uuid)
+returns table (server_now timestamptz, version int, state text, idx int, answered_n int, host_here boolean)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare z public.study_quizzes;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  perform public.study_quiz__seen(p_quiz);
+  if z.state = 'question' and clock_timestamp() > z.closes_at + interval '4.5 seconds' then
+    perform public.study_quiz__due(p_quiz);
+  end if;
+  return query select clock_timestamp(), x.version, x.state, x.idx, x.answered_n, public.study_quiz__host_here(p_quiz)
+                 from public.study_quizzes x where x.id = p_quiz;
+end;
+$$;
+
+-- Everything one screen shows, filtered for the caller (see the header).
+-- Members who do not play may watch (lobby, question, reveal) but see no
+-- scores and no end summary.
+create or replace function public.study_quiz_state(p_quiz uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  me     uuid := auth.uid();
+  z      public.study_quizzes;
+  r      public.study_quiz_rounds;
+  q      public.study_questions;
+  k      public.study_question_keys;
+  player boolean;
+  v_me   jsonb;
+  v_rnd  jsonb;
+  v_ppl  jsonb;
+  v_sum  jsonb;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.state = 'question' and clock_timestamp() > z.closes_at + interval '4.5 seconds' then
+    perform public.study_quiz__due(p_quiz);
+    select * into z from public.study_quizzes x where x.id = p_quiz;
+  end if;
+  player := exists (select 1 from public.study_quiz_players p where p.quiz_id = p_quiz and p.user_id = me);
+
+  select jsonb_build_object('playing', p.left_at is null, 'score', p.score, 'correct_n', p.correct_n,
+                            'answered_n', p.answered_n, 'joined_idx', p.joined_idx)
+    into v_me
+    from public.study_quiz_players p where p.quiz_id = p_quiz and p.user_id = me;
+
+  if z.state in ('question', 'reveal') then
+    select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = z.idx;
+    select * into q from public.study_questions x where x.id = r.question_id;
+    v_rnd := jsonb_build_object(
+      'idx', r.idx, 'seconds', r.seconds, 'opens_at', r.opens_at, 'closes_at', r.closes_at,
+      'voided', r.voided_at is not null, 'voided_by', r.voided_by,
+      'q', case when q.id is null then null else jsonb_build_object(
+             'id', q.id, 'kind', q.kind, 'vignette', q.vignette, 'question', q.question,
+             'options', to_jsonb(q.options), 'slides', to_jsonb(q.slides), 'topic', q.topic, 'aspect', q.aspect,
+             'lecture_id', coalesce(q.lecture_id, q.ref_lecture),
+             'lecture_title', (select l.title from public.study_lectures l where l.id = coalesce(q.lecture_id, q.ref_lecture)))
+           end,
+      'mine', (select jsonb_build_object('choice', a.choice, 'ms', a.ms)
+                 from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me));
+    if z.state = 'reveal' then
+      select * into k from public.study_question_keys x where x.question_id = r.question_id;
+      v_rnd := v_rnd || jsonb_build_object(
+        'answer', r.answer,
+        'explanations', to_jsonb(coalesce(k.explanations, '{}'::text[])),
+        'takeaway', coalesce(k.takeaway, ''),
+        'counts', coalesce((select jsonb_agg(coalesce(c.n, 0) order by o.i)
+                              from generate_series(0, coalesce(cardinality(q.options), 0) - 1) as o(i)
+                              left join (select a.choice, count(*)::int as n from public.study_quiz_answers a
+                                          where a.round_id = r.id and a.choice is not null group by a.choice) c
+                                     on c.choice = o.i), '[]'::jsonb),
+        'dont_know', (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.choice is null),
+        'answered', (select count(*) from public.study_quiz_answers a where a.round_id = r.id),
+        'right', (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.correct),
+        'points', (select a.points from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me),
+        'correct', (select a.correct from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me));
+    end if;
+  end if;
+
+  select coalesce(jsonb_agg(
+           jsonb_build_object(
+             'user_id', p.user_id,
+             'name', coalesce(m.name, ''),
+             'host', p.user_id is not distinct from z.host_id,
+             'here', p.left_at is null and p.seen_at > clock_timestamp() - interval '30 seconds',
+             'left', p.left_at is not null,
+             'joined_idx', p.joined_idx)
+           || case when z.mode = 'race' and player
+                   then jsonb_build_object('score', p.score, 'correct_n', p.correct_n,
+                          'last_points', case when z.state = 'reveal' then
+                              (select a.points from public.study_quiz_answers a where a.round_id = r.id and a.user_id = p.user_id)
+                            end)
+                   else '{}'::jsonb end
+           order by p.joined_at), '[]'::jsonb)
+    into v_ppl
+    from public.study_quiz_players p
+    left join public.study_members m on m.group_id = z.group_id and m.user_id = p.user_id
+   where p.quiz_id = p_quiz;
+
+  if z.state = 'ended' and player then
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'idx', r2.idx, 'voided', r2.voided_at is not null,
+             'q', case when q2.id is null then null else jsonb_build_object(
+                    'id', q2.id, 'kind', q2.kind, 'vignette', q2.vignette, 'question', q2.question,
+                    'options', to_jsonb(q2.options), 'slides', to_jsonb(q2.slides), 'topic', q2.topic,
+                    'aspect', q2.aspect, 'lecture_id', coalesce(q2.lecture_id, q2.ref_lecture)) end,
+             'answer', r2.answer, 'explanations', to_jsonb(coalesce(k2.explanations, '{}'::text[])),
+             'takeaway', coalesce(k2.takeaway, ''),
+             'answered', (select count(*) from public.study_quiz_answers a where a.round_id = r2.id),
+             'right', (select count(*) from public.study_quiz_answers a where a.round_id = r2.id and a.correct),
+             'counts', coalesce((select jsonb_agg(coalesce(c.n, 0) order by o.i)
+                                   from generate_series(0, coalesce(cardinality(q2.options), 0) - 1) as o(i)
+                                   left join (select a.choice, count(*)::int as n from public.study_quiz_answers a
+                                               where a.round_id = r2.id and a.choice is not null group by a.choice) c
+                                          on c.choice = o.i), '[]'::jsonb),
+             'mine', (select jsonb_build_object('choice', a.choice, 'correct', a.correct, 'points', a.points)
+                        from public.study_quiz_answers a where a.round_id = r2.id and a.user_id = me))
+             order by r2.idx), '[]'::jsonb)
+      into v_sum
+      from public.study_quiz_rounds r2
+      left join public.study_questions q2 on q2.id = r2.question_id
+      left join public.study_question_keys k2 on k2.question_id = r2.question_id
+     where r2.quiz_id = p_quiz and r2.revealed_at is not null;
+  end if;
+
+  return jsonb_build_object(
+    'now', clock_timestamp(),
+    'quiz', jsonb_build_object(
+      'id', z.id, 'group_id', z.group_id, 'mode', z.mode, 'title', z.title, 'lecture_ids', to_jsonb(z.lecture_ids),
+      'kinds', z.kinds, 'n_wanted', z.n_wanted, 'seconds', z.seconds, 'state', z.state, 'idx', z.idx,
+      'n_total', z.n_total, 'opens_at', z.opens_at, 'closes_at', z.closes_at, 'answered_n', z.answered_n,
+      'players_n', z.players_n, 'version', z.version, 'host_id', z.host_id,
+      'created_at', z.created_at, 'started_at', z.started_at, 'ended_at', z.ended_at),
+    'me', v_me,
+    'host_here', public.study_quiz__host_here(p_quiz),
+    'players', v_ppl,
+    'round', v_rnd,
+    'summary', v_sum);
+end;
+$$;
+
+-- The library banner: the group's live quiz, unless nobody has touched it
+-- for 20 minutes. playing: the caller is in it; names: who is in it, in the
+-- order they joined (the banner says "בפנים: שוהם, נועה +3").
+create or replace function public.study_quiz_open(p_group uuid)
+returns table (id uuid, mode text, title text, state text, idx int, n_total int, players_n int,
+               host_id uuid, playing boolean, names text[])
+language sql stable security definer set search_path = public as $$
+  select z.id, z.mode, z.title, z.state, z.idx, z.n_total, z.players_n, z.host_id,
+         exists (select 1 from public.study_quiz_players p
+                  where p.quiz_id = z.id and p.user_id = auth.uid() and p.left_at is null),
+         array(select coalesce(m.name, '') from public.study_quiz_players p
+                 left join public.study_members m on m.group_id = z.group_id and m.user_id = p.user_id
+                where p.quiz_id = z.id and p.left_at is null order by p.joined_at)
+    from public.study_quizzes z
+   where z.group_id = p_group
+     and public.study_is_member(p_group)
+     and z.state in ('lobby', 'question', 'reveal')
+     and (z.updated_at > now() - interval '20 minutes'
+          or exists (select 1 from public.study_quiz_players p
+                      where p.quiz_id = z.id and p.seen_at > now() - interval '20 minutes'))
+   order by z.created_at desc
+   limit 1;
+$$;
+
+-- The setup screen: how many questions each lecture has ready (keyed, not
+-- retired). Security invoker: RLS on study_questions keeps it to members.
+create or replace function public.study_quiz_pool(p_group uuid)
+returns table (lecture_id uuid, mcq int, cases int)
+language sql stable set search_path = public as $$
+  select coalesce(q.lecture_id, q.ref_lecture),
+         (count(*) filter (where q.kind = 'mcq'))::int,
+         (count(*) filter (where q.kind = 'case'))::int
+    from public.study_questions q
+   where q.group_id = p_group and q.retired_at is null and q.has_key
+     and coalesce(q.lecture_id, q.ref_lecture) is not null
+   group by 1;
+$$;
+
+-- The "יחד" tab: the group's last quizzes. The group's share of right
+-- answers is shared; my_* are the caller's own, my_rank only in a race the
+-- caller played (its table was shown to its players anyway).
+create or replace function public.study_quiz_recent(p_group uuid, p_limit int default 5)
+returns table (id uuid, mode text, title text, ended_at timestamptz, players_n int, rounds int,
+               right_pct int, played boolean, my_correct int, my_answered int, my_rank int)
+language sql stable security definer set search_path = public as $$
+  select z.id, z.mode, z.title, z.ended_at,
+         (select count(*) from public.study_quiz_players p where p.quiz_id = z.id)::int,
+         (select count(*) from public.study_quiz_rounds r
+           where r.quiz_id = z.id and r.revealed_at is not null and r.voided_at is null)::int,
+         (select round(100.0 * count(*) filter (where a.correct) / nullif(count(*), 0))::int
+            from public.study_quiz_answers a join public.study_quiz_rounds r on r.id = a.round_id
+           where r.quiz_id = z.id and r.voided_at is null),
+         me.user_id is not null, me.correct_n, me.answered_n,
+         case when z.mode = 'race' and me.user_id is not null then
+           (select count(*) + 1 from public.study_quiz_players o where o.quiz_id = z.id and o.score > me.score)::int
+         end
+    from public.study_quizzes z
+    left join public.study_quiz_players me on me.quiz_id = z.id and me.user_id = auth.uid()
+   where z.group_id = p_group and public.study_is_member(p_group) and z.state = 'ended'
+   order by z.ended_at desc
+   limit greatest(1, least(coalesce(p_limit, 5), 50));
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security and privileges
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_quizzes      enable row level security;
+alter table public.study_quiz_rounds  enable row level security;
+alter table public.study_quiz_players enable row level security;
+alter table public.study_quiz_answers enable row level security;
+
+-- (In study-schema.sql the file's loop has already dropped this; the drop
+-- keeps this block re-runnable on its own.)
+drop policy if exists "study quizzes read" on public.study_quizzes;
+create policy "study quizzes read" on public.study_quizzes
+  for select using (public.study_is_member(group_id));
+-- study_quiz_rounds, study_quiz_players, study_quiz_answers: no policy on purpose.
+
+revoke all on public.study_quizzes, public.study_quiz_rounds, public.study_quiz_players, public.study_quiz_answers
+  from anon, authenticated;
+grant select on public.study_quizzes to authenticated;
+
+revoke all on function public.study_quiz__seconds(int, int), public.study_quiz__playing(uuid),
+  public.study_quiz__host_here(uuid), public.study_quiz__seen(uuid), public.study_quiz__all_answered(uuid, int),
+  public.study_quiz__pick(uuid), public.study_quiz__finish(uuid), public.study_quiz__open(uuid, int),
+  public.study_quiz__reveal(uuid, int), public.study_quiz__due(uuid)
+  from public, anon, authenticated;
+revoke all on function public.study_quiz_create(uuid, text, uuid[], int, int, text), public.study_quiz_join(uuid),
+  public.study_quiz_leave(uuid), public.study_quiz_next(uuid, int), public.study_quiz_answer(uuid, int, int),
+  public.study_quiz_reveal(uuid, int), public.study_quiz_end(uuid), public.study_quiz_take_host(uuid),
+  public.study_quiz_void(uuid, int), public.study_quiz_ping(uuid), public.study_quiz_state(uuid),
+  public.study_quiz_open(uuid), public.study_quiz_pool(uuid), public.study_quiz_recent(uuid, int)
+  from public, anon;
+grant execute on function public.study_quiz_create(uuid, text, uuid[], int, int, text), public.study_quiz_join(uuid),
+  public.study_quiz_leave(uuid), public.study_quiz_next(uuid, int), public.study_quiz_answer(uuid, int, int),
+  public.study_quiz_reveal(uuid, int), public.study_quiz_end(uuid), public.study_quiz_take_host(uuid),
+  public.study_quiz_void(uuid, int), public.study_quiz_ping(uuid), public.study_quiz_state(uuid),
+  public.study_quiz_open(uuid), public.study_quiz_pool(uuid), public.study_quiz_recent(uuid, int)
+  to authenticated;
+
+-- ── Realtime: the quiz row only (never rounds, players or answers).
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.study_quizzes;
+  exception when duplicate_object then
+    null;
+  end;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('Z', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+
+
+-- Section Z's end reads six of section Q's end's columns (a question's
+-- anchor, quote, teaser, stale_at and hidden_at, and study_answers.confidence,
+-- which its reveal writes). They are Q's: section Q's end, above, defines
+-- them, and it always runs before this section (Q is at version 2 here).
+-- The package Z branch added them here too while Q was at version 1; that
+-- copy went when the two were merged, so each column is defined once.
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Z, its end · THE APPROVED GROUP QUIZ: PRESETS, THE BET, MAZUR'S
+--  REVOTE, THE ROUND'S TRAP, THE GROUP'S RECORD   (package Z, milestone Z-2;
+--  meeting addendum §3.2)
+--  Appended at the END of section Z, inside its markers. Section Z's tables
+--  gain columns; its functions are defined again here with the approved
+--  rules (create or replace; the three whose arguments or result change are
+--  dropped first, which matters only while section Z's own text precedes
+--  this block: when package Z folds the block into its functions, the drops
+--  go). Z becomes version 2.
+--
+--  Q1  a quiz on what was read: a part range of one lecture, and presets:
+--      'end' (סוף הקריאה, 5 questions by default), 'coffee' (3 לקפה: three
+--      questions chosen by the meeting's hook, section M), 'stop' (one
+--      question at a chapter's end, decision 7), 'free' (as before).
+--  Q2  co-op ("כולנו נגד המבחן", the default) has no personal table: the
+--      group's share of right final answers is its score, 80% is "עברנו",
+--      and the best score is the group's record (study_quiz_record).
+--  Q3  a bet on every first vote (1 ניחוש · 2 נראה לי · 3 על בטוח): right
+--      +1/+2/+3, wrong 0/−2/−6. Private in co-op; in a race ("מירוץ") it is
+--      the score (decision 2), and speed only breaks ties (ms_total).
+--  Q5  Mazur's rule in co-op, from at least 3 first votes: ≥ 70% right →
+--      explain; 30-70% → stage 'argue' (vote 1's counts, no key, 90 s),
+--      then vote 2; < 30% → explain and every phone jumps to the
+--      question's paragraph (next_step 'source').
+--  Q7  the round's trap: the wrong option most chosen in vote 1 (unique,
+--      on ≥ 2 of ≥ 3 answers), named at the reveal and made into a group
+--      trap card once per question and option (section C's end).
+--  Q9  every first vote, wrong ones fixed in the discussion too, lands in
+--      its owner's study_answers with its bet (mode 'quiz'); vote 2 never
+--      does. Section T derives the returns after 1 and 3 days.
+--  Coffee never argues and its reveal carries no counts: only a majority
+--  word ('most_right' · 'split' · 'most_wrong'), and none below 3 answers.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ── Columns ──
+alter table public.study_quizzes
+  add column if not exists preset      text not null default 'free' check (preset in ('free', 'end', 'coffee', 'stop')),
+  add column if not exists meeting_id  uuid,                          -- study_meetings.id (section M is later: no foreign key)
+  add column if not exists part_from   int check (part_from between 0 and 199),
+  add column if not exists part_to     int check (part_to between 0 and 199),
+  add column if not exists vote        smallint not null default 1 check (vote in (1, 2)),
+  add column if not exists stage       text not null default 'final' check (stage in ('final', 'argue')),
+  add column if not exists argue_until timestamptz;
+alter table public.study_quizzes drop constraint if exists study_quizzes_n_wanted_check;
+alter table public.study_quizzes add constraint study_quizzes_n_wanted_check check (n_wanted between 1 and 30);
+-- One opening and one closing quiz per meeting (decision 7); a cancelled lobby frees its place.
+create unique index if not exists study_quizzes_meeting_preset on public.study_quizzes (meeting_id, preset)
+  where meeting_id is not null and preset in ('coffee', 'end') and state <> 'cancelled';
+
+alter table public.study_quiz_rounds
+  add column if not exists vote      smallint not null default 1 check (vote in (1, 2)),   -- the last vote opened
+  add column if not exists next_step text check (next_step in ('explain', 'argue', 'source')),
+  add column if not exists answered1 int check (answered1 >= 0),
+  add column if not exists right1    int check (right1 >= 0),
+  add column if not exists counts1   int[],
+  add column if not exists trap      smallint check (trap >= 0),
+  add column if not exists trap_card uuid;                           -- study_cards.id (section C's end)
+
+alter table public.study_quiz_answers
+  add column if not exists vote smallint not null default 1 check (vote in (1, 2)),
+  add column if not exists bet  smallint check (bet between 1 and 3);
+alter table public.study_quiz_answers drop constraint if exists study_quiz_answers_points_check;
+alter table public.study_quiz_answers add constraint study_quiz_answers_points_check check (points between -6 and 3);
+do $$
+begin
+  if (select array_length(k.conkey, 1) from pg_constraint k
+       where k.conrelid = 'public.study_quiz_answers'::regclass and k.contype = 'p') = 2 then
+    alter table public.study_quiz_answers drop constraint study_quiz_answers_pkey;
+    alter table public.study_quiz_answers add constraint study_quiz_answers_pkey primary key (round_id, user_id, vote);
+  end if;
+end $$;
+
+alter table public.study_quiz_players add column if not exists ms_total bigint not null default 0;
+alter table public.study_quiz_players drop constraint if exists study_quiz_players_score_check;   -- a bet can take a score below 0
+
+-- ── Hooks that later sections fill (the pattern of section F's
+--    study_corrections_of: same names, arguments and results, so a later
+--    section's create-or-replace swaps the body on every run). Here they do
+--    nothing: the group's anonymous signal per question, 3 confident errors ·
+--    2 missed · 1 split · 0 (section U, Q10), and a boss battle's rounds, hit
+--    points and state (section H). ──
+-- A boss battle (section H) is a quiz in mode 'boss': co-op, no points.
+alter table public.study_quizzes drop constraint if exists study_quizzes_mode_check;
+alter table public.study_quizzes add constraint study_quizzes_mode_check check (mode in ('coop', 'race', 'boss'));
+create or replace function public.study_quiz__signal(p_question uuid)
+returns int language sql stable set search_path = public as $$ select 0 $$;
+create or replace function public.study_quiz__pick_boss(p_quiz uuid)
+returns int language sql volatile set search_path = public as $$ select 0 $$;
+create or replace function public.study_quiz__after_reveal(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile set search_path = public as $$ begin null; end $$;
+create or replace function public.study_quiz__boss_state(p_quiz uuid)
+returns jsonb language sql stable set search_path = public as $$ select null::jsonb $$;
+-- A question was revealed in a live quiz (section E unmasks a member's trap
+-- here, review SEC-7: never from a column a member can set).
+create or replace function public.study_quiz__revealed(p_quiz uuid, p_question uuid)
+returns void language plpgsql volatile set search_path = public as $$ begin null; end $$;
+
+-- ── Internal helpers (no grants) ──
+-- A first vote's points: right +bet; wrong 0, −2, −6; "לא יודעים" or none 0.
+-- A vote sent without a bet counts as ניחוש (1).
+create or replace function public.study_quiz__points(p_choice smallint, p_key smallint, p_bet smallint)
+returns int language sql immutable set search_path = public as $$
+  select case when p_choice is null or p_key is null then 0
+              when p_choice = p_key then coalesce(p_bet, 1)
+              else case coalesce(p_bet, 1) when 1 then 0 when 2 then -2 else -6 end end
+$$;
+
+-- The count per option of one vote of a round (options in display order).
+create or replace function public.study_quiz__counts(p_round uuid, p_vote int, p_n int)
+returns int[] language sql stable security definer set search_path = public as $$
+  select coalesce(array_agg(coalesce(c.n, 0) order by o.i), '{}')
+    from generate_series(0, greatest(coalesce(p_n, 0), 0) - 1) as o(i)
+    left join (select a.choice, count(*)::int as n from public.study_quiz_answers a
+                where a.round_id = p_round and a.vote = p_vote and a.choice is not null group by a.choice) c
+           on c.choice = o.i
+$$;
+
+-- Everyone still playing and not away has answered the open vote of round p_idx.
+create or replace function public.study_quiz__all_answered(p_quiz uuid, p_idx int)
+returns boolean language sql volatile security definer set search_path = public as $$
+  select not exists (
+    select 1 from public.study_quiz_players p
+     where p.quiz_id = p_quiz and p.left_at is null
+       and p.seen_at > clock_timestamp() - interval '30 seconds'
+       and not exists (select 1 from public.study_quiz_answers a
+                         join public.study_quiz_rounds r on r.id = a.round_id
+                        where r.quiz_id = p_quiz and r.idx = p_idx and a.user_id = p.user_id
+                          and a.vote = (select z.vote from public.study_quizzes z where z.id = p_quiz)));
+$$;
+
+-- The hook for preset 'coffee': section M replaces this stub with the
+-- opening's picker (same name, argument and result). null = no choice made.
+create or replace function public.study_quiz__pick_preset(p_quiz uuid)
+returns uuid[] language sql stable security definer set search_path = public as $$
+  select null::uuid[]
+$$;
+
+-- Chooses the questions when the quiz starts: as section Z (keyed, not
+-- retired, chosen lectures and kinds, spread over parts, flagged last,
+-- fewest seen by these players, then random), plus: only the quiz's part
+-- range when it has one, never a question a correction marked (stale) or
+-- two members' flags hid (review F-6), the group's nightly signal first
+-- (section U's hook), "fewest seen" only when 3 or more play (review SEC-5:
+-- with two players it would read the other's private answers), and the
+-- opening's own choice for preset 'coffee'.
+create or replace function public.study_quiz__pick(p_quiz uuid)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  z   public.study_quizzes;
+  n   int;
+  ids uuid[];
+  np  int;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  delete from public.study_quiz_rounds r where r.quiz_id = p_quiz;
+  select count(*) into np from public.study_quiz_players p where p.quiz_id = p_quiz and p.left_at is null;
+  if z.mode = 'boss' then
+    return public.study_quiz__pick_boss(p_quiz);   -- section H chooses a battle's rounds
+  end if;
+  if z.preset = 'coffee' then
+    ids := public.study_quiz__pick_preset(p_quiz);
+    if ids is not null then
+      insert into public.study_quiz_rounds (quiz_id, idx, question_id, seconds)
+      select p_quiz, (u.o - 1)::int, u.id,
+             public.study_quiz__seconds(z.seconds, (char_length(q.vignette) + char_length(q.question)
+               + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0))::int)
+        from unnest(ids) with ordinality as u(id, o)
+        join public.study_questions q on q.id = u.id
+       where u.o <= z.n_wanted;
+      get diagnostics n = row_count;
+      return n;
+    end if;
+  end if;
+  with pool as (
+    select q.id,
+           char_length(q.vignette) + char_length(q.question)
+             + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0) as chars,
+           array_position(z.lecture_ids, coalesce(q.lecture_id, q.ref_lecture)) as lec_pos,
+           coalesce(q.part_idx, -1) as part_idx,
+           coalesce(q.anchor, -1) as anchor,
+           exists (select 1 from public.study_question_flags f
+                    where f.question_id = q.id and f.reason in ('wrong_key', 'two_answers', 'not_in_slides')) as flagged,
+           case when np >= 3 then                                -- review SEC-5: an aggregate of 3 players at least
+             (select count(distinct a.user_id)
+                from public.study_answers a
+                join public.study_quiz_players p on p.user_id = a.user_id and p.quiz_id = p_quiz and p.left_at is null
+               where a.question_id = q.id) else 0 end as seen,
+           public.study_quiz__signal(q.id) as sig,   -- the group's anonymous signal (section U)
+           random() as rnd
+      from public.study_questions q
+     where q.group_id = z.group_id
+       and coalesce(q.lecture_id, q.ref_lecture) = any (z.lecture_ids)
+       and q.retired_at is null
+       and q.stale_at is null
+       and q.hidden_at is null                                   -- review F-6: two flags hide it everywhere
+       and q.has_key
+       and (z.kinds = 'all' or q.kind = z.kinds)
+       and (z.part_from is null or coalesce(q.part_idx, -1) between z.part_from and z.part_to)
+  ),
+  ranked as (
+    select p.*, row_number() over (partition by p.lec_pos, p.part_idx order by p.flagged, p.sig desc, p.seen, p.rnd) as rk
+      from pool p
+  ),
+  chosen as (
+    select c.* from ranked c order by c.flagged, (c.sig > 0) desc, c.rk, c.sig desc, c.seen, c.rnd limit z.n_wanted
+  )
+  insert into public.study_quiz_rounds (quiz_id, idx, question_id, seconds)
+  select p_quiz,
+         (row_number() over (order by case when z.mode = 'coop' then c.lec_pos end,
+                                      case when z.mode = 'coop' then c.part_idx end,
+                                      case when z.mode = 'coop' then c.anchor end,
+                                      c.rnd))::int - 1,
+         c.id,
+         public.study_quiz__seconds(z.seconds, c.chars::int)
+    from chosen c;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- Opens the first round at or after p_idx that still has its question, at
+-- vote 1, 3 seconds from now (or ends the quiz when none is left).
+create or replace function public.study_quiz__open(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  r  public.study_quiz_rounds;
+  t0 timestamptz := clock_timestamp() + interval '3 seconds';
+begin
+  select * into r from public.study_quiz_rounds x
+   where x.quiz_id = p_quiz and x.idx >= p_idx and x.question_id is not null
+   order by x.idx limit 1;
+  if not found then
+    perform public.study_quiz__finish(p_quiz);
+    return;
+  end if;
+  update public.study_quiz_rounds x
+     set opens_at = t0, closes_at = t0 + make_interval(secs => x.seconds), vote = 1
+   where x.id = r.id;
+  update public.study_question_keys k
+     set held_until = t0 + make_interval(secs => r.seconds) + interval '10 minutes'
+   where k.question_id = r.question_id;
+  update public.study_quizzes z
+     set state = 'question', idx = r.idx, opens_at = t0, closes_at = t0 + make_interval(secs => r.seconds),
+         vote = 1, stage = 'final', argue_until = null,
+         answered_n = 0, version = z.version + 1, updated_at = now()
+   where z.id = p_quiz;
+end;
+$$;
+
+-- A group trap card from the round's trap (section C's end makes it, once
+-- per question and option). Nothing when section C is not there. Only when 3
+-- or more players chose the trap, and the card opens at the next study day's
+-- start (review SEC-6: the museum's own rule, "so nobody can guess who").
+create or replace function public.study_quiz__trap_card(p_round uuid)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  r   public.study_quiz_rounds;
+  q   public.study_questions;
+  k   public.study_question_keys;
+  why text;
+  cid uuid;
+begin
+  select * into r from public.study_quiz_rounds x where x.id = p_round;
+  if r.trap is null or r.question_id is null then return null; end if;
+  if coalesce(r.counts1[r.trap + 1], 0) < 3 then return null; end if;                 -- review SEC-6: chosen by 3 at least
+  if to_regprocedure('study_private.trap_card(uuid,integer,integer,text,text,text,text,integer[],text,timestamp with time zone)') is null then
+    return null;
+  end if;
+  select * into q from public.study_questions x where x.id = r.question_id;
+  select * into k from public.study_question_keys x where x.question_id = r.question_id;
+  if q.lecture_id is null or k.answer is null or cardinality(k.explanations) <= r.trap then return null; end if;
+  why := left(btrim(k.explanations[r.trap + 1]), 300);
+  if why = '' then return null; end if;
+  cid := study_private.trap_card(
+    q.lecture_id, q.part_idx, q.anchor, q.quote,
+    left(coalesce(nullif(btrim(q.teaser), ''), btrim(q.question)), 300) || E'\nלמה לא ' || q.options[r.trap + 1] || '?',
+    why,
+    left('התשובה הנכונה: ' || q.options[k.answer + 1] || '. ' || coalesce(k.takeaway, ''), 500),
+    (select coalesce(array_agg(s), '{}') from (select s from unnest(q.slides) s limit 12) x),
+    'q:' || q.id::text || ':' || r.trap::text,
+    -- review SEC-6: it opens at the next study day's start (04:00, Israel)
+    ((((coalesce(r.revealed_at, now()) at time zone 'Asia/Jerusalem') - interval '4 hours')::date + 1) + time '04:00')
+      at time zone 'Asia/Jerusalem');
+  if cid is not null then
+    update public.study_quiz_rounds x set trap_card = cid where x.id = p_round;
+  end if;
+  return cid;
+end;
+$$;
+
+-- The final reveal of round p_round: the key is read here, every vote is
+-- marked, the first votes are scored by their bet and copied (with the bet)
+-- into their owners' private study_answers, the hold lets go, and the
+-- round's trap becomes a card.
+create or replace function public.study_quiz__score(p_quiz uuid, p_round uuid, p_key smallint, p_step text, p_t timestamptz)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare r public.study_quiz_rounds;
+begin
+  select * into r from public.study_quiz_rounds x where x.id = p_round;
+  update public.study_question_keys x set held_until = null where x.question_id = r.question_id;
+  update public.study_quiz_answers a
+     set correct = (a.choice is not null and a.choice = p_key),
+         points = case when a.vote = 1 then public.study_quiz__points(a.choice, p_key, a.bet) else 0 end
+   where a.round_id = r.id;
+  update public.study_quiz_players p
+     set score = p.score + a.points,
+         correct_n = p.correct_n + case when a.correct then 1 else 0 end,
+         answered_n = p.answered_n + 1,
+         ms_total = p.ms_total + a.ms
+    from public.study_quiz_answers a
+   where a.round_id = r.id and a.vote = 1 and p.quiz_id = p_quiz and p.user_id = a.user_id;
+  insert into public.study_answers (user_id, question_id, choice, correct, mode, ms, answered_at, confidence)
+  select a.user_id, r.question_id, a.choice, a.correct, 'quiz', a.ms, a.answered_at, a.bet
+    from public.study_quiz_answers a
+   where a.round_id = r.id and a.vote = 1;
+  update public.study_quiz_rounds x
+     set revealed_at = p_t, answer = p_key, closes_at = least(x.closes_at, p_t), next_step = p_step
+   where x.id = r.id;
+  perform public.study_quiz__after_reveal(p_quiz, r.idx);   -- a boss battle's hit points (section H)
+  perform public.study_quiz__revealed(p_quiz, r.question_id);   -- a member's trap is named (section E, review SEC-7)
+  if r.trap is not null then
+    perform public.study_quiz__trap_card(r.id);
+  end if;
+  update public.study_quizzes x
+     set state = 'reveal', stage = 'final', argue_until = null, closes_at = least(x.closes_at, p_t),
+         answered_n = (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = x.vote),
+         version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+end;
+$$;
+
+-- Closes the open vote of round p_idx. Vote 1 of a co-op round with at
+-- least 3 answers follows Mazur's rule; a split opens the 'argue' stage
+-- (vote 1's counts, no key, 90 s), anything else reveals at once. Vote 2
+-- always reveals. A round whose question went is voided, as in section Z.
+create or replace function public.study_quiz__reveal(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  z      public.study_quizzes;
+  r      public.study_quiz_rounds;
+  k      smallint;
+  nopt   int;
+  t      timestamptz := clock_timestamp();
+  n1     int;
+  ok1    int;
+  c1     int[];
+  top    int;
+  v_trap smallint;
+  v_step text := 'explain';
+  share  numeric;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.state <> 'question' or z.idx <> p_idx then return; end if;
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = p_idx;
+  if r.question_id is not null then
+    select x.answer into k from public.study_question_keys x where x.question_id = r.question_id;
+    select cardinality(q.options) into nopt from public.study_questions q where q.id = r.question_id;
+  end if;
+  if k is null then
+    if r.question_id is not null then
+      update public.study_question_keys x set held_until = null where x.question_id = r.question_id;
+    end if;
+    update public.study_quiz_rounds x set revealed_at = t, voided_at = t, closes_at = least(x.closes_at, t)
+     where x.id = r.id;
+    update public.study_quizzes x
+       set state = 'reveal', stage = 'final', argue_until = null, closes_at = least(x.closes_at, t),
+           answered_n = (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = x.vote),
+           version = x.version + 1, updated_at = now()
+     where x.id = p_quiz;
+    return;
+  end if;
+  if z.vote = 1 then
+    select count(*), count(*) filter (where a.choice = k) into n1, ok1
+      from public.study_quiz_answers a where a.round_id = r.id and a.vote = 1;
+    c1 := public.study_quiz__counts(r.id, 1, nopt);
+    if n1 >= 3 then
+      select max(c1[o.i + 1]) into top from generate_series(0, nopt - 1) as o(i) where o.i <> k;
+      if top >= 2 and (select count(*) from generate_series(0, nopt - 1) as o(i) where o.i <> k and c1[o.i + 1] = top) = 1 then
+        select o.i into v_trap from generate_series(0, nopt - 1) as o(i) where o.i <> k and c1[o.i + 1] = top;
+      end if;
+    end if;
+    if z.mode = 'coop' and z.preset <> 'coffee' and n1 >= 3 then
+      share := ok1::numeric / n1;
+      v_step := case when share >= 0.7 then 'explain' when share >= 0.3 then 'argue' else 'source' end;
+    end if;
+    update public.study_quiz_rounds x set answered1 = n1, right1 = ok1, counts1 = c1, trap = v_trap where x.id = r.id;
+    if v_step = 'argue' then
+      update public.study_question_keys x
+         set held_until = t + interval '93 seconds' + make_interval(secs => least(r.seconds, 30)) + interval '10 minutes'
+       where x.question_id = r.question_id;
+      update public.study_quiz_rounds x set next_step = 'argue', closes_at = least(x.closes_at, t) where x.id = r.id;
+      update public.study_quizzes x
+         set state = 'reveal', stage = 'argue', argue_until = t + interval '90 seconds', closes_at = least(x.closes_at, t),
+             answered_n = n1, version = x.version + 1, updated_at = now()
+       where x.id = p_quiz;
+      return;
+    end if;
+  end if;
+  perform public.study_quiz__score(p_quiz, r.id, k, v_step, t);
+end;
+$$;
+
+-- After the argue stage: vote 2 of the same round opens 3 seconds from now,
+-- for 30 seconds at most (the question was already read).
+create or replace function public.study_quiz__open_vote2(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  z    public.study_quizzes;
+  r    public.study_quiz_rounds;
+  t0   timestamptz := clock_timestamp() + interval '3 seconds';
+  secs int;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.state <> 'reveal' or z.stage <> 'argue' then return; end if;
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = z.idx;
+  secs := least(r.seconds, 30);
+  update public.study_quiz_rounds x set vote = 2, opens_at = t0, closes_at = t0 + make_interval(secs => secs) where x.id = r.id;
+  update public.study_question_keys k set held_until = t0 + make_interval(secs => secs) + interval '10 minutes'
+   where k.question_id = r.question_id;
+  update public.study_quizzes x
+     set state = 'question', vote = 2, stage = 'final', argue_until = null, opens_at = t0,
+         closes_at = t0 + make_interval(secs => secs), answered_n = 0, version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+end;
+$$;
+
+-- Ends the quiz: an open vote is revealed first, a round left in the argue
+-- stage is scored as it stands (its first votes count), then 'ended'
+-- ('cancelled' if it never left the lobby).
+create or replace function public.study_quiz__finish(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  z public.study_quizzes;
+  r public.study_quiz_rounds;
+  k smallint;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.state not in ('lobby', 'question', 'reveal') then return; end if;
+  if z.state = 'question' then
+    perform public.study_quiz__reveal(p_quiz, z.idx);
+    select * into z from public.study_quizzes x where x.id = p_quiz;
+  end if;
+  if z.state = 'reveal' and z.stage = 'argue' then
+    select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = z.idx;
+    select x.answer into k from public.study_question_keys x where x.question_id = r.question_id;
+    perform public.study_quiz__score(p_quiz, r.id, k, 'explain', clock_timestamp());
+  end if;
+  update public.study_quizzes x
+     set state = case when z.state = 'lobby' then 'cancelled' else 'ended' end, ended_at = now(),
+         opens_at = null, closes_at = null, stage = 'final', argue_until = null,
+         version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+end;
+$$;
+
+-- A vote whose time ran out (plus the grace) and that nobody revealed, or an
+-- argue stage whose 90 s are over, moves on when any phone asks next.
+create or replace function public.study_quiz__due(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare z public.study_quizzes;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found then return; end if;
+  if z.state = 'question' and clock_timestamp() > z.closes_at + interval '4.5 seconds' then
+    perform public.study_quiz__reveal(p_quiz, z.idx);
+  elsif z.state = 'reveal' and z.stage = 'argue' and clock_timestamp() > z.argue_until + interval '1 second' then
+    perform public.study_quiz__open_vote2(p_quiz);
+  end if;
+end;
+$$;
+
+-- The group's record: the best share of right final answers in an ended
+-- co-op quiz ('free' or 'end') of at least 5 rounds and 3 players, before p_before.
+create or replace function public.study_quiz__record(p_group uuid, p_before timestamptz)
+returns int language sql stable security definer set search_path = public as $$
+  select max(t.pct)::int from (
+    select round(100.0 * count(*) filter (where a.correct) / nullif(count(*), 0)) as pct
+      from public.study_quizzes z
+      join public.study_quiz_rounds r on r.quiz_id = z.id and r.revealed_at is not null and r.voided_at is null
+      join public.study_quiz_answers a on a.round_id = r.id and a.vote = r.vote
+     where z.group_id = p_group and z.state = 'ended' and z.mode = 'coop' and z.preset in ('free', 'end')
+       and z.ended_at < p_before
+       and (select count(*) from public.study_quiz_rounds r2 where r2.quiz_id = z.id and r2.revealed_at is not null and r2.voided_at is null) >= 5
+       and (select count(*) from public.study_quiz_players p where p.quiz_id = z.id) >= 3
+     group by z.id) t
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  What the phones call (signatures that change are dropped first)
+-- ═══════════════════════════════════════════════════════════════════════
+drop function if exists public.study_quiz_create(uuid, text, uuid[], int, int, text);
+drop function if exists public.study_quiz_answer(uuid, int, int);
+
+-- Opens a quiz in the lobby. New: p_preset ('free' · 'end' · 'coffee' ·
+-- 'stop'), p_meeting (the day's meeting, section M), p_part_from/p_part_to
+-- (one lecture's parts). Errors as section Z, plus 'bad preset', 'bad parts',
+-- 'meeting not found', 'already' (this meeting's opening or closing quiz exists).
+create or replace function public.study_quiz_create(p_group uuid, p_mode text, p_lectures uuid[],
+  p_count int, p_seconds int, p_kinds text default 'all', p_preset text default 'free',
+  p_meeting uuid default null, p_part_from int default null, p_part_to int default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  me     uuid := auth.uid();
+  lec    uuid[];
+  t      text;
+  course text;
+  stale  uuid;
+  qid    uuid;
+  mg     uuid;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_group is null or not public.study_is_member(p_group) then raise exception 'group not found'; end if;
+  if coalesce(p_preset, '') not in ('free', 'end', 'coffee', 'stop') then raise exception 'bad preset'; end if;
+  if coalesce(p_mode, '') not in ('coop', 'race', 'boss') then raise exception 'bad mode'; end if;
+  if p_preset in ('coffee', 'stop') and p_mode <> 'coop' then raise exception 'bad mode'; end if;
+  if coalesce(p_kinds, '') not in ('all', 'mcq', 'case') then raise exception 'bad kinds'; end if;
+  if p_count is null
+     or (p_preset = 'stop' and p_count <> 1)
+     or (p_preset = 'coffee' and p_count <> 3)
+     or (p_preset in ('free', 'end') and p_count not between 3 and 30) then
+    raise exception 'bad count';
+  end if;
+  if p_seconds is null or p_seconds not between 15 and 120 then raise exception 'bad seconds'; end if;
+  select array_agg(x.l order by x.o) into lec
+    from (select u.l, min(u.o) as o
+            from unnest(p_lectures) with ordinality as u(l, o)
+           where u.l is not null
+           group by u.l) x;
+  if lec is null or cardinality(lec) > 40
+     or exists (select 1 from unnest(lec) as l(id) where public.study_lecture_group(l.id) is distinct from p_group) then
+    raise exception 'lecture not found';
+  end if;
+  if (p_part_from is null) <> (p_part_to is null) then raise exception 'bad parts'; end if;
+  if p_part_from is not null then
+    if cardinality(lec) <> 1 or p_part_from < 0 or p_part_to < p_part_from
+       or (select count(*) from public.study_sections s
+            where s.lecture_id = lec[1] and s.idx in (p_part_from, p_part_to)) <> (case when p_part_from = p_part_to then 1 else 2 end) then
+      raise exception 'bad parts';
+    end if;
+  elsif p_preset = 'stop' then
+    raise exception 'bad parts';
+  end if;
+  if p_preset in ('coffee', 'stop') and p_meeting is null then raise exception 'meeting not found'; end if;
+  if p_meeting is not null then
+    if to_regclass('public.study_meetings') is null then raise exception 'meeting not found'; end if;
+    execute 'select m.group_id from public.study_meetings m where m.id = $1 and m.cancelled_at is null' into mg using p_meeting;
+    if mg is distinct from p_group then raise exception 'meeting not found'; end if;
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_quiz_create:' || p_group::text));
+  for stale in
+    select x.id from public.study_quizzes x
+     where x.group_id = p_group and x.state in ('lobby', 'question', 'reveal')
+       and x.updated_at < now() - interval '20 minutes'
+       and not exists (select 1 from public.study_quiz_players p
+                        where p.quiz_id = x.id and p.seen_at > now() - interval '20 minutes')
+  loop
+    perform 1 from public.study_quizzes x where x.id = stale for update;
+    perform public.study_quiz__finish(stale);
+  end loop;
+  if exists (select 1 from public.study_quizzes x
+              where x.group_id = p_group and x.state in ('lobby', 'question', 'reveal')) then
+    raise exception 'quiz open';
+  end if;
+  if p_preset in ('coffee', 'end')
+     and exists (select 1 from public.study_quizzes x
+                  where x.group_id = p_group and x.preset = p_preset and x.state <> 'cancelled'
+                    and ((x.created_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date
+                      = ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date) then
+    raise exception 'already';                              -- review F-15: one opening and one closing a study day
+  end if;
+  select case when count(distinct btrim(l.course)) = 1 then min(btrim(l.course)) end into course
+    from public.study_lectures l where l.id = any (lec);
+  if p_preset = 'coffee' then
+    t := '3 לקפה';
+  elsif p_preset = 'stop' then
+    select 'עצירה: ' || coalesce(nullif(btrim(s.title), ''), l.title) into t
+      from public.study_lectures l left join public.study_sections s on s.lecture_id = l.id and s.idx = p_part_from
+     where l.id = lec[1];
+  elsif cardinality(lec) = 1 then
+    select l.title into t from public.study_lectures l where l.id = lec[1];
+  elsif coalesce(course, '') <> '' then
+    t := course || ' · ' || cardinality(lec) || ' הרצאות';
+  else
+    select string_agg(l.title, ' · ' order by u.o) into t
+      from unnest(lec) with ordinality as u(id, o)
+      join public.study_lectures l on l.id = u.id;
+  end if;
+  insert into public.study_quizzes (group_id, mode, title, lecture_ids, kinds, n_wanted, seconds,
+                                    host_id, created_by, players_n, version, preset, meeting_id, part_from, part_to)
+  values (p_group, p_mode, left(coalesce(nullif(btrim(t), ''), 'מבחן'), 200), lec, p_kinds, p_count, p_seconds,
+          me, me, 1, 1, p_preset, p_meeting, p_part_from, p_part_to)
+  returning id into qid;
+  insert into public.study_quiz_players (quiz_id, user_id) values (qid, me);
+  return qid;
+end;
+$$;
+
+-- Host only. From the lobby it chooses the questions and opens the first;
+-- in the argue stage it opens vote 2 now ("לסבב 2"); after a final reveal it
+-- opens the next round or ends the quiz after the last.
+create or replace function public.study_quiz_next(p_quiz uuid, p_from int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+  n  int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.state not in ('lobby', 'question', 'reveal') then raise exception 'quiz over'; end if;
+  if z.host_id is distinct from me then raise exception 'not host'; end if;
+  perform public.study_quiz__seen(p_quiz);
+  if z.idx <> p_from then return; end if;
+  if z.state = 'question' then raise exception 'not revealed'; end if;
+  if z.state = 'lobby' then
+    n := public.study_quiz__pick(p_quiz);
+    if n = 0 then raise exception 'no questions'; end if;
+    update public.study_quizzes x set n_total = n, started_at = now() where x.id = p_quiz;
+    perform public.study_quiz__open(p_quiz, 0);
+  elsif z.stage = 'argue' then
+    perform public.study_quiz__open_vote2(p_quiz);
+  else
+    perform public.study_quiz__open(p_quiz, z.idx + 1);
+  end if;
+end;
+$$;
+
+-- The one thing a player sends: an option (and, in vote 1, a bet). Returns
+-- the answer kept for this vote (a retry gets the first one back), never
+-- whether it is right. p_vote, when sent, must be the vote on screen.
+-- Errors as section Z, plus 'bad bet'.
+create or replace function public.study_quiz_answer(p_quiz uuid, p_idx int, p_choice int, p_bet int default null, p_vote int default null)
+returns table (idx int, choice int, ms int, answered_at timestamptz, vote int, bet int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me   uuid := auth.uid();
+  t    timestamptz := now();
+  z    public.study_quizzes;
+  r    public.study_quiz_rounds;
+  v    int;
+  b    int;
+  nopt int;
+  took int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if not public.study_quiz__playing(p_quiz) then raise exception 'not playing'; end if;
+  v := coalesce(p_vote, z.vote);
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = p_idx;
+  if found and exists (select 1 from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = v) then
+    return query select p_idx, a.choice::int, a.ms, a.answered_at, a.vote::int, a.bet::int
+                   from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = v;
+    return;
+  end if;
+  if z.state <> 'question' or z.idx <> p_idx or v <> z.vote then raise exception 'closed'; end if;
+  if t < r.opens_at then raise exception 'not open'; end if;
+  if t > r.closes_at + interval '1.5 seconds' then raise exception 'closed'; end if;
+  select cardinality(q.options) into nopt from public.study_questions q where q.id = r.question_id;
+  if nopt is null then raise exception 'closed'; end if;
+  if p_choice is null then
+    if z.mode not in ('coop', 'boss') then raise exception 'bad choice'; end if;
+  elsif p_choice < 0 or p_choice >= nopt then
+    raise exception 'bad choice';
+  end if;
+  if p_bet is not null and p_bet not between 1 and 3 then raise exception 'bad bet'; end if;
+  b := case when v = 1 and p_choice is not null then coalesce(p_bet, 1) end;
+  took := least(r.seconds * 1000, greatest(0, floor(extract(epoch from (t - r.opens_at)) * 1000)::int));
+  insert into public.study_quiz_answers (round_id, user_id, choice, ms, answered_at, vote, bet)
+  values (r.id, me, p_choice, took, t, v, b);
+  update public.study_quiz_players p set seen_at = clock_timestamp() where p.quiz_id = p_quiz and p.user_id = me;
+  if public.study_quiz__all_answered(p_quiz, p_idx) then
+    perform public.study_quiz__reveal(p_quiz, p_idx);
+  else
+    update public.study_quizzes x
+       set answered_n = (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = v),
+           updated_at = now()
+     where x.id = p_quiz;
+  end if;
+  return query select p_idx, p_choice, took, t, v, b;
+end;
+$$;
+
+-- Host only, after a final reveal: the question was wrong. Its first votes'
+-- points come off, their private copies go, and an unedited trap card made
+-- from it is removed.
+create or replace function public.study_quiz_void(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+  r  public.study_quiz_rounds;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.host_id is distinct from me then raise exception 'not host'; end if;
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = p_idx;
+  if not found or r.revealed_at is null then raise exception 'not revealed'; end if;
+  if r.voided_at is not null then return; end if;
+  if z.mode = 'race' and z.idx is distinct from p_idx then raise exception 'too late'; end if;
+  update public.study_quiz_players p
+     set score = p.score - a.points,
+         correct_n = greatest(0, p.correct_n - case when a.correct then 1 else 0 end),
+         answered_n = greatest(0, p.answered_n - 1),
+         ms_total = greatest(0, p.ms_total - a.ms)
+    from public.study_quiz_answers a
+   where a.round_id = r.id and a.vote = 1 and p.quiz_id = p_quiz and p.user_id = a.user_id;
+  delete from public.study_answers s
+   using public.study_quiz_answers a
+   where a.round_id = r.id and a.vote = 1 and s.user_id = a.user_id and s.question_id = r.question_id
+     and s.mode = 'quiz' and s.answered_at = a.answered_at;
+  update public.study_quiz_answers a set points = 0 where a.round_id = r.id;
+  if r.trap_card is not null and to_regprocedure('study_private.trap_card_drop(uuid)') is not null then
+    perform study_private.trap_card_drop(r.trap_card);
+  end if;
+  update public.study_quiz_rounds x set voided_at = clock_timestamp(), voided_by = me where x.id = r.id;
+  update public.study_quizzes x set version = x.version + 1, updated_at = now() where x.id = p_quiz;
+end;
+$$;
+
+-- Every 15 s while the quiz screen is visible: as section Z, and an argue
+-- stage that ran out moves on to vote 2.
+create or replace function public.study_quiz_ping(p_quiz uuid)
+returns table (server_now timestamptz, version int, state text, idx int, answered_n int, host_here boolean)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare z public.study_quizzes;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  perform public.study_quiz__seen(p_quiz);
+  if (z.state = 'question' and clock_timestamp() > z.closes_at + interval '4.5 seconds')
+     or (z.state = 'reveal' and z.stage = 'argue' and clock_timestamp() > z.argue_until + interval '1 second') then
+    perform public.study_quiz__due(p_quiz);
+  end if;
+  return query select clock_timestamp(), x.version, x.state, x.idx, x.answered_n, public.study_quiz__host_here(p_quiz)
+                 from public.study_quizzes x where x.id = p_quiz;
+end;
+$$;
+
+-- Everything one screen shows, filtered for the caller. New beside section Z:
+-- quiz.preset/meeting_id/part_from/part_to/vote/stage/argue_until/record;
+-- round.vote, the argue stage (counts1, answered1, argue_until: no key),
+-- mine (this vote) and mine1 (the first vote, with its bet), next_step,
+-- trap, jump (the paragraph, when next_step is 'source'), counts1/right1/
+-- answered1 beside the final counts after a revote, correct2; coffee's
+-- reveal has a majority word and no numbers; the end summary has the team
+-- result (co-op 'free'/'end'): right_pct, passed (≥ 80), record_before, new_record.
+create or replace function public.study_quiz_state(p_quiz uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  me     uuid := auth.uid();
+  z      public.study_quizzes;
+  r      public.study_quiz_rounds;
+  q      public.study_questions;
+  k      public.study_question_keys;
+  player boolean;
+  v_me   jsonb;
+  v_rnd  jsonb;
+  v_ppl  jsonb;
+  v_sum  jsonb;
+  v_team jsonb;
+  v_rec  int;
+  n_fin  int;
+  ok_fin int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if (z.state = 'question' and clock_timestamp() > z.closes_at + interval '4.5 seconds')
+     or (z.state = 'reveal' and z.stage = 'argue' and clock_timestamp() > z.argue_until + interval '1 second') then
+    perform public.study_quiz__due(p_quiz);
+    select * into z from public.study_quizzes x where x.id = p_quiz;
+  end if;
+  player := exists (select 1 from public.study_quiz_players p where p.quiz_id = p_quiz and p.user_id = me);
+
+  select jsonb_build_object('playing', p.left_at is null, 'score', p.score, 'correct_n', p.correct_n,
+                            'answered_n', p.answered_n, 'joined_idx', p.joined_idx, 'ms_total', p.ms_total)
+    into v_me
+    from public.study_quiz_players p where p.quiz_id = p_quiz and p.user_id = me;
+
+  if z.state in ('question', 'reveal') then
+    select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = z.idx;
+    select * into q from public.study_questions x where x.id = r.question_id;
+    v_rnd := jsonb_build_object(
+      'idx', r.idx, 'seconds', r.seconds, 'opens_at', r.opens_at, 'closes_at', r.closes_at,
+      'vote', r.vote, 'stage', z.stage,
+      'voided', r.voided_at is not null, 'voided_by', r.voided_by,
+      'q', case when q.id is null then null else jsonb_build_object(
+             'id', q.id, 'kind', q.kind, 'vignette', q.vignette, 'question', q.question, 'teaser', q.teaser,
+             'options', to_jsonb(q.options), 'slides', to_jsonb(q.slides), 'topic', q.topic, 'aspect', q.aspect,
+             'lecture_id', coalesce(q.lecture_id, q.ref_lecture), 'part_idx', q.part_idx, 'anchor', q.anchor,
+             'lecture_title', (select l.title from public.study_lectures l where l.id = coalesce(q.lecture_id, q.ref_lecture)))
+           end,
+      'mine', (select jsonb_build_object('choice', a.choice, 'ms', a.ms, 'bet', a.bet)
+                 from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = r.vote),
+      'mine1', (select jsonb_build_object('choice', a.choice, 'bet', a.bet)
+                  from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = 1));
+    if z.state = 'reveal' and z.stage = 'argue' then
+      -- vote 1's distribution (from 3 answers), no key: 90 seconds to argue
+      v_rnd := v_rnd || jsonb_build_object(
+        'argue_until', z.argue_until, 'answered1', r.answered1,
+        'counts1', case when r.answered1 >= 3 then to_jsonb(r.counts1) end);
+    elsif z.state = 'reveal' then
+      select * into k from public.study_question_keys x where x.question_id = r.question_id;
+      select count(*), count(*) filter (where a.correct) into n_fin, ok_fin
+        from public.study_quiz_answers a where a.round_id = r.id and a.vote = r.vote;
+      v_rnd := v_rnd || jsonb_build_object(
+        'answer', r.answer,
+        'explanations', to_jsonb(coalesce(k.explanations, '{}'::text[])),
+        'takeaway', coalesce(k.takeaway, ''),
+        'next_step', r.next_step,
+        'points', (select a.points from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = 1),
+        'correct', (select a.correct from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = 1));
+      if not player then
+        -- review SEC-6: a member who does not play sees the question and the
+        -- key at the reveal, never how the players answered
+        v_rnd := v_rnd || jsonb_build_object('answered', n_fin);
+      elsif z.preset = 'coffee' then
+        v_rnd := v_rnd || jsonb_build_object(
+          'majority', case when coalesce(r.answered1, 0) < 3 then null
+                           when r.right1 * 2 > r.answered1 then 'most_right'
+                           when r.right1 * 2 = r.answered1 then 'split'
+                           else 'most_wrong' end);
+      else
+        v_rnd := v_rnd || jsonb_build_object(
+          -- review SEC-6: how many chose what, only from 3 answers (else only how many answered)
+          'counts', case when n_fin >= 3 then to_jsonb(public.study_quiz__counts(r.id, r.vote, coalesce(cardinality(q.options), 0))) end,
+          'dont_know', case when n_fin >= 3 then
+                         (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = r.vote and a.choice is null) end,
+          'answered', n_fin, 'right', case when n_fin >= 3 then ok_fin end,
+          'trap', r.trap,
+          'correct2', (select a.correct from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = 2),
+          'jump', case when r.next_step = 'source' and q.anchor is not null then
+                    jsonb_build_object('lecture_id', q.lecture_id, 'part', q.part_idx, 'anchor', q.anchor, 'quote', q.quote) end)
+          || case when r.vote = 2 then jsonb_build_object('counts1', to_jsonb(r.counts1), 'answered1', r.answered1, 'right1', r.right1)
+                  else '{}'::jsonb end;
+      end if;
+    end if;
+  end if;
+
+  select coalesce(jsonb_agg(
+           jsonb_build_object(
+             'user_id', p.user_id,
+             'name', coalesce(m.name, ''),
+             'host', p.user_id is not distinct from z.host_id,
+             'here', p.left_at is null and p.seen_at > clock_timestamp() - interval '30 seconds',
+             'left', p.left_at is not null,
+             'joined_idx', p.joined_idx)
+           || case when z.mode = 'race' and player
+                   then jsonb_build_object('score', p.score, 'correct_n', p.correct_n, 'ms', p.ms_total,
+                          'last_points', case when z.state = 'reveal' and z.stage = 'final' then
+                              (select a.points from public.study_quiz_answers a where a.round_id = r.id and a.user_id = p.user_id and a.vote = 1)
+                            end)
+                   else '{}'::jsonb end
+           order by p.joined_at), '[]'::jsonb)
+    into v_ppl
+    from public.study_quiz_players p
+    left join public.study_members m on m.group_id = z.group_id and m.user_id = p.user_id
+   where p.quiz_id = p_quiz;
+
+  if z.state = 'ended' and player then
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'idx', r2.idx, 'voided', r2.voided_at is not null, 'vote', r2.vote, 'trap', r2.trap,
+             'q', case when q2.id is null then null else jsonb_build_object(
+                    'id', q2.id, 'kind', q2.kind, 'vignette', q2.vignette, 'question', q2.question, 'teaser', q2.teaser,
+                    'options', to_jsonb(q2.options), 'slides', to_jsonb(q2.slides), 'topic', q2.topic,
+                    'aspect', q2.aspect, 'lecture_id', coalesce(q2.lecture_id, q2.ref_lecture),
+                    'part_idx', q2.part_idx, 'anchor', q2.anchor) end,
+             'answer', r2.answer, 'explanations', to_jsonb(coalesce(k2.explanations, '{}'::text[])),
+             'takeaway', coalesce(k2.takeaway, ''))
+           || case when z.preset = 'coffee' then jsonb_build_object(
+                'majority', case when coalesce(r2.answered1, 0) < 3 then null
+                                 when r2.right1 * 2 > r2.answered1 then 'most_right'
+                                 when r2.right1 * 2 = r2.answered1 then 'split' else 'most_wrong' end)
+              else jsonb_build_object(
+                'answered', (select count(*) from public.study_quiz_answers a where a.round_id = r2.id and a.vote = r2.vote))
+              || case when (select count(*) from public.study_quiz_answers a where a.round_id = r2.id and a.vote = r2.vote) >= 3
+                      then jsonb_build_object(                    -- review SEC-6: from 3 answers only
+                'right', (select count(*) from public.study_quiz_answers a where a.round_id = r2.id and a.vote = r2.vote and a.correct),
+                'counts', to_jsonb(public.study_quiz__counts(r2.id, r2.vote, coalesce(cardinality(q2.options), 0))),
+                'counts1', case when r2.vote = 2 then to_jsonb(r2.counts1) end,
+                'right1', case when r2.vote = 2 then r2.right1 end)
+                      else '{}'::jsonb end end
+           || jsonb_build_object(
+             'mine', (select jsonb_build_object('choice', a.choice, 'correct', a.correct, 'points', a.points, 'bet', a.bet,
+                                                'choice2', (select a2.choice from public.study_quiz_answers a2
+                                                             where a2.round_id = r2.id and a2.user_id = me and a2.vote = 2),
+                                                'correct2', (select a2.correct from public.study_quiz_answers a2
+                                                              where a2.round_id = r2.id and a2.user_id = me and a2.vote = 2))
+                        from public.study_quiz_answers a where a.round_id = r2.id and a.user_id = me and a.vote = 1))
+             order by r2.idx), '[]'::jsonb)
+      into v_sum
+      from public.study_quiz_rounds r2
+      left join public.study_questions q2 on q2.id = r2.question_id
+      left join public.study_question_keys k2 on k2.question_id = r2.question_id
+     where r2.quiz_id = p_quiz and r2.revealed_at is not null;
+    if z.mode = 'coop' and z.preset in ('free', 'end')
+       and (select count(*) from public.study_quiz_players p where p.quiz_id = p_quiz) >= 3 then   -- review SEC-6
+      select round(100.0 * count(*) filter (where a.correct) / nullif(count(*), 0))::int into ok_fin
+        from public.study_quiz_rounds r3
+        join public.study_quiz_answers a on a.round_id = r3.id and a.vote = r3.vote
+       where r3.quiz_id = p_quiz and r3.revealed_at is not null and r3.voided_at is null;
+      v_rec := public.study_quiz__record(z.group_id, z.ended_at);
+      v_team := jsonb_build_object('right_pct', ok_fin, 'passed', coalesce(ok_fin >= 80, false), 'record_before', v_rec,
+                                   'new_record', ok_fin is not null and ok_fin > coalesce(v_rec, -1)
+                                     and (select count(*) from public.study_quiz_rounds r4
+                                           where r4.quiz_id = p_quiz and r4.revealed_at is not null and r4.voided_at is null) >= 5
+                                     and (select count(*) from public.study_quiz_players p where p.quiz_id = p_quiz) >= 3);
+    end if;
+  end if;
+
+  return jsonb_build_object(
+    'now', clock_timestamp(),
+    'quiz', jsonb_build_object(
+      'id', z.id, 'group_id', z.group_id, 'mode', z.mode, 'title', z.title, 'lecture_ids', to_jsonb(z.lecture_ids),
+      'kinds', z.kinds, 'n_wanted', z.n_wanted, 'seconds', z.seconds, 'state', z.state, 'idx', z.idx,
+      'n_total', z.n_total, 'opens_at', z.opens_at, 'closes_at', z.closes_at, 'answered_n', z.answered_n,
+      'players_n', z.players_n, 'version', z.version, 'host_id', z.host_id,
+      'created_at', z.created_at, 'started_at', z.started_at, 'ended_at', z.ended_at,
+      'preset', z.preset, 'meeting_id', z.meeting_id, 'part_from', z.part_from, 'part_to', z.part_to,
+      'vote', z.vote, 'stage', z.stage, 'argue_until', z.argue_until,
+      'record', case when z.mode = 'coop' and z.preset in ('free', 'end') then public.study_quiz__record(z.group_id, coalesce(z.ended_at, now())) end),
+    'me', v_me,
+    'host_here', public.study_quiz__host_here(p_quiz),
+    'players', v_ppl,
+    'round', v_rnd,
+    'summary', v_sum,
+    'team', v_team,
+    'boss', case when z.mode = 'boss' then public.study_quiz__boss_state(p_quiz) end);
+end;
+$$;
+
+-- The "יחד" card: as section Z (same result, so its signature stays); the
+-- group's share counts final votes, none for an opening (its reveal shows
+-- no numbers) and none for a quiz of fewer than 3 players (review SEC-6: a
+-- solo quiz would publish its host's score); the caller's place in a race breaks ties by time. The
+-- banner keeps section Z's study_quiz_open: the row it names carries
+-- preset and meeting_id (study_quizzes is readable and published).
+create or replace function public.study_quiz_recent(p_group uuid, p_limit int default 5)
+returns table (id uuid, mode text, title text, ended_at timestamptz, players_n int, rounds int,
+               right_pct int, played boolean, my_correct int, my_answered int, my_rank int)
+language sql stable security definer set search_path = public as $$
+  select z.id, z.mode, z.title, z.ended_at,
+         (select count(*) from public.study_quiz_players p where p.quiz_id = z.id)::int,
+         (select count(*) from public.study_quiz_rounds r
+           where r.quiz_id = z.id and r.revealed_at is not null and r.voided_at is null)::int,
+         case when z.preset <> 'coffee'
+                   and (select count(*) from public.study_quiz_players p where p.quiz_id = z.id) >= 3 then   -- review SEC-6
+           (select round(100.0 * count(*) filter (where a.correct) / nullif(count(*), 0))::int
+              from public.study_quiz_answers a join public.study_quiz_rounds r on r.id = a.round_id and a.vote = r.vote
+             where r.quiz_id = z.id and r.voided_at is null) end,
+         me.user_id is not null, me.correct_n, me.answered_n,
+         case when z.mode = 'race' and me.user_id is not null then
+           (select count(*) + 1 from public.study_quiz_players o
+             where o.quiz_id = z.id and (o.score > me.score or (o.score = me.score and o.ms_total < me.ms_total)))::int
+         end
+    from public.study_quizzes z
+    left join public.study_quiz_players me on me.quiz_id = z.id and me.user_id = auth.uid()
+   where z.group_id = p_group and public.study_is_member(p_group) and z.state = 'ended'
+   order by z.ended_at desc
+   limit greatest(1, least(coalesce(p_limit, 5), 50));
+$$;
+
+-- The lobby's "השיא: 90%": the group's record in co-op (null before the first).
+create or replace function public.study_quiz_record(p_group uuid)
+returns int language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  return public.study_quiz__record(p_group, now());
+end;
+$$;
+
+-- ── Privileges (the redefined and new functions) ──
+revoke all on function public.study_quiz__points(smallint, smallint, smallint), public.study_quiz__counts(uuid, int, int),
+  public.study_quiz__pick_preset(uuid), public.study_quiz__trap_card(uuid),
+  public.study_quiz__score(uuid, uuid, smallint, text, timestamptz), public.study_quiz__open_vote2(uuid),
+  public.study_quiz__record(uuid, timestamptz), public.study_quiz__all_answered(uuid, int), public.study_quiz__pick(uuid),
+  public.study_quiz__open(uuid, int), public.study_quiz__reveal(uuid, int), public.study_quiz__finish(uuid), public.study_quiz__due(uuid),
+  public.study_quiz__signal(uuid), public.study_quiz__pick_boss(uuid), public.study_quiz__after_reveal(uuid, int),
+  public.study_quiz__boss_state(uuid), public.study_quiz__revealed(uuid, uuid)
+  from public, anon, authenticated;
+revoke all on function public.study_quiz_create(uuid, text, uuid[], int, int, text, text, uuid, int, int),
+  public.study_quiz_answer(uuid, int, int, int, int), public.study_quiz_recent(uuid, int),
+  public.study_quiz_record(uuid), public.study_quiz_next(uuid, int), public.study_quiz_void(uuid, int),
+  public.study_quiz_ping(uuid), public.study_quiz_state(uuid)
+  from public, anon;
+grant execute on function public.study_quiz_create(uuid, text, uuid[], int, int, text, text, uuid, int, int),
+  public.study_quiz_answer(uuid, int, int, int, int), public.study_quiz_recent(uuid, int),
+  public.study_quiz_record(uuid), public.study_quiz_next(uuid, int), public.study_quiz_void(uuid, int),
+  public.study_quiz_ping(uuid), public.study_quiz_state(uuid)
+  to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('Z', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION Z ════
+
+-- ════ BEGIN SECTION C · flashcards (package C) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION C · FLASHCARDS   (owned by package C)
+--  design-cards.md §2.2. Needs nothing from sections Q or Z.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  flashcards (כרטיסיות) for תמצית,
+--  design-cards.md. To be appended to supabase/study-schema.sql after the
+--  practice-questions section (its own section needs nothing from it).
+--  Re-runnable, like the rest of the file.
+--
+--  Who sees what
+--  ─────────────
+--  Shared inside the group: one deck per lecture, made once for everyone;
+--  the generation rounds; and every card's history (who edited, deleted or
+--  restored it, and what it said before), so any member can fix a bad card
+--  and any member can undo a fix.
+--  Private to each member: their memory of each card (study_card_states),
+--  their review log (study_card_reviews) and their settings
+--  (study_card_settings). Due counts, daily numbers and weak points are
+--  functions over the caller's own rows (Shoham: "יראו רק למשתמש הנוכחי").
+--
+--  Writes go through security-definer functions: generating, adding,
+--  editing, deleting, restoring and reverting a card (each leaves a history
+--  row), and recording a review (state and log together, idempotent by the
+--  review's own id, so a phone that resends after a dropped connection is
+--  not counted twice). The scheduler (FSRS-6) runs on the phone
+--  (shared/study/fsrs.ts); the database checks that what it stores is sane,
+--  not the arithmetic: a member can only mislead their own schedule.
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ── Generation rounds: one row per lecture part per round, claimed by one
+--  /api/study/ai call at a time (op "cards"), visible to the group.
+create table if not exists public.study_card_batches (
+  id         uuid          primary key default gen_random_uuid(),
+  lecture_id uuid          not null references public.study_lectures (id) on delete cascade,
+  round      int           not null check (round between 1 and 20),
+  part_idx   int           not null check (part_idx >= 0),
+  heading    text          not null default '' check (char_length(heading) <= 200),
+  slide_from int           not null,
+  slide_to   int           not null,
+  wanted     int           not null check (wanted between 1 and 8),
+  status     text          not null default 'pending' check (status in ('pending', 'writing', 'ready', 'failed')),
+  made       int           not null default 0 check (made >= 0),
+  rejected   int           not null default 0 check (rejected >= 0),
+  model      text          check (char_length(model) <= 80),
+  cost_usd   numeric(10,4) not null default 0 check (cost_usd >= 0),
+  error      text          check (char_length(error) <= 200),
+  created_by uuid          default auth.uid() references auth.users (id) on delete set null,
+  created_at timestamptz   not null default now(),
+  updated_at timestamptz   not null default now(),
+  unique (lecture_id, round, part_idx),
+  check (slide_to >= slide_from)
+);
+-- Paid tries of a batch: at most 3 (review M6).
+alter table public.study_card_batches add column if not exists attempts int not null default 0;
+
+-- ── The cards (shared). A question card: front = the question, back = its
+--  short answer. A cloze card: front = one sentence with exactly one {{…}},
+--  back = ''. figure = a slide picture shown with the answer ("fig:12-1").
+--  updated_at moves only when the content or the deletion changes: an Anki
+--  export uses it as the note's mod ("update if newer", research-anki).
+create table if not exists public.study_cards (
+  id         uuid        primary key default gen_random_uuid(),
+  group_id   uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  batch_id   uuid        references public.study_card_batches (id) on delete set null,
+  source     text        not null default 'ai' check (source in ('ai', 'member')),
+  part_idx   int         check (part_idx >= 0),
+  kind       text        not null check (kind in ('qa', 'cloze')),
+  front      text        not null check (char_length(btrim(front)) between 3 and 400),
+  back       text        not null default '' check (char_length(back) <= 300),
+  extra      text        not null default '' check (char_length(extra) <= 500),
+  figure     text        not null default '' check (figure = '' or figure ~ '^fig:[0-9]{1,4}-[0-9]{1,3}$'),
+  slides     int[]       not null default '{}' check (cardinality(slides) <= 12),
+  topic      text        not null default '' check (char_length(topic) <= 120),
+  aspect     text        not null default 'other' check (aspect in (
+               'mechanism', 'uses', 'pk', 'adverse', 'contra', 'interactions', 'resistance', 'dosing',
+               'classification', 'epidemiology', 'lifecycle', 'pathogenesis', 'clinical', 'diagnosis',
+               'treatment', 'prevention', 'other')),
+  model      text        check (char_length(model) <= 80),
+  version    int         not null default 1 check (version >= 1),
+  created_by uuid        default auth.uid() references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_by uuid        references auth.users (id) on delete set null,
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  deleted_by uuid        references auth.users (id) on delete set null,
+  constraint study_cards_form check (
+    (kind = 'qa' and position('{{' in front) = 0 and position('}}' in front) = 0 and char_length(btrim(back)) >= 1)
+    or (kind = 'cloze' and back = '' and front ~ '^[^{}]*\{\{[^{}]{1,80}\}\}[^{}]*$'))
+);
+create index if not exists study_cards_lecture on public.study_cards (lecture_id, part_idx, created_at);
+create index if not exists study_cards_group on public.study_cards (group_id) where deleted_at is null;
+
+-- ── A card's history: every edit, deletion, restore and revert, with the
+--  content before and after, so the group sees who changed what and anyone
+--  can put a version back. Written only by the functions below.
+create table if not exists public.study_card_edits (
+  id        uuid        primary key default gen_random_uuid(),
+  card_id   uuid        not null references public.study_cards (id) on delete cascade,
+  action    text        not null check (action in ('edit', 'delete', 'restore', 'revert')),
+  version   int         not null check (version >= 1),        -- the card's version after this action
+  before    jsonb       not null default '{}'::jsonb,         -- kind, front, back, extra, figure, slides
+  after     jsonb       not null default '{}'::jsonb,
+  edited_by uuid        default auth.uid() references auth.users (id) on delete set null,
+  edited_at timestamptz not null default now()
+);
+create index if not exists study_card_edits_card on public.study_card_edits (card_id, edited_at desc);
+
+-- ── One member's memory of one card (private). No row = a new card.
+--  state: 0 new, 1 learning, 2 review, 3 relearning (FSRS / ts-fsrs numbers);
+--  step: the (re)learning step; stability in days, difficulty 1-10.
+create table if not exists public.study_card_states (
+  user_id     uuid             not null default auth.uid() references auth.users (id) on delete cascade,
+  card_id     uuid             not null references public.study_cards (id) on delete cascade,
+  state       smallint         not null default 0 check (state between 0 and 3),
+  step        smallint         not null default 0 check (step between 0 and 9),
+  stability   double precision not null default 0 check (stability = 0 or stability between 0.001 and 36500),
+  difficulty  double precision not null default 0 check (difficulty = 0 or difficulty between 1 and 10),
+  due         timestamptz,
+  last_review timestamptz,
+  reps        int              not null default 0 check (reps >= 0),
+  lapses      int              not null default 0 check (lapses >= 0),
+  suspended   boolean          not null default false,          -- "להסתיר ממני": this member only
+  updated_at  timestamptz      not null default now(),
+  primary key (user_id, card_id),
+  check ((state = 0) = (stability = 0 and difficulty = 0)),
+  check (state = 0 or (due is not null and last_review is not null))
+);
+create index if not exists study_card_states_due on public.study_card_states (user_id, due) where not suspended;
+create index if not exists study_card_states_card on public.study_card_states (card_id);
+
+-- ── The review log (private): what was answered, when, and the state before
+--  (for undo). Its id is made on the phone, so a resend is not counted twice.
+create table if not exists public.study_card_reviews (
+  id           uuid             primary key,
+  user_id      uuid             not null default auth.uid() references auth.users (id) on delete cascade,
+  card_id      uuid             not null references public.study_cards (id) on delete cascade,
+  rating       smallint         not null check (rating between 1 and 4),      -- שוב, קשה, טוב, קל
+  reviewed_at  timestamptz      not null,
+  ms           int              check (ms between 0 and 3600000),
+  elapsed_days int              not null check (elapsed_days >= 0),
+  state_before smallint         not null check (state_before between 0 and 3),
+  state_after  smallint         not null check (state_after between 1 and 3),
+  stability    double precision not null check (stability between 0.001 and 36500),
+  difficulty   double precision not null check (difficulty between 1 and 10),
+  due          timestamptz      not null,
+  prev         jsonb,                            -- the state before, for undo ('{}': the card was new);
+                                                 -- null once a later answer, a day on, made it old
+  created_at   timestamptz      not null default now()
+);
+create index if not exists study_card_reviews_mine on public.study_card_reviews (user_id, reviewed_at desc);
+create index if not exists study_card_reviews_card on public.study_card_reviews (user_id, card_id, reviewed_at desc);
+create index if not exists study_card_reviews_card_fk on public.study_card_reviews (card_id);
+
+-- ── Each member's own settings, the same on every device (private).
+create table if not exists public.study_card_settings (
+  user_id     uuid         primary key default auth.uid() references auth.users (id) on delete cascade,
+  new_per_day int          not null default 20 check (new_per_day between 0 and 200),
+  retention   numeric(3,2) not null default 0.90 check (retention between 0.80 and 0.97),
+  updated_at  timestamptz  not null default now()
+);
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Helpers
+-- ═══════════════════════════════════════════════════════════════════════
+create or replace function public.study_card_group(c uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select group_id from public.study_cards where id = c;
+$$;
+
+-- The study day: Israel time, starting at 04:00 (Anki's default "Next day
+-- starts at"), as days since 1970-01-01. shared/study/fsrs.ts studyDay() is
+-- the same rule; the tests compare them.
+create or replace function public.study_day(p_at timestamptz)
+returns int language sql stable set search_path = public as $$
+  select (((p_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date - date '1970-01-01')::int
+$$;
+
+-- When the study day of p_at ends: the next 04:00 in Israel.
+create or replace function public.study_day_end(p_at timestamptz)
+returns timestamptz language sql stable set search_path = public as $$
+  select ((date '1970-01-01' + public.study_day(p_at) + 1) + time '04:00') at time zone 'Asia/Jerusalem'
+$$;
+
+-- FSRS-6's forgetting curve with its default decay (w20 = 0.1542): the chance
+-- of recall p_days after the last review. R(S, S) = 0.9.
+create or replace function public.study_card_recall(p_stability double precision, p_days int)
+returns double precision language sql immutable set search_path = public as $$
+  select case when p_stability is null or p_stability <= 0 then null
+              else power(1 + (power(0.9, -1 / 0.1542) - 1) * greatest(p_days, 0) / p_stability, -0.1542) end
+$$;
+
+-- Why a card's content is not acceptable, or null: the table's own checks as
+-- readable reasons, plus "the slides and the picture exist in this lecture".
+create or replace function public.study_card_problem(p_kind text, p_front text, p_back text, p_extra text,
+  p_figure text, p_slides int[], p_lecture uuid)
+returns text language plpgsql stable security definer set search_path = public as $$
+declare
+  have int[];
+  fn int;
+  fk int;
+begin
+  if coalesce(p_kind, '') not in ('qa', 'cloze') then return 'bad kind'; end if;
+  if char_length(btrim(coalesce(p_front, ''))) not between 3 and 400 then return 'front length'; end if;
+  if char_length(coalesce(p_back, '')) > 300 or char_length(coalesce(p_extra, '')) > 500 then return 'too long'; end if;
+  if p_kind = 'cloze' and (coalesce(p_back, '') <> '' or p_front !~ '^[^{}]*\{\{[^{}]{1,80}\}\}[^{}]*$') then return 'bad cloze'; end if;
+  if p_kind = 'qa' and (position('{{' in p_front) > 0 or position('}}' in p_front) > 0 or char_length(btrim(coalesce(p_back, ''))) = 0) then
+    return 'bad answer';
+  end if;
+  if cardinality(coalesce(p_slides, '{}')) > 12 then return 'too many slides'; end if;
+  select coalesce(array_agg((s ->> 'n')::int), '{}') into have
+    from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = p_lecture;
+  if not (coalesce(p_slides, '{}') <@ have) then return 'unknown slide'; end if;
+  if coalesce(p_figure, '') <> '' then
+    if p_figure !~ '^fig:[0-9]{1,4}-[0-9]{1,3}$' then return 'bad figure'; end if;
+    fn := split_part(substr(p_figure, 5), '-', 1)::int;
+    fk := split_part(substr(p_figure, 5), '-', 2)::int;
+    if not exists (select 1 from public.study_lectures l, jsonb_array_elements(l.slides) s,
+                          jsonb_array_elements(coalesce(s -> 'figures', '[]'::jsonb)) f
+                    where l.id = p_lecture and (s ->> 'n')::int = fn and (f ->> 'k')::int = fk) then
+      return 'unknown figure';
+    end if;
+  end if;
+  return null;
+end;
+$$;
+
+-- version and updated_at follow the content, whoever writes the row.
+create or replace function public.study_card_touch()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if (new.kind, new.front, new.back, new.extra, new.figure, new.slides)
+     is distinct from (old.kind, old.front, old.back, old.extra, old.figure, old.slides) then
+    new.version := old.version + 1;
+    new.updated_at := now();
+  elsif new.deleted_at is distinct from old.deleted_at then
+    new.version := old.version;
+    new.updated_at := now();
+  else
+    new.version := old.version;
+    new.updated_at := old.updated_at;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists study_card_touch on public.study_cards;
+create trigger study_card_touch before update on public.study_cards
+  for each row execute function public.study_card_touch();
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Generation: plan a round, claim a part, save each card, finish
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Plans the next round for a lecture. Round 1: about one card per 250
+-- characters of slide text (lines, tables, speaker notes), at most 8 a part;
+-- later rounds ("עוד כרטיסיות") half that, at most 4 a part. A round of more
+-- than 60 is scaled down. Parts are the summary's; before an outline exists,
+-- six-slide chunks. An open round (parts pending or being written) is
+-- returned instead (fresh = false), so two members tapping at once drive the
+-- same round.
+create or replace function public.study_card_round(p_lecture uuid)
+returns table (round int, batches int, wanted int, fresh boolean)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  g uuid := public.study_lecture_group(p_lecture);
+  r int;
+  open_n int;
+  open_w int;
+  made_n int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not public.study_is_member(g) then raise exception 'lecture not found'; end if;
+  if exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_card_round:' || p_lecture::text));
+  -- A batch whose 3 tries all died stops holding its round open.
+  update public.study_card_batches b set status = 'failed', error = 'gave up', updated_at = now()
+   where b.lecture_id = p_lecture and b.status = 'writing' and b.attempts >= 3 and b.updated_at < now() - interval '6 minutes';
+  select max(b.round) into r from public.study_card_batches b where b.lecture_id = p_lecture;
+  if r is not null then
+    select count(*), coalesce(sum(b.wanted), 0) into open_n, open_w from public.study_card_batches b
+     where b.lecture_id = p_lecture and b.round = r and b.status in ('pending', 'writing');
+    if open_n > 0 then
+      return query select r, open_n, open_w::int, false;
+      return;
+    end if;
+  end if;
+  -- 150 live cards, and 250 ever generated: deleting cards does not free paid rounds (review M6).
+  if (select count(*) from public.study_cards c where c.lecture_id = p_lecture and c.deleted_at is null) >= 150
+     or (select count(*) from public.study_cards c where c.lecture_id = p_lecture and c.source = 'ai') >= 250 then
+    raise exception 'enough cards';
+  end if;
+  r := coalesce(r, 0) + 1;
+  if r > 20 then raise exception 'enough cards'; end if;
+  with sl as (
+    select (s ->> 'n')::int as n,
+           coalesce((select sum(char_length(x)) from jsonb_array_elements_text(coalesce(s -> 'lines', '[]'::jsonb)) x), 0)
+           + char_length(coalesce(s ->> 'notes', ''))
+           + case when jsonb_typeof(s -> 'tables') = 'array' and jsonb_array_length(s -> 'tables') > 0
+                  then char_length((s -> 'tables')::text) else 0 end as chars,
+           row_number() over (order by (s ->> 'n')::int) as o
+    from public.study_lectures l, jsonb_array_elements(l.slides) s
+    where l.id = p_lecture
+  ),
+  parts as (
+    select s.idx as part_idx, s.title as heading, s.slide_from, s.slide_to
+    from public.study_sections s where s.lecture_id = p_lecture
+    union all
+    select ((x.o - 1) / 6)::int, '', min(x.n), max(x.n) from sl x
+    where not exists (select 1 from public.study_sections s2 where s2.lecture_id = p_lecture)
+    group by (x.o - 1) / 6
+  ),
+  want as (
+    select p.*, least(case when r = 1 then 8 else 4 end,
+                      round((select coalesce(sum(x.chars), 0) from sl x where x.n between p.slide_from and p.slide_to)
+                            / case when r = 1 then 250.0 else 500.0 end))::int as w
+    from parts p
+  ),
+  total as (select coalesce(sum(w), 0) as t from want)
+  insert into public.study_card_batches (lecture_id, round, part_idx, heading, slide_from, slide_to, wanted)
+  select p_lecture, r, k.part_idx, left(k.heading, 200), k.slide_from, k.slide_to,
+         case when t.t > 60 then greatest(1, floor(k.w * 60.0 / t.t))::int else k.w end
+  from want k, total t
+  where k.w >= 1;
+  get diagnostics made_n = row_count;
+  if made_n = 0 then raise exception 'no slides'; end if;
+  return query select r, made_n, (select sum(b.wanted)::int from public.study_card_batches b where b.lecture_id = p_lecture and b.round = r), true;
+end;
+$$;
+
+-- Takes one part to write. Free when pending, failed (a tap on "לנסות
+-- שוב"), or "writing" with no sign of life for six minutes (a phone that
+-- slept). Raises 'busy' otherwise. Effort medium; low after a timeout.
+create or replace function public.study_card_claim(p_batch uuid, p_key text default null)
+returns table (lecture_id uuid, round int, part_idx int, heading text, slide_from int, slide_to int, wanted int, effort text)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare b public.study_card_batches;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;   -- only the op (review B1)
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into b from public.study_card_batches x where x.id = p_batch;
+  if not found or not public.study_is_member(public.study_lecture_group(b.lecture_id))
+     or exists (select 1 from public.study_lectures l where l.id = b.lecture_id and l.deleted_at is not null) then
+    raise exception 'batch not found';
+  end if;
+  update public.study_card_batches x
+     set status = 'writing', attempts = x.attempts + 1, updated_at = now()
+   where x.id = p_batch and x.attempts < 3
+     and (x.status in ('pending', 'failed') or (x.status = 'writing' and x.updated_at < now() - interval '6 minutes'));
+  if not found then
+    if b.attempts >= 3 and b.status <> 'ready' then raise exception 'gave up'; end if;
+    raise exception 'busy';
+  end if;
+  return query select b.lecture_id, b.round, b.part_idx, b.heading, b.slide_from, b.slide_to, b.wanted - b.made,
+                      case when b.error = 'timeout' then 'low' else 'medium' end;
+end;
+$$;
+
+-- Saves one generated card. p_card: { kind, front, back, extra, figure,
+-- slides[], topic, aspect, model }. The API has already checked the card
+-- (one fact, cloze form, lengths, duplicates); these are the checks the
+-- database must not trust anyone on.
+create or replace function public.study_save_card(p_batch uuid, p_card jsonb, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  b   public.study_card_batches;
+  g   uuid;
+  sl  int[] := array(select (jsonb_array_elements_text(coalesce(p_card -> 'slides', '[]'::jsonb)))::int);
+  why text;
+  cid uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;   -- source 'ai' is the server's word (review B1)
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into b from public.study_card_batches x where x.id = p_batch;
+  if not found then raise exception 'batch not found'; end if;
+  g := public.study_lecture_group(b.lecture_id);
+  if not public.study_is_member(g) then raise exception 'batch not found'; end if;
+  if b.status <> 'writing' then raise exception 'batch not writing'; end if;
+  if b.made >= b.wanted then raise exception 'part full'; end if;
+  if (select count(*) from public.study_cards c where c.lecture_id = b.lecture_id and c.deleted_at is null) >= 150 then
+    raise exception 'enough cards';
+  end if;
+  why := public.study_card_problem(p_card ->> 'kind', p_card ->> 'front', coalesce(p_card ->> 'back', ''),
+                                   coalesce(p_card ->> 'extra', ''), coalesce(p_card ->> 'figure', ''), sl, b.lecture_id);
+  if why is not null then raise exception '%', why; end if;
+  if cardinality(sl) = 0 then raise exception 'no slides'; end if;
+  if not exists (select 1 from unnest(sl) s where s between b.slide_from and b.slide_to) then
+    raise exception 'outside the part';
+  end if;
+  insert into public.study_cards (group_id, lecture_id, batch_id, source, part_idx, kind, front, back, extra, figure,
+                                  slides, topic, aspect, model)
+  values (g, b.lecture_id, p_batch, 'ai', b.part_idx, p_card ->> 'kind', btrim(p_card ->> 'front'),
+          coalesce(p_card ->> 'back', ''), coalesce(p_card ->> 'extra', ''), coalesce(p_card ->> 'figure', ''), sl,
+          left(coalesce(p_card ->> 'topic', ''), 120), coalesce(nullif(p_card ->> 'aspect', ''), 'other'),
+          left(p_card ->> 'model', 80))
+  returning id into cid;
+  update public.study_card_batches x set made = x.made + 1, updated_at = now() where x.id = p_batch;
+  return cid;
+end;
+$$;
+
+-- Ends a claimed part: ready (even with fewer cards than wanted) or failed.
+create or replace function public.study_card_finish(p_batch uuid, p_status text, p_rejected int,
+  p_model text, p_cost numeric, p_error text, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if p_status not in ('ready', 'failed') then raise exception 'bad status'; end if;
+  update public.study_card_batches x
+     set status = p_status,
+         rejected = x.rejected + greatest(0, coalesce(p_rejected, 0)),
+         model = coalesce(left(p_model, 80), x.model),
+         cost_usd = x.cost_usd + greatest(0, coalesce(p_cost, 0)),
+         error = left(p_error, 200),
+         updated_at = now()
+   where x.id = p_batch
+     and x.status = 'writing'
+     and public.study_is_member(public.study_lecture_group(x.lecture_id));
+  if not found then raise exception 'batch not writing'; end if;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  The group's deck: add, edit, delete, restore, revert (all with history)
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- A member's own card ("הוספת כרטיסייה"). It is marked source = 'member'.
+create or replace function public.study_add_card(p_lecture uuid, p_card jsonb)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  g   uuid := public.study_lecture_group(p_lecture);
+  sl  int[] := array(select (jsonb_array_elements_text(coalesce(p_card -> 'slides', '[]'::jsonb)))::int);
+  why text;
+  cid uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not public.study_is_member(g) then raise exception 'lecture not found'; end if;
+  if (select count(*) from public.study_cards c where c.lecture_id = p_lecture and c.deleted_at is null) >= 150 then
+    raise exception 'enough cards';
+  end if;
+  why := public.study_card_problem(p_card ->> 'kind', p_card ->> 'front', coalesce(p_card ->> 'back', ''),
+                                   coalesce(p_card ->> 'extra', ''), coalesce(p_card ->> 'figure', ''), sl, p_lecture);
+  if why is not null then raise exception '%', why; end if;
+  insert into public.study_cards (group_id, lecture_id, source, part_idx, kind, front, back, extra, figure, slides, topic, aspect)
+  values (g, p_lecture, 'member',
+          (select s.idx from public.study_sections s where s.lecture_id = p_lecture and sl[1] between s.slide_from and s.slide_to limit 1),
+          p_card ->> 'kind', btrim(p_card ->> 'front'), coalesce(p_card ->> 'back', ''), coalesce(p_card ->> 'extra', ''),
+          coalesce(p_card ->> 'figure', ''), sl, left(coalesce(p_card ->> 'topic', ''), 120),
+          coalesce(nullif(p_card ->> 'aspect', ''), 'other'))
+  returning id into cid;
+  return cid;
+end;
+$$;
+
+-- Fixes a card for the whole group. p_version is the version the member
+-- edited: a card someone else changed meanwhile raises 'conflict'. Returns
+-- the new version. The history row keeps the text before, for "ביטול".
+create or replace function public.study_edit_card(p_card uuid, p_version int, p_new jsonb)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  c   public.study_cards;
+  k   text;
+  f   text;
+  b   text;
+  e   text;
+  fig text;
+  sl  int[];
+  why text;
+  v   int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into c from public.study_cards x where x.id = p_card for update;
+  if not found or not public.study_is_member(c.group_id) then raise exception 'card not found'; end if;
+  if c.deleted_at is not null then raise exception 'card deleted'; end if;
+  if c.version <> p_version then raise exception 'conflict'; end if;
+  k := coalesce(p_new ->> 'kind', c.kind);
+  f := btrim(coalesce(p_new ->> 'front', c.front));
+  b := case when k = 'cloze' then '' else btrim(coalesce(p_new ->> 'back', c.back)) end;
+  e := btrim(coalesce(p_new ->> 'extra', c.extra));
+  fig := coalesce(p_new ->> 'figure', c.figure);
+  sl := case when p_new ? 'slides' then array(select (jsonb_array_elements_text(p_new -> 'slides'))::int) else c.slides end;
+  why := public.study_card_problem(k, f, b, e, fig, sl, c.lecture_id);
+  if why is not null then raise exception '%', why; end if;
+  if (k, f, b, e, fig, sl) is not distinct from (c.kind, c.front, c.back, c.extra, c.figure, c.slides) then
+    raise exception 'no change';
+  end if;
+  update public.study_cards x
+     set kind = k, front = f, back = b, extra = e, figure = fig, slides = sl, updated_by = auth.uid()
+   where x.id = p_card
+  returning x.version into v;
+  insert into public.study_card_edits (card_id, action, version, before, after)
+  values (p_card, 'edit', v,
+          jsonb_build_object('kind', c.kind, 'front', c.front, 'back', c.back, 'extra', c.extra, 'figure', c.figure, 'slides', to_jsonb(c.slides)),
+          jsonb_build_object('kind', k, 'front', f, 'back', b, 'extra', e, 'figure', fig, 'slides', to_jsonb(sl)));
+  return v;
+end;
+$$;
+
+-- Deletes a card for the whole group (p_delete), or restores it. Soft: the
+-- row stays, so "ביטול" and the history work, and an Anki export can tell
+-- the student. Calling it twice is harmless.
+create or replace function public.study_delete_card(p_card uuid, p_delete boolean)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare c public.study_cards;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into c from public.study_cards x where x.id = p_card for update;
+  if not found or not public.study_is_member(c.group_id) then raise exception 'card not found'; end if;
+  if p_delete and c.deleted_at is null then
+    update public.study_cards x set deleted_at = now(), deleted_by = auth.uid() where x.id = p_card;
+    insert into public.study_card_edits (card_id, action, version) values (p_card, 'delete', c.version);
+  elsif not p_delete and c.deleted_at is not null then
+    update public.study_cards x set deleted_at = null, deleted_by = null where x.id = p_card;
+    insert into public.study_card_edits (card_id, action, version) values (p_card, 'restore', c.version);
+  end if;
+end;
+$$;
+
+-- Puts back the text a card had before one edit (the history's "החזרת
+-- הגרסה הקודמת", and the toast's "ביטול" right after saving). Returns the
+-- new version.
+create or replace function public.study_revert_card(p_edit uuid)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  e  public.study_card_edits;
+  c  public.study_cards;
+  sl int[];
+  v  int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into e from public.study_card_edits x where x.id = p_edit;
+  if not found then raise exception 'edit not found'; end if;
+  select * into c from public.study_cards x where x.id = e.card_id for update;
+  if not found or not public.study_is_member(c.group_id) then raise exception 'edit not found'; end if;
+  if e.action not in ('edit', 'revert') then raise exception 'nothing to revert'; end if;
+  if c.deleted_at is not null then raise exception 'card deleted'; end if;
+  sl := array(select (jsonb_array_elements_text(e.before -> 'slides'))::int);
+  if (e.before ->> 'kind', e.before ->> 'front', e.before ->> 'back', e.before ->> 'extra', e.before ->> 'figure', sl)
+     is not distinct from (c.kind, c.front, c.back, c.extra, c.figure, c.slides) then
+    raise exception 'no change';
+  end if;
+  update public.study_cards x
+     set kind = e.before ->> 'kind', front = e.before ->> 'front', back = e.before ->> 'back', extra = e.before ->> 'extra',
+         figure = e.before ->> 'figure', slides = sl, updated_by = auth.uid()
+   where x.id = c.id
+  returning x.version into v;
+  insert into public.study_card_edits (card_id, action, version, before, after)
+  values (c.id, 'revert', v,
+          jsonb_build_object('kind', c.kind, 'front', c.front, 'back', c.back, 'extra', c.extra, 'figure', c.figure, 'slides', to_jsonb(c.slides)),
+          e.before);
+  return v;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Reviewing (private): record, undo, hide, reset
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Records one answer: the new state the phone computed (FSRS-6,
+-- shared/study/fsrs.ts) and a log row, in one transaction.
+--   p_review     the review's id, made on the phone: a resend returns 'dup'
+--   p_prev_reps  the reps the phone started from: anything else is 'stale'
+--                (another device of the same member answered in between)
+--   p_next       { state, step, stability, difficulty, due, lapses }
+-- Returns 'ok' or 'dup'.
+create or replace function public.study_card_review(p_review uuid, p_card uuid, p_rating int, p_reviewed_at timestamptz,
+  p_ms int, p_prev_reps int, p_next jsonb)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare
+  c         public.study_cards;
+  s         public.study_card_states;
+  had       boolean;
+  v_state   int;
+  v_step    int;
+  v_s       double precision;
+  v_d       double precision;
+  v_due     timestamptz;
+  v_lapses  int;
+  v_lapse   int;
+  v_elapsed int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if p_review is null then raise exception 'bad review'; end if;
+  perform pg_advisory_xact_lock(hashtext('study_card_review:' || auth.uid()::text || ':' || coalesce(p_card::text, '')));
+  if exists (select 1 from public.study_card_reviews r where r.id = p_review) then
+    if exists (select 1 from public.study_card_reviews r where r.id = p_review and r.user_id = auth.uid()) then
+      return 'dup';
+    end if;
+    raise exception 'bad review';
+  end if;
+  select * into c from public.study_cards x where x.id = p_card;
+  if not found or not public.study_is_member(c.group_id) then raise exception 'card not found'; end if;
+  if c.deleted_at is not null then raise exception 'card deleted'; end if;
+  if p_rating is null or p_rating not between 1 and 4 then raise exception 'bad rating'; end if;
+  if p_reviewed_at is null or p_reviewed_at > now() + interval '5 minutes' or p_reviewed_at < now() - interval '30 days' then
+    raise exception 'bad time';
+  end if;
+  select * into s from public.study_card_states x where x.user_id = auth.uid() and x.card_id = p_card for update;
+  had := found;
+  if coalesce(s.reps, 0) <> coalesce(p_prev_reps, -1) then raise exception 'stale'; end if;
+  if had and s.last_review is not null and p_reviewed_at < s.last_review then raise exception 'stale'; end if;
+  begin
+    v_state := (p_next ->> 'state')::int;
+    v_step := coalesce((p_next ->> 'step')::int, 0);
+    v_s := (p_next ->> 'stability')::double precision;
+    v_d := (p_next ->> 'difficulty')::double precision;
+    v_due := (p_next ->> 'due')::timestamptz;
+    v_lapses := (p_next ->> 'lapses')::int;
+  exception when others then
+    raise exception 'bad state';
+  end;
+  -- A lapse is שוב on a card in review, and nothing else (FSRS's rule).
+  v_lapse := (p_rating = 1 and coalesce(s.state, 0) = 2)::int;
+  if v_state is null or v_state not between 1 and 3 or v_step not between 0 and 9
+     or v_s is null or v_s not between 0.001 and 36500 or v_d is null or v_d not between 1 and 10
+     or v_due is null or v_due < p_reviewed_at or v_due > p_reviewed_at + interval '36501 days'
+     or v_lapses is null or v_lapses <> coalesce(s.lapses, 0) + v_lapse
+  then
+    raise exception 'bad state';
+  end if;
+  v_elapsed := case when had and s.state > 0 and s.last_review is not null
+                    then greatest(0, public.study_day(p_reviewed_at) - public.study_day(s.last_review)) else 0 end;
+  insert into public.study_card_states as t (user_id, card_id, state, step, stability, difficulty, due, last_review, reps, lapses, suspended, updated_at)
+  values (auth.uid(), p_card, v_state, v_step, v_s, v_d, v_due, p_reviewed_at, p_prev_reps + 1, v_lapses, coalesce(s.suspended, false), now())
+  on conflict (user_id, card_id) do update
+    set state = excluded.state, step = excluded.step, stability = excluded.stability, difficulty = excluded.difficulty,
+        due = excluded.due, last_review = excluded.last_review, reps = excluded.reps, lapses = excluded.lapses, updated_at = now();
+  insert into public.study_card_reviews (id, user_id, card_id, rating, reviewed_at, ms, elapsed_days, state_before, state_after,
+                                         stability, difficulty, due, prev)
+  values (p_review, auth.uid(), p_card, p_rating, p_reviewed_at, case when p_ms between 0 and 3600000 then p_ms end, v_elapsed,
+          coalesce(s.state, 0), v_state, v_s, v_d, v_due,
+          case when had then to_jsonb(s) - 'user_id' - 'card_id' - 'updated_at' else '{}'::jsonb end);
+  -- Undo copies are kept for a day (a session's chain of answers); older
+  -- ones of this card go, so the log stays small.
+  update public.study_card_reviews x set prev = null
+   where x.user_id = auth.uid() and x.card_id = p_card and x.prev is not null and x.reviewed_at < p_reviewed_at - interval '1 day';
+  return 'ok';
+end;
+$$;
+
+-- Takes back the caller's latest answer to a card ("ביטול התשובה"): the
+-- state goes back to what it was, and the log row goes.
+create or replace function public.study_card_undo(p_review uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare r public.study_card_reviews;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into r from public.study_card_reviews x where x.id = p_review and x.user_id = auth.uid();
+  if not found then raise exception 'review not found'; end if;
+  perform pg_advisory_xact_lock(hashtext('study_card_review:' || auth.uid()::text || ':' || r.card_id::text));
+  if exists (select 1 from public.study_card_reviews x
+              where x.user_id = auth.uid() and x.card_id = r.card_id and x.id <> r.id
+                and (x.reviewed_at, x.created_at) > (r.reviewed_at, r.created_at)) then
+    raise exception 'not the latest';
+  end if;
+  if r.prev is null then raise exception 'too old'; end if;
+  if r.prev = '{}'::jsonb then
+    delete from public.study_card_states s where s.user_id = auth.uid() and s.card_id = r.card_id;
+  else
+    update public.study_card_states s
+       set state = (r.prev ->> 'state')::smallint, step = (r.prev ->> 'step')::smallint,
+           stability = (r.prev ->> 'stability')::double precision, difficulty = (r.prev ->> 'difficulty')::double precision,
+           due = (r.prev ->> 'due')::timestamptz, last_review = (r.prev ->> 'last_review')::timestamptz,
+           reps = (r.prev ->> 'reps')::int, lapses = (r.prev ->> 'lapses')::int, updated_at = now()
+     where s.user_id = auth.uid() and s.card_id = r.card_id;
+  end if;
+  delete from public.study_card_reviews x where x.id = r.id;
+end;
+$$;
+
+-- Hides a card from the caller's reviews only ("להסתיר ממני"), or shows it again.
+create or replace function public.study_card_hide(p_card uuid, p_hide boolean)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_card_group(p_card)), false) then raise exception 'card not found'; end if;
+  insert into public.study_card_states (user_id, card_id, suspended) values (auth.uid(), p_card, coalesce(p_hide, false))
+  on conflict (user_id, card_id) do update set suspended = excluded.suspended, updated_at = now();
+end;
+$$;
+
+-- Starts a lecture's cards over for the caller ("להתחיל מחדש"): their states
+-- go (the log stays, for the progress page). Returns how many were reset.
+create or replace function public.study_card_reset(p_lecture uuid)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare n int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then raise exception 'lecture not found'; end if;
+  delete from public.study_card_states s using public.study_cards c
+   where c.id = s.card_id and c.lecture_id = p_lecture and s.user_id = auth.uid();
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  The caller's own numbers (security invoker: RLS keeps them to the
+--  caller; the explicit user filters are for the indexes). The library's
+--  due chips, the "today" screen, and the contract with item 7.
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Per lecture: active cards, new ones not hidden, (re)learning due within the
+-- 20-minute learn-ahead, reviews due before today's study day ends, studied,
+-- hidden, and the next due time.
+create or replace function public.study_my_card_counts(p_group uuid, p_now timestamptz default now())
+returns table (lecture_id uuid, cards int, new_cards int, learning_due int, review_due int, studied int, hidden int, next_due timestamptz)
+language sql stable set search_path = public as $$
+  select c.lecture_id,
+         count(*)::int,
+         (count(*) filter (where s.card_id is null or (s.state = 0 and not s.suspended)))::int,
+         (count(*) filter (where s.state in (1, 3) and not s.suspended and s.due <= p_now + interval '20 minutes'))::int,
+         (count(*) filter (where s.state = 2 and not s.suspended and s.due < public.study_day_end(p_now)))::int,
+         (count(*) filter (where s.state > 0))::int,
+         (count(*) filter (where s.suspended))::int,
+         min(s.due) filter (where s.state > 0 and not s.suspended)
+  from public.study_cards c
+  left join public.study_card_states s on s.card_id = c.id and s.user_id = auth.uid()
+  where c.group_id = p_group and c.deleted_at is null
+  group by c.lecture_id;
+$$;
+
+-- Per study day: answers, cards seen for the first time (today's new-card
+-- limit counts these), שוב presses, and seconds spent.
+create or replace function public.study_my_card_days(p_group uuid, p_days int default 30)
+returns table (day date, reviews int, first_seen int, again int, seconds int)
+language sql stable set search_path = public as $$
+  select date '1970-01-01' + public.study_day(r.reviewed_at), count(*)::int,
+         (count(*) filter (where r.state_before = 0))::int, (count(*) filter (where r.rating = 1))::int,
+         (coalesce(sum(r.ms), 0) / 1000)::int
+  from public.study_card_reviews r
+  join public.study_cards c on c.id = r.card_id
+  where r.user_id = auth.uid() and c.group_id = p_group
+    and r.reviewed_at >= now() - make_interval(days => greatest(1, least(coalesce(p_days, 30), 366)))
+  group by 1
+  order by 1;
+$$;
+
+-- Weak points (item 7): per lecture × topic × aspect, how many cards, how
+-- many studied, lapses, שוב in the last 30 days, and the mean chance of
+-- recall now (FSRS-6 curve) over the studied ones.
+create or replace function public.study_my_card_topics(p_group uuid, p_now timestamptz default now())
+returns table (lecture_id uuid, course text, topic text, aspect text, cards int, studied int, lapses int, again_30d int, recall numeric)
+language sql stable set search_path = public as $$
+  with st as (
+    select s.* from public.study_card_states s where s.user_id = auth.uid() and s.state > 0
+  ), ag as (
+    select r.card_id, count(*) as n from public.study_card_reviews r
+    where r.user_id = auth.uid() and r.rating = 1 and r.reviewed_at > p_now - interval '30 days'
+    group by r.card_id
+  )
+  select c.lecture_id, l.course, c.topic, c.aspect, count(*)::int, count(st.card_id)::int,
+         coalesce(sum(st.lapses), 0)::int, coalesce(sum(ag.n), 0)::int,
+         round(avg(public.study_card_recall(st.stability, public.study_day(p_now) - public.study_day(st.last_review)))::numeric, 3)
+  from public.study_cards c
+  join public.study_lectures l on l.id = c.lecture_id
+  left join st on st.card_id = c.id
+  left join ag on ag.card_id = c.id
+  where c.group_id = p_group and c.deleted_at is null
+  group by c.lecture_id, l.course, c.topic, c.aspect;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security and privileges
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_card_batches  enable row level security;
+alter table public.study_cards         enable row level security;
+alter table public.study_card_edits    enable row level security;
+alter table public.study_card_states   enable row level security;
+alter table public.study_card_reviews  enable row level security;
+alter table public.study_card_settings enable row level security;
+
+-- (In study-schema.sql the file's loop has already dropped these; the drops
+-- keep this section re-runnable on its own.)
+drop policy if exists "study card batches read"     on public.study_card_batches;
+drop policy if exists "study cards read"            on public.study_cards;
+drop policy if exists "study card edits read"       on public.study_card_edits;
+drop policy if exists "study card states own"       on public.study_card_states;
+drop policy if exists "study card reviews own"      on public.study_card_reviews;
+drop policy if exists "study card settings own"     on public.study_card_settings;
+drop policy if exists "study card settings add"     on public.study_card_settings;
+drop policy if exists "study card settings change"  on public.study_card_settings;
+
+create policy "study card batches read" on public.study_card_batches
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study cards read" on public.study_cards
+  for select using (public.study_is_member(group_id));
+create policy "study card edits read" on public.study_card_edits
+  for select using (public.study_is_member(public.study_card_group(card_id)));
+create policy "study card states own" on public.study_card_states
+  for select using (user_id = auth.uid());
+create policy "study card reviews own" on public.study_card_reviews
+  for select using (user_id = auth.uid());
+create policy "study card settings own" on public.study_card_settings
+  for select using (user_id = auth.uid());
+create policy "study card settings add" on public.study_card_settings
+  for insert with check (user_id = auth.uid());
+create policy "study card settings change" on public.study_card_settings
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Shared tables: read only; every write is a function. Private tables: the
+-- owner reads; states and reviews change only through the functions; the
+-- settings row is the owner's to write (user_id always takes its default).
+revoke all on public.study_card_batches, public.study_cards, public.study_card_edits, public.study_card_states,
+  public.study_card_reviews, public.study_card_settings from anon, authenticated;
+grant select on public.study_card_batches, public.study_cards, public.study_card_edits to authenticated;
+grant select on public.study_card_states, public.study_card_reviews to authenticated;
+grant select on public.study_card_settings to authenticated;
+grant insert (new_per_day, retention) on public.study_card_settings to authenticated;
+grant update (new_per_day, retention, updated_at) on public.study_card_settings to authenticated;
+
+revoke all on function public.study_card_problem(text, text, text, text, text, int[], uuid),
+  public.study_card_touch() from public, anon, authenticated;
+revoke all on function public.study_card_group(uuid), public.study_day(timestamptz), public.study_day_end(timestamptz),
+  public.study_card_recall(double precision, int),
+  public.study_card_round(uuid), public.study_card_claim(uuid, text), public.study_save_card(uuid, jsonb, text),
+  public.study_card_finish(uuid, text, int, text, numeric, text, text), public.study_add_card(uuid, jsonb),
+  public.study_edit_card(uuid, int, jsonb), public.study_delete_card(uuid, boolean), public.study_revert_card(uuid),
+  public.study_card_review(uuid, uuid, int, timestamptz, int, int, jsonb), public.study_card_undo(uuid),
+  public.study_card_hide(uuid, boolean), public.study_card_reset(uuid),
+  public.study_my_card_counts(uuid, timestamptz), public.study_my_card_days(uuid, int), public.study_my_card_topics(uuid, timestamptz)
+  from public, anon;
+grant execute on function public.study_card_group(uuid), public.study_day(timestamptz), public.study_day_end(timestamptz),
+  public.study_card_recall(double precision, int),
+  public.study_card_round(uuid), public.study_card_claim(uuid, text), public.study_save_card(uuid, jsonb, text),
+  public.study_card_finish(uuid, text, int, text, numeric, text, text), public.study_add_card(uuid, jsonb),
+  public.study_edit_card(uuid, int, jsonb), public.study_delete_card(uuid, boolean), public.study_revert_card(uuid),
+  public.study_card_review(uuid, uuid, int, timestamptz, int, int, jsonb), public.study_card_undo(uuid),
+  public.study_card_hide(uuid, boolean), public.study_card_reset(uuid),
+  public.study_my_card_counts(uuid, timestamptz), public.study_my_card_days(uuid, int), public.study_my_card_topics(uuid, timestamptz)
+  to authenticated;
+
+-- ── Realtime: cards appear on every phone as they are written; fixes,
+--  deletions and history show live. Never anyone's states, log or settings.
+do $$
+declare t text;
+begin
+  foreach t in array array['study_card_batches', 'study_cards', 'study_card_edits'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then
+      null;
+    end;
+  end loop;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('C', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION C, its end · ANCHORS, TRAP CARDS, MARKS AFTER A CORRECTION, THE
+--  DECK PART BY PART, PRIVATE CARDS, ONE REVIEW HOME, THE WORKER PATH
+--  (package C; spec §12.3.C). Appended at the END of section C, inside its
+--  markers. C becomes version 2.
+--
+--  A1  every generated card sits on one paragraph (data-blk) of its part.
+--  Q7 / R4 / P8 / MU3  a trap card is a group card the app makes, never
+--      Claude (source 'trap', one per trap_key), from a quiz round, an
+--      accepted VAR verdict or the pulse; it reaches every deck as a new
+--      card, first among the new ones and inside the 20-a-day limit.
+--  R2  a correction approved on the paragraph marks the card stale (section
+--      V) until "עדיין נכון" or an edit of its text.
+--  D8  decision 8: the full deck, added to one's own deck part by part, at
+--      most 20 new cards a day; new only in an added part, a trap card or
+--      one's own card.
+--  C5  private cards from one's own mistakes (the autopsy on the back), the
+--      answer to one's question (K4) and a blank table's wrong cell (P10):
+--      owner-only, never published, merged. The table and its trigger on
+--      section Q's answers are created once section Q exists, so section C
+--      also loads before Q (review F-4).
+--  C6  one review home per person (Anki or the app).  D3  the worker path.
+-- ════════════════════════════════════════════════════════════════════════
+alter table public.study_cards
+  add column if not exists anchor     int  check (anchor between 0 and 9999),
+  add column if not exists quote      text not null default '' check (char_length(quote) <= 200),
+  add column if not exists part_gen   int  check (part_gen >= 0),
+  add column if not exists trap_key   text check (char_length(trap_key) <= 120),
+  add column if not exists stale_at   timestamptz,
+  add column if not exists stale_edit uuid,
+  add column if not exists checked_by uuid references auth.users (id) on delete set null,
+  add column if not exists checked_at timestamptz,
+  add column if not exists opens_at   timestamptz;               -- a trap card hidden until then (review SEC-6)
+alter table public.study_cards drop constraint if exists study_cards_source_check;
+alter table public.study_cards add constraint study_cards_source_check check (source in ('ai', 'member', 'trap'));
+create unique index if not exists study_cards_trap on public.study_cards (lecture_id, trap_key) where trap_key is not null;
+create index if not exists study_cards_anchor on public.study_cards (lecture_id, part_idx, anchor) where anchor is not null;
+
+-- An edit of a card's text clears a correction's mark.
+create or replace function public.study_cards_unstale()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if new.stale_at is not null and (new.kind, new.front, new.back, new.extra) is distinct from (old.kind, old.front, old.back, old.extra) then
+    new.stale_at := null;
+    new.stale_edit := null;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.study_cards_unstale() from public, anon, authenticated;
+drop trigger if exists study_cards_unstale on public.study_cards;
+create trigger study_cards_unstale before update on public.study_cards
+  for each row execute function public.study_cards_unstale();
+
+
+-- A member's own card (section C's function). From a paragraph's sheet the
+-- phone also sends part, para and quote; otherwise the part follows the
+-- first slide, as before.
+create or replace function public.study_add_card(p_lecture uuid, p_card jsonb)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  g    uuid := public.study_lecture_group(p_lecture);
+  sl   int[] := array(select (jsonb_array_elements_text(coalesce(p_card -> 'slides', '[]'::jsonb)))::int);
+  part int  := case when jsonb_typeof(p_card -> 'part') = 'number' and (p_card ->> 'part') ~ '^[0-9]{1,3}$' then (p_card ->> 'part')::int end;
+  para int  := case when jsonb_typeof(p_card -> 'para') = 'number' and (p_card ->> 'para') ~ '^[0-9]{1,4}$' then (p_card ->> 'para')::int end;
+  why  text;
+  cid  uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not public.study_is_member(g) then raise exception 'lecture not found'; end if;
+  if (select count(*) from public.study_cards c where c.lecture_id = p_lecture and c.deleted_at is null) >= 150 then
+    raise exception 'enough cards';
+  end if;
+  why := public.study_card_problem(p_card ->> 'kind', p_card ->> 'front', coalesce(p_card ->> 'back', ''),
+                                   coalesce(p_card ->> 'extra', ''), coalesce(p_card ->> 'figure', ''), sl, p_lecture);
+  if why is not null then raise exception '%', why; end if;
+  if part is not null and not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.idx = part) then
+    part := null;
+  end if;
+  if part is null then
+    para := null;
+    part := (select s.idx from public.study_sections s where s.lecture_id = p_lecture and sl[1] between s.slide_from and s.slide_to limit 1);
+  end if;
+  insert into public.study_cards (group_id, lecture_id, source, part_idx, kind, front, back, extra, figure, slides, topic, aspect,
+                                  anchor, quote, part_gen)
+  values (g, p_lecture, 'member', part,
+          p_card ->> 'kind', btrim(p_card ->> 'front'), coalesce(p_card ->> 'back', ''), coalesce(p_card ->> 'extra', ''),
+          coalesce(p_card ->> 'figure', ''), sl, left(coalesce(p_card ->> 'topic', ''), 120),
+          coalesce(nullif(p_card ->> 'aspect', ''), 'other'),
+          para, case when para is null then '' else left(coalesce(p_card ->> 'quote', ''), 200) end,
+          case when para is null then null else (select s.gen from public.study_sections s where s.lecture_id = p_lecture and s.idx = part) end)
+  returning id into cid;
+  return cid;
+end;
+$$;
+
+-- "עדיין נכון" on a card a correction marked.
+create or replace function public.study_card_still_true(p_card uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_cards c
+     set stale_at = null, stale_edit = null, checked_by = auth.uid(), checked_at = now()
+   where c.id = p_card and public.study_is_member(c.group_id) and c.stale_at is not null;
+  if not found and not exists (select 1 from public.study_cards c where c.id = p_card and public.study_is_member(c.group_id)) then
+    raise exception 'card not found';
+  end if;
+end;
+$$;
+revoke all on function public.study_card_still_true(uuid), public.study_add_card(uuid, jsonb),
+  public.study_save_card(uuid, jsonb, text) from public, anon;
+grant execute on function public.study_card_still_true(uuid), public.study_add_card(uuid, jsonb),
+  public.study_save_card(uuid, jsonb, text) to authenticated;
+
+-- A trap card (internal: called by section Z's reveal and section V's VAR
+-- decision, never by a phone). Checked like any card; null when it does not
+-- pass, or when the lecture has its 150 cards. The same trap_key returns
+-- the card already made.
+drop function if exists study_private.trap_card(uuid, int, int, text, text, text, text, int[], text);
+create or replace function study_private.trap_card(p_lecture uuid, p_part int, p_anchor int, p_quote text,
+  p_front text, p_back text, p_extra text, p_slides int[], p_key text, p_opens_at timestamptz default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  g   uuid := public.study_lecture_group(p_lecture);
+  why text;
+  cid uuid;
+begin
+  if g is null or p_key is null then return null; end if;
+  select c.id into cid from public.study_cards c where c.lecture_id = p_lecture and c.trap_key = p_key;
+  if found then return cid; end if;
+  if (select count(*) from public.study_cards c where c.lecture_id = p_lecture and c.deleted_at is null) >= 150 then return null; end if;
+  why := public.study_card_problem('qa', btrim(p_front), btrim(p_back), coalesce(p_extra, ''), '', coalesce(p_slides, '{}'), p_lecture);
+  if why is not null then return null; end if;
+  insert into public.study_cards (group_id, lecture_id, source, part_idx, kind, front, back, extra, slides, anchor, quote, part_gen,
+                                  trap_key, created_by, opens_at)
+  values (g, p_lecture, 'trap', p_part, 'qa', btrim(p_front), btrim(p_back), coalesce(p_extra, ''), coalesce(p_slides, '{}'),
+          p_anchor, coalesce(left(p_quote, 200), ''),
+          case when p_anchor is null then null else (select s.gen from public.study_sections s where s.lecture_id = p_lecture and s.idx = p_part) end,
+          left(p_key, 120), null, case when p_opens_at > now() then p_opens_at end)
+  on conflict do nothing
+  returning id into cid;
+  return cid;
+end;
+$$;
+
+-- A trap card made from a round that was voided goes too, unless a member
+-- has already edited it (then it is the group's card).
+create or replace function study_private.trap_card_drop(p_card uuid)
+returns void language sql volatile security definer set search_path = public as $$
+  delete from public.study_cards c where c.id = p_card and c.source = 'trap' and c.version = 1
+$$;
+revoke all on function study_private.trap_card(uuid, int, int, text, text, text, text, int[], text, timestamptz),
+  study_private.trap_card_drop(uuid) from public;
+-- Members read a group card once it is open (review SEC-6). Replaces section
+-- C's policy of the same name.
+drop policy if exists "study cards read" on public.study_cards;
+create policy "study cards read" on public.study_cards
+  for select using (public.study_is_member(group_id) and (opens_at is null or opens_at <= now()));
+
+alter table public.study_card_batches
+  add column if not exists via        text not null default 'tap' check (via in ('tap', 'batch', 'server')),
+  add column if not exists hold_until timestamptz;
+
+-- ── C6: one review home ──
+alter table public.study_card_settings
+  add column if not exists home text check (home in ('app', 'anki'));     -- null: not chosen yet
+grant insert (new_per_day, retention, home) on public.study_card_settings to authenticated;
+grant update (new_per_day, retention, home, updated_at) on public.study_card_settings to authenticated;
+
+-- ── D8: the parts a member added to her own deck (owner-only) ──
+create table if not exists public.study_card_adoptions (
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null check (part_idx >= 0),
+  added_at   timestamptz not null default now(),
+  primary key (user_id, lecture_id, part_idx)
+);
+create index if not exists study_card_adoptions_lecture on public.study_card_adoptions (lecture_id);
+
+-- ── C5: private cards (owner-only; the memory is on the row: one owner) ──
+create table if not exists public.study_my_cards (
+  id          uuid             primary key default gen_random_uuid(),
+  user_id     uuid             not null default auth.uid() references auth.users (id) on delete cascade,
+  group_id    uuid             not null references public.study_groups (id) on delete cascade,
+  lecture_id  uuid             not null references public.study_lectures (id) on delete cascade,
+  part_idx    int              check (part_idx >= 0),
+  anchor      int              check (anchor between 0 and 9999),
+  origin      text             not null check (origin in ('quiz', 'practice', 'answer', 'table')),
+  question_id uuid,                                  -- study_questions.id: the key is added below once section Q exists (review F-4)
+  comment_id  uuid             references public.study_comments (id) on delete set null,
+  front       text             not null check (char_length(btrim(front)) between 3 and 400),
+  back        text             not null check (char_length(btrim(back)) between 1 and 300),
+  extra       text             not null default '' check (char_length(extra) <= 500),
+  slides      int[]            not null default '{}' check (cardinality(slides) <= 12),
+  state       smallint         not null default 0 check (state between 0 and 3),
+  step        smallint         not null default 0 check (step between 0 and 9),
+  stability   double precision not null default 0 check (stability = 0 or stability between 0.001 and 36500),
+  difficulty  double precision not null default 0 check (difficulty = 0 or difficulty between 1 and 10),
+  due         timestamptz,
+  last_review timestamptz,
+  reps        int              not null default 0 check (reps >= 0),
+  lapses      int              not null default 0 check (lapses >= 0),
+  suspended   boolean          not null default false,
+  created_at  timestamptz      not null default now(),
+  deleted_at  timestamptz,
+  check ((state = 0) = (stability = 0 and difficulty = 0)),
+  check (state = 0 or (due is not null and last_review is not null))
+);
+do $$
+begin
+  if to_regclass('public.study_questions') is not null
+     and not exists (select 1 from pg_constraint where conname = 'study_my_cards_question_id_fkey') then
+    alter table public.study_my_cards add constraint study_my_cards_question_id_fkey
+      foreign key (question_id) references public.study_questions (id) on delete set null;
+  end if;
+end $$;
+-- One card per question per member, and one per answered thread.
+create unique index if not exists study_my_cards_question on public.study_my_cards (user_id, question_id) where question_id is not null;
+create unique index if not exists study_my_cards_comment on public.study_my_cards (user_id, comment_id) where comment_id is not null;
+create index if not exists study_my_cards_due on public.study_my_cards (user_id, due) where deleted_at is null and not suspended;
+
+create table if not exists public.study_my_card_reviews (
+  id          uuid        primary key,
+  user_id     uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  card_id     uuid        not null references public.study_my_cards (id) on delete cascade,
+  rating      smallint    not null check (rating between 1 and 4),
+  reviewed_at timestamptz not null,
+  ms          int         check (ms between 0 and 3600000),
+  prev        jsonb       not null,                  -- the memory before (undo)
+  created_at  timestamptz not null default now()
+);
+create index if not exists study_my_card_reviews_mine on public.study_my_card_reviews (user_id, reviewed_at desc);
+
+alter table public.study_card_adoptions  enable row level security;
+alter table public.study_my_cards        enable row level security;
+alter table public.study_my_card_reviews enable row level security;
+drop policy if exists "study card adoptions own"  on public.study_card_adoptions;
+drop policy if exists "study my cards own"        on public.study_my_cards;
+drop policy if exists "study my card reviews own" on public.study_my_card_reviews;
+create policy "study card adoptions own" on public.study_card_adoptions for select using (user_id = auth.uid());
+create policy "study my cards own" on public.study_my_cards for select using (user_id = auth.uid());
+create policy "study my card reviews own" on public.study_my_card_reviews for select using (user_id = auth.uid());
+revoke all on public.study_card_adoptions, public.study_my_cards, public.study_my_card_reviews from anon, authenticated;
+grant select on public.study_card_adoptions, public.study_my_cards, public.study_my_card_reviews to authenticated;
+-- Never published: every write is a definer function below.
+
+-- ── D3: the worker path (as section Q's end) ──
+-- Who may drive a batch: identical to section Q's end's helper, repeated so
+-- section C runs before section Q is merged (review F-4); whichever end loads
+-- second replaces it with the same text.
+create or replace function study_private.may_bank(p_lecture uuid, p_key text)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then return false; end if;
+  if auth.uid() is null then return true; end if;
+  return coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false);
+end;
+$$;
+revoke all on function study_private.may_bank(uuid, text) from public;
+drop function if exists public.study_card_round(uuid);
+create or replace function public.study_card_round(p_lecture uuid, p_key text default null)
+returns table (round int, batches int, wanted int, fresh boolean)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  g uuid := public.study_lecture_group(p_lecture);
+  r int;
+  open_n int;
+  open_w int;
+  made_n int;
+begin
+  if auth.uid() is null then
+    if not study_private.is_worker(p_key) then raise exception 'not signed in'; end if;   -- the worker (section B)
+    if g is null then raise exception 'lecture not found'; end if;
+  elsif g is null or not public.study_is_member(g) then
+    raise exception 'lecture not found';
+  end if;
+  if exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_card_round:' || p_lecture::text));
+  update public.study_card_batches b set status = 'failed', error = 'gave up', updated_at = now()
+   where b.lecture_id = p_lecture and b.status = 'writing' and b.attempts >= 3 and b.updated_at < now() - interval '6 minutes'
+     and (b.hold_until is null or b.hold_until <= now());
+  select max(b.round) into r from public.study_card_batches b where b.lecture_id = p_lecture;
+  if r is not null then
+    select count(*), coalesce(sum(b.wanted), 0) into open_n, open_w from public.study_card_batches b
+     where b.lecture_id = p_lecture and b.round = r and b.status in ('pending', 'writing');
+    if open_n > 0 then
+      return query select r, open_n, open_w::int, false;
+      return;
+    end if;
+  end if;
+  if (select count(*) from public.study_cards c where c.lecture_id = p_lecture and c.deleted_at is null) >= 150
+     or (select count(*) from public.study_cards c where c.lecture_id = p_lecture and c.source = 'ai') >= 250 then
+    raise exception 'enough cards';
+  end if;
+  r := coalesce(r, 0) + 1;
+  if r > 20 then raise exception 'enough cards'; end if;
+  with sl as (
+    select (s ->> 'n')::int as n,
+           coalesce((select sum(char_length(x)) from jsonb_array_elements_text(coalesce(s -> 'lines', '[]'::jsonb)) x), 0)
+           + char_length(coalesce(s ->> 'notes', ''))
+           + case when jsonb_typeof(s -> 'tables') = 'array' and jsonb_array_length(s -> 'tables') > 0
+                  then char_length((s -> 'tables')::text) else 0 end as chars,
+           row_number() over (order by (s ->> 'n')::int) as o
+    from public.study_lectures l, jsonb_array_elements(l.slides) s
+    where l.id = p_lecture
+  ),
+  parts as (
+    select s.idx as part_idx, s.title as heading, s.slide_from, s.slide_to
+    from public.study_sections s where s.lecture_id = p_lecture
+    union all
+    select ((x.o - 1) / 6)::int, '', min(x.n), max(x.n) from sl x
+    where not exists (select 1 from public.study_sections s2 where s2.lecture_id = p_lecture)
+    group by (x.o - 1) / 6
+  ),
+  want as (
+    select p.*, least(case when r = 1 then 8 else 4 end,
+                      round((select coalesce(sum(x.chars), 0) from sl x where x.n between p.slide_from and p.slide_to)
+                            / case when r = 1 then 250.0 else 500.0 end))::int as w
+    from parts p
+  ),
+  total as (select coalesce(sum(w), 0) as t from want)
+  insert into public.study_card_batches (lecture_id, round, part_idx, heading, slide_from, slide_to, wanted)
+  select p_lecture, r, k.part_idx, left(k.heading, 200), k.slide_from, k.slide_to,
+         case when t.t > 60 then greatest(1, floor(k.w * 60.0 / t.t))::int else k.w end
+  from want k, total t
+  where k.w >= 1;
+  get diagnostics made_n = row_count;
+  if made_n = 0 then raise exception 'no slides'; end if;
+  return query select r, made_n, (select sum(b.wanted)::int from public.study_card_batches b where b.lecture_id = p_lecture and b.round = r), true;
+end;
+$$;
+
+create or replace function public.study_card_claim(p_batch uuid, p_key text default null)
+returns table (lecture_id uuid, round int, part_idx int, heading text, slide_from int, slide_to int, wanted int, effort text)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare b public.study_card_batches;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  select * into b from public.study_card_batches x where x.id = p_batch;
+  if not found or not study_private.may_bank(b.lecture_id, p_key)
+     or exists (select 1 from public.study_lectures l where l.id = b.lecture_id and l.deleted_at is not null) then
+    raise exception 'batch not found';
+  end if;
+  if auth.uid() is not null and b.hold_until > now() then raise exception 'busy'; end if;
+  update public.study_card_batches x
+     set status = 'writing', attempts = x.attempts + 1, updated_at = now()
+   where x.id = p_batch and x.attempts < 3
+     and (x.status in ('pending', 'failed') or (x.status = 'writing' and x.updated_at < now() - interval '6 minutes'));
+  if not found then
+    if b.attempts >= 3 and b.status <> 'ready' then raise exception 'gave up'; end if;
+    raise exception 'busy';
+  end if;
+  return query select b.lecture_id, b.round, b.part_idx, b.heading, b.slide_from, b.slide_to, b.wanted - b.made,
+                      case when b.error = 'timeout' then 'low' else 'medium' end;
+end;
+$$;
+
+-- The meeting block's version (the paragraph) plus the worker path.
+create or replace function public.study_save_card(p_batch uuid, p_card jsonb, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  b    public.study_card_batches;
+  g    uuid;
+  sl   int[] := array(select (jsonb_array_elements_text(coalesce(p_card -> 'slides', '[]'::jsonb)))::int);
+  para int   := case when jsonb_typeof(p_card -> 'para') = 'number' and (p_card ->> 'para') ~ '^[0-9]{1,4}$' then (p_card ->> 'para')::int end;
+  why  text;
+  cid  uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;   -- source 'ai' is the server's word (review B1)
+  select * into b from public.study_card_batches x where x.id = p_batch;
+  if not found then raise exception 'batch not found'; end if;
+  g := public.study_lecture_group(b.lecture_id);
+  if not study_private.may_bank(b.lecture_id, p_key) then raise exception 'batch not found'; end if;
+  if b.status <> 'writing' then raise exception 'batch not writing'; end if;
+  if b.made >= b.wanted then raise exception 'part full'; end if;
+  if (select count(*) from public.study_cards c where c.lecture_id = b.lecture_id and c.deleted_at is null) >= 150 then
+    raise exception 'enough cards';
+  end if;
+  why := public.study_card_problem(p_card ->> 'kind', p_card ->> 'front', coalesce(p_card ->> 'back', ''),
+                                   coalesce(p_card ->> 'extra', ''), coalesce(p_card ->> 'figure', ''), sl, b.lecture_id);
+  if why is not null then raise exception '%', why; end if;
+  if cardinality(sl) = 0 then raise exception 'no slides'; end if;
+  if not exists (select 1 from unnest(sl) s where s between b.slide_from and b.slide_to) then
+    raise exception 'outside the part';
+  end if;
+  insert into public.study_cards (group_id, lecture_id, batch_id, source, part_idx, kind, front, back, extra, figure,
+                                  slides, topic, aspect, model, anchor, quote, part_gen, created_by)
+  values (g, b.lecture_id, p_batch, 'ai', b.part_idx, p_card ->> 'kind', btrim(p_card ->> 'front'),
+          coalesce(p_card ->> 'back', ''), coalesce(p_card ->> 'extra', ''), coalesce(p_card ->> 'figure', ''), sl,
+          left(coalesce(p_card ->> 'topic', ''), 120), coalesce(nullif(p_card ->> 'aspect', ''), 'other'),
+          left(p_card ->> 'model', 80),
+          para, case when para is null then '' else left(coalesce(p_card ->> 'quote', ''), 200) end,
+          case when para is null then null
+               else (select s.gen from public.study_sections s where s.lecture_id = b.lecture_id and s.idx = b.part_idx) end,
+          auth.uid())
+  returning id into cid;
+  update public.study_card_batches x set made = x.made + 1, updated_at = now() where x.id = p_batch;
+  return cid;
+end;
+$$;
+
+create or replace function public.study_card_finish(p_batch uuid, p_status text, p_rejected int,
+  p_model text, p_cost numeric, p_error text, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if p_status not in ('ready', 'failed') then raise exception 'bad status'; end if;
+  update public.study_card_batches x
+     set status = p_status,
+         rejected = x.rejected + greatest(0, coalesce(p_rejected, 0)),
+         model = coalesce(left(p_model, 80), x.model),
+         cost_usd = x.cost_usd + greatest(0, coalesce(p_cost, 0)),
+         error = left(p_error, 200),
+         hold_until = null,
+         updated_at = now()
+   where x.id = p_batch
+     and x.status = 'writing'
+     and study_private.may_bank(x.lecture_id, p_key);
+  if not found then raise exception 'batch not writing'; end if;
+end;
+$$;
+
+-- ── D8: adding parts to one's own deck ("להוסיף"), or taking them out ──
+-- The parts a member adds: the summary's parts, or, for a lecture whose deck
+-- was written before its outline (study_card_round then cuts the slides into
+-- parts of six), the parts its card rounds were written in. (As built:
+-- without this, a lecture with no outline had no part to add and its deck
+-- could never become anyone's.)
+create or replace function study_private.card_parts(p_lecture uuid)
+returns table (part_idx int, heading text, slide_from int, slide_to int)
+language sql stable security definer set search_path = public as $$
+  select s.idx, s.title, s.slide_from, s.slide_to from public.study_sections s where s.lecture_id = p_lecture
+  union all
+  select b.part_idx, (array_agg(b.heading order by b.round desc))[1], min(b.slide_from), max(b.slide_to)
+    from public.study_card_batches b
+   where b.lecture_id = p_lecture and not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture)
+   group by b.part_idx
+$$;
+revoke all on function study_private.card_parts(uuid) from public;
+
+-- p_parts null: every part of the lecture. Returns the parts now in the deck.
+create or replace function public.study_card_adopt(p_lecture uuid, p_parts int[], p_on boolean default true)
+returns int[] language plpgsql volatile security definer set search_path = public as $$
+declare g uuid := public.study_lecture_group(p_lecture);
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not public.study_is_member(g)
+     or exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  if p_parts is not null and exists (select 1 from unnest(p_parts) x
+                                      where not exists (select 1 from study_private.card_parts(p_lecture) s where s.part_idx = x)) then
+    raise exception 'bad parts';
+  end if;
+  if coalesce(p_on, true) then
+    insert into public.study_card_adoptions (user_id, lecture_id, part_idx)
+    select auth.uid(), p_lecture, s.part_idx from study_private.card_parts(p_lecture) s
+     where p_parts is null or s.part_idx = any (p_parts)
+    on conflict do nothing;
+  else
+    delete from public.study_card_adoptions a
+     where a.user_id = auth.uid() and a.lecture_id = p_lecture and (p_parts is null or a.part_idx = any (p_parts));
+  end if;
+  return coalesce((select array_agg(a.part_idx order by a.part_idx) from public.study_card_adoptions a
+                    where a.user_id = auth.uid() and a.lecture_id = p_lecture), '{}');
+end;
+$$;
+
+-- Is this group card new material for the caller: in a part she added, a
+-- trap card (the group's vaccine), or a card she wrote herself. (As built:
+-- "herself" is source 'member'; a card Claude wrote on her tap also carries
+-- her id in created_by, and the deck she asked for for the group is not hers
+-- until she adds its parts.)
+create or replace function study_private.card_in_my_deck(p_card public.study_cards)
+returns boolean language sql stable security definer set search_path = public as $$
+  select p_card.source = 'trap' or (p_card.source = 'member' and p_card.created_by = auth.uid())
+      or exists (select 1 from public.study_card_adoptions a
+                  where a.user_id = auth.uid() and a.lecture_id = p_card.lecture_id and a.part_idx = p_card.part_idx)
+$$;
+revoke all on function study_private.card_in_my_deck(public.study_cards) from public;
+
+-- The lecture's deck page (cards.html s3): per part, its cards, whether it is
+-- in the caller's deck, and how many of them she has studied.
+create or replace function public.study_my_deck(p_lecture uuid)
+returns table (part_idx int, heading text, slide_from int, slide_to int, cards int, in_deck boolean, studied int)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then
+    raise exception 'lecture not found';
+  end if;
+  return query
+  select s.part_idx, s.heading, s.slide_from, s.slide_to,
+         (select count(*)::int from public.study_cards c where c.lecture_id = p_lecture and c.part_idx = s.part_idx and c.deleted_at is null
+             and (c.opens_at is null or c.opens_at <= now())),
+         exists (select 1 from public.study_card_adoptions a where a.user_id = auth.uid() and a.lecture_id = p_lecture and a.part_idx = s.part_idx),
+         (select count(*)::int from public.study_cards c join public.study_card_states st on st.card_id = c.id and st.user_id = auth.uid()
+           where c.lecture_id = p_lecture and c.part_idx = s.part_idx and c.deleted_at is null and st.state > 0)
+    from study_private.card_parts(p_lecture) s
+   order by s.part_idx;
+end;
+$$;
+
+-- Section C's counts, now with the deck part by part: a card never studied
+-- counts as new only when it is in the caller's deck (D8).
+create or replace function public.study_my_card_counts(p_group uuid, p_now timestamptz default now())
+returns table (lecture_id uuid, cards int, new_cards int, learning_due int, review_due int, studied int, hidden int, next_due timestamptz)
+language sql stable security definer set search_path = public as $$
+  select c.lecture_id,
+         count(*)::int,
+         (count(*) filter (where (s.card_id is null or (s.state = 0 and not s.suspended)) and study_private.card_in_my_deck(c)))::int,
+         (count(*) filter (where s.state in (1, 3) and not s.suspended and s.due <= p_now + interval '20 minutes'))::int,
+         (count(*) filter (where s.state = 2 and not s.suspended and s.due < public.study_day_end(p_now)))::int,
+         (count(*) filter (where s.state > 0))::int,
+         (count(*) filter (where s.suspended))::int,
+         min(s.due) filter (where s.state > 0 and not s.suspended)
+  from public.study_cards c
+  left join public.study_card_states s on s.card_id = c.id and s.user_id = auth.uid()
+  where c.group_id = p_group and c.deleted_at is null and coalesce(public.study_is_member(p_group), false)
+    and (c.opens_at is null or c.opens_at <= p_now)          -- review SEC-6
+  group by c.lecture_id;
+$$;
+
+-- ── C5: the card a mistake becomes (the database writes it, $0) ──
+-- Front: the teaser, else the case and the lead-in (at most 400 characters,
+-- cut at a word). Back: the right option and why (at most 300). Extra: the
+-- autopsy of the option the member chose ("ענית X: …").
+create or replace function study_private.mistake_card(p_user uuid, p_question uuid, p_choice int, p_origin text)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  q   record;                      -- section Q's row types are not named, so section C loads before Q (review F-4)
+  k   record;
+  f   text;
+  b   text;
+  x   text := '';
+  cid uuid;
+begin
+  select * into q from public.study_questions z where z.id = p_question;
+  if not found or q.lecture_id is null or q.source = 'exam' then return null; end if;
+  select * into k from public.study_question_keys z where z.question_id = p_question;
+  if not found or k.answer is null then return null; end if;
+  f := coalesce(nullif(btrim(to_jsonb(q) ->> 'teaser'), ''),
+                btrim(case when q.vignette <> '' then q.vignette || E'\n' else '' end || q.question));
+  if char_length(f) > 400 then f := btrim(regexp_replace(left(f, 399), '\s+\S*$', '')) || '…'; end if;
+  b := q.options[k.answer + 1] || coalesce(': ' || nullif(k.explanations[k.answer + 1], ''), '');
+  if char_length(b) > 300 then b := btrim(regexp_replace(left(b, 299), '\s+\S*$', '')) || '…'; end if;
+  if p_choice is not null and p_choice <> k.answer and p_choice < cardinality(q.options) then
+    x := 'ענית ' || q.options[p_choice + 1] || coalesce(': ' || nullif(k.explanations[p_choice + 1], ''), '');
+  elsif p_choice is null then
+    x := coalesce(nullif(k.takeaway, ''), '');
+  end if;
+  if char_length(x) > 500 then x := btrim(regexp_replace(left(x, 499), '\s+\S*$', '')) || '…'; end if;
+  insert into public.study_my_cards (user_id, group_id, lecture_id, part_idx, anchor, origin, question_id, front, back, extra, slides)
+  values (p_user, q.group_id, q.lecture_id, q.part_idx, (to_jsonb(q) ->> 'anchor')::int, p_origin, p_question, f, b, x,
+          q.slides[1:12])
+  on conflict do nothing
+  returning id into cid;
+  return cid;
+end;
+$$;
+revoke all on function study_private.mistake_card(uuid, uuid, int, text) from public;
+
+-- Every wrong answer in practice or in a live quiz (its first vote) makes
+-- the card once; a later wrong answer to the same question makes none.
+create or replace function public.study_answers_mistake_card()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if not new.correct and new.mode in ('lecture', 'course', 'mistakes', 'quiz', 'exam') then
+    -- (As built: a card that cannot be made, for whatever reason, never
+    -- stops the answer itself from being saved.)
+    begin
+      perform study_private.mistake_card(new.user_id, new.question_id, new.choice,
+                                         case when new.mode = 'quiz' then 'quiz' else 'practice' end);
+    exception when others then
+      null;
+    end;
+  end if;
+  return null;
+end;
+$$;
+revoke all on function public.study_answers_mistake_card() from public, anon, authenticated;
+do $$
+begin
+  if to_regclass('public.study_answers') is not null then
+    drop trigger if exists study_answers_mistake_card on public.study_answers;
+    create trigger study_answers_mistake_card after insert on public.study_answers
+      for each row execute function public.study_answers_mistake_card();
+  end if;
+end $$;
+
+-- A private card from a paragraph: the answer to one's own question (K4,
+-- origin 'answer', p_comment = the question) or a wrong cell of a blank
+-- table (P10, origin 'table'). The front and back are the member's to edit
+-- before saving; the slides must be the lecture's.
+create or replace function public.study_my_card_add(p_lecture uuid, p_origin text, p_part int, p_anchor int,
+  p_front text, p_back text, p_slides int[] default '{}', p_comment uuid default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  g    uuid := public.study_lecture_group(p_lecture);
+  have int[];
+  c    public.study_comments;
+  cid  uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not public.study_is_member(g) then raise exception 'lecture not found'; end if;
+  if coalesce(p_origin, '') not in ('answer', 'table') then raise exception 'bad origin'; end if;
+  if char_length(btrim(coalesce(p_front, ''))) not between 3 and 400 then raise exception 'front length'; end if;
+  if char_length(btrim(coalesce(p_back, ''))) not between 1 and 300 then raise exception 'too long'; end if;
+  select coalesce(array_agg((s ->> 'n')::int), '{}') into have
+    from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = p_lecture;
+  if cardinality(coalesce(p_slides, '{}')) > 12 or not (coalesce(p_slides, '{}') <@ have) then raise exception 'unknown slide'; end if;
+  if p_origin = 'answer' then
+    select * into c from public.study_comments x where x.id = p_comment;
+    if not found or c.lecture_id <> p_lecture or c.kind <> 'question' or c.parent_id is not null then
+      raise exception 'comment not found';
+    end if;
+    if c.author_id <> auth.uid() then raise exception 'not yours'; end if;
+  end if;
+  insert into public.study_my_cards (user_id, group_id, lecture_id, part_idx, anchor, origin, comment_id, front, back, slides)
+  values (auth.uid(), g, p_lecture, p_part, p_anchor, p_origin, case when p_origin = 'answer' then p_comment end,
+          btrim(p_front), btrim(p_back), coalesce(p_slides, '{}'))
+  on conflict do nothing
+  returning id into cid;
+  if cid is null then raise exception 'already'; end if;
+  return cid;
+end;
+$$;
+
+-- Reviewing a private card: the same rules as section C's study_card_review
+-- (the phone computes FSRS-6; the database checks it is sane), idempotent
+-- by the review's id. Returns 'ok' or 'dup'.
+create or replace function public.study_my_card_review(p_review uuid, p_card uuid, p_rating int, p_reviewed_at timestamptz,
+  p_ms int, p_prev_reps int, p_next jsonb)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare
+  c        public.study_my_cards;
+  v_state  int; v_step int; v_s double precision; v_d double precision; v_due timestamptz; v_lapses int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if p_review is null then raise exception 'bad review'; end if;
+  if exists (select 1 from public.study_my_card_reviews r where r.id = p_review) then
+    if exists (select 1 from public.study_my_card_reviews r where r.id = p_review and r.user_id = auth.uid()) then return 'dup'; end if;
+    raise exception 'bad review';
+  end if;
+  select * into c from public.study_my_cards x where x.id = p_card and x.user_id = auth.uid() for update;
+  if not found or c.deleted_at is not null then raise exception 'card not found'; end if;
+  if p_rating is null or p_rating not between 1 and 4 then raise exception 'bad rating'; end if;
+  if p_reviewed_at is null or p_reviewed_at > now() + interval '5 minutes' or p_reviewed_at < now() - interval '30 days' then
+    raise exception 'bad time';
+  end if;
+  if c.reps <> coalesce(p_prev_reps, -1) or (c.last_review is not null and p_reviewed_at < c.last_review) then raise exception 'stale'; end if;
+  begin
+    v_state := (p_next ->> 'state')::int; v_step := coalesce((p_next ->> 'step')::int, 0);
+    v_s := (p_next ->> 'stability')::double precision; v_d := (p_next ->> 'difficulty')::double precision;
+    v_due := (p_next ->> 'due')::timestamptz; v_lapses := (p_next ->> 'lapses')::int;
+  exception when others then
+    raise exception 'bad state';
+  end;
+  if v_state is null or v_state not between 1 and 3 or v_step not between 0 and 9
+     or v_s is null or v_s not between 0.001 and 36500 or v_d is null or v_d not between 1 and 10
+     or v_due is null or v_due < p_reviewed_at or v_due > p_reviewed_at + interval '36501 days'
+     or v_lapses is null or v_lapses <> c.lapses + (p_rating = 1 and c.state = 2)::int then
+    raise exception 'bad state';
+  end if;
+  insert into public.study_my_card_reviews (id, user_id, card_id, rating, reviewed_at, ms, prev)
+  values (p_review, auth.uid(), p_card, p_rating, p_reviewed_at, case when p_ms between 0 and 3600000 then p_ms end,
+          jsonb_build_object('state', c.state, 'step', c.step, 'stability', c.stability, 'difficulty', c.difficulty,
+                             'due', c.due, 'last_review', c.last_review, 'reps', c.reps, 'lapses', c.lapses));
+  update public.study_my_cards x
+     set state = v_state, step = v_step, stability = v_s, difficulty = v_d, due = v_due, last_review = p_reviewed_at,
+         reps = c.reps + 1, lapses = v_lapses
+   where x.id = p_card;
+  return 'ok';
+end;
+$$;
+
+-- Takes back the latest answer to a private card.
+create or replace function public.study_my_card_undo(p_review uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare r public.study_my_card_reviews;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into r from public.study_my_card_reviews x where x.id = p_review and x.user_id = auth.uid();
+  if not found then raise exception 'review not found'; end if;
+  if exists (select 1 from public.study_my_card_reviews x where x.card_id = r.card_id and x.id <> r.id
+              and (x.reviewed_at, x.created_at) > (r.reviewed_at, r.created_at)) then
+    raise exception 'not the latest';
+  end if;
+  update public.study_my_cards c
+     set state = (r.prev ->> 'state')::smallint, step = (r.prev ->> 'step')::smallint,
+         stability = (r.prev ->> 'stability')::double precision, difficulty = (r.prev ->> 'difficulty')::double precision,
+         due = (r.prev ->> 'due')::timestamptz, last_review = (r.prev ->> 'last_review')::timestamptz,
+         reps = (r.prev ->> 'reps')::int, lapses = (r.prev ->> 'lapses')::int
+   where c.id = r.card_id;
+  delete from public.study_my_card_reviews x where x.id = r.id;
+end;
+$$;
+
+-- Hide a private card from one's reviews, or delete it ("למחוק"): a deleted
+-- card is gone from the phone; its question does not make a new one.
+create or replace function public.study_my_card_set(p_card uuid, p_action text)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if coalesce(p_action, '') not in ('hide', 'show', 'delete', 'restore') then raise exception 'bad action'; end if;
+  update public.study_my_cards c
+     set suspended = case p_action when 'hide' then true when 'show' then false else c.suspended end,
+         deleted_at = case p_action when 'delete' then now() when 'restore' then null else c.deleted_at end
+   where c.id = p_card and c.user_id = auth.uid();
+  if not found then raise exception 'card not found'; end if;
+end;
+$$;
+
+revoke all on function public.study_card_round(uuid, text), public.study_card_claim(uuid, text), public.study_save_card(uuid, jsonb, text),
+  public.study_card_finish(uuid, text, int, text, numeric, text, text),
+  public.study_card_adopt(uuid, int[], boolean), public.study_my_deck(uuid), public.study_my_card_counts(uuid, timestamptz),
+  public.study_my_card_add(uuid, text, int, int, text, text, int[], uuid),
+  public.study_my_card_review(uuid, uuid, int, timestamptz, int, int, jsonb), public.study_my_card_undo(uuid),
+  public.study_my_card_set(uuid, text)
+  from public, anon;
+grant execute on function public.study_card_round(uuid, text), public.study_card_claim(uuid, text), public.study_save_card(uuid, jsonb, text),
+  public.study_card_finish(uuid, text, int, text, numeric, text, text),
+  public.study_card_adopt(uuid, int[], boolean), public.study_my_deck(uuid), public.study_my_card_counts(uuid, timestamptz),
+  public.study_my_card_add(uuid, text, int, int, text, text, int[], uuid),
+  public.study_my_card_review(uuid, uuid, int, timestamptz, int, int, jsonb), public.study_my_card_undo(uuid),
+  public.study_my_card_set(uuid, text)
+  to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('C', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION C ════
+
+-- ════ BEGIN SECTION K · corrections, shared answers, memory aids (package K) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION K · CORRECTIONS, SHARED ANSWERS AND MEMORY AIDS   (owned by package K)
+--  design-collab.md §2.3. Replaces section F's study_corrections_of() hook with the real one.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  COLLAB additions to supabase/study-schema.sql (design-collab.md §2).
+--  Appended after the platform block (design-platform.sql), which brings the
+--  spend ledger study_usage. Safe to run again: add-if-missing,
+--  create-or-replace, drop-then-create.
+--
+--  1. Corrections: a member fixes the text of one paragraph of a summary.
+--     The group sees the new text at once, who changed it, every
+--     paragraph's history, and can undo. An edit replaces ONE block with one
+--     block of the same kind, so every paragraph anchor (comments, the
+--     reader's place, recording notes) keeps pointing where it did.
+--  2. Comments gain two kinds: 'mnemonic' (a memory aid shared from a
+--     paragraph's "אסוציאציה" tab) and 'answer' (an answer from "לשאול"
+--     shared with the group). Both are top-level, never replies.
+--  3. A member's own use of "לשאול" and "אסוציאציה" today, for the daily
+--     limits. The ledger itself stays unreadable (platform §2).
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ── 1a. Versions of a part ──
+-- rev: +1 whenever the part's text changes (a correction, or the writer).
+-- gen: +1 whenever the part starts being written (again). Corrections made
+--      to an earlier generation no longer apply to the text; they stay in
+--      the history and are handed to the writer (study_part_corrections).
+alter table public.study_sections
+  add column if not exists rev int not null default 0,
+  add column if not exists gen int not null default 0;
+
+create or replace function public.study_sections_versions()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    new.rev := 0;
+    new.gen := 0;
+  else
+    -- Whatever a client sends, the counters move only here, and only forward.
+    new.rev := old.rev + case when new.markdown is distinct from old.markdown then 1 else 0 end;
+    new.gen := old.gen + case when new.status = 'writing' and old.status is distinct from 'writing' then 1 else 0 end;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists study_sections_versions on public.study_sections;
+create trigger study_sections_versions before insert or update on public.study_sections
+  for each row execute function public.study_sections_versions();
+
+-- ── 1b. The block rules (the same rules as shared/study/blocks.ts) ──
+-- What every phone renders: an en dash between digits becomes a hyphen and
+-- direction marks go (SummaryView's tidy(); JS \s and \d spelled out).
+create or replace function public.study_tidy(t text)
+returns text language sql immutable set search_path = public as $$
+  select regexp_replace(
+           regexp_replace(t,
+             '([0-9])[\t\n\u000b\f\r    -     　﻿]*–[\t\n\u000b\f\r    -     　﻿]*([0-9])',
+             '\1-\2', 'g'),
+           '[‎‏‪-‮⁦-⁩]', '', 'g')
+$$;
+
+-- The kind of a block, from its first characters.
+create or replace function public.study_block_kind(t text)
+returns text language sql immutable set search_path = public as $$
+  select case
+    when t is null or t = '' then null
+    when t ~ '^ {0,3}#{1,6}([ \t]|$)' then 'heading'
+    when t ~ '^ {0,3}>' then 'box'
+    when t ~ '^ {0,3}\|' then 'table'
+    when t ~ '^ {0,3}([-*+]|[0-9]{1,9}[.)])([ \t]|$)' then 'item'
+    when t ~ '^!\[[^\[\]\n`<\\]*\]\(fig:[0-9]+-[0-9]+\)$' then 'figure'
+    else 'paragraph'
+  end
+$$;
+
+-- Cells of a table row with leading and trailing pipes (\| is not a pipe).
+create or replace function public.study_pipe_cells(line text)
+returns int language sql immutable set search_path = public as $$
+  select greatest(0, array_length(string_to_array(replace(btrim(line), '\|', ''), '|'), 1) - 2)
+$$;
+
+-- null when replacing p_before by p_after keeps one block of the same kind
+-- (so no anchor moves); otherwise why not.
+create or replace function public.study_block_edit_problem(p_before text, p_after text)
+returns text language plpgsql immutable set search_path = public as $$
+declare
+  k  text := public.study_block_kind(p_before);
+  bl text[];
+  al text[];
+  l  text;
+begin
+  if k is null or p_after is null then return 'bad block'; end if;
+  if p_after = p_before then return 'no change'; end if;
+  if char_length(p_after) > 8000 or char_length(p_before) > 8000 then return 'too long'; end if;
+  if position(E'\r' in p_after) > 0 or p_before ~ '(^|\n)[ \t]*(\n|$)' or p_after ~ '(^|\n)[ \t]*(\n|$)' then
+    return 'bad block';
+  end if;
+  -- The block keeps its indentation: two spaces before a paragraph that follows
+  -- a list make it part of the list's last item, and a space and a tab make it
+  -- code (package K's edits.test.ts found both; check KH1).
+  if substring(p_after from '^[ \t]*') is distinct from substring(p_before from '^[ \t]*') then
+    return 'bad block';
+  end if;
+  if public.study_block_kind(p_after) is distinct from k then return 'bad block'; end if;
+  bl := string_to_array(p_before, E'\n');
+  al := string_to_array(p_after, E'\n');
+  if k in ('heading', 'paragraph', 'item', 'figure') and (array_length(bl, 1) <> 1 or array_length(al, 1) <> 1) then
+    return 'bad block';
+  end if;
+  if k = 'heading' then
+    if substring(p_before from '^ {0,3}(#{1,6})') is distinct from substring(p_after from '^ {0,3}(#{1,6})')
+       or p_after !~ '^ {0,3}#{1,6}[ \t]+[^ \t#]' then
+      return 'bad block';
+    end if;
+  elsif k = 'item' then
+    if substring(p_before from '^ {0,3}([-*+]|[0-9]{1,9}[.)])[ \t]') is distinct from substring(p_after from '^ {0,3}([-*+]|[0-9]{1,9}[.)])[ \t]')
+       or p_after !~ '^ {0,3}([-*+]|[0-9]{1,9}[.)])[ \t]+[^ \t]' then
+      return 'bad block';
+    end if;
+    -- An item that reads as a rule ("- ---") is a rule, and a fence or an HTML
+    -- block opened inside an item (or in a quote or list nested in it) reaches
+    -- past its line (check KH2).
+    if p_after ~ '^ {0,3}([-*_])([ \t]*\1){2,}[ \t]*$'
+       or p_after ~ '^ {0,3}([-*+]|[0-9]{1,9}[.)])([ \t]*(>|[-*+][ \t]|[0-9]{1,9}[.)][ \t]))*[ \t]*(```|~~~|<[A-Za-z!?/])' then
+      return 'bad block';
+    end if;
+  elsif k = 'figure' then
+    if substring(p_before from '\((fig:[0-9]+-[0-9]+)\)$') is distinct from substring(p_after from '\((fig:[0-9]+-[0-9]+)\)$') then
+      return 'bad block';
+    end if;
+  elsif k = 'paragraph' then
+    if p_after ~ '^( {0,3}(#{1,6}([ \t]|$)|>|[-*+]([ \t]|$)|[0-9]{1,9}[.)]([ \t]|$)|\||```|~~~|<|\[[^]]*\]:|!\[)|( {4}|\t))'
+       or p_after ~ '^ {0,3}([-*_])([ \t]*\1){2,}[ \t]*$' then
+      return 'bad block';
+    end if;
+  elsif k = 'box' then
+    foreach l in array bl || al loop
+      if l !~ '^ {0,3}>' then return 'bad block'; end if;
+    end loop;
+    if substring(p_before from '^ {0,3}> ?(\*\*[^*\n]{1,60}:\*\*)') is distinct from substring(p_after from '^ {0,3}> ?(\*\*[^*\n]{1,60}:\*\*)') then
+      return 'bad block';
+    end if;
+  elsif k = 'table' then
+    foreach l in array bl || al loop
+      if l !~ '^ {0,3}\|' or l !~ '\|[ \t]*$' then return 'bad block'; end if;
+    end loop;
+    if array_length(bl, 1) <> array_length(al, 1) or array_length(bl, 1) < 2 or bl[2] <> al[2] then
+      return 'bad block';
+    end if;
+    foreach l in array al loop
+      if position('\' in replace(l, '\|', '')) > 0 then return 'bad block'; end if;
+    end loop;
+    if public.study_pipe_cells(al[1]) <> public.study_pipe_cells(al[2]) then return 'bad block'; end if;
+  end if;
+  -- No new links in the trusted reader (review M9): a URL, "www." or a
+  -- Markdown link that the block did not already have. (Structure comes first:
+  -- a link definition line is a 'bad block'.)
+  if exists (select 1 from regexp_matches(p_after, '(https?://[^\s)\]]+|www\.[^\s)\]]+|\]\()', 'gi') m
+              where position(lower(m[1]) in lower(p_before)) = 0) then
+    return 'link';
+  end if;
+  return null;
+end;
+$$;
+
+-- 1-based positions where p_blk stands on whole lines of p_md.
+create or replace function public.study_block_positions(p_md text, p_blk text)
+returns int[] language plpgsql immutable set search_path = public as $$
+declare
+  out_ int[] := '{}';
+  len  int := char_length(p_blk);
+  tot  int := char_length(p_md);
+  from_ int := 1;
+  hit  int;
+  pos  int;
+begin
+  if len = 0 or p_md is null then return out_; end if;
+  loop
+    hit := strpos(substr(p_md, from_), p_blk);
+    exit when hit = 0;
+    pos := from_ + hit - 1;
+    if (pos = 1 or substr(p_md, pos - 1, 1) = E'\n') and (pos + len - 1 = tot or substr(p_md, pos + len, 1) = E'\n') then
+      out_ := out_ || pos;
+    end if;
+    from_ := pos + 1;
+  end loop;
+  return out_;
+end;
+$$;
+
+-- ── 1c. The history ──
+-- One row per correction (an undo is a correction too, with undo_of set).
+-- Written only by study_edit_block(); members read it; nobody changes it.
+create table if not exists public.study_edits (
+  id          uuid        primary key default gen_random_uuid(),
+  lecture_id  uuid        not null,
+  part_idx    int         not null,
+  anchor      int         not null check (anchor between 0 and 9999),
+  gen         int         not null check (gen >= 0),
+  rev         int         not null check (rev >= 1),          -- the part's rev this correction produced
+  kind        text        not null check (kind in ('heading', 'paragraph', 'item', 'box', 'table', 'figure')),
+  before_text text        not null check (char_length(before_text) between 1 and 8000),
+  after_text  text        not null check (char_length(after_text) between 1 and 8000),
+  note        text        not null default '' check (char_length(note) <= 300),
+  undo_of     uuid        references public.study_edits (id) on delete set null,
+  author_id   uuid        default auth.uid() references auth.users (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  foreign key (lecture_id, part_idx) references public.study_sections (lecture_id, idx) on delete cascade
+);
+create index if not exists study_edits_block on public.study_edits (lecture_id, part_idx, gen, anchor, rev);
+
+alter table public.study_edits enable row level security;
+revoke all on public.study_edits from anon, authenticated;
+grant select on public.study_edits to authenticated;
+drop policy if exists "study edits read" on public.study_edits;
+create policy "study edits read" on public.study_edits
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+
+-- ── 1d. The one way to correct a part ──
+-- p_before: the block's text as the phone parsed it from the part (tidy).
+-- p_base_rev / p_base_gen: the part's rev and gen when the editor opened.
+-- p_occurrence: which whole-line occurrence of p_before (1 = first), for the
+-- rare part where two blocks read the same.
+-- Same rev: the block is replaced where the phone saw it. Another rev of the
+-- same generation (someone corrected ANOTHER paragraph meanwhile): replaced
+-- if p_before still appears exactly once ("merged"). Otherwise 'edit
+-- conflict': this paragraph changed meanwhile, the phone shows both.
+create or replace function public.study_edit_block(
+  p_lecture uuid, p_part int, p_anchor int, p_before text, p_after text,
+  p_base_rev int, p_base_gen int, p_occurrence int default 1, p_note text default '', p_undo_of uuid default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  s        public.study_sections;
+  v_after  text := public.study_tidy(coalesce(p_after, ''));
+  v_note   text := btrim(coalesce(p_note, ''));
+  v_why    text;
+  v_md     text;
+  v_pos    int[];
+  v_at     int;
+  v_merged boolean := false;
+  v_rev    int;
+  v_id     uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then
+    raise exception 'forbidden';
+  end if;
+  if p_anchor is null or p_anchor < 0 or p_anchor > 9999 then raise exception 'bad block'; end if;
+  if char_length(v_note) > 300 then raise exception 'too long'; end if;
+  select * into s from public.study_sections x where x.lecture_id = p_lecture and x.idx = p_part for update;
+  if not found then raise exception 'part not found'; end if;
+  if s.status <> 'ready' then raise exception 'part busy'; end if;
+  if s.gen is distinct from p_base_gen then raise exception 'part rewritten'; end if;
+  v_why := public.study_block_edit_problem(p_before, v_after);
+  if v_why is not null then raise exception '%', v_why; end if;
+  if p_undo_of is not null and not exists (
+       select 1 from public.study_edits e
+        where e.id = p_undo_of and e.lecture_id = p_lecture and e.part_idx = p_part
+          and e.gen = s.gen and e.anchor = p_anchor) then
+    raise exception 'bad undo';
+  end if;
+  v_md := public.study_tidy(s.markdown);
+  v_pos := public.study_block_positions(v_md, p_before);
+  if s.rev = p_base_rev then
+    if p_occurrence is null or p_occurrence < 1 or p_occurrence > coalesce(array_length(v_pos, 1), 0) then
+      raise exception 'edit conflict';
+    end if;
+    v_at := v_pos[p_occurrence];
+  elsif coalesce(array_length(v_pos, 1), 0) = 1 then
+    v_at := v_pos[1];
+    v_merged := true;
+  else
+    raise exception 'edit conflict';
+  end if;
+  update public.study_sections x
+     set markdown = overlay(v_md placing v_after from v_at for char_length(p_before)),
+         -- the part's own heading is also its title (table of contents, placeholders, prompts)
+         title = case when v_at = 1 and p_before ~ '^## ' then left(btrim(regexp_replace(v_after, '^##[ \t]+', '')), 120) else x.title end,
+         updated_at = now()
+   where x.lecture_id = p_lecture and x.idx = p_part
+  returning x.rev into v_rev;
+  insert into public.study_edits (lecture_id, part_idx, anchor, gen, rev, kind, before_text, after_text, note, undo_of)
+  values (p_lecture, p_part, p_anchor, s.gen, v_rev, public.study_block_kind(p_before), p_before, v_after, v_note, p_undo_of)
+  returning id into v_id;
+  return jsonb_build_object('edit_id', v_id, 'rev', v_rev, 'gen', s.gen, 'merged', v_merged);
+end;
+$$;
+
+-- ── 1e. Corrections that a rewrite must keep ──
+-- What the group corrected in the latest EARLIER generation of a part, net
+-- per paragraph (its first text before, its last text after; a paragraph
+-- that was put back drops out). Internal; the platform's study_writing_input
+-- can embed it for the server writer.
+create or replace function public.study_corrections_of(p_lecture uuid, p_part int)
+returns jsonb language sql stable security definer set search_path = public as $$
+  with cur as (
+    select s.gen from public.study_sections s where s.lecture_id = p_lecture and s.idx = p_part
+  ), g as (
+    select max(e.gen) as gen from public.study_edits e, cur
+     where e.lecture_id = p_lecture and e.part_idx = p_part and e.gen < cur.gen
+  ), net as (
+    select e.anchor,
+           (array_agg(e.before_text order by e.rev))[1] as before_text,
+           (array_agg(e.after_text order by e.rev desc))[1] as after_text,
+           coalesce(string_agg(nullif(e.note, ''), ' · ' order by e.rev), '') as note
+      from public.study_edits e, g
+     where e.lecture_id = p_lecture and e.part_idx = p_part and e.gen = g.gen
+     group by e.anchor
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('before', left(n.before_text, 1500), 'after', left(n.after_text, 1500),
+                                               'note', left(n.note, 300)) order by n.anchor), '[]'::jsonb)
+    from (select * from net where before_text <> after_text order by anchor limit 20) n
+$$;
+
+-- The device writer reads them through study_part_corrections() (section F).
+
+-- ── 2. Comments: shared memory aids and shared answers ──
+-- (For new installs, also change the create table above: the kind check and
+-- the body check below replace the inline ones.)
+alter table public.study_comments drop constraint if exists study_comments_kind_check;
+alter table public.study_comments add constraint study_comments_kind_check
+  check (kind in ('comment', 'question', 'mnemonic', 'answer'));
+alter table public.study_comments drop constraint if exists study_comments_body_check;
+alter table public.study_comments add constraint study_comments_body_check
+  check (length(btrim(body)) between 1 and case when kind = 'answer' then 4000 else 2000 end);
+-- A reply is always a plain comment. "not valid": rows from before are not re-checked.
+alter table public.study_comments drop constraint if exists study_comments_reply_kind;
+alter table public.study_comments add constraint study_comments_reply_kind
+  check (parent_id is null or kind = 'comment') not valid;
+
+-- ── 3. My own use today (Israel time), for the daily limits ──
+-- Counts only the caller's rows; the ledger stays unreadable. Needs the
+-- platform's study_usage (plpgsql, so this file loads in any order).
+create or replace function public.study_my_uses_today(p_group uuid, p_kind text, p_ref text default null)
+returns int language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then
+    raise exception 'forbidden';
+  end if;
+  return (select count(*)::int from public.study_usage u
+           where u.group_id = p_group and u.user_id = auth.uid() and u.kind = p_kind
+             and (p_ref is null or u.ref = p_ref)
+             and u.created_at >= (date_trunc('day', now() at time zone 'Asia/Jerusalem') at time zone 'Asia/Jerusalem'));
+end;
+$$;
+
+-- ── Privileges ──
+revoke all on function public.study_sections_versions() from public, anon, authenticated;
+revoke all on function public.study_tidy(text) from public, anon, authenticated;
+revoke all on function public.study_block_kind(text) from public, anon, authenticated;
+revoke all on function public.study_pipe_cells(text) from public, anon, authenticated;
+revoke all on function public.study_block_edit_problem(text, text) from public, anon, authenticated;
+revoke all on function public.study_block_positions(text, text) from public, anon, authenticated;
+revoke all on function public.study_corrections_of(uuid, int) from public, anon, authenticated;
+revoke all on function public.study_edit_block(uuid, int, int, text, text, int, int, int, text, uuid) from public, anon;
+revoke all on function public.study_my_uses_today(uuid, text, text) from public, anon;
+grant execute on function public.study_edit_block(uuid, int, int, text, text, int, int, int, text, uuid) to authenticated;
+grant execute on function public.study_my_uses_today(uuid, text, text) to authenticated;
+
+-- ── Realtime: a correction reaches every open phone (the part's text via
+--    study_sections, already published; the history and marks via this) ──
+do $$
+begin
+  execute 'alter publication supabase_realtime add table public.study_edits';
+exception when duplicate_object then
+  null;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('K', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION K, its end · A CORRECTION NEEDS A SOURCE AND A SECOND APPROVAL
+--  (package K; decision 5, R1; meeting addendum §3.4). K becomes version 2.
+--
+--  "הצעת תיקון": a member proposes one block for one block (section K's
+--  rules: anchors never move, no new links) with a mandatory source: a slide
+--  of the lecture ("שקף ✓"), the recording at a minute ("מההקלטה"), or an
+--  outside source with a note ("חיצוני"). The group sees it pending
+--  (published, so "ממתין לאישור" and "לאשר" show live). It is applied when
+--  another member approves it, or when the meeting's reader approves it
+--  aloud (section M: the reader of today's live meeting on this lecture,
+--  with two other members following; never the reader's own proposal,
+--  review SEC-3). Applied, it is a study_edits row as before, now with its
+--  proposal, source and approver. An undo stays one tap and immediate, but
+--  only of the paragraph's latest correction and only back to its own text
+--  (study_undo_edit, or study_edit_block with p_undo_of and the two texts
+--  swapped; review SEC-1); every other direct call of study_edit_block is
+--  refused.
+-- ════════════════════════════════════════════════════════════════════════
+create table if not exists public.study_edit_proposals (
+  id            uuid        primary key default gen_random_uuid(),
+  lecture_id    uuid        not null,
+  part_idx      int         not null,
+  anchor        int         not null check (anchor between 0 and 9999),
+  gen           int         not null check (gen >= 0),
+  base_rev      int         not null check (base_rev >= 0),
+  occurrence    int         not null default 1 check (occurrence between 1 and 50),
+  kind          text        not null check (kind in ('heading', 'paragraph', 'item', 'box', 'table', 'figure')),
+  before_text   text        not null check (char_length(before_text) between 1 and 8000),
+  after_text    text        not null check (char_length(after_text) between 1 and 8000),
+  note          text        not null default '' check (char_length(note) <= 300),
+  source_kind   text        not null check (source_kind in ('slide', 'recording', 'external')),
+  source_slides int[]       not null default '{}' check (cardinality(source_slides) <= 6),
+  source_at     int         check (source_at between 0 and 36000),          -- seconds into the recording
+  source_note   text        not null default '' check (char_length(source_note) <= 300),
+  state         text        not null default 'pending' check (state in ('pending', 'applied', 'withdrawn', 'conflict', 'disputed')),
+  proposed_by   uuid        default auth.uid() references auth.users (id) on delete set null,
+  approved_by   uuid        references auth.users (id) on delete set null,
+  aloud         boolean     not null default false,
+  edit_id       uuid        references public.study_edits (id) on delete set null,
+  created_at    timestamptz not null default now(),
+  decided_at    timestamptz,
+  updated_at    timestamptz not null default now(),
+  foreign key (lecture_id, part_idx) references public.study_sections (lecture_id, idx) on delete cascade
+);
+create index if not exists study_edit_proposals_lecture on public.study_edit_proposals (lecture_id, state, created_at desc);
+-- One open proposal per paragraph.
+create unique index if not exists study_edit_proposals_open on public.study_edit_proposals (lecture_id, part_idx, anchor)
+  where state in ('pending', 'disputed');
+
+alter table public.study_edits
+  add column if not exists proposal_id   uuid references public.study_edit_proposals (id) on delete set null,
+  add column if not exists source_kind   text check (source_kind in ('slide', 'recording', 'external', 'undo')),
+  add column if not exists source_slides int[] not null default '{}',
+  add column if not exists source_at     int check (source_at between 0 and 36000),
+  add column if not exists source_note   text not null default '' check (char_length(source_note) <= 300),
+  add column if not exists approved_by   uuid references auth.users (id) on delete set null,
+  add column if not exists aloud         boolean not null default false,
+  -- which whole-line occurrence of after_text the correction wrote (1 = the
+  -- first), so its undo puts the text back in that paragraph and no other
+  -- that reads the same; null on rows from before K's end
+  add column if not exists occurrence    int check (occurrence >= 1);
+
+alter table public.study_edit_proposals enable row level security;
+revoke all on public.study_edit_proposals from anon, authenticated;
+grant select on public.study_edit_proposals to authenticated;
+drop policy if exists "study edit proposals read" on public.study_edit_proposals;
+create policy "study edit proposals read" on public.study_edit_proposals
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+
+-- Where a block stands now, by section K's rules (null: it cannot be placed).
+create or replace function study_private.edit_place(p_md text, p_before text, p_base_rev int, p_rev int, p_occurrence int)
+returns int language plpgsql immutable set search_path = public as $$
+declare v_pos int[] := public.study_block_positions(p_md, p_before);
+begin
+  if p_rev = p_base_rev then
+    if p_occurrence is null or p_occurrence < 1 or p_occurrence > coalesce(array_length(v_pos, 1), 0) then return null; end if;
+    return v_pos[p_occurrence];
+  elsif coalesce(array_length(v_pos, 1), 0) = 1 then
+    return v_pos[1];
+  end if;
+  return null;
+end;
+$$;
+
+-- Section K's study_edit_block body, now internal: applies one block for
+-- one block, writes the history row with its author, approver and source.
+-- Errors as section K's ('forbidden', 'bad block', 'too long', 'part not
+-- found', 'part busy', 'part rewritten', 'no change', 'link', 'bad undo',
+-- 'edit conflict').
+create or replace function study_private.edit_apply(
+  p_lecture uuid, p_part int, p_anchor int, p_before text, p_after text,
+  p_base_rev int, p_base_gen int, p_occurrence int, p_note text, p_undo_of uuid,
+  p_author uuid, p_approver uuid, p_aloud boolean, p_proposal uuid,
+  p_source_kind text, p_source_slides int[], p_source_at int, p_source_note text)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  s        public.study_sections;
+  v_after  text := public.study_tidy(coalesce(p_after, ''));
+  v_note   text := btrim(coalesce(p_note, ''));
+  v_why    text;
+  v_md     text;
+  v_at     int;
+  v_merged boolean := false;
+  v_rev    int;
+  v_id     uuid;
+  v_new    text;
+  v_occ    int;
+  u        public.study_edits;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then
+    raise exception 'forbidden';
+  end if;
+  if p_anchor is null or p_anchor < 0 or p_anchor > 9999 then raise exception 'bad block'; end if;
+  if char_length(v_note) > 300 then raise exception 'too long'; end if;
+  select * into s from public.study_sections x where x.lecture_id = p_lecture and x.idx = p_part for update;
+  if not found then raise exception 'part not found'; end if;
+  if s.status <> 'ready' then raise exception 'part busy'; end if;
+  if s.gen is distinct from p_base_gen then raise exception 'part rewritten'; end if;
+  v_why := public.study_block_edit_problem(p_before, v_after);
+  if v_why is not null then raise exception '%', v_why; end if;
+  if p_undo_of is not null then
+    -- review SEC-1: only the paragraph's latest correction, not an undo
+    -- itself, and only back to its own text (no other text rides on an undo)
+    select * into u from public.study_edits e
+     where e.id = p_undo_of and e.lecture_id = p_lecture and e.part_idx = p_part
+       and e.gen = s.gen and e.anchor = p_anchor;
+    -- (an undo written before K's end has no source_kind, only undo_of)
+    if not found or coalesce(u.source_kind, '') = 'undo' or u.undo_of is not null
+       or exists (select 1 from public.study_edits e2
+                   where e2.lecture_id = p_lecture and e2.part_idx = p_part and e2.anchor = p_anchor
+                     and e2.gen = s.gen and e2.rev > u.rev)
+       or public.study_tidy(coalesce(p_before, '')) <> public.study_tidy(u.after_text)
+       or v_after <> public.study_tidy(u.before_text) then
+      raise exception 'bad undo';
+    end if;
+  end if;
+  v_md := public.study_tidy(s.markdown);
+  v_at := study_private.edit_place(v_md, p_before, p_base_rev, s.rev, p_occurrence);
+  if v_at is null then raise exception 'edit conflict'; end if;
+  v_merged := s.rev <> p_base_rev;
+  v_new := overlay(v_md placing v_after from v_at for char_length(p_before));
+  -- the occurrence of the new text this correction wrote, counted in the new part
+  select count(*) into v_occ from unnest(public.study_block_positions(v_new, v_after)) p where p <= v_at;
+  update public.study_sections x
+     set markdown = v_new,
+         title = case when v_at = 1 and p_before ~ '^## ' then left(btrim(regexp_replace(v_after, '^##[ \t]+', '')), 120) else x.title end,
+         updated_at = now()
+   where x.lecture_id = p_lecture and x.idx = p_part
+  returning x.rev into v_rev;
+  insert into public.study_edits (lecture_id, part_idx, anchor, gen, rev, kind, before_text, after_text, note, undo_of,
+                                  author_id, approved_by, aloud, proposal_id, source_kind, source_slides, source_at, source_note,
+                                  occurrence)
+  values (p_lecture, p_part, p_anchor, s.gen, v_rev, public.study_block_kind(p_before), p_before, v_after, v_note, p_undo_of,
+          p_author, p_approver, coalesce(p_aloud, false), p_proposal, p_source_kind, coalesce(p_source_slides, '{}'),
+          p_source_at, left(coalesce(p_source_note, ''), 300), greatest(v_occ, 1))
+  returning id into v_id;
+  return jsonb_build_object('edit_id', v_id, 'rev', v_rev, 'gen', s.gen, 'merged', v_merged);
+end;
+$$;
+revoke all on function study_private.edit_place(text, text, int, int, int),
+  study_private.edit_apply(uuid, int, int, text, text, int, int, int, text, uuid, uuid, uuid, boolean, uuid, text, int[], int, text)
+  from public;
+
+-- One tap undoes a correction, at once (section K's signature). Without
+-- p_undo_of a change must be proposed: 'needs approval'. With it, the texts
+-- must be the undone correction's own, swapped (review SEC-1: 'bad undo').
+create or replace function public.study_edit_block(
+  p_lecture uuid, p_part int, p_anchor int, p_before text, p_after text,
+  p_base_rev int, p_base_gen int, p_occurrence int default 1, p_note text default '', p_undo_of uuid default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then
+    raise exception 'forbidden';
+  end if;
+  if p_undo_of is null then raise exception 'needs approval'; end if;
+  return study_private.edit_apply(p_lecture, p_part, p_anchor, p_before, p_after, p_base_rev, p_base_gen, p_occurrence, p_note,
+                                  p_undo_of, auth.uid(), null, false, null, 'undo', '{}', null, '');
+end;
+$$;
+
+-- The app's one-tap undo (review SEC-1): the server reads the correction
+-- and puts its text back; the phone sends nothing but the edit's id.
+create or replace function public.study_undo_edit(p_edit uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  e public.study_edits;
+  s public.study_sections;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into e from public.study_edits x where x.id = p_edit;
+  if not found or not coalesce(public.study_is_member(public.study_lecture_group(e.lecture_id)), false) then
+    raise exception 'bad undo';
+  end if;
+  select * into s from public.study_sections x where x.lecture_id = e.lecture_id and x.idx = e.part_idx;
+  if not found then raise exception 'part not found'; end if;
+  -- The paragraph the correction wrote, never another that reads the same
+  -- (edit_place): with the part unchanged since the correction (its rev), the
+  -- occurrence it recorded; otherwise, or for a correction from before K's
+  -- end (no occurrence: base rev -1), its text must stand exactly once, or
+  -- 'edit conflict'.
+  return study_private.edit_apply(e.lecture_id, e.part_idx, e.anchor, e.after_text, e.before_text,
+                                  case when e.occurrence is null then -1 else e.rev end, s.gen, coalesce(e.occurrence, 1), '',
+                                  e.id, auth.uid(), null, false, null, 'undo', '{}', null, '');
+end;
+$$;
+revoke all on function public.study_undo_edit(uuid) from public, anon;
+grant execute on function public.study_undo_edit(uuid) to authenticated;
+
+-- "הצעת תיקון". Checked now as it will be applied (so a structural change,
+-- a link or a stale editor fails at once), plus the source. Returns the
+-- proposal's id. Errors: section K's, and 'bad source', 'pending exists'
+-- (this paragraph already has an open proposal: approve or dispute it).
+create or replace function public.study_propose_edit(
+  p_lecture uuid, p_part int, p_anchor int, p_before text, p_after text, p_base_rev int, p_base_gen int,
+  p_occurrence int, p_note text, p_source_kind text, p_source_slides int[], p_source_at int, p_source_note text)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  s       public.study_sections;
+  v_after text := public.study_tidy(coalesce(p_after, ''));
+  v_note  text := btrim(coalesce(p_note, ''));
+  v_src   text := btrim(coalesce(p_source_note, ''));
+  v_why   text;
+  have    int[];
+  v_id    uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then
+    raise exception 'forbidden';
+  end if;
+  if p_anchor is null or p_anchor < 0 or p_anchor > 9999 then raise exception 'bad block'; end if;
+  if char_length(v_note) > 300 or char_length(v_src) > 300 then raise exception 'too long'; end if;
+  select * into s from public.study_sections x where x.lecture_id = p_lecture and x.idx = p_part;
+  if not found then raise exception 'part not found'; end if;
+  if s.status <> 'ready' then raise exception 'part busy'; end if;
+  if s.gen is distinct from p_base_gen then raise exception 'part rewritten'; end if;
+  v_why := public.study_block_edit_problem(p_before, v_after);
+  if v_why is not null then raise exception '%', v_why; end if;
+  if study_private.edit_place(public.study_tidy(s.markdown), p_before, p_base_rev, s.rev, coalesce(p_occurrence, 1)) is null then
+    raise exception 'edit conflict';
+  end if;
+  if coalesce(p_source_kind, '') = 'slide' then
+    select coalesce(array_agg((sl ->> 'n')::int), '{}') into have
+      from public.study_lectures l, jsonb_array_elements(l.slides) sl where l.id = p_lecture;
+    if cardinality(coalesce(p_source_slides, '{}')) not between 1 and 6 or not (p_source_slides <@ have) then
+      raise exception 'bad source';
+    end if;
+  elsif coalesce(p_source_kind, '') = 'recording' then
+    if p_source_at is null or p_source_at not between 0 and 36000 then raise exception 'bad source'; end if;
+  elsif coalesce(p_source_kind, '') = 'external' then
+    if char_length(v_src) < 3 then raise exception 'bad source'; end if;
+  else
+    raise exception 'bad source';
+  end if;
+  if exists (select 1 from public.study_edit_proposals x
+              where x.lecture_id = p_lecture and x.part_idx = p_part and x.anchor = p_anchor and x.state in ('pending', 'disputed')) then
+    raise exception 'pending exists';
+  end if;
+  insert into public.study_edit_proposals (lecture_id, part_idx, anchor, gen, base_rev, occurrence, kind, before_text, after_text,
+                                           note, source_kind, source_slides, source_at, source_note, proposed_by)
+  values (p_lecture, p_part, p_anchor, s.gen, p_base_rev, coalesce(p_occurrence, 1), public.study_block_kind(p_before),
+          p_before, v_after, v_note, p_source_kind,
+          case when p_source_kind = 'slide' then p_source_slides else '{}' end,
+          case when p_source_kind = 'recording' then p_source_at end, v_src, auth.uid())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- "לאשר": another member applies the proposal; with p_aloud, the reader of
+-- a live meeting on this lecture applies it for the group ("אישור בקול
+-- בפגישה"), even when the reader proposed it. A paragraph that changed
+-- meanwhile does not raise: the proposal becomes 'conflict' and the answer
+-- says so ({"conflict": true, "reason": …}). Errors: 'not pending',
+-- 'own proposal', 'not the reader', and section K's.
+create or replace function public.study_approve_edit(p_proposal uuid, p_aloud boolean default false)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  p   public.study_edit_proposals;
+  res jsonb;
+  ok  boolean;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into p from public.study_edit_proposals x where x.id = p_proposal for update;
+  if not found or not coalesce(public.study_is_member(public.study_lecture_group(p.lecture_id)), false) then
+    raise exception 'forbidden';
+  end if;
+  if p.state <> 'pending' then raise exception 'not pending'; end if;
+  if p.proposed_by = auth.uid() then raise exception 'own proposal'; end if;              -- review SEC-3: aloud too
+  if coalesce(p_aloud, false) then
+    ok := false;
+    if to_regprocedure('study_private.meeting_reads_live(uuid,uuid)') is not null then    -- section M
+      execute 'select study_private.meeting_reads_live($1, $2)' into ok using p.lecture_id, auth.uid();
+    end if;
+    if not coalesce(ok, false) then raise exception 'not live'; end if;                    -- review SEC-3
+  end if;
+  begin
+    res := study_private.edit_apply(p.lecture_id, p.part_idx, p.anchor, p.before_text, p.after_text, p.base_rev, p.gen,
+                                    p.occurrence, p.note, null, p.proposed_by, auth.uid(), coalesce(p_aloud, false), p.id,
+                                    p.source_kind, p.source_slides, p.source_at, p.source_note);
+  exception when others then
+    if sqlerrm in ('edit conflict', 'part rewritten', 'part busy', 'part not found') then
+      update public.study_edit_proposals x set state = 'conflict', decided_at = now(), updated_at = now() where x.id = p.id;
+      return jsonb_build_object('conflict', true, 'reason', sqlerrm, 'proposal_id', p.id);
+    end if;
+    raise;
+  end;
+  update public.study_edit_proposals x
+     set state = 'applied', approved_by = auth.uid(), aloud = coalesce(p_aloud, false),
+         edit_id = (res ->> 'edit_id')::uuid, decided_at = now(), updated_at = now()
+   where x.id = p.id;
+  return res || jsonb_build_object('proposal_id', p.id);
+end;
+$$;
+
+-- The proposer takes a pending proposal back.
+create or replace function public.study_withdraw_edit(p_proposal uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_edit_proposals x set state = 'withdrawn', decided_at = now(), updated_at = now()
+   where x.id = p_proposal and x.proposed_by = auth.uid() and x.state in ('pending', 'conflict');
+  if not found then raise exception 'not pending'; end if;
+end;
+$$;
+
+revoke all on function public.study_edit_block(uuid, int, int, text, text, int, int, int, text, uuid),
+  public.study_propose_edit(uuid, int, int, text, text, int, int, int, text, text, int[], int, text),
+  public.study_approve_edit(uuid, boolean), public.study_withdraw_edit(uuid)
+  from public, anon;
+grant execute on function public.study_edit_block(uuid, int, int, text, text, int, int, int, text, uuid),
+  public.study_propose_edit(uuid, int, int, text, text, int, int, int, text, text, int[], int, text),
+  public.study_approve_edit(uuid, boolean), public.study_withdraw_edit(uuid)
+  to authenticated;
+
+do $$
+begin
+  execute 'alter publication supabase_realtime add table public.study_edit_proposals';
+exception when duplicate_object then
+  null;
+end $$;
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION K, its end (2) · "לשאול את הקבוצה" IN ONE TAP, WHO MARKED IT
+--  ANSWERED, AND THE OPTIONAL CHECK OF A CORRECTION   (package K; server
+--  addendum §3.3)
+--  Appended at the end of section K, after the meeting addendum's lines
+--  (75-collab-end.sql), inside K's markers. K stays version 2.
+--
+--  K2  "עדיין לא ברור? לשאול את הקבוצה": the question goes onto the
+--      paragraph's thread as the asker's question, with Claude's attempt
+--      attached as a reply only this function can mark (ask_attempt).
+--  K4  who marked a question answered (resolved_by, resolved_at); the
+--      asker's card is section C's study_my_card_add(origin 'answer').
+--  X2  "בדיקת תיקון מול השקף" (optional, ≈ $0.01-0.02): op fix_check
+--      writes its result on the proposal with the server key.
+-- ════════════════════════════════════════════════════════════════════════
+alter table public.study_comments
+  add column if not exists ask_attempt boolean not null default false,   -- Claude's attempt, attached by the asker
+  add column if not exists resolved_by uuid references auth.users (id) on delete set null,
+  add column if not exists resolved_at timestamptz;
+
+-- Marking a question answered (any member, as today) records who and when.
+create or replace function public.study_comments_resolved_by()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.resolved is distinct from old.resolved then
+    new.resolved_by := case when new.resolved then auth.uid() end;
+    new.resolved_at := case when new.resolved then now() end;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.study_comments_resolved_by() from public, anon, authenticated;
+drop trigger if exists study_comments_resolved_by on public.study_comments;
+create trigger study_comments_resolved_by before update of resolved on public.study_comments
+  for each row execute function public.study_comments_resolved_by();
+
+-- K2: the asker posts her question on the paragraph with Claude's attempt
+-- (the answer she got from "לשאול", at most 2,000 characters). Returns the
+-- question's id. A member cannot set ask_attempt herself (no column grant),
+-- and the attempt comes only through op "ask" (its share path checks the
+-- answer's signature, the done line's HMAC, and calls with the server key;
+-- review SEC-9); without it a member posts her question alone.
+drop function if exists public.study_ask_to_group(uuid, int, int, text, text, text);
+create or replace function public.study_ask_to_group(p_lecture uuid, p_part int, p_anchor int, p_quote text,
+  p_question text, p_attempt text, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  g   uuid := public.study_lecture_group(p_lecture);
+  qid uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  -- review SEC-9: an attempt is Claude's only when the op (server key, the
+  -- answer's signature checked) sends it; a member alone posts the question
+  if char_length(btrim(coalesce(p_attempt, ''))) > 0 and not study_private.is_worker(p_key) then
+    raise exception 'forbidden';
+  end if;
+  if g is null or not public.study_is_member(g)
+     or exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  if p_part is null or p_anchor is null or p_part < 0 or p_anchor < 0
+     or not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.idx = p_part) then
+    raise exception 'bad parts';
+  end if;
+  if char_length(btrim(coalesce(p_question, ''))) not between 1 and 2000 then raise exception 'too long'; end if;
+  insert into public.study_comments (lecture_id, part_idx, anchor, quote, kind, body, author_id)
+  values (p_lecture, p_part, p_anchor, left(coalesce(p_quote, ''), 200), 'question', btrim(p_question), auth.uid())
+  returning id into qid;
+  if char_length(btrim(coalesce(p_attempt, ''))) > 0 then
+    insert into public.study_comments (lecture_id, part_idx, anchor, quote, kind, body, parent_id, author_id, ask_attempt)
+    values (p_lecture, p_part, p_anchor, left(coalesce(p_quote, ''), 200), 'comment', left(btrim(p_attempt), 2000), qid, auth.uid(), true);
+  end if;
+  return qid;
+end;
+$$;
+
+-- X2: the optional check of a proposed correction against the slide it cites
+-- (op fix_check, server key). Columns on the meeting addendum's proposals.
+do $$
+begin
+  if to_regclass('public.study_edit_proposals') is not null then
+    alter table public.study_edit_proposals
+      add column if not exists check_ok   boolean,
+      add column if not exists check_note text check (char_length(check_note) <= 200),
+      add column if not exists checked_at timestamptz;
+  end if;
+end $$;
+create or replace function public.study_edit_proposal_checked(p_proposal uuid, p_ok boolean, p_note text, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare n int;
+begin
+  if not study_private.is_worker(p_key) or auth.uid() is null then raise exception 'forbidden'; end if;
+  if to_regclass('public.study_edit_proposals') is null then raise exception 'not pending'; end if;
+  execute 'update public.study_edit_proposals p set check_ok = $2, check_note = left(btrim(coalesce($3, '''')), 200), checked_at = now()
+            where p.id = $1 and p.state = ''pending'' and public.study_is_member(public.study_lecture_group(p.lecture_id))'
+    using p_proposal, p_ok, p_note;
+  get diagnostics n = row_count;
+  if n = 0 then raise exception 'not pending'; end if;
+end;
+$$;
+
+revoke all on function public.study_ask_to_group(uuid, int, int, text, text, text, text),
+  public.study_edit_proposal_checked(uuid, boolean, text, text) from public, anon;
+grant execute on function public.study_ask_to_group(uuid, int, int, text, text, text, text),
+  public.study_edit_proposal_checked(uuid, boolean, text, text) to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('K', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION K ════
+
+-- ════ BEGIN SECTION P · progress, plan, marathons (package A) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION P · READING PROGRESS, PRIVATE NUMBERS, THE PLAN, MARATHONS   (owned by package A)
+--  design-me.md §2.3 (block B). After section Q: its SQL functions read study_questions and study_answers.
+--
+--  Package A2 (spec §12.3.A) loads the spec's section P as printed (P 1),
+--  then P's end below it (P 2). Yoad's decision 1 (17 Nov 2026): there are
+--  no email accounts; a member is the anonymous identity of the device they
+--  joined from, so nothing here waits for section A (which stays empty).
+--  Everything private stays the caller's own: no member reads another's
+--  numbers, places, plans, mistakes or danger list.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  private progress, the study plan and
+--  marathons for תמצית (item 7). Appended to supabase/study-schema.sql AFTER
+--  the practice-questions block (it reads study_questions and study_answers);
+--  the quiz and flashcards blocks may come before or after it. Re-runnable.
+--
+--  Who sees what: reading progress, the numbers and the plan are visible
+--  only to their owner and never published; marathons and who is in are
+--  visible to every member of the group and published to Realtime. Nothing
+--  here calls Claude.
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  2. Reading progress (private)
+-- ═══════════════════════════════════════════════════════════════════════
+-- A summary part counts as read once its end reached the reading line and
+-- the member spent long enough on it (LectureView's tracker), or by hand
+-- (a plan task ticked). seconds = time spent on the part, for the member's
+-- own reading speed. Never published: (user, lecture) keys stay private.
+create table if not exists public.study_read_parts (
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null check (part_idx between 0 and 199),
+  done_at    timestamptz not null default now(),
+  seconds    int         not null default 0 check (seconds between 0 and 86400),
+  primary key (user_id, lecture_id, part_idx)
+);
+create index if not exists study_read_parts_lecture on public.study_read_parts (lecture_id);
+
+-- Where the member stopped in a lecture: "continue where you stopped" on
+-- any device.
+create table if not exists public.study_read_places (
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null check (part_idx between 0 and 199),
+  anchor     int         not null check (anchor between 0 and 99999),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, lecture_id)
+);
+create index if not exists study_read_places_lecture on public.study_read_places (lecture_id);
+
+-- A part that is deleted (the lecture was split into parts again) takes the
+-- members' "read" marks for its number with it: the new part with that
+-- number is different text. Definer, so it clears every member's rows.
+create or replace function public.study_read_parts_forget()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.study_read_parts r where r.lecture_id = old.lecture_id and r.part_idx = old.idx;
+  return old;
+end;
+$$;
+revoke all on function public.study_read_parts_forget() from public, anon, authenticated;
+drop trigger if exists study_read_parts_forget on public.study_sections;
+create trigger study_read_parts_forget after delete on public.study_sections
+  for each row execute function public.study_read_parts_forget();
+
+-- Saves the caller's place in a lecture; with p_done, also marks that part
+-- read (once; the first time counts). Errors: 'not signed in',
+-- 'lecture not found', 'bad part'.
+create or replace function public.study_note_reading(p_lecture uuid, p_part int, p_anchor int,
+  p_done boolean default false, p_seconds int default 0)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_lecture is null or not public.study_is_member(public.study_lecture_group(p_lecture)) then
+    raise exception 'lecture not found';
+  end if;
+  if not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.idx = p_part) then
+    raise exception 'bad part';
+  end if;
+  insert into public.study_read_places (user_id, lecture_id, part_idx, anchor, updated_at)
+  values (me, p_lecture, p_part, greatest(0, least(coalesce(p_anchor, 0), 99999)), now())
+  on conflict (user_id, lecture_id)
+  do update set part_idx = excluded.part_idx, anchor = excluded.anchor, updated_at = excluded.updated_at;
+  if coalesce(p_done, false) then
+    insert into public.study_read_parts (user_id, lecture_id, part_idx, done_at, seconds)
+    values (me, p_lecture, p_part, now(), greatest(0, least(coalesce(p_seconds, 0), 86400)))
+    on conflict (user_id, lecture_id, part_idx) do nothing;
+  end if;
+end;
+$$;
+
+-- Marks parts read or unread by hand (a plan task ticked or unticked).
+-- Unknown part numbers are ignored. Returns how many rows changed.
+create or replace function public.study_mark_parts(p_lecture uuid, p_parts int[], p_done boolean)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); n int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_lecture is null or not public.study_is_member(public.study_lecture_group(p_lecture)) then
+    raise exception 'lecture not found';
+  end if;
+  if cardinality(coalesce(p_parts, '{}')) > 200 then raise exception 'bad part'; end if;
+  if coalesce(p_done, false) then
+    insert into public.study_read_parts (user_id, lecture_id, part_idx, done_at, seconds)
+    select me, p_lecture, s.idx, now(), 0
+      from public.study_sections s
+     where s.lecture_id = p_lecture and s.idx = any (p_parts)
+    on conflict (user_id, lecture_id, part_idx) do nothing;
+  else
+    delete from public.study_read_parts r
+     where r.user_id = me and r.lecture_id = p_lecture and r.part_idx = any (p_parts);
+  end if;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  3. Private numbers (security invoker: RLS keeps them to the caller)
+-- ═══════════════════════════════════════════════════════════════════════
+-- Per lecture of the group, as of p_asof: the caller's read mark and parts,
+-- the active keyed questions (practice and past-exam items linked to it) and
+-- the caller's answers to them. p_asof = the start of today freezes the
+-- plan's "today"; now() gives the live numbers.
+--   correct_now / wrong_now: questions whose LATEST answer is right / wrong
+--   first_try: questions whose FIRST answer was right
+--   parts: [{i, t, from, to, chars, ready}] for time estimates
+create or replace function public.study_my_lectures(p_group uuid, p_asof timestamptz default now())
+returns table (lecture_id uuid, course text, title text, lecture_date date, created_at timestamptz, status text,
+               slides int, parts jsonb, read_at timestamptz, parts_done int[], part_seconds jsonb,
+               questions int, cases int, answered int, correct_now int, first_try int, wrong_now int,
+               answers int, last_answer_at timestamptz)
+language sql stable set search_path = public as $$
+  with lec as (
+    select l.id, l.course, l.title, l.lecture_date, l.created_at, l.status, jsonb_array_length(l.slides) as slides
+    from public.study_lectures l
+    where l.group_id = p_group and l.created_at <= p_asof and l.deleted_at is null
+  ),
+  q as (
+    select q.id, coalesce(q.lecture_id, q.ref_lecture) as lecture_id, q.kind
+    from public.study_questions q
+    where q.group_id = p_group and q.retired_at is null and q.has_key and q.created_at <= p_asof
+      and coalesce(q.lecture_id, q.ref_lecture) is not null
+  ),
+  a as (
+    select a.question_id, a.correct, a.answered_at,
+           row_number() over (partition by a.question_id order by a.answered_at desc, a.id) as rn_last,
+           row_number() over (partition by a.question_id order by a.answered_at asc, a.id) as rn_first
+    from public.study_answers a
+    join q on q.id = a.question_id
+    where a.user_id = auth.uid() and a.answered_at <= p_asof
+  ),
+  qs as (
+    select q.lecture_id,
+           count(*)::int as questions,
+           (count(*) filter (where q.kind = 'case'))::int as cases,
+           (count(*) filter (where la.question_id is not null))::int as answered,
+           (count(*) filter (where la.correct))::int as correct_now,
+           (count(*) filter (where fa.correct))::int as first_try,
+           (count(*) filter (where la.correct = false))::int as wrong_now
+    from q
+    left join a la on la.question_id = q.id and la.rn_last = 1
+    left join a fa on fa.question_id = q.id and fa.rn_first = 1
+    group by q.lecture_id
+  ),
+  an as (
+    select q.lecture_id, count(*)::int as answers, max(a.answered_at) as last_at
+    from a join q on q.id = a.question_id
+    group by q.lecture_id
+  ),
+  pt as (
+    select s.lecture_id,
+           jsonb_agg(jsonb_build_object('i', s.idx, 't', s.title, 'from', s.slide_from, 'to', s.slide_to,
+                                        'chars', char_length(s.markdown), 'ready', s.status = 'ready') order by s.idx) as parts
+    from public.study_sections s
+    where s.lecture_id in (select id from lec)
+    group by s.lecture_id
+  ),
+  rp as (
+    select r.lecture_id, array_agg(r.part_idx order by r.part_idx) as done,
+           jsonb_object_agg(r.part_idx::text, r.seconds) as secs
+    from public.study_read_parts r
+    where r.user_id = auth.uid() and r.done_at <= p_asof and r.lecture_id in (select id from lec)
+    group by r.lecture_id
+  ),
+  rd as (
+    select r.lecture_id, r.read_at
+    from public.study_reads r
+    where r.user_id = auth.uid() and r.read_at <= p_asof and r.lecture_id in (select id from lec)
+  )
+  select l.id, btrim(l.course), l.title, l.lecture_date, l.created_at, l.status, l.slides,
+         coalesce(pt.parts, '[]'::jsonb), rd.read_at, coalesce(rp.done, '{}'), coalesce(rp.secs, '{}'::jsonb),
+         coalesce(qs.questions, 0), coalesce(qs.cases, 0), coalesce(qs.answered, 0), coalesce(qs.correct_now, 0),
+         coalesce(qs.first_try, 0), coalesce(qs.wrong_now, 0), coalesce(an.answers, 0), an.last_at
+  from lec l
+  left join pt on pt.lecture_id = l.id
+  left join rp on rp.lecture_id = l.id
+  left join rd on rd.lecture_id = l.id
+  left join qs on qs.lecture_id = l.id
+  left join an on an.lecture_id = l.id
+  order by l.created_at, l.id;
+$$;
+
+-- Weak points (item 7), from the caller's practice AND live-quiz answers
+-- (the quiz copies each answer into study_answers, mode 'quiz').
+--   1. Evidence: the FIRST answer to a question in each study day (Israel
+--      time, the day starts 04:00), on active keyed questions with a topic.
+--      "לא יודעים" is a wrong answer. Re-answers later the same day (right
+--      after reading the explanation) do not count.
+--   2. Weight: 0.5 ^ (age in days / 21): an answer three weeks old counts half.
+--   3. Score: (Σ w·correct + 2 × 0.7) / (Σ w + 2): two pseudo-answers at 70%
+--      keep a topic with little evidence near "unknown, probably fine".
+--   4. Topic key: lower(btrim(topic)), across lectures. Per aspect the same.
+--   5. status: 'weak'  when items >= 2, Σw >= 1.5, score < 0.6 and
+--                      (a question is wrong right now or score < 0.5);
+--              'watch' when items >= 2 and score < 0.75; else 'ok'.
+create or replace function public.study_my_weak_points(p_group uuid, p_now timestamptz default now())
+returns table (topic_key text, topic text, score numeric, weight numeric, items int, wrong_now int,
+               status text, worst_aspect text, aspects jsonb, lecture_ids uuid[], slides jsonb, last_at timestamptz)
+language sql stable set search_path = public as $$
+  with al as (   -- every answer of the caller to an active keyed question with a topic
+    select lower(btrim(q.topic)) as topic_key, btrim(q.topic) as topic, q.aspect,
+           coalesce(q.lecture_id, q.ref_lecture) as lecture_id, q.id as question_id, q.slides,
+           a.id as answer_id, a.correct, a.answered_at,
+           row_number() over (
+             partition by a.question_id, ((a.answered_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date
+             order by a.answered_at, a.id) as rn
+    from public.study_answers a
+    join public.study_questions q on q.id = a.question_id
+    where a.user_id = auth.uid() and a.answered_at <= p_now
+      and q.group_id = p_group and q.retired_at is null and q.has_key and btrim(q.topic) <> ''
+  ),
+  w as (         -- the evidence: the first answer per question per study day, weighted by age
+    select al.*,
+           power(0.5::numeric, (greatest(0, extract(epoch from (p_now - al.answered_at))) / 86400.0 / 21.0)::numeric) as wt,
+           (case when al.correct then 1 else 0 end)::numeric as y
+    from al
+    where al.rn = 1
+  ),
+  latest as (    -- each question's latest answer (any), for "wrong right now"
+    select distinct on (al.question_id) al.question_id, al.correct
+    from al
+    order by al.question_id, al.answered_at desc, al.answer_id desc
+  ),
+  asp as (
+    select w.topic_key, w.aspect, round((sum(w.wt * w.y) + 1.4) / (sum(w.wt) + 2), 3) as score,
+           round(sum(w.wt), 2) as weight, count(distinct w.question_id)::int as items
+    from w
+    group by w.topic_key, w.aspect
+  ),
+  miss as (   -- slides of questions answered wrong, most missed first
+    select m.topic_key, jsonb_agg(jsonb_build_object('l', m.lecture_id, 'n', m.n, 'c', m.c)
+                                  order by m.c desc, m.n) filter (where m.rk <= 3) as slides
+    from (
+      select w.topic_key, w.lecture_id, s.n, count(*) as c,
+             row_number() over (partition by w.topic_key order by count(*) desc, s.n) as rk
+      from w cross join lateral unnest(w.slides) as s(n)
+      where not w.correct and w.lecture_id is not null
+      group by w.topic_key, w.lecture_id, s.n
+    ) m
+    group by m.topic_key
+  ),
+  t as (
+    select w.topic_key, min(w.topic) as topic,
+           round((sum(w.wt * w.y) + 1.4) / (sum(w.wt) + 2), 3) as score,
+           round(sum(w.wt), 2) as weight,
+           count(distinct w.question_id)::int as items,
+           (count(distinct w.question_id) filter (where lt.correct = false))::int as wrong_now,
+           array_agg(distinct w.lecture_id) filter (where w.lecture_id is not null) as lecture_ids,
+           max(w.answered_at) as last_at
+    from w join latest lt on lt.question_id = w.question_id
+    group by w.topic_key
+  )
+  select t.topic_key, t.topic, t.score, t.weight, t.items, t.wrong_now,
+         case when t.items >= 2 and t.weight >= 1.5 and t.score < 0.6 and (t.wrong_now > 0 or t.score < 0.5) then 'weak'
+              when t.items >= 2 and t.score < 0.75 then 'watch'
+              else 'ok' end,
+         (select a.aspect from asp a where a.topic_key = t.topic_key order by a.score, a.weight desc, a.aspect limit 1),
+         (select jsonb_agg(jsonb_build_object('aspect', a.aspect, 'score', a.score, 'items', a.items)
+                           order by a.score, a.aspect)
+            from asp a where a.topic_key = t.topic_key),
+         coalesce(t.lecture_ids, '{}'), coalesce(m.slides, '[]'::jsonb), t.last_at
+  from t
+  left join miss m on m.topic_key = t.topic_key
+  order by t.score, t.weight desc, t.topic_key;
+$$;
+
+-- Activity per study day (Israel time, from 04:00): answers (practice and
+-- quiz), right ones, practice time (each answer capped at 5 minutes), parts
+-- read and reading time. Flashcard reviews come from study_my_card_days.
+create or replace function public.study_my_days(p_group uuid, p_days int default 28, p_now timestamptz default now())
+returns table (day date, answers int, correct int, practice_seconds int, parts_read int, read_seconds int)
+language sql stable set search_path = public as $$
+  with lim as (
+    select p_now - make_interval(days => greatest(1, least(coalesce(p_days, 28), 366))) as since
+  ),
+  d as (
+    select ((a.answered_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date as day,
+           1 as answer, case when a.correct then 1 else 0 end as ok, least(coalesce(a.ms, 0), 300000) as ms,
+           0 as part, 0 as rs
+    from public.study_answers a
+    join public.study_questions q on q.id = a.question_id
+    where a.user_id = auth.uid() and q.group_id = p_group
+      and a.answered_at <= p_now and a.answered_at > (select since from lim)
+    union all
+    select ((r.done_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date, 0, 0, 0, 1, r.seconds
+    from public.study_read_parts r
+    join public.study_lectures l on l.id = r.lecture_id
+    where r.user_id = auth.uid() and l.group_id = p_group
+      and r.done_at <= p_now and r.done_at > (select since from lim)
+  )
+  select d.day, sum(d.answer)::int, sum(d.ok)::int, (sum(d.ms) / 1000)::int, sum(d.part)::int, sum(d.rs)::int
+  from d
+  group by d.day
+  order by d.day;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  4. The study plan (private)
+-- ═══════════════════════════════════════════════════════════════════════
+-- One active plan per member per group. Scope = every lecture of the listed
+-- courses (also ones uploaded later) + lectures added by hand − lectures
+-- left out by hand (study_plan_lectures).
+create table if not exists public.study_plans (
+  id            uuid        primary key default gen_random_uuid(),
+  user_id       uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  group_id      uuid        not null references public.study_groups (id) on delete cascade,
+  title         text        not null check (char_length(btrim(title)) between 1 and 120),
+  exam_date     date        not null,
+  courses       text[]      not null default '{}' check (cardinality(courses) <= 20),
+  daily_minutes int         not null default 120 check (daily_minutes between 15 and 720),
+  days_off      smallint[]  not null default '{}' check (days_off <@ '{0,1,2,3,4,5,6}'::smallint[]),
+  final_review  boolean     not null default true,
+  status        text        not null default 'active' check (status in ('active', 'archived')),
+  replanned_at  timestamptz,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+create unique index if not exists study_plans_one_active on public.study_plans (user_id, group_id) where status = 'active';
+
+create table if not exists public.study_plan_lectures (
+  plan_id    uuid    not null references public.study_plans (id) on delete cascade,
+  lecture_id uuid    not null references public.study_lectures (id) on delete cascade,
+  user_id    uuid    not null default auth.uid() references auth.users (id) on delete cascade,
+  included   boolean not null,            -- true: added by hand; false: left out by hand
+  primary key (plan_id, lecture_id)
+);
+create index if not exists study_plan_lectures_lecture on public.study_plan_lectures (lecture_id);
+
+-- A task the member ticked by hand on a day (key as shared/study/plan.ts makes it).
+create table if not exists public.study_plan_checks (
+  plan_id    uuid        not null references public.study_plans (id) on delete cascade,
+  day        date        not null,
+  task_key   text        not null check (char_length(task_key) between 3 and 200),
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  checked_at timestamptz not null default now(),
+  primary key (plan_id, day, task_key)
+);
+
+-- Creates the caller's plan (p_plan null: the previous active plan goes to
+-- the archive) or changes it (its lecture choices are replaced, and today is
+-- planned again). Returns the plan id. Errors: 'not signed in',
+-- 'group not found', 'bad title', 'bad date', 'bad minutes', 'bad days',
+-- 'bad courses', 'lecture not found', 'too many lectures', 'plan not found'.
+create or replace function public.study_plan_save(p_plan uuid, p_group uuid, p_title text, p_exam_date date,
+  p_courses text[], p_add uuid[], p_drop uuid[], p_daily_minutes int, p_days_off int[], p_final_review boolean default true)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  me    uuid := auth.uid();
+  pid   uuid;
+  today date := ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date;
+  crs   text[];
+  offs  smallint[];
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_group is null or not public.study_is_member(p_group) then raise exception 'group not found'; end if;
+  if char_length(btrim(coalesce(p_title, ''))) not between 1 and 120 then raise exception 'bad title'; end if;
+  if p_exam_date is null or p_exam_date <= today or p_exam_date > today + 366 then raise exception 'bad date'; end if;
+  if p_daily_minutes is null or p_daily_minutes not between 15 and 720 then raise exception 'bad minutes'; end if;
+  if cardinality(coalesce(p_days_off, '{}')) > 6
+     or exists (select 1 from unnest(coalesce(p_days_off, '{}')) d where d is null or d not between 0 and 6) then
+    raise exception 'bad days';
+  end if;
+  if cardinality(coalesce(p_courses, '{}')) > 20
+     or exists (select 1 from unnest(coalesce(p_courses, '{}')) c where char_length(btrim(coalesce(c, ''))) not between 1 and 120) then
+    raise exception 'bad courses';
+  end if;
+  if cardinality(coalesce(p_add, '{}')) + cardinality(coalesce(p_drop, '{}')) > 200 then raise exception 'too many lectures'; end if;
+  if exists (select 1 from unnest(coalesce(p_add, '{}') || coalesce(p_drop, '{}')) as l(id)
+              where public.study_lecture_group(l.id) is distinct from p_group) then
+    raise exception 'lecture not found';
+  end if;
+  select coalesce(array_agg(distinct btrim(c) order by btrim(c)), '{}') into crs from unnest(coalesce(p_courses, '{}')) c;
+  select coalesce(array_agg(distinct d::smallint order by d::smallint), '{}') into offs from unnest(coalesce(p_days_off, '{}')) d;
+  perform pg_advisory_xact_lock(hashtext('study_plan:' || me::text));
+  if p_plan is null then
+    update public.study_plans set status = 'archived', updated_at = now()
+     where user_id = me and group_id = p_group and status = 'active';
+    insert into public.study_plans (user_id, group_id, title, exam_date, courses, daily_minutes, days_off, final_review)
+    values (me, p_group, btrim(p_title), p_exam_date, crs, p_daily_minutes, offs, coalesce(p_final_review, true))
+    returning id into pid;
+  else
+    update public.study_plans
+       set title = btrim(p_title), exam_date = p_exam_date, courses = crs, daily_minutes = p_daily_minutes,
+           days_off = offs, final_review = coalesce(p_final_review, true), replanned_at = now(), updated_at = now()
+     where id = p_plan and user_id = me and group_id = p_group and status = 'active'
+    returning id into pid;
+    if pid is null then raise exception 'plan not found'; end if;
+    delete from public.study_plan_lectures where plan_id = pid;
+  end if;
+  insert into public.study_plan_lectures (plan_id, lecture_id, user_id, included)
+  select pid, l.id, me, true from (select distinct unnest(coalesce(p_add, '{}')) as id) l
+  union all
+  select pid, l.id, me, false from (select distinct unnest(coalesce(p_drop, '{}')) as id) l
+   where not (l.id = any (coalesce(p_add, '{}')));
+  return pid;
+end;
+$$;
+
+-- "לסדר מחדש את היום": today is planned again from now. 'plan not found'.
+create or replace function public.study_plan_replan(p_plan uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_plans set replanned_at = now(), updated_at = now()
+   where id = p_plan and user_id = auth.uid() and status = 'active';
+  if not found then raise exception 'plan not found'; end if;
+end;
+$$;
+
+-- "סיום התוכנית": the plan goes to the archive. 'plan not found'.
+create or replace function public.study_plan_end(p_plan uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_plans set status = 'archived', updated_at = now()
+   where id = p_plan and user_id = auth.uid() and status = 'active';
+  if not found then raise exception 'plan not found'; end if;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  5. Marathons (shared inside the group)
+-- ═══════════════════════════════════════════════════════════════════════
+-- agenda: the run-of-show, an array of steps (shared/study/agenda.ts):
+--   { k: 'intro'|'read'|'quiz'|'break'|'questions'|'free'|'wrap',
+--     l?: lecture id (read, quiz: required; one of lecture_ids),
+--     from?, to?: summary part numbers (read), min: planned minutes 1-240,
+--     n?: quiz questions 3-30, mode?: 'coop'|'race', title?: ≤ 80 chars }
+-- step: the step on screen (-1 before the start). Any member may move it;
+-- study_marathon_step() takes "from" so two taps at once move it once.
+-- version: bumped by every change, for "someone else edited it".
+create table if not exists public.study_marathons (
+  id          uuid        primary key default gen_random_uuid(),
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  title       text        not null check (char_length(btrim(title)) between 1 and 120),
+  starts_at   timestamptz not null,
+  minutes     int         not null check (minutes between 30 and 720),
+  place       text        not null default '' check (char_length(place) <= 120),
+  note        text        not null default '' check (char_length(note) <= 500),
+  lecture_ids uuid[]      not null default '{}' check (cardinality(lecture_ids) <= 20),
+  agenda      jsonb       not null default '[]'::jsonb
+                          check (jsonb_typeof(agenda) = 'array' and jsonb_array_length(agenda) <= 40),
+  state       text        not null default 'planned' check (state in ('planned', 'live', 'ended', 'cancelled')),
+  step        int         not null default -1 check (step between -1 and 39),
+  step_at     timestamptz,
+  started_at  timestamptz,
+  ended_at    timestamptz,
+  version     int         not null default 1 check (version >= 1),
+  created_by  uuid        default auth.uid() references auth.users (id) on delete set null,
+  updated_by  uuid        references auth.users (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists study_marathons_group on public.study_marathons (group_id, starts_at);
+
+-- Who is in. Its own id: the table is published, and a key must say nothing.
+create table if not exists public.study_marathon_people (
+  id          uuid        primary key default gen_random_uuid(),
+  marathon_id uuid        not null references public.study_marathons (id) on delete cascade,
+  user_id     uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  answer      text        not null check (answer in ('in', 'maybe', 'out')),
+  updated_at  timestamptz not null default now(),
+  unique (marathon_id, user_id)
+);
+create index if not exists study_marathon_people_user on public.study_marathon_people (user_id);
+
+create or replace function public.study_marathon_group(m uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select group_id from public.study_marathons where id = m;
+$$;
+
+-- A marathon is over when it ended, was cancelled, or is 3 hours past its
+-- planned end (nobody pressed "סיום"): no cron needed.
+create or replace function public.study_marathon__over(m public.study_marathons)
+returns boolean language sql stable set search_path = public as $$
+  select m.state in ('ended', 'cancelled') or now() > m.starts_at + make_interval(mins => m.minutes) + interval '3 hours';
+$$;
+
+-- The run-of-show is checked here, so a phone cannot store junk for others.
+create or replace function public.study_marathon__agenda_ok(p_agenda jsonb, p_lectures uuid[])
+returns boolean language plpgsql immutable set search_path = public as $$
+declare
+  s jsonb;
+  num constant text := '^[0-9]{1,4}$';
+begin
+  if p_agenda is null or jsonb_typeof(p_agenda) <> 'array' or jsonb_array_length(p_agenda) > 40 then return false; end if;
+  for s in select x from jsonb_array_elements(p_agenda) as x loop
+    if jsonb_typeof(s) <> 'object' then return false; end if;
+    if exists (select 1 from jsonb_object_keys(s) k where k not in ('k', 'l', 'from', 'to', 'min', 'n', 'mode', 'title')) then
+      return false;
+    end if;
+    if coalesce(s ->> 'k', '') not in ('intro', 'read', 'quiz', 'break', 'questions', 'free', 'wrap') then return false; end if;
+    if jsonb_typeof(s -> 'min') is distinct from 'number' or (s ->> 'min') !~ num or (s ->> 'min')::int not between 1 and 240 then
+      return false;
+    end if;
+    if s ? 'l' then
+      if jsonb_typeof(s -> 'l') <> 'string' or (s ->> 'l') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+         or not ((s ->> 'l')::uuid = any (coalesce(p_lectures, '{}'))) then
+        return false;
+      end if;
+    elsif s ->> 'k' in ('read', 'quiz') then
+      return false;
+    end if;
+    if s ? 'from' and (jsonb_typeof(s -> 'from') <> 'number' or (s ->> 'from') !~ num or (s ->> 'from')::int > 199) then return false; end if;
+    if s ? 'to' and (jsonb_typeof(s -> 'to') <> 'number' or (s ->> 'to') !~ num or (s ->> 'to')::int > 199
+                     or (s ? 'from' and (s ->> 'to')::int < (s ->> 'from')::int)) then
+      return false;
+    end if;
+    if s ? 'n' and (jsonb_typeof(s -> 'n') <> 'number' or (s ->> 'n') !~ num or (s ->> 'n')::int not between 3 and 30) then return false; end if;
+    if s ? 'mode' and coalesce(s ->> 'mode', '') not in ('coop', 'race') then return false; end if;
+    if s ? 'title' and (jsonb_typeof(s -> 'title') <> 'string' or char_length(s ->> 'title') > 80) then return false; end if;
+  end loop;
+  return true;
+end;
+$$;
+
+-- Creates (p_id null; the creator is "in") or changes a marathon. Returns its
+-- id and new version. Errors: 'not signed in', 'group not found',
+-- 'bad title', 'bad minutes', 'bad time', 'lecture not found', 'bad agenda',
+-- 'marathon not found', 'marathon over', 'conflict' (someone else saved first).
+create or replace function public.study_marathon_save(p_id uuid, p_version int, p_group uuid, p_title text,
+  p_starts_at timestamptz, p_minutes int, p_place text, p_note text, p_lectures uuid[], p_agenda jsonb)
+returns table (id uuid, version int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me  uuid := auth.uid();
+  m   public.study_marathons;
+  lec uuid[];
+  ag  jsonb := coalesce(p_agenda, '[]'::jsonb);
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_group is null or not public.study_is_member(p_group) then raise exception 'group not found'; end if;
+  if char_length(btrim(coalesce(p_title, ''))) not between 1 and 120 then raise exception 'bad title'; end if;
+  if p_minutes is null or p_minutes not between 30 and 720 then raise exception 'bad minutes'; end if;
+  if p_starts_at is null or p_starts_at > now() + interval '180 days' then raise exception 'bad time'; end if;
+  -- The lectures, once each, in the order given, all of this group.
+  select array_agg(x.l order by x.o) into lec
+    from (select u.l, min(u.o) as o from unnest(coalesce(p_lectures, '{}')) with ordinality as u(l, o)
+           where u.l is not null group by u.l) x;
+  lec := coalesce(lec, '{}');
+  if cardinality(lec) > 20
+     or exists (select 1 from unnest(lec) as t(id) where public.study_lecture_group(t.id) is distinct from p_group) then
+    raise exception 'lecture not found';
+  end if;
+  if not public.study_marathon__agenda_ok(ag, lec) then raise exception 'bad agenda'; end if;
+  if p_id is null then
+    if p_starts_at < now() - interval '1 hour' then raise exception 'bad time'; end if;
+    insert into public.study_marathons (group_id, title, starts_at, minutes, place, note, lecture_ids, agenda, created_by, updated_by)
+    values (p_group, btrim(p_title), p_starts_at, p_minutes, left(btrim(coalesce(p_place, '')), 120),
+            left(btrim(coalesce(p_note, '')), 500), lec, ag, me, me)
+    returning * into m;
+    insert into public.study_marathon_people (marathon_id, user_id, answer) values (m.id, me, 'in');
+  else
+    select * into m from public.study_marathons x where x.id = p_id for update;
+    if not found or m.group_id <> p_group then raise exception 'marathon not found'; end if;
+    if public.study_marathon__over(m) then raise exception 'marathon over'; end if;
+    if m.version <> coalesce(p_version, -1) then raise exception 'conflict'; end if;
+    update public.study_marathons x
+       set title = btrim(p_title), starts_at = p_starts_at, minutes = p_minutes,
+           place = left(btrim(coalesce(p_place, '')), 120), note = left(btrim(coalesce(p_note, '')), 500),
+           lecture_ids = lec, agenda = ag,
+           step = least(x.step, jsonb_array_length(ag) - 1),
+           version = x.version + 1, updated_by = me, updated_at = now()
+     where x.id = p_id
+    returning * into m;
+  end if;
+  return query select m.id, m.version;
+end;
+$$;
+
+-- The caller's answer: 'in', 'maybe' or 'out'. Errors: 'marathon not found',
+-- 'marathon over', 'bad answer'.
+create or replace function public.study_marathon_answer(p_id uuid, p_answer text)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); m public.study_marathons;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_marathons x where x.id = p_id;
+  if not found or not public.study_is_member(m.group_id) then raise exception 'marathon not found'; end if;
+  if public.study_marathon__over(m) then raise exception 'marathon over'; end if;
+  if coalesce(p_answer, '') not in ('in', 'maybe', 'out') then raise exception 'bad answer'; end if;
+  insert into public.study_marathon_people (marathon_id, user_id, answer, updated_at)
+  values (p_id, me, p_answer, now())
+  on conflict (marathon_id, user_id) do update set answer = excluded.answer, updated_at = excluded.updated_at;
+end;
+$$;
+
+-- Moves the run-of-show from step p_from to step p_to (start: -1 → 0; next;
+-- back; jump). p_to = the number of steps ends the marathon. If the step is
+-- no longer p_from (another phone moved it first), nothing changes and the
+-- current step is returned. Errors: 'marathon not found', 'marathon over',
+-- 'no agenda', 'bad step'.
+create or replace function public.study_marathon_step(p_id uuid, p_from int, p_to int)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); m public.study_marathons; n int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_marathons x where x.id = p_id for update;
+  if not found or not public.study_is_member(m.group_id) then raise exception 'marathon not found'; end if;
+  if public.study_marathon__over(m) then raise exception 'marathon over'; end if;
+  n := jsonb_array_length(m.agenda);
+  if n = 0 then raise exception 'no agenda'; end if;
+  if m.step <> coalesce(p_from, -2) then return m.step; end if;
+  if p_to is null or p_to < 0 or p_to > n then raise exception 'bad step'; end if;
+  if p_to = n then
+    update public.study_marathons x
+       set state = 'ended', ended_at = now(), started_at = coalesce(x.started_at, now()),
+           version = x.version + 1, updated_by = me, updated_at = now()
+     where x.id = p_id;
+    return n;
+  end if;
+  update public.study_marathons x
+     set step = p_to, step_at = now(), state = 'live', started_at = coalesce(x.started_at, now()),
+         version = x.version + 1, updated_by = me, updated_at = now()
+   where x.id = p_id;
+  return p_to;
+end;
+$$;
+
+-- Cancels (p_cancel true) a marathon that is not over, or brings a cancelled
+-- one back (false) while its time has not passed. Errors: 'marathon not
+-- found', 'marathon over'.
+create or replace function public.study_marathon_cancel(p_id uuid, p_cancel boolean)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := auth.uid(); m public.study_marathons;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_marathons x where x.id = p_id for update;
+  if not found or not public.study_is_member(m.group_id) then raise exception 'marathon not found'; end if;
+  if coalesce(p_cancel, true) then
+    if public.study_marathon__over(m) then raise exception 'marathon over'; end if;
+    update public.study_marathons x set state = 'cancelled', version = x.version + 1, updated_by = me, updated_at = now()
+     where x.id = p_id;
+  else
+    if m.state <> 'cancelled' or now() > m.starts_at + make_interval(mins => m.minutes) + interval '3 hours' then
+      raise exception 'marathon over';
+    end if;
+    update public.study_marathons x
+       set state = case when x.started_at is null then 'planned' else 'live' end,
+           version = x.version + 1, updated_by = me, updated_at = now()
+     where x.id = p_id;
+  end if;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security and privileges
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_read_parts      enable row level security;
+alter table public.study_read_places     enable row level security;
+alter table public.study_plans           enable row level security;
+alter table public.study_plan_lectures   enable row level security;
+alter table public.study_plan_checks     enable row level security;
+alter table public.study_marathons       enable row level security;
+alter table public.study_marathon_people enable row level security;
+
+-- (In study-schema.sql the file's loop has already dropped these; the drops
+-- keep this block re-runnable on its own.)
+drop policy if exists "study read parts own"        on public.study_read_parts;
+drop policy if exists "study read parts remove"     on public.study_read_parts;
+drop policy if exists "study read places own"       on public.study_read_places;
+drop policy if exists "study plans own"             on public.study_plans;
+drop policy if exists "study plans remove"          on public.study_plans;
+drop policy if exists "study plan lectures own"     on public.study_plan_lectures;
+drop policy if exists "study plan checks own"       on public.study_plan_checks;
+drop policy if exists "study plan checks add"       on public.study_plan_checks;
+drop policy if exists "study plan checks remove"    on public.study_plan_checks;
+drop policy if exists "study marathons read"        on public.study_marathons;
+drop policy if exists "study marathon people read"  on public.study_marathon_people;
+
+-- Private rows: the owner reads (and may delete) their own; writes go
+-- through the functions above (no insert/update grants).
+create policy "study read parts own" on public.study_read_parts
+  for select using (user_id = auth.uid());
+create policy "study read parts remove" on public.study_read_parts
+  for delete using (user_id = auth.uid());
+create policy "study read places own" on public.study_read_places
+  for select using (user_id = auth.uid());
+create policy "study plans own" on public.study_plans
+  for select using (user_id = auth.uid());
+create policy "study plans remove" on public.study_plans
+  for delete using (user_id = auth.uid());
+create policy "study plan lectures own" on public.study_plan_lectures
+  for select using (user_id = auth.uid());
+-- Checks: ticked and unticked straight from the phone, on the caller's own plan.
+create policy "study plan checks own" on public.study_plan_checks
+  for select using (user_id = auth.uid());
+create policy "study plan checks add" on public.study_plan_checks
+  for insert with check (
+    user_id = auth.uid()
+    and exists (select 1 from public.study_plans p where p.id = plan_id and p.user_id = auth.uid())
+  );
+create policy "study plan checks remove" on public.study_plan_checks
+  for delete using (user_id = auth.uid());
+
+-- Marathons: the whole group reads them and who is in; writes go through
+-- the functions above.
+create policy "study marathons read" on public.study_marathons
+  for select using (public.study_is_member(group_id));
+create policy "study marathon people read" on public.study_marathon_people
+  for select using (public.study_is_member(public.study_marathon_group(marathon_id)));
+
+revoke all on public.study_read_parts, public.study_read_places, public.study_plans, public.study_plan_lectures,
+  public.study_plan_checks, public.study_marathons, public.study_marathon_people
+  from anon, authenticated;
+grant select, delete on public.study_read_parts to authenticated;
+grant select on public.study_read_places to authenticated;
+grant select, delete on public.study_plans to authenticated;
+grant select on public.study_plan_lectures to authenticated;
+grant select, delete on public.study_plan_checks to authenticated;
+grant insert (plan_id, day, task_key) on public.study_plan_checks to authenticated;
+grant select on public.study_marathons to authenticated;
+grant select on public.study_marathon_people to authenticated;
+
+revoke all on function public.study_note_reading(uuid, int, int, boolean, int), public.study_mark_parts(uuid, int[], boolean),
+  public.study_my_lectures(uuid, timestamptz), public.study_my_weak_points(uuid, timestamptz),
+  public.study_my_days(uuid, int, timestamptz),
+  public.study_plan_save(uuid, uuid, text, date, text[], uuid[], uuid[], int, int[], boolean),
+  public.study_plan_replan(uuid), public.study_plan_end(uuid),
+  public.study_marathon_group(uuid), public.study_marathon__over(public.study_marathons),
+  public.study_marathon__agenda_ok(jsonb, uuid[]),
+  public.study_marathon_save(uuid, int, uuid, text, timestamptz, int, text, text, uuid[], jsonb),
+  public.study_marathon_answer(uuid, text), public.study_marathon_step(uuid, int, int),
+  public.study_marathon_cancel(uuid, boolean)
+  from public, anon;
+grant execute on function public.study_note_reading(uuid, int, int, boolean, int), public.study_mark_parts(uuid, int[], boolean),
+  public.study_my_lectures(uuid, timestamptz), public.study_my_weak_points(uuid, timestamptz),
+  public.study_my_days(uuid, int, timestamptz),
+  public.study_plan_save(uuid, uuid, text, date, text[], uuid[], uuid[], int, int[], boolean),
+  public.study_plan_replan(uuid), public.study_plan_end(uuid),
+  public.study_marathon_group(uuid),
+  public.study_marathon_save(uuid, int, uuid, text, timestamptz, int, text, text, uuid[], jsonb),
+  public.study_marathon_answer(uuid, text), public.study_marathon_step(uuid, int, int),
+  public.study_marathon_cancel(uuid, boolean)
+  to authenticated;
+
+-- ── Realtime: marathons and who is in arrive live on every member's phone.
+--  Never the private tables (read parts, places, plans, checks).
+do $$
+declare t text;
+begin
+  foreach t in array array['study_marathons', 'study_marathon_people'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then
+      null;
+    end;
+  end loop;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('P', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION P, its end · READINESS AS A RANGE, THE DANGER LIST, WEAK POINTS
+--  BY ASPECT, CALIBRATION, AND A MOVED BLOCK IN A MARATHON   (package A,
+--  milestone A2; server addendum §3.4; spec §12.3.A)
+--  Appended at the end of section P, inside its markers. P becomes 2.
+--
+--  Everything here is the caller's own and computed for her alone (definer
+--  functions that read only rows with user_id = auth.uid()); nothing is
+--  published, nothing is shown to anyone else. Release 8, which since Yoad's
+--  decision 1 (17 Nov 2026) needs no account: the device's member.
+--
+--  PR2 readiness per part of a lecture as a range ("טווח, לא ציון"), from
+--      about 20 answers per part on: a 68% Wilson interval, its ends rounded
+--      to the nearest 5%. Below 20 the part is listed with its count, so
+--      the screen says how many answers are still needed (no range yet).
+--  PR3 the danger list: wrong answers given "על בטוח" (practice, or a live
+--      quiz's first vote). Each returns the next study day in another
+--      wording, then 3 days after the first right "על בטוח", and leaves the
+--      list after two right "על בטוח" answers on two different later days
+--      (the same question or another on its paragraph). A question hidden
+--      by two flags leaves the list with it (review F-6).
+--  PR4 weak points by aspect, as three buckets (חם · פושר · יושב טוב), from
+--      4 questions in an aspect; an aspect with fewer is listed with no
+--      bucket, so the screen can say how many more it needs.
+--  PR5 calibration: of the answers marked "על בטוח", how many were right;
+--      shown from about 20 such answers.
+--  PR7 one call for the counts the screens around progress need ("שלי"'s
+--      rows, Today): answers and parts, the danger list's size and what is
+--      due, open mistakes and the ones due again in another wording, and
+--      how many questions are due again today all told (each once).
+--  PL2/PL5 a marathon's run-of-show step may carry "moved": a block moved
+--      from a day that slipped ("הוזז מאתמול").
+--
+--  The thresholds (20 answers for a range, 20 "על בטוח" answers for
+--  calibration, 4 questions for an aspect) are shared/study/progress.ts's
+--  constants; progress.test.ts checks that this block uses the same numbers.
+-- ════════════════════════════════════════════════════════════════════════
+alter table public.study_answers add column if not exists confidence smallint check (confidence between 1 and 3);
+
+-- PR2. The evidence is the first answer per question per study day, last 28 days.
+create or replace function public.study_my_readiness(p_group uuid, p_now timestamptz default now())
+returns table (lecture_id uuid, part_idx int, heading text, answers int, right_n int, lo int, hi int)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  return query
+  with ev as (
+    select q.lecture_id, q.part_idx, a.correct,
+           row_number() over (partition by a.question_id, public.study_day(a.answered_at) order by a.answered_at, a.id) as rn
+      from public.study_answers a
+      join public.study_questions q on q.id = a.question_id
+      join public.study_lectures l on l.id = q.lecture_id and l.deleted_at is null
+     where a.user_id = auth.uid() and q.group_id = p_group and q.lecture_id is not null and q.part_idx is not null
+       and q.retired_at is null and a.answered_at <= p_now and a.answered_at > p_now - interval '28 days'
+  ), b as (
+    select ev.lecture_id, ev.part_idx, count(*)::int as n, (count(*) filter (where ev.correct))::int as r
+      from ev where ev.rn = 1 group by ev.lecture_id, ev.part_idx
+  ), w as (
+    select b.*, b.r::numeric / b.n as p from b
+  )
+  select w.lecture_id, w.part_idx, coalesce(s.title, ''), w.n, w.r,
+         case when w.n >= 20 then greatest(0, round(20 * ((w.p + 1.0 / (2 * w.n)) - sqrt(w.p * (1 - w.p) / w.n + 1.0 / (4 * w.n * w.n)))
+                                                    / (1 + 1.0 / w.n)) * 5)::int end,
+         case when w.n >= 20 then least(100, round(20 * ((w.p + 1.0 / (2 * w.n)) + sqrt(w.p * (1 - w.p) / w.n + 1.0 / (4 * w.n * w.n)))
+                                                    / (1 + 1.0 / w.n)) * 5)::int end
+    from w left join public.study_sections s on s.lecture_id = w.lecture_id and s.idx = w.part_idx
+   order by w.lecture_id, w.part_idx;
+end;
+$$;
+
+-- PR3. The danger list (and the "על בטוח" row of Today: its first due item).
+create or replace function public.study_my_danger_list(p_group uuid, p_now timestamptz default now())
+returns table (question_id uuid, lecture_id uuid, wrong_at timestamptz, chosen text, right_text text, slides int[],
+               rights int, due_day date, ask_id uuid)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  return query
+  with mine as (
+    select a.question_id, a.correct, a.confidence, a.choice, a.answered_at, public.study_day(a.answered_at) as d,
+           q.lecture_id, q.part_idx, q.anchor
+      from public.study_answers a join public.study_questions q on q.id = a.question_id
+     where a.user_id = auth.uid() and q.group_id = p_group and q.retired_at is null
+       and a.answered_at <= p_now and a.answered_at > p_now - interval '60 days'
+  ), start as (     -- the latest wrong "על בטוח" per question still in practice (not hidden by two flags)
+    select distinct on (m.question_id) m.*
+      from mine m join public.study_questions h on h.id = m.question_id and h.hidden_at is null
+     where not m.correct and m.confidence = 3
+     order by m.question_id, m.answered_at desc
+  ), fixed as (     -- right "על בטוח" answers on later days, to it or to its paragraph
+    select s.question_id, r.d
+      from start s join mine r
+        on r.correct and r.confidence = 3 and r.d > s.d
+       and (r.question_id = s.question_id
+            or (s.anchor is not null and r.lecture_id = s.lecture_id and r.part_idx = s.part_idx and r.anchor = s.anchor))
+  ), f as (
+    select x.question_id, count(distinct x.d)::int as rights, min(x.d) as first_d from fixed x group by x.question_id
+  )
+  select s.question_id, s.lecture_id, s.answered_at,
+         case when s.choice is null then '' else coalesce(q.options[s.choice + 1], '') end,
+         coalesce(q.options[k.answer + 1], ''), q.slides,
+         coalesce(f.rights, 0),
+         (date '1970-01-01' + case when coalesce(f.rights, 0) = 0 then s.d + 1 else f.first_d + 3 end),
+         coalesce((select q2.id from public.study_questions q2
+                    where s.anchor is not null and q2.lecture_id = s.lecture_id and q2.part_idx = s.part_idx
+                      and q2.anchor = s.anchor and q2.id <> s.question_id and q2.retired_at is null
+                      and q2.has_key and q2.hidden_at is null and q2.stale_at is null
+                    order by (select max(a.answered_at) from public.study_answers a where a.user_id = auth.uid() and a.question_id = q2.id) nulls first,
+                             q2.created_at, q2.id
+                    limit 1), s.question_id)
+    from start s
+    join public.study_questions q on q.id = s.question_id
+    join public.study_question_keys k on k.question_id = s.question_id
+    left join f on f.question_id = s.question_id
+   where coalesce(f.rights, 0) < 2
+   order by 8, s.answered_at;
+end;
+$$;
+
+-- PR4. Weak points by aspect: the caller's latest answer per question (all
+-- lectures, or one). A bucket from 4 questions in an aspect; below that the
+-- aspect is listed with bucket null (the screen says how many more).
+drop function if exists public.study_my_aspects(uuid, uuid);
+create or replace function public.study_my_aspects(p_group uuid, p_lecture uuid default null)
+returns table (aspect text, questions int, wrong_now int, bucket text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  return query
+  with latest as (
+    select distinct on (a.question_id) a.question_id, a.correct, q.aspect
+      from public.study_answers a join public.study_questions q on q.id = a.question_id
+     where a.user_id = auth.uid() and q.group_id = p_group and q.retired_at is null and q.has_key
+       and (p_lecture is null or coalesce(q.lecture_id, q.ref_lecture) = p_lecture)
+     order by a.question_id, a.answered_at desc, a.id desc
+  )
+  select l.aspect, count(*)::int, (count(*) filter (where not l.correct))::int,
+         case when count(*) < 4 then null
+              when count(*) filter (where not l.correct) * 2 >= count(*) then 'hot'
+              when count(*) filter (where not l.correct) * 4 >= count(*) then 'warm'
+              else 'cool' end
+    from latest l
+   group by l.aspect
+   order by (count(*) >= 4) desc, 3 desc, 2 desc, 1;
+end;
+$$;
+
+-- PR5. Calibration: answers marked "על בטוח" (the first per question per
+-- study day, last 60 days), per part, per lecture and overall (scope).
+create or replace function public.study_my_calibration(p_group uuid, p_now timestamptz default now())
+returns table (scope text, lecture_id uuid, part_idx int, sure int, sure_right int, pct int)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  return query
+  with ev as (
+    select q.lecture_id, q.part_idx, a.correct,
+           row_number() over (partition by a.question_id, public.study_day(a.answered_at) order by a.answered_at, a.id) as rn
+      from public.study_answers a join public.study_questions q on q.id = a.question_id
+     where a.user_id = auth.uid() and q.group_id = p_group and a.confidence = 3
+       and a.answered_at <= p_now and a.answered_at > p_now - interval '60 days'
+  ), e as (select * from ev where ev.rn = 1)
+  select x.scope, x.lecture_id, x.part_idx, x.n, x.r, case when x.n >= 20 then round(100.0 * x.r / x.n)::int end
+    from (
+      select 'part'::text as scope, e.lecture_id, e.part_idx, count(*)::int as n, (count(*) filter (where e.correct))::int as r
+        from e where e.lecture_id is not null and e.part_idx is not null group by e.lecture_id, e.part_idx
+      union all
+      select 'lecture', e.lecture_id, null::int, count(*)::int, (count(*) filter (where e.correct))::int
+        from e where e.lecture_id is not null group by e.lecture_id
+      union all
+      select 'all', null::uuid, null::int, count(*)::int, (count(*) filter (where e.correct))::int from e having count(*) > 0
+    ) x
+   order by case x.scope when 'part' then 0 when 'lecture' then 1 else 2 end, x.n desc, x.lecture_id, x.part_idx;
+end;
+$$;
+
+-- PR7. The counts around progress, in one call ("שלי"'s rows; Today's
+-- numbers): the caller's own, as the functions above and section Q's count
+-- them, so the rows and the screens they open never disagree.
+drop function if exists public.study_my_progress_counts(uuid, timestamptz);
+create or replace function public.study_my_progress_counts(p_group uuid, p_now timestamptz default now())
+returns table (answers int, parts int, parts_ranged int, sure int, sure_right int,
+               danger int, danger_due int, mistakes int, rewordings_due int, again_due int)
+language plpgsql stable security definer set search_path = public as $$
+declare today date;
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  today := date '1970-01-01' + public.study_day(p_now);
+  return query
+  select coalesce((select sum(r.answers) from public.study_my_readiness(p_group, p_now) r), 0)::int,
+         (select count(*) from public.study_my_readiness(p_group, p_now) r)::int,
+         (select count(*) from public.study_my_readiness(p_group, p_now) r where r.lo is not null)::int,
+         coalesce((select c.sure from public.study_my_calibration(p_group, p_now) c where c.scope = 'all'), 0)::int,
+         coalesce((select c.sure_right from public.study_my_calibration(p_group, p_now) c where c.scope = 'all'), 0)::int,
+         (select count(*) from public.study_my_danger_list(p_group, p_now) d)::int,
+         (select count(*) from public.study_my_danger_list(p_group, p_now) d where d.due_day <= today)::int,
+         (select count(*) from public.study_open_mistakes(p_group) m)::int,
+         (select count(*) from public.study_my_rewordings(p_group, p_now) w)::int,
+         (select count(distinct x.q) from (
+            select d.question_id as q from public.study_my_danger_list(p_group, p_now) d where d.due_day <= today
+            union all
+            select w.question_id from public.study_my_rewordings(p_group, p_now) w) x)::int;
+end;
+$$;
+
+-- PL2/PL5: a run-of-show step may say it was moved from a day that slipped.
+create or replace function public.study_marathon__agenda_ok(p_agenda jsonb, p_lectures uuid[])
+returns boolean language plpgsql immutable set search_path = public as $$
+declare
+  s jsonb;
+  num constant text := '^[0-9]{1,4}$';
+begin
+  if p_agenda is null or jsonb_typeof(p_agenda) <> 'array' or jsonb_array_length(p_agenda) > 40 then return false; end if;
+  for s in select x from jsonb_array_elements(p_agenda) as x loop
+    if jsonb_typeof(s) <> 'object' then return false; end if;
+    if exists (select 1 from jsonb_object_keys(s) k where k not in ('k', 'l', 'from', 'to', 'min', 'n', 'mode', 'title', 'moved')) then
+      return false;
+    end if;
+    if coalesce(s ->> 'k', '') not in ('intro', 'read', 'quiz', 'break', 'questions', 'free', 'wrap') then return false; end if;
+    if jsonb_typeof(s -> 'min') is distinct from 'number' or (s ->> 'min') !~ num or (s ->> 'min')::int not between 1 and 240 then
+      return false;
+    end if;
+    if s ? 'l' then
+      if jsonb_typeof(s -> 'l') <> 'string' or (s ->> 'l') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+         or not ((s ->> 'l')::uuid = any (coalesce(p_lectures, '{}'))) then
+        return false;
+      end if;
+    elsif s ->> 'k' in ('read', 'quiz') then
+      return false;
+    end if;
+    if s ? 'from' and (jsonb_typeof(s -> 'from') <> 'number' or (s ->> 'from') !~ num or (s ->> 'from')::int > 199) then return false; end if;
+    if s ? 'to' and (jsonb_typeof(s -> 'to') <> 'number' or (s ->> 'to') !~ num or (s ->> 'to')::int > 199
+                     or (s ? 'from' and (s ->> 'to')::int < (s ->> 'from')::int)) then
+      return false;
+    end if;
+    if s ? 'n' and (jsonb_typeof(s -> 'n') <> 'number' or (s ->> 'n') !~ num or (s ->> 'n')::int not between 3 and 30) then return false; end if;
+    if s ? 'mode' and coalesce(s ->> 'mode', '') not in ('coop', 'race') then return false; end if;
+    if s ? 'title' and (jsonb_typeof(s -> 'title') <> 'string' or char_length(s ->> 'title') > 80) then return false; end if;
+    if s ? 'moved' and jsonb_typeof(s -> 'moved') <> 'boolean' then return false; end if;
+  end loop;
+  return true;
+end;
+$$;
+
+revoke all on function public.study_my_readiness(uuid, timestamptz), public.study_my_danger_list(uuid, timestamptz),
+  public.study_my_aspects(uuid, uuid), public.study_my_calibration(uuid, timestamptz),
+  public.study_my_progress_counts(uuid, timestamptz) from public, anon;
+grant execute on function public.study_my_readiness(uuid, timestamptz), public.study_my_danger_list(uuid, timestamptz),
+  public.study_my_aspects(uuid, uuid), public.study_my_calibration(uuid, timestamptz),
+  public.study_my_progress_counts(uuid, timestamptz) to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('P', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION P ════
+
+-- ════ BEGIN SECTION M · the daily meeting (package M) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION M · THE DAILY MEETING   (package M; meeting addendum §4)
+--  After section P (its SQL functions read Q, Z, K and P's tables). Re-runnable.
+--  As built (package M, wave 4, on study/wave3's file): the addendum's text
+--  (spec §12.4.M) with two changes: the reader's card also says how many
+--  others follow ("{n} עוקבים", the count study_private.meeting_reads_live
+--  uses for "אישור בקול"), and the guess warning waits for the switch
+--  'pulse' to exist and be on (section U adds it, off; a missing row is not
+--  "on" here). It reads only F, Q, Z and K's tables (study_reads is F's), so
+--  it loads on wave 3's database without section P, U or J: the hot spot,
+--  the opt-out and the wall's moment are read only when they exist. Safe on
+--  production's data: it adds tables and functions, and replaces section
+--  Z's stub study_quiz__pick_preset (same name, argument and result).
+--
+--  T1  the day's meeting as data: time, lecture, part range, the planned
+--      reader; created ahead ("הפגישה הבאה") or by the first reading aloud of
+--      the day. Shared in the group and published (the band, the banner).
+--  M4  "לא ברור לי": a follower's anonymous tap on the paragraph being read;
+--      private rows, written only by a function, never published.
+--  M5  only the meeting's current reader is told where 3 or more members
+--      tapped (study_meeting_reader_view), and records what was done there:
+--      a stop to explain, moving on, or an open question for tomorrow.
+--  M1  "3 לקפה": section Z's preset 'coffee'; this section chooses its three
+--      questions (study_quiz__pick_preset): two from the previous meeting's
+--      parts as read, one older.
+--  M2/K3 the three-line agenda: today's reading and reader; a hot spot (the
+--      pulse's, not here); one question open for more than 24 hours, or
+--      sent "לשאלה פתוחה למחר" at an earlier meeting.
+--  M3/M6 phase 2, the pre-guess: two questions on the first part, answered
+--      privately (never a mistake: not in study_answers), their keys shown
+--      only once the reading reaches their paragraph; results only as a
+--      majority, from 3 guessers; the reader is warned before a paragraph
+--      most of the group guessed wrong.
+--  M7  a tapped paragraph comes back to the tapper alone on a later day.
+--  T3  catch-up for a meeting one missed: built from what the group made
+--      (stops, answered questions, shared memory aids, the questions the
+--      group found hardest in the meeting's quizzes); finishing marks the
+--      lecture read in "קראו", with no time.
+--  Attendance is private (each member's own row), used only to offer the
+--  catch-up. The live counts here (taps, guesses) are shown only on the
+--  reader's screen or as a majority word, from 3 people, never names: the
+--  approved exception to the nightly rule (design.md §2.3).
+-- ════════════════════════════════════════════════════════════════════════
+
+-- The study day of a moment (Israel time, from 04:00), as section P counts it.
+create or replace function study_private.day_of(p_at timestamptz)
+returns date language sql immutable set search_path = public as $$
+  select ((p_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date
+$$;
+revoke all on function study_private.day_of(timestamptz) from public;
+
+-- ── The meetings (shared, published; own uuid key) ──
+create table if not exists public.study_meetings (
+  id             uuid        primary key default gen_random_uuid(),
+  group_id       uuid        not null references public.study_groups (id) on delete cascade,
+  day            date        not null,
+  starts_at      timestamptz not null,
+  lecture_id     uuid        not null references public.study_lectures (id) on delete cascade,
+  part_from      int         not null check (part_from between 0 and 199),
+  part_to        int         not null check (part_to between 0 and 199),
+  title          text        not null default '' check (char_length(title) <= 120),
+  planned_reader uuid        references auth.users (id) on delete set null,
+  reader_id      uuid        references auth.users (id) on delete set null,   -- who reads aloud now, or last did
+  reading        boolean     not null default false,
+  started_at     timestamptz,
+  read_part      int         check (read_part between 0 and 199),           -- the furthest part the reading reached
+  guess_ids      uuid[]      not null default '{}' check (cardinality(guess_ids) <= 2),
+  guess_released smallint    not null default 0 check (guess_released between 0 and 2),
+  cancelled_at   timestamptz,
+  version        int         not null default 1 check (version >= 1),
+  created_by     uuid        default auth.uid() references auth.users (id) on delete set null,
+  updated_by     uuid        references auth.users (id) on delete set null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  check (part_to >= part_from)
+);
+create unique index if not exists study_meetings_one on public.study_meetings (group_id, day, lecture_id) where cancelled_at is null;
+create index if not exists study_meetings_group on public.study_meetings (group_id, day desc);
+
+-- The reader's place, as the reader's phone reports it (no grants; never published).
+create table if not exists public.study_meeting_live (
+  meeting_id uuid        primary key references public.study_meetings (id) on delete cascade,
+  part_idx   int         not null check (part_idx between 0 and 199),
+  anchor     int         not null check (anchor between 0 and 99999),
+  max_part   int         not null check (max_part between 0 and 199),
+  max_anchor int         not null check (max_anchor between 0 and 99999),
+  place_at   timestamptz not null default now()
+);
+
+-- "לא ברור לי" (private: the owner reads her own; written by functions only).
+create table if not exists public.study_meeting_taps (
+  id         uuid        primary key default gen_random_uuid(),
+  meeting_id uuid        not null references public.study_meetings (id) on delete cascade,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null check (part_idx between 0 and 199),
+  anchor     int         not null check (anchor between 0 and 99999),
+  quote      text        not null default '' check (char_length(quote) <= 200),
+  created_at timestamptz not null default now(),
+  done_at    timestamptz,                                  -- seen again on a later day (M7)
+  unique (meeting_id, user_id, part_idx, anchor)
+);
+create index if not exists study_meeting_taps_meeting on public.study_meeting_taps (meeting_id, part_idx, anchor);
+create index if not exists study_meeting_taps_user on public.study_meeting_taps (user_id, created_at desc);
+
+-- What the reader did at a paragraph (shared in the group; not published).
+create table if not exists public.study_meeting_events (
+  id         uuid        primary key default gen_random_uuid(),
+  meeting_id uuid        not null references public.study_meetings (id) on delete cascade,
+  kind       text        not null check (kind in ('explain', 'continue', 'question')),
+  part_idx   int         not null check (part_idx between 0 and 199),
+  anchor     int         not null check (anchor between 0 and 99999),
+  quote      text        not null default '' check (char_length(quote) <= 200),
+  comment_id uuid        references public.study_comments (id) on delete set null,
+  created_by uuid        default auth.uid() references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (meeting_id, kind, part_idx, anchor)
+);
+
+-- Who was there (private, each member's own row): following the reader,
+-- reading aloud, tapping. Only for offering the catch-up.
+create table if not exists public.study_meeting_presence (
+  meeting_id uuid        not null references public.study_meetings (id) on delete cascade,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  first_at   timestamptz not null default now(),
+  last_at    timestamptz not null default now(),
+  primary key (meeting_id, user_id)
+);
+
+-- Pre-guesses (private, never in study_answers: a guess is never a mistake).
+create table if not exists public.study_meeting_guess_answers (
+  meeting_id  uuid        not null references public.study_meetings (id) on delete cascade,
+  question_id uuid        not null references public.study_questions (id) on delete cascade,
+  user_id     uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  choice      smallint    not null check (choice >= 0),
+  answered_at timestamptz not null default now(),
+  primary key (meeting_id, question_id, user_id)
+);
+
+-- A catch-up finished (private).
+create table if not exists public.study_meeting_catchups (
+  meeting_id uuid        not null references public.study_meetings (id) on delete cascade,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  done_at    timestamptz not null default now(),
+  primary key (meeting_id, user_id)
+);
+-- review SEC-12: "קראו" is written on the next study day (catchup_marks)
+alter table public.study_meeting_catchups add column if not exists marked_at timestamptz;
+
+-- ── Helpers ──
+-- ── Review helpers (spec §12.10) ──
+-- Members who follow this meeting now, other than p_user: a presence row
+-- refreshed within 10 minutes (following refreshes it every 3 minutes).
+create or replace function study_private.meeting_followers(p_meeting uuid, p_user uuid)
+returns int language sql stable security definer set search_path = public as $$
+  select count(*)::int from public.study_meeting_presence pr
+   where pr.meeting_id = p_meeting and pr.user_id is distinct from p_user and pr.last_at > now() - interval '10 minutes'
+$$;
+-- p_user reads aloud today's meeting on p_lecture, live: the place reported
+-- within the last minute and two other members following (review SEC-3:
+-- the one condition under which an approval counts as "בקול בפגישה").
+create or replace function study_private.meeting_reads_live(p_lecture uuid, p_user uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.study_meetings m
+      join public.study_meeting_live lv on lv.meeting_id = m.id
+     where m.lecture_id = p_lecture and m.cancelled_at is null and m.reading and m.reader_id = p_user
+       and m.day = study_private.day_of(now())
+       and lv.place_at > now() - interval '1 minute'
+       and study_private.meeting_followers(m.id, p_user) >= 2)
+$$;
+-- A member who left the pulse's count (section U) is left out of the
+-- meeting's counts too (review F-14: decision 1's one answer). Without
+-- section U nobody is out.
+create or replace function study_private.pulse_out(p_group uuid, p_user uuid)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare r boolean := false;
+begin
+  if to_regclass('public.study_pulse_optout') is null then return false; end if;
+  execute 'select exists (select 1 from public.study_pulse_optout o where o.group_id = $1 and o.user_id = $2)'
+    into r using p_group, p_user;
+  return coalesce(r, false);
+end;
+$$;
+-- The catch-ups finished on an earlier study day join "קראו" now, with the
+-- meeting's own time (review SEC-12: no mark arrives live hours after the
+-- meeting, and no mark carries the time of the catch-up).
+create or replace function study_private.catchup_marks(p_group uuid)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare n int;
+begin
+  with due as (
+    update public.study_meeting_catchups c set marked_at = now()
+      from public.study_meetings m
+     where m.id = c.meeting_id and m.group_id = p_group and c.marked_at is null
+       and study_private.day_of(c.done_at) < study_private.day_of(now())
+    returning c.user_id, m.lecture_id, coalesce(m.started_at, m.starts_at) as at)
+  insert into public.study_reads (lecture_id, user_id, read_at)
+  select d.lecture_id, d.user_id, min(d.at) from due d group by d.lecture_id, d.user_id
+  on conflict (lecture_id, user_id) do nothing;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function study_private.meeting_followers(uuid, uuid), study_private.meeting_reads_live(uuid, uuid),
+  study_private.pulse_out(uuid, uuid), study_private.catchup_marks(uuid) from public;
+create or replace function public.study_meeting_group(p_meeting uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select group_id from public.study_meetings where id = p_meeting;
+$$;
+
+-- A meeting is over once its study day is past, four hours after it
+-- started, or when its closing quiz ended.
+create or replace function study_private.meeting_over(m public.study_meetings)
+returns boolean language sql stable security definer set search_path = public as $$
+  select m.cancelled_at is null and (
+         m.day < study_private.day_of(now())
+      or (m.started_at is not null and m.started_at < now() - interval '4 hours')
+      or exists (select 1 from public.study_quizzes z where z.meeting_id = m.id and z.preset = 'end' and z.state = 'ended'))
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Planning and running the meeting
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- "הפגישה הבאה": creates (p_id null) or changes a meeting. Any member, as a
+-- marathon. Errors: 'group not found', 'lecture not found', 'bad parts',
+-- 'bad time', 'bad title', 'member not found', 'meeting exists' (that
+-- lecture already has a meeting that day), 'meeting not found', 'conflict',
+-- 'meeting started' (a started meeting keeps its lecture, parts and day).
+create or replace function public.study_meeting_save(p_id uuid, p_version int, p_group uuid, p_starts_at timestamptz,
+  p_lecture uuid, p_part_from int, p_part_to int, p_title text default '', p_reader uuid default null)
+returns table (id uuid, version int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me uuid := auth.uid();
+  m  public.study_meetings;
+  d  date;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_group is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  if p_lecture is null or public.study_lecture_group(p_lecture) is distinct from p_group
+     or exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  if p_part_from is null or p_part_to is null or p_part_from < 0 or p_part_to < p_part_from
+     or (select count(*) from public.study_sections s where s.lecture_id = p_lecture and s.idx in (p_part_from, p_part_to))
+        <> (case when p_part_from = p_part_to then 1 else 2 end) then
+    raise exception 'bad parts';
+  end if;
+  if p_starts_at is null or p_starts_at < now() - interval '12 hours' or p_starts_at > now() + interval '14 days' then
+    raise exception 'bad time';
+  end if;
+  if char_length(coalesce(p_title, '')) > 120 then raise exception 'bad title'; end if;
+  if p_reader is not null and not exists (select 1 from public.study_members x where x.group_id = p_group and x.user_id = p_reader) then
+    raise exception 'member not found';
+  end if;
+  d := study_private.day_of(p_starts_at);
+  perform pg_advisory_xact_lock(hashtext('study_meeting:' || p_group::text));
+  if p_id is null then
+    if exists (select 1 from public.study_meetings x
+                where x.group_id = p_group and x.day = d and x.lecture_id = p_lecture and x.cancelled_at is null) then
+      raise exception 'meeting exists';
+    end if;
+    insert into public.study_meetings (group_id, day, starts_at, lecture_id, part_from, part_to, title, planned_reader, created_by)
+    values (p_group, d, p_starts_at, p_lecture, p_part_from, p_part_to, btrim(coalesce(p_title, '')), p_reader, me)
+    returning * into m;
+  else
+    select * into m from public.study_meetings x where x.id = p_id and x.group_id = p_group for update;
+    if not found or m.cancelled_at is not null then raise exception 'meeting not found'; end if;
+    if m.version <> p_version then raise exception 'conflict'; end if;
+    -- Review SEC4-2: once it started (or while it is read aloud), what is read and its day stay:
+    -- a live reading, its place, the released guesses and "אישור בקול" all lean on them. The
+    -- time, the title and who is planned to read may still change.
+    if (m.started_at is not null or m.reading)
+       and (p_lecture is distinct from m.lecture_id or p_part_from is distinct from m.part_from
+            or p_part_to is distinct from m.part_to or d is distinct from m.day) then
+      raise exception 'meeting started';
+    end if;
+    if exists (select 1 from public.study_meetings x
+                where x.id <> p_id and x.group_id = p_group and x.day = d and x.lecture_id = p_lecture and x.cancelled_at is null) then
+      raise exception 'meeting exists';
+    end if;
+    update public.study_meetings x
+       set day = d, starts_at = p_starts_at, lecture_id = p_lecture, part_from = p_part_from, part_to = p_part_to,
+           title = btrim(coalesce(p_title, '')), planned_reader = p_reader,
+           guess_ids = case when x.lecture_id = p_lecture and x.part_from = p_part_from then x.guess_ids else '{}' end,
+           guess_released = case when x.lecture_id = p_lecture and x.part_from = p_part_from then x.guess_released else 0 end,
+           version = x.version + 1, updated_by = me, updated_at = now()
+     where x.id = p_id
+    returning * into m;
+  end if;
+  return query select m.id, m.version;
+end;
+$$;
+
+-- "לבטל את הפגישה": before it started. Errors: 'meeting not found', 'meeting started'.
+create or replace function public.study_meeting_cancel(p_meeting uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare m public.study_meetings;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting for update;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) or m.cancelled_at is not null then
+    raise exception 'meeting not found';
+  end if;
+  if m.started_at is not null then raise exception 'meeting started'; end if;
+  update public.study_meetings x set cancelled_at = now(), version = x.version + 1, updated_by = auth.uid(), updated_at = now()
+   where x.id = p_meeting;
+end;
+$$;
+
+-- "להקריא לקבוצה" starts or stops on a lecture. On: today's meeting on that
+-- lecture (made now when none was planned) gets the caller as its reader,
+-- and the caller's place, unless another member is reading it live (a place
+-- reported in the last minute): 'reading' (review SEC-4). Off: the caller
+-- stops being the one reading. Returns the meeting's id (null when stopping
+-- with none).
+create or replace function public.study_meeting_reading(p_lecture uuid, p_on boolean, p_part int default 0, p_anchor int default 0)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  me  uuid := auth.uid();
+  g   uuid := public.study_lecture_group(p_lecture);
+  d   date := study_private.day_of(now());
+  pt  int  := greatest(0, least(coalesce(p_part, 0), 199));
+  an  int  := greatest(0, least(coalesce(p_anchor, 0), 99999));
+  mid uuid;
+  m   public.study_meetings;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if g is null or not coalesce(public.study_is_member(g), false)
+     or exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_meeting:' || g::text));
+  select x.id into mid from public.study_meetings x
+   where x.group_id = g and x.day = d and x.lecture_id = p_lecture and x.cancelled_at is null;
+  if not coalesce(p_on, false) then
+    update public.study_meetings x set reading = false, version = x.version + 1, updated_at = now()
+     where x.id = mid and x.reader_id = me and x.reading;
+    return mid;
+  end if;
+  -- review SEC-4: nobody takes over a live reading. The reader hands over
+  -- by stopping ("off"), or after a minute with no place reported.
+  select * into m from public.study_meetings x where x.id = mid;
+  if found and m.reading and m.reader_id is distinct from me
+     and exists (select 1 from public.study_meeting_live lv where lv.meeting_id = mid and lv.place_at > now() - interval '60 seconds') then
+    raise exception 'reading';
+  end if;
+  if not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.idx = pt) then
+    pt := coalesce((select min(s.idx) from public.study_sections s where s.lecture_id = p_lecture), 0);
+    an := 0;
+  end if;
+  if mid is null then
+    insert into public.study_meetings (group_id, day, starts_at, lecture_id, part_from, part_to, created_by)
+    values (g, d, now(), p_lecture, pt, pt, me)
+    returning id into mid;
+  end if;
+  update public.study_meetings x
+     set reader_id = me, reading = true, started_at = coalesce(x.started_at, now()),
+         read_part = greatest(coalesce(x.read_part, pt), pt),
+         version = x.version + 1, updated_at = now()
+   where x.id = mid;
+  insert into public.study_meeting_live (meeting_id, part_idx, anchor, max_part, max_anchor, place_at)
+  values (mid, pt, an, pt, an, now())
+  on conflict (meeting_id) do update
+    set part_idx = excluded.part_idx, anchor = excluded.anchor, place_at = excluded.place_at;
+  insert into public.study_meeting_presence (meeting_id, user_id) values (mid, me)
+  on conflict (meeting_id, user_id) do update set last_at = now();
+  return mid;
+end;
+$$;
+
+-- The reader's place (the reader's phone: on every change at most every 5 s
+-- with a trailing call, and at least every 20 s). Moves the meeting's
+-- furthest part (published once per part; at most one part a call) and,
+-- while two other members follow, releases each pre-guess whose paragraph
+-- the reading reached. Returns how many guesses are released. Errors: 'not
+-- the reader', 'bad parts' (review SEC-4).
+create or replace function public.study_meeting_place(p_meeting uuid, p_part int, p_anchor int)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  m    public.study_meetings;
+  lv   public.study_meeting_live;
+  pt   int := greatest(0, least(coalesce(p_part, 0), 199));
+  an   int := greatest(0, least(coalesce(p_anchor, 0), 99999));
+  rel  int;
+  q    public.study_questions;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting for update;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) then raise exception 'meeting not found'; end if;
+  if m.reader_id is distinct from auth.uid() or not m.reading then raise exception 'not the reader'; end if;
+  -- review SEC-4: a part of the lecture, and the furthest place moves at
+  -- most one part a call (a jump to the end does not read the lecture)
+  if not exists (select 1 from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = pt) then
+    raise exception 'bad parts';
+  end if;
+  select * into lv from public.study_meeting_live x where x.meeting_id = p_meeting;
+  if found and pt > lv.max_part + 1 then
+    pt := lv.max_part + 1;
+    an := 0;
+  end if;
+  insert into public.study_meeting_live (meeting_id, part_idx, anchor, max_part, max_anchor, place_at)
+  values (p_meeting, pt, an, pt, an, now())
+  on conflict (meeting_id) do update
+    set part_idx = excluded.part_idx, anchor = excluded.anchor, place_at = excluded.place_at,
+        max_part = case when (excluded.part_idx, excluded.anchor) > (study_meeting_live.max_part, study_meeting_live.max_anchor)
+                        then excluded.part_idx else study_meeting_live.max_part end,
+        max_anchor = case when (excluded.part_idx, excluded.anchor) > (study_meeting_live.max_part, study_meeting_live.max_anchor)
+                          then excluded.anchor else study_meeting_live.max_anchor end
+  returning * into lv;
+  rel := m.guess_released;
+  -- review SEC-4: a pre-guess is released by a reading the group follows
+  -- (two other members here), never by one phone alone
+  if study_private.meeting_followers(p_meeting, auth.uid()) >= 2 then
+    while rel < cardinality(m.guess_ids) loop
+      select * into q from public.study_questions x where x.id = m.guess_ids[rel + 1];
+      exit when not found or q.part_idx is null
+             or (coalesce(q.part_idx, 0), coalesce(q.anchor, 0)) > (lv.max_part, lv.max_anchor);
+      rel := rel + 1;
+    end loop;
+  end if;
+  if rel <> m.guess_released or lv.max_part > coalesce(m.read_part, -1) then
+    update public.study_meetings x
+       set guess_released = rel, read_part = greatest(coalesce(x.read_part, lv.max_part), lv.max_part),
+           version = x.version + 1, updated_at = now()
+     where x.id = p_meeting;
+  end if;
+  return rel;
+end;
+$$;
+
+-- A follower is here (called once when following starts during the meeting,
+-- and by the meeting's screens). Private; offers no one anything but the
+-- caller's own catch-up.
+create or replace function public.study_meeting_here(p_meeting uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare m public.study_meetings;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) or m.cancelled_at is not null then
+    raise exception 'meeting not found';
+  end if;
+  if m.day = study_private.day_of(now()) then
+    insert into public.study_meeting_presence (meeting_id, user_id) values (p_meeting, auth.uid())
+    on conflict (meeting_id, user_id) do update set last_at = now();
+  end if;
+end;
+$$;
+
+-- "לא ברור לי" on the paragraph being read (p_on false: take it back).
+-- Errors: 'meeting not found', 'not live' (nobody is reading now), 'is
+-- reader' (the reader does not tap, review SEC-11), 'bad parts'. The phone's
+-- text is not kept (review SEC-11).
+create or replace function public.study_meeting_unclear(p_meeting uuid, p_part int, p_anchor int, p_quote text default '', p_on boolean default true)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare m public.study_meetings;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) or m.cancelled_at is not null then
+    raise exception 'meeting not found';
+  end if;
+  if not coalesce(p_on, true) then
+    delete from public.study_meeting_taps t
+     where t.meeting_id = p_meeting and t.user_id = auth.uid() and t.part_idx = p_part and t.anchor = p_anchor and t.done_at is null;
+    return false;
+  end if;
+  if not m.reading then raise exception 'not live'; end if;
+  if m.reader_id = auth.uid() then raise exception 'is reader'; end if;            -- review SEC-11: the reader does not tap
+  if p_anchor is null or p_anchor < 0 or p_anchor > 99999
+     or not exists (select 1 from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = p_part) then
+    raise exception 'bad parts';
+  end if;
+  -- review SEC-11: no text from the phone; each phone shows the paragraph's
+  -- own first words from the summary it already has (p_quote is ignored)
+  insert into public.study_meeting_taps (meeting_id, user_id, lecture_id, part_idx, anchor, quote)
+  values (p_meeting, auth.uid(), m.lecture_id, p_part, p_anchor, '')
+  on conflict (meeting_id, user_id, part_idx, anchor) do nothing;
+  insert into public.study_meeting_presence (meeting_id, user_id) values (p_meeting, auth.uid())
+  on conflict (meeting_id, user_id) do update set last_at = now();
+  return true;
+end;
+$$;
+
+-- Only on the reader's screen (polled every 6 s while reading aloud):
+-- paragraphs with 3 or more other members' "לא ברור" taps not yet handled,
+-- with the count and no names or text; and (phase 2, with the switch
+-- 'pulse') the next pre-guess paragraph when most of the group guessed it
+-- wrong (from 3 guessers). Only today's meeting while the place is reported.
+-- Errors: 'not the reader', 'not live' (review SEC-4, SEC-11, F-14).
+create or replace function public.study_meeting_reader_view(p_meeting uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  m    public.study_meetings;
+  v    jsonb;
+  w    jsonb;
+  q    public.study_questions;
+  k    smallint;
+  n    int;
+  bad  int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) then raise exception 'meeting not found'; end if;
+  if m.reader_id is distinct from auth.uid() or not m.reading then raise exception 'not the reader'; end if;
+  -- review SEC-4: only today's meeting, only while the reader's place is
+  -- reported (the reader's phone sends it at least every 20 s)
+  if m.day <> study_private.day_of(now())
+     or not exists (select 1 from public.study_meeting_live lv where lv.meeting_id = p_meeting and lv.place_at > now() - interval '60 seconds') then
+    raise exception 'not live';
+  end if;
+  -- review SEC-11, F-14: three taps of OTHER members (the reader's own
+  -- never counts), members out of the pulse's count left out; no text
+  select coalesce(jsonb_agg(jsonb_build_object('part', t.part_idx, 'anchor', t.anchor, 'n', t.n)
+                            order by t.part_idx, t.anchor), '[]'::jsonb) into v
+    from (select x.part_idx, x.anchor, count(distinct x.user_id)::int as n
+            from public.study_meeting_taps x
+           where x.meeting_id = p_meeting and x.user_id <> auth.uid()
+             and not study_private.pulse_out(m.group_id, x.user_id)
+             and not exists (select 1 from public.study_meeting_events e
+                              where e.meeting_id = p_meeting and e.part_idx = x.part_idx and e.anchor = x.anchor)
+           group by x.part_idx, x.anchor
+          having count(distinct x.user_id) >= 3) t;
+  -- review F-14: the guess warning is decision 1's (the switch 'pulse')
+  -- (package M: off until the switch's row exists and is on; section U adds
+  -- it, off. feature_on() would read a missing row as on.)
+  if m.guess_released < cardinality(m.guess_ids)
+     and coalesce((select f.enabled from study_private.features f where f.name = 'pulse'), false) then
+    select * into q from public.study_questions x where x.id = m.guess_ids[m.guess_released + 1];
+    select x.answer into k from public.study_question_keys x where x.question_id = q.id;
+    select count(*), count(*) filter (where a.choice is distinct from k) into n, bad
+      from public.study_meeting_guess_answers a
+     where a.meeting_id = p_meeting and a.question_id = q.id and not study_private.pulse_out(m.group_id, a.user_id);
+    if n >= 3 and bad * 2 > n then
+      w := jsonb_build_object('guess', m.guess_released + 1, 'part', q.part_idx, 'anchor', q.anchor,
+                              'question', q.question, 'slides', to_jsonb(q.slides));
+    end if;
+  end if;
+  -- package M: the card's "{n} עוקבים" and "אישור בקול"'s condition (two others
+  -- following, as study_private.meeting_reads_live counts them): a count, to
+  -- the reader only, never who
+  return jsonb_build_object('taps', v, 'guess_warn', w, 'followers', study_private.meeting_followers(p_meeting, auth.uid()));
+end;
+$$;
+
+-- The reader's answer to a callout: 'explain' ("לעצור ולהסביר"), 'continue'
+-- ("להמשיך"), 'question' ("לשאלה פתוחה למחר", with the question comment the
+-- phone has just posted on the paragraph). Errors: 'not the reader',
+-- 'bad kind', 'question not found'.
+create or replace function public.study_meeting_stop(p_meeting uuid, p_kind text, p_part int, p_anchor int,
+  p_quote text default '', p_comment uuid default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare m public.study_meetings;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) then raise exception 'meeting not found'; end if;
+  if m.reader_id is distinct from auth.uid() or not m.reading then raise exception 'not the reader'; end if;
+  if coalesce(p_kind, '') not in ('explain', 'continue', 'question') then raise exception 'bad kind'; end if;
+  if p_kind = 'question' and not exists (
+       select 1 from public.study_comments c
+        where c.id = p_comment and c.lecture_id = m.lecture_id and c.part_idx = p_part and c.anchor = p_anchor
+          and c.kind = 'question' and c.parent_id is null) then
+    raise exception 'question not found';
+  end if;
+  insert into public.study_meeting_events (meeting_id, kind, part_idx, anchor, quote, comment_id, created_by)
+  values (p_meeting, p_kind, p_part, p_anchor, '', case when p_kind = 'question' then p_comment end, auth.uid())   -- review SEC-11
+  on conflict (meeting_id, kind, part_idx, anchor) do nothing;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  The opening and the closing (section Z's presets)
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- The opening's picker (replaces section Z's stub): two questions from the
+-- parts read at the previous meeting day, one older; each keyed, active,
+-- not marked by a correction or hidden by two flags; the group's nightly
+-- signal first (section U), then a teaser, then at random. Never one
+-- player's private answers (review SEC-5: with two players the opening was
+-- the other player's mistakes). Never today's planned parts unless already
+-- read.
+create or replace function public.study_quiz__pick_preset(p_quiz uuid)
+returns uuid[] language plpgsql volatile security definer set search_path = public as $$
+declare
+  z      public.study_quizzes;
+  m      public.study_meetings;
+  prev   date;
+  readto int;
+  pick   uuid[] := '{}';
+  more   uuid[];
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.preset <> 'coffee' or z.meeting_id is null then return null; end if;
+  select * into m from public.study_meetings x where x.id = z.meeting_id;
+  if not found then return null; end if;
+  select max(x.day) into prev from public.study_meetings x
+   where x.group_id = z.group_id and x.day < m.day and x.cancelled_at is null and x.started_at is not null;
+  select coalesce(max(coalesce(y.read_part, -1)), -1) into readto from public.study_meetings y
+   where y.group_id = z.group_id and y.lecture_id = m.lecture_id and y.day < m.day and y.cancelled_at is null;
+  -- two from the parts read at the previous meeting day: the group's
+  -- nightly signal first (section U's hook: confident errors, missed,
+  -- split), then a teaser, then at random; never one player's answers
+  -- (review SEC-5, F-18)
+  with cand as (
+    select q.id, q.lecture_id, q.part_idx, coalesce(q.anchor, -1) as anchor, q.teaser <> '' as has_teaser,
+           public.study_quiz__signal(q.id) as sig, random() as rnd
+      from public.study_questions q
+     where q.group_id = z.group_id and q.lecture_id = any (z.lecture_ids)
+       and q.retired_at is null and q.stale_at is null and q.hidden_at is null and q.has_key
+       and not (q.lecture_id = m.lecture_id and q.part_idx between m.part_from and m.part_to and q.part_idx > readto)
+       and exists (select 1 from public.study_meetings y
+                    where y.group_id = z.group_id and y.day = prev and y.cancelled_at is null and y.lecture_id = q.lecture_id
+                      and q.part_idx between y.part_from and greatest(y.part_from, coalesce(y.read_part, y.part_to)))
+  ), r2 as (
+    select c.*, row_number() over (partition by c.lecture_id, c.part_idx order by c.sig desc, c.has_teaser desc, c.rnd) as rk
+      from cand c
+  )
+  select coalesce(array_agg(x.id order by x.lecture_id, x.part_idx, x.anchor), '{}') into pick
+    from (select r.* from r2 r order by r.rk, r.sig desc, r.has_teaser desc, r.rnd limit 2) x;
+  -- the older one (or more, while the recent parts gave fewer than two)
+  select coalesce(array_agg(x.id), '{}') into more
+    from (select c.id from public.study_questions c
+           where c.group_id = z.group_id and c.lecture_id = any (z.lecture_ids)
+             and c.retired_at is null and c.stale_at is null and c.hidden_at is null and c.has_key and not (c.id = any (pick))
+             and not (c.lecture_id = m.lecture_id and c.part_idx between m.part_from and m.part_to and c.part_idx > readto)
+           order by not exists (select 1 from public.study_meetings y
+                                 where y.group_id = z.group_id and y.day = prev and y.lecture_id = c.lecture_id
+                                   and c.part_idx between y.part_from and greatest(y.part_from, coalesce(y.read_part, y.part_to))) desc,
+                    public.study_quiz__signal(c.id) desc, (c.teaser <> '') desc, random()
+           limit 3 - cardinality(pick)) x;
+  return pick || more;
+end;
+$$;
+revoke all on function public.study_quiz__pick_preset(uuid) from public, anon, authenticated;
+
+-- Opens the meeting's quiz: 'coffee' (3 לקפה: three questions, 45 s each,
+-- co-op), 'end' (סוף הקריאה: on the parts read, 5 by default, either mode),
+-- 'stop' (one question on a part just read, co-op). Section Z's errors
+-- ('quiz open', 'already', 'no questions' at the start) pass through.
+create or replace function public.study_meeting_quiz(p_meeting uuid, p_preset text, p_mode text default 'coop',
+  p_count int default null, p_part int default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  m    public.study_meetings;
+  lecs uuid[];
+  upto int;
+  qid  uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) or m.cancelled_at is not null then
+    raise exception 'meeting not found';
+  end if;
+  if coalesce(p_preset, '') = 'coffee' then
+    select array_agg(x.lecture_id order by x.last desc) into lecs
+      from (select y.lecture_id, max(y.day) as last from public.study_meetings y
+              join public.study_lectures l on l.id = y.lecture_id and l.deleted_at is null
+             where y.group_id = m.group_id and y.day < m.day and y.cancelled_at is null
+             group by y.lecture_id order by max(y.day) desc limit 40) x;
+    if lecs is null then
+      select array_agg(x.lecture_id) into lecs
+        from (select q.lecture_id from public.study_questions q join public.study_lectures l on l.id = q.lecture_id and l.deleted_at is null
+               where q.group_id = m.group_id and q.has_key and q.retired_at is null
+               group by q.lecture_id order by max(q.created_at) desc limit 40) x;
+    end if;
+    qid := public.study_quiz_create(m.group_id, 'coop', coalesce(lecs, array[m.lecture_id]), 3, 45, 'all', 'coffee', p_meeting);
+  elsif p_preset = 'end' then
+    upto := greatest(m.part_from, coalesce(m.read_part, m.part_to));
+    qid := public.study_quiz_create(m.group_id, coalesce(p_mode, 'coop'), array[m.lecture_id], coalesce(p_count, 5), 60, 'all', 'end',
+                                    p_meeting, m.part_from, upto);
+  elsif p_preset = 'stop' then
+    qid := public.study_quiz_create(m.group_id, 'coop', array[m.lecture_id], 1, 60, 'all', 'stop', p_meeting,
+                                    coalesce(p_part, m.read_part, m.part_from), coalesce(p_part, m.read_part, m.part_from));
+  else
+    raise exception 'bad preset';
+  end if;
+  update public.study_meetings x set started_at = coalesce(x.started_at, now()), version = x.version + 1, updated_at = now()
+   where x.id = p_meeting and x.started_at is null;
+  return qid;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  The pre-guess (phase 2)
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Chooses the two questions once (the first call after the bank exists):
+-- placed on a paragraph of the meeting's first part, keyed, active, not
+-- marked or hidden; the first two paragraphs that have one, in reading
+-- order, a teaser first, then the oldest (review SEC-5: no count of who
+-- answered what).
+create or replace function public.study_meeting_guess_pick(p_meeting uuid)
+returns uuid[] language plpgsql volatile security definer set search_path = public as $$
+declare
+  m   public.study_meetings;
+  ids uuid[];
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting for update;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) or m.cancelled_at is not null then
+    raise exception 'meeting not found';
+  end if;
+  if cardinality(m.guess_ids) = 2 or m.guess_released > 0 then return m.guess_ids; end if;
+  select coalesce(array_agg(y.id order by y.anchor), '{}') into ids
+    from (select x.id, x.anchor
+            from (select distinct on (q.anchor) q.id, q.anchor,
+                         q.created_at
+                    from public.study_questions q
+                   where q.lecture_id = m.lecture_id and q.part_idx = m.part_from and q.anchor is not null
+                     and q.has_key and q.retired_at is null and q.stale_at is null and q.hidden_at is null
+                   order by q.anchor, q.teaser = '', q.created_at, q.id) x
+           order by x.anchor
+           limit 2) y;
+  if cardinality(ids) > 0 then
+    update public.study_meetings x set guess_ids = ids, version = x.version + 1, updated_at = now() where x.id = p_meeting;
+  end if;
+  return ids;
+end;
+$$;
+
+-- A private guess (changeable until its paragraph is reached). Errors:
+-- 'question not found', 'released', 'bad choice'.
+create or replace function public.study_meeting_guess(p_meeting uuid, p_question uuid, p_choice int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  m   public.study_meetings;
+  pos int;
+  n   int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) or m.cancelled_at is not null then
+    raise exception 'meeting not found';
+  end if;
+  pos := array_position(m.guess_ids, p_question);
+  if pos is null then raise exception 'question not found'; end if;
+  if pos <= m.guess_released then raise exception 'released'; end if;
+  select cardinality(q.options) into n from public.study_questions q where q.id = p_question;
+  if p_choice is null or p_choice < 0 or p_choice >= n then raise exception 'bad choice'; end if;
+  insert into public.study_meeting_guess_answers (meeting_id, question_id, user_id, choice)
+  values (p_meeting, p_question, auth.uid(), p_choice)
+  on conflict (meeting_id, question_id, user_id) do update set choice = excluded.choice, answered_at = now();
+end;
+$$;
+
+-- The guesses as the caller may see them: the question, her own guess, and
+-- once released the key, the right option's explanation and a majority
+-- word from 3 guessers (with_most: her option was chosen by more than half;
+-- most_right; spread: no option had more than half). Never a number.
+create or replace function public.study_meeting_guess_state(p_meeting uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  m   public.study_meetings;
+  out jsonb := '[]'::jsonb;
+  i   int;
+  q   public.study_questions;
+  k   public.study_question_keys;
+  mc  smallint;
+  n   int;
+  ok  int;
+  top int;
+  topn int;
+  e   jsonb;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) then raise exception 'meeting not found'; end if;
+  for i in 1 .. cardinality(m.guess_ids) loop
+    select * into q from public.study_questions x where x.id = m.guess_ids[i];
+    continue when not found;
+    select a.choice into mc from public.study_meeting_guess_answers a
+     where a.meeting_id = p_meeting and a.question_id = q.id and a.user_id = auth.uid();
+    e := jsonb_build_object('n', i, 'released', i <= m.guess_released, 'mine', mc,
+           'q', jsonb_build_object('id', q.id, 'kind', q.kind, 'vignette', q.vignette, 'question', q.question, 'teaser', q.teaser,
+                                   'options', to_jsonb(q.options), 'slides', to_jsonb(q.slides), 'part', q.part_idx, 'anchor', q.anchor));
+    if i <= m.guess_released then
+      select * into k from public.study_question_keys x where x.question_id = q.id;
+      select count(*), count(*) filter (where a.choice = k.answer) into n, ok
+        from public.study_meeting_guess_answers a
+       where a.meeting_id = p_meeting and a.question_id = q.id and not study_private.pulse_out(m.group_id, a.user_id);   -- review F-14
+      select a.choice, count(*) into top, topn from public.study_meeting_guess_answers a
+       where a.meeting_id = p_meeting and a.question_id = q.id and not study_private.pulse_out(m.group_id, a.user_id)
+       group by a.choice order by count(*) desc, a.choice limit 1;
+      e := e || jsonb_build_object('answer', k.answer,
+             'explanation', coalesce(k.explanations[k.answer + 1], ''), 'takeaway', coalesce(k.takeaway, ''),
+             'correct', case when mc is null then null else mc = k.answer end,
+             'majority', case when n < 3 then null else jsonb_build_object(
+                           'most_right', ok * 2 > n,
+                           'spread', topn * 2 <= n,
+                           'with_most', mc is not null and topn * 2 > n and mc = top) end);
+    end if;
+    out := out || e;
+  end loop;
+  return out;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  The agenda, the band, and what comes back later
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- The agenda's line 2, the pulse's hot spot: a hook section U fills (the
+-- pattern of section Z's study_quiz__signal: same name, argument and result,
+-- so U's create-or-replace swaps the body on every run). Here it is null, so
+-- this section loads and runs without U.
+create or replace function study_private.meeting__hot_spot(p_meeting uuid)
+returns jsonb language sql stable set search_path = public as $$ select null::jsonb $$;
+revoke all on function study_private.meeting__hot_spot(uuid) from public;
+
+-- The three-line agenda. Line 1: today's reading and reader. Line 2: the
+-- pulse's hot spot (section U's, through the hook above). Line 3: one open question,
+-- preferring one sent "לשאלה פתוחה למחר" at an earlier meeting, then one
+-- older than 24 hours on this or the previous meeting's lecture, then the oldest.
+create or replace function public.study_meeting_agenda(p_meeting uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  m  public.study_meetings;
+  rd jsonb;
+  oq jsonb;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) then raise exception 'meeting not found'; end if;
+  select jsonb_build_object('lecture_id', m.lecture_id, 'lecture_title', l.title,
+           'title', coalesce(nullif(m.title, ''), (select string_agg(s.title, ' · ' order by s.idx) from public.study_sections s
+                                                   where s.lecture_id = m.lecture_id and s.idx between m.part_from and m.part_to)),
+           'part_from', m.part_from, 'part_to', m.part_to,
+           'slide_from', (select s.slide_from from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = m.part_from),
+           'slide_to', (select s.slide_to from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = m.part_to),
+           'reader', (select mb.name from public.study_members mb where mb.group_id = m.group_id and mb.user_id = coalesce(m.reader_id, m.planned_reader)),
+           'reading', m.reading)
+    into rd from public.study_lectures l where l.id = m.lecture_id;
+  select jsonb_build_object('id', c.id, 'body', c.body, 'lecture_id', c.lecture_id, 'lecture_title', l.title,
+           'part', c.part_idx, 'anchor', c.anchor, 'quote', c.quote, 'created_at', c.created_at,
+           'author', (select mb.name from public.study_members mb where mb.group_id = m.group_id and mb.user_id = c.author_id),
+           'from_meeting', exists (select 1 from public.study_meeting_events e join public.study_meetings y on y.id = e.meeting_id
+                                    where e.comment_id = c.id and y.day < m.day))
+    into oq
+    from public.study_comments c
+    join public.study_lectures l on l.id = c.lecture_id and l.group_id = m.group_id and l.deleted_at is null
+   where c.kind = 'question' and c.parent_id is null and not c.resolved
+     and (c.created_at <= m.starts_at - interval '24 hours'
+          or exists (select 1 from public.study_meeting_events e join public.study_meetings y on y.id = e.meeting_id
+                      where e.comment_id = c.id and y.day < m.day))
+   order by exists (select 1 from public.study_meeting_events e join public.study_meetings y on y.id = e.meeting_id
+                     where e.comment_id = c.id and y.day < m.day) desc,
+            (c.lecture_id = m.lecture_id
+             or c.lecture_id in (select y.lecture_id from public.study_meetings y
+                                  where y.group_id = m.group_id and y.day < m.day and y.cancelled_at is null
+                                  order by y.day desc limit 1)) desc,
+            c.created_at
+   limit 1;
+  return jsonb_build_object('reading', rd, 'hot_spot', study_private.meeting__hot_spot(p_meeting), 'open_question', oq);
+end;
+$$;
+
+-- Today's band (or the next meeting within 14 days, when today has none):
+-- what Today, "יחד" and the banner show, in one call.
+create or replace function public.study_meeting_band(p_group uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  d   date := study_private.day_of(now());
+  out jsonb;
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  perform study_private.catchup_marks(p_group);              -- review SEC-12: yesterday's catch-ups join ׳קראו׳
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'id', m.id, 'day', m.day, 'starts_at', m.starts_at, 'version', m.version, 'today', m.day = d,
+           'lecture_id', m.lecture_id, 'lecture_title', l.title,
+           'title', coalesce(nullif(m.title, ''), (select string_agg(s.title, ' · ' order by s.idx) from public.study_sections s
+                                                   where s.lecture_id = m.lecture_id and s.idx between m.part_from and m.part_to)),
+           'part_from', m.part_from, 'part_to', m.part_to,
+           'slide_from', (select s.slide_from from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = m.part_from),
+           'slide_to', (select s.slide_to from public.study_sections s where s.lecture_id = m.lecture_id and s.idx = m.part_to),
+           'planned_reader', m.planned_reader, 'reader_id', m.reader_id, 'reading', m.reading, 'started_at', m.started_at,
+           'over', study_private.meeting_over(m),
+           'guesses', cardinality(m.guess_ids), 'guess_released', m.guess_released,
+           'my_guesses', (select count(*) from public.study_meeting_guess_answers a where a.meeting_id = m.id and a.user_id = auth.uid()),
+           'coffee', (select jsonb_build_object('id', z.id, 'state', z.state) from public.study_quizzes z
+                       where z.meeting_id = m.id and z.preset = 'coffee' and z.state <> 'cancelled' order by z.created_at desc limit 1),
+           'closing', (select jsonb_build_object('id', z.id, 'state', z.state) from public.study_quizzes z
+                        where z.meeting_id = m.id and z.preset = 'end' and z.state <> 'cancelled' order by z.created_at desc limit 1))
+           order by m.starts_at), '[]'::jsonb)
+    into out
+    from public.study_meetings m
+    join public.study_lectures l on l.id = m.lecture_id and l.deleted_at is null
+   where m.group_id = p_group and m.cancelled_at is null
+     and (m.day = d or (m.day > d and m.day = (select min(y.day) from public.study_meetings y
+                                                where y.group_id = p_group and y.cancelled_at is null and y.day > d
+                                                  and y.day <= d + 14)
+                        and not exists (select 1 from public.study_meetings y2
+                                         where y2.group_id = p_group and y2.cancelled_at is null and y2.day = d)));
+  return out;
+end;
+$$;
+
+-- M7: the caller's own "לא ברור" paragraphs from earlier study days (14
+-- days), not yet seen again: whether the reader stopped there, and the
+-- paragraph's thread ('answered': its question is resolved or has a reply
+-- after the tap; 'open'; 'none').
+create or replace function public.study_my_unclear(p_group uuid)
+returns table (tap_id uuid, meeting_id uuid, lecture_id uuid, lecture_title text, part_idx int, anchor int, quote text,
+               tapped_at timestamptz, explained boolean, thread text, comment_id uuid)
+language sql stable security definer set search_path = public as $$
+  select t.id, t.meeting_id, t.lecture_id, l.title, t.part_idx, t.anchor, t.quote, t.created_at,
+         exists (select 1 from public.study_meeting_events e
+                  where e.meeting_id = t.meeting_id and e.kind = 'explain' and e.part_idx = t.part_idx and e.anchor = t.anchor),
+         case when c.id is null then 'none'
+              when c.resolved or exists (select 1 from public.study_comments r where r.parent_id = c.id and r.created_at > t.created_at)
+                then 'answered'
+              else 'open' end,
+         c.id
+    from public.study_meeting_taps t
+    join public.study_lectures l on l.id = t.lecture_id and l.deleted_at is null and l.group_id = p_group
+    left join lateral (select c2.* from public.study_comments c2
+                        where c2.lecture_id = t.lecture_id and c2.part_idx = t.part_idx and c2.anchor = t.anchor
+                          and c2.kind = 'question' and c2.parent_id is null
+                        order by c2.created_at desc limit 1) c on true
+   where t.user_id = auth.uid() and t.done_at is null
+     and study_private.day_of(t.created_at) < study_private.day_of(now())
+     and t.created_at > now() - interval '14 days'
+     and public.study_is_member(p_group)
+   order by t.created_at;
+$$;
+
+create or replace function public.study_unclear_done(p_tap uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_meeting_taps t set done_at = coalesce(t.done_at, now()) where t.id = p_tap and t.user_id = auth.uid();
+  if not found then raise exception 'not found'; end if;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Catch-up (T3)
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Meetings of the last 7 days that are over and happened, where the caller
+-- was not there (no presence, tap, guess or quiz seat) and has not caught up.
+create or replace function public.study_my_missed(p_group uuid)
+returns table (meeting_id uuid, lecture_id uuid, lecture_title text, title text, day date)
+language sql stable security definer set search_path = public as $$
+  select m.id, m.lecture_id, l.title,
+         coalesce(nullif(m.title, ''), (select string_agg(s.title, ' · ' order by s.idx) from public.study_sections s
+                                         where s.lecture_id = m.lecture_id and s.idx between m.part_from and m.part_to)),
+         m.day
+    from public.study_meetings m
+    join public.study_lectures l on l.id = m.lecture_id and l.deleted_at is null
+   where m.group_id = p_group and public.study_is_member(p_group)
+     and m.cancelled_at is null and m.started_at is not null and study_private.meeting_over(m)
+     and m.day > study_private.day_of(now()) - 7
+     and not exists (select 1 from public.study_meeting_presence x where x.meeting_id = m.id and x.user_id = auth.uid())
+     and not exists (select 1 from public.study_meeting_taps x where x.meeting_id = m.id and x.user_id = auth.uid())
+     and not exists (select 1 from public.study_meeting_guess_answers x where x.meeting_id = m.id and x.user_id = auth.uid())
+     and not exists (select 1 from public.study_meeting_catchups x where x.meeting_id = m.id and x.user_id = auth.uid())
+     and not exists (select 1 from public.study_quizzes z join public.study_quiz_players p on p.quiz_id = z.id
+                      where z.meeting_id = m.id and p.user_id = auth.uid())
+   order by m.day desc, m.starts_at desc;
+$$;
+
+-- The catch-up pack: only what the group made in that meeting. Error:
+-- 'meeting not found', 'not over'.
+create or replace function public.study_meeting_catchup(p_meeting uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  m     public.study_meetings;
+  t0    timestamptz;
+  t1    timestamptz;
+  upto  int;
+  stops jsonb;
+  res   jsonb;
+  pins  jsonb;
+  qs    uuid[];
+  more  uuid[];
+  rd    text[];
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) or m.cancelled_at is not null then
+    raise exception 'meeting not found';
+  end if;
+  if not study_private.meeting_over(m) then raise exception 'not over'; end if;
+  t0 := coalesce(m.started_at, m.starts_at);
+  t1 := t0 + interval '4 hours';
+  upto := greatest(m.part_from, coalesce(m.read_part, m.part_to));
+  select coalesce(jsonb_agg(jsonb_build_object('part', e.part_idx, 'anchor', e.anchor, 'quote', e.quote) order by e.part_idx, e.anchor), '[]'::jsonb)
+    into stops from public.study_meeting_events e where e.meeting_id = p_meeting and e.kind = 'explain';
+  select coalesce(jsonb_agg(x.j order by x.at), '[]'::jsonb) into res
+    from (select c.created_at as at, jsonb_build_object('id', c.id, 'question', c.body, 'part', c.part_idx, 'anchor', c.anchor,
+                   'answer', r.body, 'answer_by', (select mb.name from public.study_members mb where mb.group_id = m.group_id and mb.user_id = r.author_id)) as j
+            from public.study_comments c
+            join lateral (select r2.* from public.study_comments r2 where r2.parent_id = c.id and r2.created_at between t0 and t1
+                           order by r2.created_at desc limit 1) r on true
+           where c.lecture_id = m.lecture_id and c.kind = 'question' and c.parent_id is null and c.resolved
+           limit 3) x;
+  pins := '[]'::jsonb;
+  if to_regclass('public.study_aids') is not null then      -- review F-13: the wall's moments (section J)
+    execute 'select coalesce(jsonb_agg(x.j order by x.at), ''[]''::jsonb)
+               from (select a.created_at as at, jsonb_build_object(''id'', a.id, ''body'', a.body, ''fact'', a.fact,
+                              ''part'', a.part_idx, ''anchor'', a.anchor,
+                              ''by'', (select mb.name from public.study_members mb where mb.group_id = $2 and mb.user_id = a.named_by)) as j
+                       from public.study_aids a
+                      where a.lecture_id = $1 and a.kind = ''moment'' and a.flag is distinct from ''not_ok''
+                        and a.created_at between $3 and $4
+                      order by a.created_at limit 2) x'
+      into pins using m.lecture_id, m.group_id, t0, t1;
+  end if;
+  -- the questions the group found hardest in this meeting's quizzes (rounds
+  -- of 3 answers or more, counts the group already saw), then questions on
+  -- the paragraphs where the reading stopped, then the parts read
+  select coalesce(array_agg(x.qid), '{}') into qs
+    from (select r.question_id as qid
+            from public.study_quizzes z
+            join public.study_quiz_rounds r on r.quiz_id = z.id and r.revealed_at is not null and r.voided_at is null
+            join public.study_questions q on q.id = r.question_id and q.retired_at is null and q.stale_at is null
+                                          and q.hidden_at is null and q.has_key
+           where z.meeting_id = p_meeting
+             and (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = r.vote) >= 3
+           group by r.question_id
+           order by min((select count(*) filter (where a.correct)::numeric / nullif(count(*), 0)
+                           from public.study_quiz_answers a where a.round_id = r.id and a.vote = r.vote))
+           limit 5) x;
+  select coalesce(array_agg(x.id), '{}') into more
+    from (select q.id from public.study_questions q
+           where q.lecture_id = m.lecture_id and q.part_idx between m.part_from and upto
+             and q.retired_at is null and q.stale_at is null and q.hidden_at is null and q.has_key and not (q.id = any (qs))
+           order by exists (select 1 from public.study_meeting_events e
+                             where e.meeting_id = p_meeting and e.kind = 'explain' and e.part_idx = q.part_idx and e.anchor = q.anchor) desc,
+                    q.part_idx, coalesce(q.anchor, 0), q.created_at
+           limit greatest(0, 5 - cardinality(qs))) x;
+  qs := qs || more;
+  select coalesce(array_agg(mb.name order by mb.name), '{}') into rd               -- review SEC-12: by name, never by time
+    from public.study_reads r join public.study_members mb on mb.group_id = m.group_id and mb.user_id = r.user_id
+   where r.lecture_id = m.lecture_id;
+  return jsonb_build_object(
+    'meeting', jsonb_build_object('id', m.id, 'lecture_id', m.lecture_id, 'day', m.day, 'part_from', m.part_from, 'part_to', upto,
+                                  'lecture_title', (select l.title from public.study_lectures l where l.id = m.lecture_id),
+                                  'title', coalesce(nullif(m.title, ''), (select string_agg(s.title, ' · ' order by s.idx) from public.study_sections s
+                                                                         where s.lecture_id = m.lecture_id and s.idx between m.part_from and upto))),
+    'stops', stops, 'resolved', res, 'pins', pins, 'questions', to_jsonb(qs), 'readers', to_jsonb(rd),
+    'minutes', 2 + jsonb_array_length(stops) + jsonb_array_length(res) + ceil(jsonb_array_length(pins) * 0.5)::int + ceil(cardinality(qs) * 1.5)::int,
+    'done', exists (select 1 from public.study_meeting_catchups c where c.meeting_id = p_meeting and c.user_id = auth.uid()));
+end;
+$$;
+
+-- Finishing the catch-up. The lecture is marked read for the caller on the
+-- next study day, with the meeting's time (study_private.catchup_marks,
+-- review SEC-12): who-read-what shows names only, no time, no "באיחור", and
+-- no mark arrives live hours after the meeting.
+create or replace function public.study_meeting_catchup_done(p_meeting uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare m public.study_meetings;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into m from public.study_meetings x where x.id = p_meeting;
+  if not found or not coalesce(public.study_is_member(m.group_id), false) or m.cancelled_at is not null then
+    raise exception 'meeting not found';
+  end if;
+  insert into public.study_meeting_catchups (meeting_id, user_id) values (p_meeting, auth.uid())
+  on conflict (meeting_id, user_id) do nothing;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security and privileges
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_meetings              enable row level security;
+alter table public.study_meeting_live          enable row level security;
+alter table public.study_meeting_taps          enable row level security;
+alter table public.study_meeting_events        enable row level security;
+alter table public.study_meeting_presence      enable row level security;
+alter table public.study_meeting_guess_answers enable row level security;
+alter table public.study_meeting_catchups      enable row level security;
+
+drop policy if exists "study meetings read"        on public.study_meetings;
+drop policy if exists "study meeting events read"  on public.study_meeting_events;
+drop policy if exists "study meeting taps own"     on public.study_meeting_taps;
+drop policy if exists "study meeting presence own" on public.study_meeting_presence;
+drop policy if exists "study meeting guesses own"  on public.study_meeting_guess_answers;
+drop policy if exists "study meeting catchups own" on public.study_meeting_catchups;
+create policy "study meetings read" on public.study_meetings
+  for select using (public.study_is_member(group_id));
+create policy "study meeting events read" on public.study_meeting_events
+  for select using (public.study_is_member(public.study_meeting_group(meeting_id)));
+create policy "study meeting taps own" on public.study_meeting_taps
+  for select using (user_id = auth.uid());
+create policy "study meeting presence own" on public.study_meeting_presence
+  for select using (user_id = auth.uid());
+create policy "study meeting guesses own" on public.study_meeting_guess_answers
+  for select using (user_id = auth.uid());
+create policy "study meeting catchups own" on public.study_meeting_catchups
+  for select using (user_id = auth.uid());
+-- study_meeting_live: no policy on purpose.
+
+revoke all on public.study_meetings, public.study_meeting_live, public.study_meeting_taps, public.study_meeting_events,
+  public.study_meeting_presence, public.study_meeting_guess_answers, public.study_meeting_catchups from anon, authenticated;
+grant select on public.study_meetings, public.study_meeting_events, public.study_meeting_taps, public.study_meeting_presence,
+  public.study_meeting_guess_answers, public.study_meeting_catchups to authenticated;
+
+revoke all on function study_private.meeting_over(public.study_meetings) from public;
+revoke all on function public.study_meeting_group(uuid), public.study_meeting_save(uuid, int, uuid, timestamptz, uuid, int, int, text, uuid),
+  public.study_meeting_cancel(uuid), public.study_meeting_reading(uuid, boolean, int, int), public.study_meeting_place(uuid, int, int),
+  public.study_meeting_here(uuid), public.study_meeting_unclear(uuid, int, int, text, boolean), public.study_meeting_reader_view(uuid),
+  public.study_meeting_stop(uuid, text, int, int, text, uuid), public.study_meeting_quiz(uuid, text, text, int, int),
+  public.study_meeting_guess_pick(uuid), public.study_meeting_guess(uuid, uuid, int), public.study_meeting_guess_state(uuid),
+  public.study_meeting_agenda(uuid), public.study_meeting_band(uuid), public.study_my_unclear(uuid), public.study_unclear_done(uuid),
+  public.study_my_missed(uuid), public.study_meeting_catchup(uuid), public.study_meeting_catchup_done(uuid)
+  from public, anon;
+grant execute on function public.study_meeting_group(uuid), public.study_meeting_save(uuid, int, uuid, timestamptz, uuid, int, int, text, uuid),
+  public.study_meeting_cancel(uuid), public.study_meeting_reading(uuid, boolean, int, int), public.study_meeting_place(uuid, int, int),
+  public.study_meeting_here(uuid), public.study_meeting_unclear(uuid, int, int, text, boolean), public.study_meeting_reader_view(uuid),
+  public.study_meeting_stop(uuid, text, int, int, text, uuid), public.study_meeting_quiz(uuid, text, text, int, int),
+  public.study_meeting_guess_pick(uuid), public.study_meeting_guess(uuid, uuid, int), public.study_meeting_guess_state(uuid),
+  public.study_meeting_agenda(uuid), public.study_meeting_band(uuid), public.study_my_unclear(uuid), public.study_unclear_done(uuid),
+  public.study_my_missed(uuid), public.study_meeting_catchup(uuid), public.study_meeting_catchup_done(uuid)
+  to authenticated;
+
+-- ── Realtime: the meeting row only (the band, the reader, the guesses'
+--  release). Never taps, guesses, presence or the reader's place.
+do $$
+begin
+  execute 'alter publication supabase_realtime add table public.study_meetings';
+exception when duplicate_object then
+  null;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('M', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION M ════
+
+-- ════ BEGIN SECTION N · the paragraph anchor (package N) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION N · THE PARAGRAPH ANCHOR   (package N; spec §12.4.N)
+--  After sections Q and C. Section C's end (cards' own anchors, trap cards
+--  that open later, a card marked by a correction), section M's taps and
+--  section J's wall are read when they exist (review F-10, F-13), so this
+--  section loads and runs on release 1's and release 2's database as well
+--  as after them. Re-runnable, and safe on production's data: it adds
+--  functions only.
+--
+--  A1  the paragraph of a question and of a card: its own anchor; else, for
+--      a question, the first point to know it covers (practice 2.0's
+--      study_points); else the first point of its part that shares a slide
+--      with it. A card has its own anchor only with section C's end; until
+--      then the points place it.
+--  A2  the chip row under each paragraph: how many questions, cards,
+--      comments and wall entries sit on it (the group's), and two chips
+--      only the caller sees: "טעית כאן" (her wrong answers on its questions
+--      that are still wrong now) and her "לא ברור" from a meeting.
+--  A4  the paragraph sheet's "תרגול" tab: its questions and cards, each
+--      with the caller's own state, and the questions for "לתרגל את הפסקה".
+--  Both are computed for the caller only; nothing private leaves her.
+--  Hidden questions and trap cards that have not opened are not counted or
+--  listed in the chips (review F-6, SEC-6); the tab lists a hidden question
+--  marked, never as practice.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- The caller's own "לא ברור" paragraphs of the last 14 days not yet seen
+-- again (section M's taps), and the wall's visible entries per paragraph
+-- (section J): read only when those sections exist, so section N loads
+-- and runs without them (review F-10, F-13).
+create or replace function study_private.my_unclear_spots(p_lecture uuid)
+returns table (part_idx int, anchor int) language plpgsql stable security definer set search_path = public as $$
+begin
+  if to_regclass('public.study_meeting_taps') is null then return; end if;
+  return query execute
+    'select t.part_idx, t.anchor from public.study_meeting_taps t
+      where t.user_id = auth.uid() and t.lecture_id = $1 and t.done_at is null and t.created_at > now() - interval ''14 days''
+      group by 1, 2' using p_lecture;
+end;
+$$;
+create or replace function study_private.aid_spots(p_lecture uuid)
+returns table (part_idx int, anchor int, n int) language plpgsql stable security definer set search_path = public as $$
+begin
+  if to_regclass('public.study_aids') is null then return; end if;
+  return query execute
+    'select a.part_idx, a.anchor, count(*)::int from public.study_aids a
+      where a.lecture_id = $1 and a.kind <> ''draft'' and a.flag is distinct from ''not_ok''
+      group by 1, 2' using p_lecture;
+end;
+$$;
+
+-- A1. The lecture's live questions (not retired, with a key) and the
+-- paragraph each sits on (null: none found). Hidden ones are included;
+-- the callers decide.
+create or replace function study_private.question_spots(p_lecture uuid)
+returns table (id uuid, part_idx int, anchor int, hidden boolean)
+language sql stable security definer set search_path = public as $$
+  select q.id, q.part_idx,
+         coalesce(q.anchor,
+                  (select p.anchor from public.study_points p
+                    where p.lecture_id = q.lecture_id and p.part_idx = q.part_idx and p.anchor is not null and p.id = any (q.points)
+                    order by p.n limit 1),
+                  (select p.anchor from public.study_points p
+                    where p.lecture_id = q.lecture_id and p.part_idx = q.part_idx and p.anchor is not null and p.slides && q.slides
+                    order by p.n limit 1)),
+         q.hidden_at is not null
+    from public.study_questions q
+   where q.lecture_id = p_lecture and q.part_idx is not null and q.retired_at is null and q.has_key;
+$$;
+
+-- A1. The lecture's cards that everyone may see (not deleted; a trap card
+-- only once it opens: review SEC-6) and the paragraph each sits on. The
+-- columns of section C's end are read only when they exist.
+create or replace function study_private.card_spots(p_lecture uuid)
+returns table (id uuid, part_idx int, anchor int, stale boolean)
+language plpgsql stable security definer set search_path = public as $$
+declare
+  has_col constant text := 'select exists (select 1 from pg_attribute where attrelid = ''public.study_cards''::regclass and attname = $1 and not attisdropped)';
+  a boolean;
+  o boolean;
+  s boolean;
+begin
+  execute has_col into a using 'anchor';
+  execute has_col into o using 'opens_at';
+  execute has_col into s using 'stale_at';
+  return query execute format(
+    'select c.id, c.part_idx,
+            coalesce(%s, (select p.anchor from public.study_points p
+                           where p.lecture_id = c.lecture_id and p.part_idx = c.part_idx and p.anchor is not null and p.slides && c.slides
+                           order by p.n limit 1)),
+            %s
+       from public.study_cards c
+      where c.lecture_id = $1 and c.part_idx is not null and c.deleted_at is null%s',
+    case when a then 'c.anchor' else 'null::int' end,
+    case when s then '(c.stale_at is not null)' else 'false' end,
+    case when o then ' and (c.opens_at is null or c.opens_at <= now())' else '' end)
+  using p_lecture;
+end;
+$$;
+revoke all on function study_private.my_unclear_spots(uuid), study_private.aid_spots(uuid),
+  study_private.question_spots(uuid), study_private.card_spots(uuid) from public;
+
+-- Whether the caller may read a lecture's paragraphs: a member of its
+-- group, and the lecture not deleted.
+create or replace function study_private.anchor_ok(p_lecture uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null
+     and coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false)
+     and not exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null);
+$$;
+revoke all on function study_private.anchor_ok(uuid) from public;
+
+-- A2. The chip row. my_wrong: her wrong answers on the paragraph's
+-- questions whose latest answer is wrong.
+drop function if exists public.study_paragraph_chips(uuid);   -- its result changed: 'aids' (the wall's) replaces 'mnemonics'
+create or replace function public.study_paragraph_chips(p_lecture uuid)
+returns table (part_idx int, anchor int, questions int, cards int, comments int, aids int, my_wrong int, my_unclear boolean)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if not study_private.anchor_ok(p_lecture) then return; end if;
+  return query
+  with qs as (select * from study_private.question_spots(p_lecture) x where x.anchor is not null),
+  q as (select x.part_idx, x.anchor, count(*)::int as n from qs x where not x.hidden group by 1, 2),   -- review F-6
+  c as (
+    select x.part_idx, x.anchor, count(*)::int as n from study_private.card_spots(p_lecture) x
+     where x.anchor is not null group by 1, 2
+  ),
+  cm as (
+    select x.part_idx, x.anchor, count(*)::int as n
+      from public.study_comments x
+     where x.lecture_id = p_lecture and x.parent_id is null and x.kind in ('comment', 'question', 'answer')
+     group by 1, 2
+  ),
+  ai as (select s.part_idx, s.anchor, s.n from study_private.aid_spots(p_lecture) s),
+  mine as (
+    select a.question_id, a.correct,
+           row_number() over (partition by a.question_id order by a.answered_at desc) as k
+      from public.study_answers a join qs on qs.id = a.question_id
+     where a.user_id = auth.uid()
+  ),
+  mw as (
+    select qs.part_idx, qs.anchor, count(*)::int as n
+      from mine m join qs on qs.id = m.question_id
+     where not m.correct
+       and exists (select 1 from mine l where l.question_id = m.question_id and l.k = 1 and not l.correct)
+     group by 1, 2
+  ),
+  mu as (select s.part_idx, s.anchor from study_private.my_unclear_spots(p_lecture) s),
+  k as (
+    select x.part_idx, x.anchor from q x union select x.part_idx, x.anchor from c x union select x.part_idx, x.anchor from cm x
+    union select x.part_idx, x.anchor from ai x union select x.part_idx, x.anchor from mw x union select x.part_idx, x.anchor from mu x
+  )
+  select k.part_idx, k.anchor, coalesce(q.n, 0), coalesce(c.n, 0), coalesce(cm.n, 0), coalesce(ai.n, 0),
+         coalesce(mw.n, 0), mu.part_idx is not null
+    from k
+    left join q on q.part_idx = k.part_idx and q.anchor = k.anchor
+    left join c on c.part_idx = k.part_idx and c.anchor = k.anchor
+    left join cm on cm.part_idx = k.part_idx and cm.anchor = k.anchor
+    left join ai on ai.part_idx = k.part_idx and ai.anchor = k.anchor
+    left join mw on mw.part_idx = k.part_idx and mw.anchor = k.anchor
+    left join mu on mu.part_idx = k.part_idx and mu.anchor = k.anchor
+   order by k.part_idx, k.anchor;
+end;
+$$;
+
+-- A4. The "תרגול" tab of one paragraph. Error: 'lecture not found'.
+-- questions: each with the caller's own answers (how many, how many wrong,
+-- whether the last was right); a hidden one says so (review F-6: "הוסתרה
+-- עד בדיקה", never practised). cards: each with whether it is in her deck
+-- (a state she has not hidden) and her lapses.
+create or replace function public.study_paragraph_practice(p_lecture uuid, p_part int, p_anchor int)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  qs jsonb;
+  cs jsonb;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not study_private.anchor_ok(p_lecture) then raise exception 'lecture not found'; end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'id', q.id, 'kind', q.kind, 'style', q.style, 'question', q.question, 'teaser', q.teaser,
+           'stale', q.stale_at is not null, 'hidden', q.hidden_at is not null,
+           'answered', (select count(*) from public.study_answers a where a.user_id = auth.uid() and a.question_id = q.id),
+           'wrong', (select count(*) from public.study_answers a where a.user_id = auth.uid() and a.question_id = q.id and not a.correct),
+           'last_correct', (select a.correct from public.study_answers a where a.user_id = auth.uid() and a.question_id = q.id
+                             order by a.answered_at desc limit 1))
+           order by q.hidden_at is not null, q.created_at, q.id), '[]'::jsonb)
+    into qs
+    from study_private.question_spots(p_lecture) s
+    join public.study_questions q on q.id = s.id
+   where s.part_idx = p_part and s.anchor = p_anchor;
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'id', c.id, 'kind', c.kind, 'front', c.front, 'source', c.source, 'stale', s.stale,
+           'in_deck', exists (select 1 from public.study_card_states t where t.user_id = auth.uid() and t.card_id = c.id and not t.suspended),
+           'lapses', coalesce((select t.lapses from public.study_card_states t where t.user_id = auth.uid() and t.card_id = c.id), 0))
+           order by c.created_at, c.id), '[]'::jsonb)
+    into cs
+    from study_private.card_spots(p_lecture) s
+    join public.study_cards c on c.id = s.id
+   where s.part_idx = p_part and s.anchor = p_anchor;
+  return jsonb_build_object('questions', qs, 'cards', cs);
+end;
+$$;
+
+revoke all on function public.study_paragraph_chips(uuid), public.study_paragraph_practice(uuid, int, int) from public, anon;
+grant execute on function public.study_paragraph_chips(uuid), public.study_paragraph_practice(uuid, int, int) to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('N', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION N ════
+
+-- ════ BEGIN SECTION V · disputes, VAR, the log, the spread (package V) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION V · DISPUTES, VAR, THE LECTURE'S LOG, THE SPREAD   (package V;
+--  meeting addendum §6; spec §12.4.V). After sections Q, C and K, with their
+--  ends (Q 2, C 2, K 2: the marks' columns, section C's trap card maker,
+--  the proposals). Re-runnable, and safe on study/wave3's data: it adds
+--  tables, functions and one trigger on study_edits; the trigger only
+--  marks questions and cards for corrections approved from now on.
+--  Nothing the app does without VITE_STUDY_VAR reaches these tables, but
+--  the spread runs for every correction once this section is loaded.
+--
+--  R3  "כרטיס צהוב": two claims about one paragraph, each one line with
+--      its slides; the others back a side anonymously (private rows; the
+--      counts by side are shown from 3 backers, never names).
+--  R4  "VAR": op 'var' of /api/study/ai (server key) stores Claude's
+--      verdict, which separates what the slides say from interpretation;
+--      the group accepts it ("לקבל": a "פסיקת VAR" box on the paragraph and
+--      a trap card for everyone) or overrides it ("בהרצאה נאמר אחרת").
+--  R5  "יומן התיקונים": a lecture's corrections (source, approver, undo),
+--      verdicts, and "כרטיס צהוב לשקף" entries for the deck's own slips.
+--  R2  the spread: every applied correction marks the questions and cards
+--      on its paragraph (they leave practice and review until "עדיין נכון"
+--      or a fix), and gives one private "עדכון" row to each member who had
+--      already reviewed those cards or answered those questions. An undo
+--      takes back its marks and the updates nobody saw.
+-- ════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.study_disputes (
+  id            uuid        primary key default gen_random_uuid(),
+  lecture_id    uuid        not null,
+  part_idx      int         not null,
+  anchor        int         not null check (anchor between 0 and 9999),
+  quote         text        not null default '' check (char_length(quote) <= 200),
+  proposal_id   uuid        references public.study_edit_proposals (id) on delete set null,
+  claim_a       text        not null check (char_length(btrim(claim_a)) between 5 and 240),
+  slides_a      int[]       not null check (cardinality(slides_a) between 1 and 4),
+  author_a      uuid        default auth.uid() references auth.users (id) on delete set null,
+  claim_b       text        check (char_length(btrim(claim_b)) between 5 and 240),
+  slides_b      int[]       not null default '{}' check (cardinality(slides_b) <= 4),
+  author_b      uuid        references auth.users (id) on delete set null,
+  state         text        not null default 'open' check (state in ('open', 'judged', 'accepted', 'overridden', 'closed')),
+  verdict       jsonb,
+  verdict_model text        check (char_length(verdict_model) <= 80),
+  judged_at     timestamptz,
+  decided_by    uuid        references auth.users (id) on delete set null,
+  decided_at    timestamptz,
+  decision_note text        not null default '' check (char_length(decision_note) <= 200),
+  trap_card     uuid,
+  judging_until timestamptz,                                -- op 'var' holds the dispute (review SEC-15)
+  var_asked_at  timestamptz,                                -- VAR asked: backing closes (review SEC-10)
+  version       int         not null default 1 check (version >= 1),
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  foreign key (lecture_id, part_idx) references public.study_sections (lecture_id, idx) on delete cascade
+);
+alter table public.study_disputes drop column if exists backs_n;              -- review SEC-10: not published
+alter table public.study_disputes add column if not exists judging_until timestamptz;
+alter table public.study_disputes add column if not exists var_asked_at timestamptz;
+create unique index if not exists study_disputes_open on public.study_disputes (lecture_id, part_idx, anchor)
+  where state in ('open', 'judged');
+create index if not exists study_disputes_lecture on public.study_disputes (lecture_id, created_at desc);
+
+-- Backing a side: private (the owner reads her own; written by a function).
+create table if not exists public.study_dispute_backs (
+  dispute_id uuid        not null references public.study_disputes (id) on delete cascade,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  side       text        not null check (side in ('a', 'b')),
+  created_at timestamptz not null default now(),
+  primary key (dispute_id, user_id)
+);
+
+-- "כרטיס צהוב לשקף": a slip in the deck itself (shared, published).
+create table if not exists public.study_slide_flags (
+  id         uuid        primary key default gen_random_uuid(),
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  slides     int[]       not null check (cardinality(slides) between 1 and 4),
+  note       text        not null check (char_length(btrim(note)) between 5 and 300),
+  created_by uuid        default auth.uid() references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  removed_at timestamptz,
+  removed_by uuid        references auth.users (id) on delete set null
+);
+create index if not exists study_slide_flags_lecture on public.study_slide_flags (lecture_id, created_at desc);
+
+-- "עדכון": a correction reached someone who had studied the old line (private).
+create table if not exists public.study_updates (
+  id         uuid        primary key default gen_random_uuid(),
+  user_id    uuid        not null references auth.users (id) on delete cascade,
+  edit_id    uuid        not null references public.study_edits (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null,
+  anchor     int         not null,
+  reason     text        not null check (reason in ('card', 'question')),
+  reason_at  timestamptz not null,
+  created_at timestamptz not null default now(),
+  seen_at    timestamptz,
+  unique (user_id, edit_id)
+);
+create index if not exists study_updates_mine on public.study_updates (user_id, seen_at, created_at desc);
+
+create or replace function public.study_dispute_group(p_dispute uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select public.study_lecture_group(lecture_id) from public.study_disputes where id = p_dispute;
+$$;
+
+-- The slides of a lecture, as numbers.
+create or replace function study_private.lecture_slides(p_lecture uuid)
+returns int[] language sql stable security definer set search_path = public as $$
+  select coalesce(array_agg((sl ->> 'n')::int), '{}') from public.study_lectures l, jsonb_array_elements(l.slides) sl where l.id = p_lecture
+$$;
+
+-- A verdict as op 'var' stores it (checked again here: the database trusts no one on its shape).
+--   { certainty: 'slide' | 'interpretation' | 'unclear', summary (≤ 300),
+--     on_slides: [{text (≤ 300), slides [n]}] (≤ 4), interpretation: [{text, slides}] (≤ 3),
+--     listen: boolean, trap: {front (≤ 400), back (≤ 300), slides [n]} | null }
+-- A verdict's slide list: an array of at most p_max whole numbers, each a
+-- slide of the lecture.
+create or replace function study_private.verdict_slides_ok(a jsonb, p_slides int[], p_max int)
+returns boolean language sql immutable set search_path = public as $$
+  select coalesce(jsonb_typeof(a), '') = 'array' and jsonb_array_length(a) <= p_max
+     and not exists (select 1 from jsonb_array_elements(a) x
+                      where jsonb_typeof(x) <> 'number' or (x #>> '{}') !~ '^[0-9]{1,4}$' or not ((x #>> '{}')::int = any (p_slides)))
+$$;
+
+create or replace function study_private.verdict_ok(v jsonb, p_slides int[])
+returns boolean language plpgsql stable set search_path = public as $$
+declare
+  e jsonb;
+  k text;
+begin
+  -- Every test reads coalesce(jsonb_typeof(…), ''): a missing key is null,
+  -- and "null <> 'string'" would let it through.
+  if v is null or jsonb_typeof(v) <> 'object' then return false; end if;
+  if coalesce(v ->> 'certainty', '') not in ('slide', 'interpretation', 'unclear') then return false; end if;
+  if coalesce(jsonb_typeof(v -> 'summary'), '') <> 'string' or char_length(v ->> 'summary') not between 5 and 300 then return false; end if;
+  if coalesce(jsonb_typeof(v -> 'listen'), '') <> 'boolean' then return false; end if;
+  foreach k in array array['on_slides', 'interpretation'] loop
+    if coalesce(jsonb_typeof(v -> k), '') <> 'array' or jsonb_array_length(v -> k) > (case when k = 'on_slides' then 4 else 3 end) then return false; end if;
+    for e in select x from jsonb_array_elements(v -> k) x loop
+      if coalesce(jsonb_typeof(e -> 'text'), '') <> 'string' or char_length(e ->> 'text') not between 3 and 300 then return false; end if;
+      if not study_private.verdict_slides_ok(e -> 'slides', p_slides, 6) then return false; end if;
+    end loop;
+  end loop;
+  if coalesce(jsonb_typeof(v -> 'trap'), 'null') = 'object' then
+    if coalesce(jsonb_typeof(v -> 'trap' -> 'front'), '') <> 'string' or char_length(v -> 'trap' ->> 'front') not between 5 and 400
+       or coalesce(jsonb_typeof(v -> 'trap' -> 'back'), '') <> 'string' or char_length(v -> 'trap' ->> 'back') not between 1 and 300
+       or not study_private.verdict_slides_ok(v -> 'trap' -> 'slides', p_slides, 6) then
+      return false;
+    end if;
+  elsif coalesce(jsonb_typeof(v -> 'trap'), 'null') <> 'null' then
+    return false;
+  end if;
+  return true;
+end;
+$$;
+revoke all on function study_private.lecture_slides(uuid), study_private.verdict_ok(jsonb, int[]),
+  study_private.verdict_slides_ok(jsonb, int[], int) from public;
+
+-- "לא מסכימים: כרטיס צהוב" (from a pending correction, which waits) or from
+-- a paragraph. The opener's claim is side a. Errors: 'forbidden',
+-- 'bad claim', 'bad source', 'part not found', 'dispute open'.
+create or replace function public.study_dispute_open(p_lecture uuid, p_part int, p_anchor int, p_quote text, p_claim text,
+  p_slides int[], p_proposal uuid default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare v_id uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then raise exception 'forbidden'; end if;
+  if char_length(btrim(coalesce(p_claim, ''))) not between 5 and 240 then raise exception 'bad claim'; end if;
+  if cardinality(coalesce(p_slides, '{}')) not between 1 and 4 or not (p_slides <@ study_private.lecture_slides(p_lecture)) then
+    raise exception 'bad source';
+  end if;
+  if p_anchor is null or p_anchor not between 0 and 9999
+     or not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.idx = p_part) then
+    raise exception 'part not found';
+  end if;
+  if exists (select 1 from public.study_disputes d where d.lecture_id = p_lecture and d.part_idx = p_part and d.anchor = p_anchor
+                                                     and d.state in ('open', 'judged')) then
+    raise exception 'dispute open';
+  end if;
+  if p_proposal is not null then
+    update public.study_edit_proposals x set state = 'disputed', updated_at = now()
+     where x.id = p_proposal and x.lecture_id = p_lecture and x.part_idx = p_part and x.anchor = p_anchor and x.state = 'pending';
+    if not found then raise exception 'not pending'; end if;
+  end if;
+  insert into public.study_disputes (lecture_id, part_idx, anchor, quote, proposal_id, claim_a, slides_a, author_a)
+  values (p_lecture, p_part, p_anchor, left(coalesce(p_quote, ''), 200), p_proposal, btrim(p_claim), p_slides, auth.uid())
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- The other side's line (any member but side a's author, once), or an
+-- author's own line again until a verdict (after a refused VAR a side may
+-- put it another way). Errors: 'dispute not found', 'sides taken', 'bad
+-- claim', 'bad source', 'not open', 'busy' (op 'var' is reading them).
+create or replace function public.study_dispute_claim(p_dispute uuid, p_claim text, p_slides int[])
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare d public.study_disputes;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_disputes x where x.id = p_dispute for update;
+  if not found or not coalesce(public.study_is_member(public.study_lecture_group(d.lecture_id)), false) then
+    raise exception 'dispute not found';
+  end if;
+  if d.state <> 'open' then raise exception 'not open'; end if;
+  if d.judging_until > now() then raise exception 'busy'; end if;      -- op 'var' is reading both claims
+  if char_length(btrim(coalesce(p_claim, ''))) not between 5 and 240 then raise exception 'bad claim'; end if;
+  if cardinality(coalesce(p_slides, '{}')) not between 1 and 4 or not (p_slides <@ study_private.lecture_slides(d.lecture_id)) then
+    raise exception 'bad source';
+  end if;
+  if d.author_a = auth.uid() then
+    update public.study_disputes x set claim_a = btrim(p_claim), slides_a = p_slides, version = x.version + 1, updated_at = now() where x.id = p_dispute;
+  elsif d.author_b is null or d.author_b = auth.uid() then
+    delete from public.study_dispute_backs b where b.dispute_id = p_dispute and b.user_id = auth.uid();
+    update public.study_disputes x
+       set claim_b = btrim(p_claim), slides_b = p_slides, author_b = auth.uid(),
+           version = x.version + 1, updated_at = now()
+     where x.id = p_dispute;
+  else
+    raise exception 'sides taken';
+  end if;
+end;
+$$;
+
+-- "עם מי הצדק? גיבוי בלי שמות": back side a or b (null: take it back).
+-- The sides' authors do not back. Errors: 'dispute not found', 'a side
+-- cannot back', 'not open'.
+create or replace function public.study_dispute_back(p_dispute uuid, p_side text)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare d public.study_disputes;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_disputes x where x.id = p_dispute for update;
+  if not found or not coalesce(public.study_is_member(public.study_lecture_group(d.lecture_id)), false) then
+    raise exception 'dispute not found';
+  end if;
+  if d.state <> 'open' or d.var_asked_at is not null then raise exception 'not open'; end if;   -- review SEC-10
+  if auth.uid() in (d.author_a, d.author_b) then raise exception 'a side cannot back'; end if;
+  if p_side is null then
+    delete from public.study_dispute_backs b where b.dispute_id = p_dispute and b.user_id = auth.uid();
+  elsif p_side in ('a', 'b') then
+    insert into public.study_dispute_backs (dispute_id, user_id, side) values (p_dispute, auth.uid(), p_side)
+    on conflict (dispute_id, user_id) do update set side = excluded.side, created_at = now();
+  else
+    raise exception 'bad side';
+  end if;
+  -- review SEC-10: the shared row does not change on a back (no count, no version)
+end;
+$$;
+
+-- A dispute as the caller may see it: the claims with names (what one
+-- publishes carries the name), how many back the sides, her own backing,
+-- the verdict. The split by side shows once backing has closed (VAR asked
+-- or the card decided), from 3 backers other than the caller (review
+-- SEC-10: one's own back and un-back can no longer read the others').
+create or replace function public.study_dispute_state(p_dispute uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  d  public.study_disputes;
+  na int;
+  nb int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_disputes x where x.id = p_dispute;
+  if not found or not coalesce(public.study_is_member(public.study_lecture_group(d.lecture_id)), false) then
+    raise exception 'dispute not found';
+  end if;
+  select count(*) filter (where b.side = 'a'), count(*) filter (where b.side = 'b') into na, nb
+    from public.study_dispute_backs b where b.dispute_id = p_dispute;
+  return jsonb_build_object(
+    'id', d.id, 'lecture_id', d.lecture_id, 'part', d.part_idx, 'anchor', d.anchor, 'quote', d.quote, 'state', d.state,
+    'proposal_id', d.proposal_id,
+    'a', jsonb_build_object('claim', d.claim_a, 'slides', to_jsonb(d.slides_a), 'author_id', d.author_a,
+                            'name', (select m.name from public.study_members m where m.group_id = public.study_lecture_group(d.lecture_id) and m.user_id = d.author_a)),
+    'b', case when d.claim_b is null then null else jsonb_build_object('claim', d.claim_b, 'slides', to_jsonb(d.slides_b), 'author_id', d.author_b,
+                            'name', (select m.name from public.study_members m where m.group_id = public.study_lecture_group(d.lecture_id) and m.user_id = d.author_b)) end,
+    'backs', case when (d.state <> 'open' or d.var_asked_at is not null)
+                       and na + nb - (select count(*) from public.study_dispute_backs b
+                                       where b.dispute_id = p_dispute and b.user_id = auth.uid()) >= 3
+                  then jsonb_build_object('a', na, 'b', nb) end,
+    'backing_open', d.state = 'open' and d.var_asked_at is null,
+    'backers', na + nb,
+    'mine', (select b.side from public.study_dispute_backs b where b.dispute_id = p_dispute and b.user_id = auth.uid()),
+    'verdict', d.verdict, 'judged_at', d.judged_at,
+    'decided_by', (select m.name from public.study_members m where m.group_id = public.study_lecture_group(d.lecture_id) and m.user_id = d.decided_by),
+    'decision_note', d.decision_note, 'trap_card', d.trap_card);
+end;
+$$;
+
+-- op 'var' first takes the dispute (server key, with the member's token)
+-- for 3 minutes, before it reserves the budget: a second phone gets 'busy'
+-- and pays nothing (review SEC-15). Errors: 'forbidden', 'dispute not
+-- found', 'not ready', 'busy'.
+create or replace function public.study_dispute_judge_begin(p_dispute uuid, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare d public.study_disputes;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_disputes x where x.id = p_dispute for update;
+  if not found or not coalesce(public.study_is_member(public.study_lecture_group(d.lecture_id)), false) then
+    raise exception 'dispute not found';
+  end if;
+  if d.state <> 'open' or d.claim_b is null then raise exception 'not ready'; end if;
+  if d.judging_until > now() then raise exception 'busy'; end if;
+  update public.study_disputes x
+     set judging_until = now() + interval '3 minutes', var_asked_at = coalesce(x.var_asked_at, now()),
+         version = x.version + 1, updated_at = now()
+   where x.id = p_dispute;
+end;
+$$;
+
+-- op 'var' saves Claude's verdict (server key, with the member's token).
+-- Errors: 'forbidden', 'dispute not found', 'not ready' (both sides are
+-- needed, and only once), 'bad verdict'.
+create or replace function public.study_dispute_verdict(p_dispute uuid, p_verdict jsonb, p_model text, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare d public.study_disputes;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_disputes x where x.id = p_dispute for update;
+  if not found or not coalesce(public.study_is_member(public.study_lecture_group(d.lecture_id)), false) then
+    raise exception 'dispute not found';
+  end if;
+  if d.state <> 'open' or d.claim_b is null or d.judging_until is null then raise exception 'not ready'; end if;   -- review SEC-15
+  if not study_private.verdict_ok(p_verdict, study_private.lecture_slides(d.lecture_id)) then raise exception 'bad verdict'; end if;
+  update public.study_disputes x
+     set verdict = p_verdict, verdict_model = left(p_model, 80), judged_at = now(), state = 'judged', judging_until = null,
+         version = x.version + 1, updated_at = now()
+   where x.id = p_dispute;
+end;
+$$;
+
+-- "לקבל" (the box is pinned and the verdict's trap card joins everyone's
+-- deck) or "בהרצאה נאמר אחרת" (with an optional line). Errors: 'dispute
+-- not found', 'not judged', 'bad decision'.
+create or replace function public.study_dispute_decide(p_dispute uuid, p_decision text, p_note text default '')
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  d   public.study_disputes;
+  cid uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_disputes x where x.id = p_dispute for update;
+  if not found or not coalesce(public.study_is_member(public.study_lecture_group(d.lecture_id)), false) then
+    raise exception 'dispute not found';
+  end if;
+  if d.state <> 'judged' then raise exception 'not judged'; end if;
+  if coalesce(p_decision, '') not in ('accept', 'override') then raise exception 'bad decision'; end if;
+  if char_length(coalesce(p_note, '')) > 200 then raise exception 'too long'; end if;
+  if p_decision = 'accept' and jsonb_typeof(d.verdict -> 'trap') = 'object'
+     and to_regprocedure('study_private.trap_card(uuid,integer,integer,text,text,text,text,integer[],text,timestamp with time zone)') is not null then
+    cid := study_private.trap_card(d.lecture_id, d.part_idx, d.anchor, d.quote,
+             d.verdict -> 'trap' ->> 'front', d.verdict -> 'trap' ->> 'back', left(d.verdict ->> 'summary', 500),
+             array(select (jsonb_array_elements_text(d.verdict -> 'trap' -> 'slides'))::int), 'd:' || d.id::text);
+  end if;
+  update public.study_disputes x
+     set state = case when p_decision = 'accept' then 'accepted' else 'overridden' end,
+         decided_by = auth.uid(), decided_at = now(), decision_note = btrim(coalesce(p_note, '')), trap_card = cid,
+         version = x.version + 1, updated_at = now()
+   where x.id = p_dispute;
+  -- a proposal that waited on the dispute is open again for approval
+  update public.study_edit_proposals x set state = 'pending', updated_at = now()
+   where x.id = d.proposal_id and x.state = 'disputed';
+  return cid;
+end;
+$$;
+
+-- The opener closes an open dispute ("ביטול הכרטיס הצהוב").
+create or replace function public.study_dispute_close(p_dispute uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare d public.study_disputes;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into d from public.study_disputes x where x.id = p_dispute for update;
+  if not found or d.author_a is distinct from auth.uid() or d.state <> 'open' then raise exception 'dispute not found'; end if;
+  update public.study_disputes x set state = 'closed', version = x.version + 1, updated_at = now() where x.id = p_dispute;
+  update public.study_edit_proposals x set state = 'pending', updated_at = now() where x.id = d.proposal_id and x.state = 'disputed';
+end;
+$$;
+
+-- "כרטיס צהוב לשקף": a slip in the deck. Errors: 'forbidden', 'bad source', 'bad note'.
+create or replace function public.study_slide_flag(p_lecture uuid, p_slides int[], p_note text)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare v_id uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then raise exception 'forbidden'; end if;
+  if cardinality(coalesce(p_slides, '{}')) not between 1 and 4 or not (p_slides <@ study_private.lecture_slides(p_lecture)) then
+    raise exception 'bad source';
+  end if;
+  if char_length(btrim(coalesce(p_note, ''))) not between 5 and 300 then raise exception 'bad note'; end if;
+  insert into public.study_slide_flags (lecture_id, slides, note) values (p_lecture, p_slides, btrim(p_note)) returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- One-tap undo of a slide flag (any member; the log keeps who), or putting it back.
+create or replace function public.study_slide_flag_remove(p_flag uuid, p_remove boolean default true)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_slide_flags f
+     set removed_at = case when p_remove then now() end, removed_by = case when p_remove then auth.uid() end
+   where f.id = p_flag and coalesce(public.study_is_member(public.study_lecture_group(f.lecture_id)), false);
+  if not found then raise exception 'flag not found'; end if;
+end;
+$$;
+
+-- ── R2: the spread, from every applied correction ──
+-- The questions' part obeys the server switch 'spread_questions' (review
+-- SEC4-1; on by default): a marked question leaves practice and the quiz
+-- until a member taps "עדיין נכון" in the paragraph's "תרגול" tab (package
+-- N's, VITE_STUDY_ANCHOR) or the correction is undone. Where that tab is
+-- off, Yoad turns the switch off and corrections leave questions as they
+-- are (cards keep theirs: the deck has its own "עדיין נכון").
+insert into study_private.features (name, enabled) values ('spread_questions', true) on conflict (name) do nothing;
+create or replace function public.study_edits_spread()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.undo_of is not null then
+    update public.study_questions q set stale_at = null, stale_edit = null where q.stale_edit = new.undo_of;
+    update public.study_cards c set stale_at = null, stale_edit = null where c.stale_edit = new.undo_of;
+    delete from public.study_updates u where u.edit_id = new.undo_of and u.seen_at is null;
+    return null;
+  end if;
+  update public.study_questions q set stale_at = now(), stale_edit = new.id
+   where q.lecture_id = new.lecture_id and q.part_idx = new.part_idx and q.anchor = new.anchor
+     and (q.part_gen is null or q.part_gen = new.gen) and q.retired_at is null
+     and study_private.feature_on('spread_questions');
+  update public.study_cards c set stale_at = now(), stale_edit = new.id
+   where c.lecture_id = new.lecture_id and c.part_idx = new.part_idx and c.anchor = new.anchor
+     and (c.part_gen is null or c.part_gen = new.gen) and c.deleted_at is null;
+  insert into public.study_updates (user_id, edit_id, lecture_id, part_idx, anchor, reason, reason_at)
+  select x.u, new.id, new.lecture_id, new.part_idx, new.anchor, x.reason, x.at
+    from (select distinct on (y.u) y.u, y.reason, y.at
+            from (select r.user_id as u, 'card' as reason, max(r.reviewed_at) as at
+                    from public.study_card_reviews r join public.study_cards c on c.id = r.card_id
+                   where c.stale_edit = new.id and r.reviewed_at < now()
+                   group by r.user_id
+                  union all
+                  select a.user_id, 'question', max(a.answered_at)
+                    from public.study_answers a join public.study_questions q on q.id = a.question_id
+                   where q.stale_edit = new.id and a.answered_at < now()
+                   group by a.user_id) y
+           order by y.u, y.at desc) x
+   where x.u is distinct from new.author_id and x.u is distinct from new.approved_by
+  on conflict (user_id, edit_id) do nothing;
+  return null;
+end;
+$$;
+revoke all on function public.study_edits_spread() from public, anon, authenticated;
+drop trigger if exists study_edits_spread on public.study_edits;
+create trigger study_edits_spread after insert on public.study_edits
+  for each row execute function public.study_edits_spread();
+
+-- The caller's unseen "עדכון" rows: the old line, the new one, who
+-- corrected, who approved, the source and why it reached her.
+create or replace function public.study_my_updates(p_group uuid)
+returns table (id uuid, edit_id uuid, lecture_id uuid, lecture_title text, part_idx int, anchor int, kind text,
+               before_text text, after_text text, author text, approver text, aloud boolean,
+               source_kind text, source_slides int[], source_at int, source_note text,
+               reason text, reason_at timestamptz, created_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select u.id, u.edit_id, u.lecture_id, l.title, u.part_idx, u.anchor, e.kind, e.before_text, e.after_text,
+         (select m.name from public.study_members m where m.group_id = p_group and m.user_id = e.author_id),
+         (select m.name from public.study_members m where m.group_id = p_group and m.user_id = e.approved_by),
+         e.aloud, e.source_kind, e.source_slides, e.source_at, e.source_note, u.reason, u.reason_at, u.created_at
+    from public.study_updates u
+    join public.study_edits e on e.id = u.edit_id
+    join public.study_lectures l on l.id = u.lecture_id and l.group_id = p_group and l.deleted_at is null
+   where u.user_id = auth.uid() and u.seen_at is null and public.study_is_member(p_group)
+   order by u.created_at;
+$$;
+
+create or replace function public.study_update_seen(p_update uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_updates u set seen_at = coalesce(u.seen_at, now()) where u.id = p_update and u.user_id = auth.uid();
+  if not found then raise exception 'not found'; end if;
+end;
+$$;
+
+-- "יומן התיקונים": a lecture's corrections, verdicts and slide flags, newest
+-- first (at most 100). Error: 'lecture not found'.
+create or replace function public.study_lecture_log(p_lecture uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  g   uuid := public.study_lecture_group(p_lecture);
+  out jsonb;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not coalesce(public.study_is_member(g), false) then raise exception 'lecture not found'; end if;
+  select coalesce(jsonb_agg(x.j order by x.at desc), '[]'::jsonb) into out
+    from (select y.at, y.j from (
+      select e.created_at as at, jsonb_build_object('kind', 'edit', 'id', e.id, 'at', e.created_at, 'part', e.part_idx, 'anchor', e.anchor,
+               'block', e.kind, 'before', e.before_text, 'after', e.after_text, 'note', e.note, 'undo_of', e.undo_of,
+               'undone', exists (select 1 from public.study_edits u where u.undo_of = e.id),
+               'source_kind', e.source_kind, 'source_slides', to_jsonb(e.source_slides), 'source_at', e.source_at, 'source_note', e.source_note,
+               'author', (select m.name from public.study_members m where m.group_id = g and m.user_id = e.author_id),
+               'approver', (select m.name from public.study_members m where m.group_id = g and m.user_id = e.approved_by),
+               'aloud', e.aloud) as j
+        from public.study_edits e where e.lecture_id = p_lecture
+      union all
+      select d.created_at, jsonb_build_object('kind', 'verdict', 'id', d.id, 'at', coalesce(d.decided_at, d.judged_at, d.created_at),
+               'part', d.part_idx, 'anchor', d.anchor, 'state', d.state, 'claim_a', d.claim_a, 'claim_b', d.claim_b,
+               'slides', to_jsonb(d.slides_a || d.slides_b),
+               'name_a', (select m.name from public.study_members m where m.group_id = g and m.user_id = d.author_a),
+               'name_b', (select m.name from public.study_members m where m.group_id = g and m.user_id = d.author_b),
+               'certainty', d.verdict ->> 'certainty', 'summary', d.verdict ->> 'summary',
+               'decided_by', (select m.name from public.study_members m where m.group_id = g and m.user_id = d.decided_by),
+               'decision_note', d.decision_note)
+        from public.study_disputes d where d.lecture_id = p_lecture and d.state in ('judged', 'accepted', 'overridden')
+      union all
+      select f.created_at, jsonb_build_object('kind', 'slide', 'id', f.id, 'at', f.created_at, 'slides', to_jsonb(f.slides), 'note', f.note,
+               'by', (select m.name from public.study_members m where m.group_id = g and m.user_id = f.created_by),
+               'removed', f.removed_at is not null,
+               'removed_by', (select m.name from public.study_members m where m.group_id = g and m.user_id = f.removed_by))
+        from public.study_slide_flags f where f.lecture_id = p_lecture) y
+      order by y.at desc limit 100) x;
+  return out;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security and privileges
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_disputes      enable row level security;
+alter table public.study_dispute_backs enable row level security;
+alter table public.study_slide_flags   enable row level security;
+alter table public.study_updates       enable row level security;
+drop policy if exists "study disputes read"     on public.study_disputes;
+drop policy if exists "study dispute backs own" on public.study_dispute_backs;
+drop policy if exists "study slide flags read"  on public.study_slide_flags;
+drop policy if exists "study updates own"       on public.study_updates;
+create policy "study disputes read" on public.study_disputes
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study dispute backs own" on public.study_dispute_backs
+  for select using (user_id = auth.uid());
+create policy "study slide flags read" on public.study_slide_flags
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+create policy "study updates own" on public.study_updates
+  for select using (user_id = auth.uid());
+revoke all on public.study_disputes, public.study_dispute_backs, public.study_slide_flags, public.study_updates from anon, authenticated;
+grant select on public.study_disputes, public.study_dispute_backs, public.study_slide_flags, public.study_updates to authenticated;
+
+revoke all on function public.study_dispute_group(uuid), public.study_dispute_open(uuid, int, int, text, text, int[], uuid),
+  public.study_dispute_claim(uuid, text, int[]), public.study_dispute_back(uuid, text), public.study_dispute_state(uuid),
+  public.study_dispute_verdict(uuid, jsonb, text, text), public.study_dispute_judge_begin(uuid, text),
+  public.study_dispute_decide(uuid, text, text), public.study_dispute_close(uuid),
+  public.study_slide_flag(uuid, int[], text), public.study_slide_flag_remove(uuid, boolean),
+  public.study_my_updates(uuid), public.study_update_seen(uuid), public.study_lecture_log(uuid)
+  from public, anon;
+-- study_dispute_verdict needs the server key inside; the grant only lets op 'var' reach it with the member's token.
+grant execute on function public.study_dispute_group(uuid), public.study_dispute_open(uuid, int, int, text, text, int[], uuid),
+  public.study_dispute_claim(uuid, text, int[]), public.study_dispute_back(uuid, text), public.study_dispute_state(uuid),
+  public.study_dispute_verdict(uuid, jsonb, text, text), public.study_dispute_judge_begin(uuid, text),
+  public.study_dispute_decide(uuid, text, text), public.study_dispute_close(uuid),
+  public.study_slide_flag(uuid, int[], text), public.study_slide_flag_remove(uuid, boolean),
+  public.study_my_updates(uuid), public.study_update_seen(uuid), public.study_lecture_log(uuid)
+  to authenticated;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['study_disputes', 'study_slide_flags'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then
+      null;
+    end;
+  end loop;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('V', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION V ════
+
+-- ════ BEGIN SECTION U · the anonymous counts, the pulse, traps and the museum (package U) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION U · THE ANONYMOUS COUNTS AND THE PULSE   (package U; spec
+--  §12.5.U, milestones U-1 and U-2; the fun design §2.1-§2.2, PU1, Q10)
+--  After section V, before J in the file. It reads what the meeting
+--  addendum adds (the bet, study_answers.confidence; the paragraph,
+--  study_questions.anchor and study_cards.anchor; a correction's mark,
+--  stale_at; the "לא ברור" taps, study_meeting_taps; the wall's winners,
+--  study_aid_winners) only where they exist, through to_jsonb(row) and
+--  to_regclass, so it loads and runs on study/wave3's database and on
+--  study/wave4's. Re-runnable, and safe on a database with data: it adds
+--  tables and functions, adds the switch 'pulse' (off), and replaces two
+--  hooks of earlier sections with the same names, arguments and results
+--  (section Z's study_quiz__signal, section M's study_private.meeting__hot_spot).
+--
+--  As built (package U, wave 5), with Yoad's decisions of 17 Nov 2026:
+--    - decision 1 (no email accounts): "3 people" are three members who
+--      joined at least 7 days before and did not opt out. Without accounts
+--      a second phone is a second member, so one person on two phones counts
+--      twice; help and the privacy note say so plainly. The joining week
+--      stays, so a member cannot reach 3 by joining again the same day.
+--    - decision 3 (a meter instead of a dead end): below the floor nothing
+--      is shown as a word, but study_pulse_meter() says how far each lecture
+--      is from its first row ("עוד אדם אחד וזה נפתח"), from the night's real
+--      counts, and a member not counted yet how many days are left.
+--    - U-3 (traps and the museum, version 2) is the block at the end of
+--      this section: the night calls the hook study_private.pulse_night__traps,
+--      a stub here that U-3 replaces further down.
+--  The thresholds are functions (pulse_floor, pulse_join_days,
+--  pulse_window_days, pulse_week_days, pulse_forget_days), the one place the
+--  SQL reads them; shared/study/pulse.ts holds the same numbers for the app,
+--  and its unit test reads them from this file.
+--
+--  Who sees what
+--  ─────────────
+--  Private rows stay private. Answers, bets, card reviews and "לא ברור"
+--  taps are read only by the definer functions below, once a night (pg_cron,
+--  or the first read of the study day without it), and only for members who
+--  did not opt out. The numbers stay in study_private (no grants). Members
+--  see words derived from them, and only where at least 3 different members
+--  contributed:
+--    study_pulse_topics     חם · פושר · יושב טוב, per lecture, topic and aspect
+--    study_pulse_questions  'sure' · 'missed' · 'split', per question
+--    study_pulse_cards      cards at least 3 members keep forgetting
+--    study_pulse_spots      paragraphs at least 3 members found hard
+--  and the meter: per lecture, how many rows are open, how many wait, and
+--  how many more people the closest waiting row needs (1 or 2).
+--  Every count covers signals up to the start of the current study day
+--  (04:00, Israel time), never later, whenever it runs: practice done today
+--  changes nothing anyone sees until tomorrow. Only members the last night
+--  counted read it (review SEC-8, reciprocity). Nothing here is published to
+--  Realtime. The server switch 'pulse' (study_private.features, off until
+--  Yoad turns it on) stops all counting at once, whatever the app's flags.
+-- ════════════════════════════════════════════════════════════════════════
+
+create schema if not exists study_private;
+revoke all on schema study_private from public;
+
+insert into study_private.features (name) values ('pulse') on conflict (name) do nothing;
+
+-- ── The thresholds (one place; shared/study/pulse.ts mirrors them) ──
+create or replace function study_private.pulse_floor() returns int language sql immutable as $$ select 3 $$;          -- members behind any word
+create or replace function study_private.pulse_join_days() returns int language sql immutable as $$ select 7 $$;      -- in the group this long before counted
+create or replace function study_private.pulse_window_days() returns int language sql immutable as $$ select 28 $$;   -- the evidence's window
+create or replace function study_private.pulse_week_days() returns int language sql immutable as $$ select 7 $$;      -- "this week"
+create or replace function study_private.pulse_forget_days() returns int language sql immutable as $$ select 60 $$;   -- untouched cells are forgotten
+
+-- ── U1. "לא לכלול אותי בדופק": owner-only. A row = out. ──
+create table if not exists public.study_pulse_optout (
+  group_id   uuid        not null references public.study_groups (id) on delete cascade,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+
+-- ── U2. What the night counted, and when (Yoad reads it; no grants) ──
+create table if not exists study_private.pulse_runs (
+  group_id uuid        primary key references public.study_groups (id) on delete cascade,
+  cutoff   timestamptz not null,               -- signals before this instant were counted
+  ran_at   timestamptz not null default now(),
+  counted  jsonb       not null default '{}'::jsonb,
+  members  uuid[]      not null default '{}'    -- review SEC-8: who the night counted (they, and only they, read it)
+);
+
+-- The numbers behind the words (no grants: only the definer functions read them).
+create table if not exists study_private.pulse_q (
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  question_id uuid        primary key references public.study_questions (id) on delete cascade,
+  lecture_id  uuid,
+  cutoff      timestamptz not null,
+  people      int         not null,            -- members with an answer in the window
+  missed      int         not null,            -- whose latest answer is wrong ("לא יודעים" too)
+  week_missed int         not null,            -- with a wrong answer in the last 7 days
+  sure_wrong  int         not null,            -- with a wrong answer bet "על בטוח"
+  trap_option smallint,                        -- the wrong option the most members chose (U-3 reads it)
+  trap_people int         not null default 0,
+  sure_option smallint,                        -- the wrong option the most members chose "על בטוח"
+  sure_people int         not null default 0
+);
+create index if not exists study_pulse_q_group on study_private.pulse_q (group_id);
+
+create table if not exists study_private.pulse_cells (
+  group_id   uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  topic_key  text        not null,
+  aspect     text        not null,
+  cutoff     timestamptz not null,
+  people     int         not null,             -- members with evidence in the cell
+  struggling int         not null,             -- of them, half or more of their latest evidence wrong
+  hot_on     date,                             -- the last study day the cell was hot (kept when it drops out)
+  primary key (lecture_id, topic_key, aspect)
+);
+create index if not exists study_pulse_cells_group on study_private.pulse_cells (group_id);
+
+-- ── U3. What members see (member-only read, never published) ──
+create table if not exists public.study_pulse_topics (
+  id          uuid        primary key default gen_random_uuid(),
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id  uuid        not null references public.study_lectures (id) on delete cascade,
+  topic_key   text        not null check (char_length(topic_key) between 1 and 120),
+  topic       text        not null check (char_length(topic) <= 120),
+  aspect      text        not null,
+  bucket      text        not null check (bucket in ('hot', 'warm', 'cool')),
+  slides      int[]       not null default '{}',   -- the slides behind the misses, most first (at most 2)
+  closed_week boolean     not null default false,  -- "החור שנסגר השבוע": hot in the last 7 days, cool now
+  cutoff      timestamptz not null,
+  unique (lecture_id, topic_key, aspect)
+);
+create index if not exists study_pulse_topics_group on public.study_pulse_topics (group_id);
+
+create table if not exists public.study_pulse_questions (
+  id          uuid        primary key default gen_random_uuid(),
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id  uuid        references public.study_lectures (id) on delete cascade,
+  question_id uuid        not null unique references public.study_questions (id) on delete cascade,
+  signal      text        not null check (signal in ('sure', 'missed', 'split')),
+  cutoff      timestamptz not null
+);
+create index if not exists study_pulse_questions_group on public.study_pulse_questions (group_id, lecture_id);
+
+create table if not exists public.study_pulse_cards (
+  id         uuid        primary key default gen_random_uuid(),
+  group_id   uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  card_id    uuid        not null unique references public.study_cards (id) on delete cascade,
+  cutoff     timestamptz not null
+);
+create index if not exists study_pulse_cards_group on public.study_pulse_cards (group_id, lecture_id);
+
+create table if not exists public.study_pulse_spots (
+  id         uuid        primary key default gen_random_uuid(),
+  group_id   uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null check (part_idx >= 0),
+  anchor     int         not null check (anchor >= 0),
+  cutoff     timestamptz not null,
+  unique (lecture_id, part_idx, anchor)
+);
+create index if not exists study_pulse_spots_group on public.study_pulse_spots (group_id, lecture_id);
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Helpers
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- The start of the study day of p_at (04:00, Israel time), and of the next.
+create or replace function study_private.pulse_cutoff(p_at timestamptz)
+returns timestamptz language sql stable set search_path = public as $$
+  select ((((p_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date + time '04:00') at time zone 'Asia/Jerusalem')
+$$;
+create or replace function study_private.pulse_next_cutoff(p_cut timestamptz)
+returns timestamptz language sql stable set search_path = public as $$
+  select ((((p_cut at time zone 'Asia/Jerusalem') - interval '4 hours')::date + 1 + time '04:00') at time zone 'Asia/Jerusalem')
+$$;
+
+-- The members whose signals count at p_now: in the group for pulse_join_days()
+-- at least, not opted out. Decision 1 (17 Nov 2026): no saved accounts, so
+-- the addendum's "saved account" test is gone; a member is the phone they
+-- joined from (review SEC-8's week stays: joining again today counts no one).
+create or replace function study_private.pulse_counted(p_group uuid, p_now timestamptz default now())
+returns table (user_id uuid) language sql stable security definer set search_path = public as $$
+  select m.user_id from public.study_members m
+   where m.group_id = p_group
+     and m.joined_at <= p_now - make_interval(days => study_private.pulse_join_days())
+     and not exists (select 1 from public.study_pulse_optout o where o.group_id = p_group and o.user_id = m.user_id)
+$$;
+-- The caller reads the group's counts only when the last night counted her
+-- and she is not out now (review SEC-8: reading is reciprocal).
+create or replace function public.study_pulse_reader(p_group uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null
+     and exists (select 1 from study_private.pulse_runs r where r.group_id = p_group and auth.uid() = any (r.members))
+     and not exists (select 1 from public.study_pulse_optout o where o.group_id = p_group and o.user_id = auth.uid())
+$$;
+
+-- The "לא ברור" taps (section M) of p_group's members in [p_from, p_to);
+-- none while that table is not there.
+create or replace function study_private.pulse_unclear(p_group uuid, p_from timestamptz, p_to timestamptz)
+returns table (user_id uuid, lecture_id uuid, part_idx int, anchor int)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if to_regclass('public.study_meeting_taps') is null then return; end if;
+  return query execute
+    'select t.user_id, t.lecture_id, t.part_idx, t.anchor
+       from public.study_meeting_taps t join public.study_lectures l on l.id = t.lecture_id
+      where l.group_id = $1 and t.created_at >= $2 and t.created_at < $3'
+    using p_group, p_from, p_to;
+end;
+$$;
+
+-- Every counted member's FIRST answer to a question in each study day, in
+-- [p_from, p_to): the evidence (practice and the live quiz's first votes;
+-- pre-guesses never reach study_answers). Questions retired, hidden, without
+-- a key, flagged as wrong, or marked by a correction (stale_at) are left out
+-- (review F-6). The bet and the paragraph are read through to_jsonb, so a
+-- missing column reads as null.
+create or replace function study_private.pulse_answers(p_group uuid, p_from timestamptz, p_to timestamptz)
+returns table (user_id uuid, question_id uuid, lecture_id uuid, topic_key text, topic text, aspect text,
+               part_idx int, anchor int, slides int[], day date, choice smallint, correct boolean, sure boolean,
+               answered_at timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  return query
+  with ans as (
+    select a.user_id, a.question_id, a.choice, a.correct, coalesce((to_jsonb(a) ->> 'confidence')::int = 3, false) as sure, a.answered_at,
+           ((a.answered_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date as day,
+           row_number() over (partition by a.user_id, a.question_id,
+                                           ((a.answered_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date
+                              order by a.answered_at, a.id) as rn
+      from public.study_answers a
+     where a.answered_at >= p_from and a.answered_at < p_to
+       and a.user_id in (select c.user_id from study_private.pulse_counted(p_group, p_to) c)
+  )
+  select x.user_id, q.id, coalesce(q.lecture_id, q.ref_lecture), lower(btrim(q.topic)), btrim(q.topic), q.aspect,
+         q.part_idx, (to_jsonb(q) ->> 'anchor')::int, q.slides, x.day, x.choice, x.correct, x.sure, x.answered_at
+    from ans x
+    join public.study_questions q on q.id = x.question_id
+   where x.rn = 1 and q.group_id = p_group and q.retired_at is null and q.has_key
+     and (to_jsonb(q) ->> 'hidden_at') is null and (to_jsonb(q) ->> 'stale_at') is null
+     and not exists (select 1 from public.study_question_flags f
+                      where f.question_id = q.id and f.reason in ('wrong_key', 'two_answers', 'not_in_slides'));
+end;
+$$;
+
+-- Every counted member's card reviews in [p_from, p_to). again: "שוב";
+-- lapse: "שוב" on a card that was learned (state 2), FSRS's lapse.
+create or replace function study_private.pulse_reviews(p_group uuid, p_from timestamptz, p_to timestamptz)
+returns table (user_id uuid, card_id uuid, lecture_id uuid, topic_key text, topic text, aspect text,
+               part_idx int, anchor int, slides int[], again boolean, lapse boolean, reviewed_at timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  return query
+  select r.user_id, c.id, c.lecture_id, lower(btrim(c.topic)), btrim(c.topic), c.aspect, c.part_idx,
+         (to_jsonb(c) ->> 'anchor')::int, c.slides, r.rating = 1, r.rating = 1 and r.state_before = 2, r.reviewed_at
+    from public.study_card_reviews r
+    join public.study_cards c on c.id = r.card_id
+   where c.group_id = p_group and c.deleted_at is null and (to_jsonb(c) ->> 'stale_at') is null
+     and r.reviewed_at >= p_from and r.reviewed_at < p_to
+     and r.user_id in (select x.user_id from study_private.pulse_counted(p_group, p_to) x);
+end;
+$$;
+
+-- U-3's hook: traps found tonight, trap cards opened, retired (the museum).
+-- Package U-3 replaces this body further down this section, with the same
+-- name, arguments and result; here it finds nothing. Returns what it counted
+-- (merged into pulse_runs.counted).
+create or replace function study_private.pulse_night__traps(p_group uuid, p_cut timestamptz)
+returns jsonb language sql volatile set search_path = public as $$ select '{}'::jsonb $$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  The night: one function counts everything for one group (or every
+--  group whose last count is older than the current study day).
+--    p_now    the moment to count for (the checks pass a fixed one)
+--    p_force  count again even if this study day was counted
+--  Returns how many groups were counted.
+-- ═══════════════════════════════════════════════════════════════════════
+create or replace function study_private.pulse_night(p_group uuid default null, p_now timestamptz default now(),
+  p_force boolean default false)
+returns int language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  g      uuid;
+  fl     int  := study_private.pulse_floor();
+  c      timestamptz := study_private.pulse_cutoff(p_now);
+  w      timestamptz := study_private.pulse_cutoff(p_now) - make_interval(days => study_private.pulse_window_days());
+  wk     timestamptz := study_private.pulse_cutoff(p_now) - make_interval(days => study_private.pulse_week_days());
+  n      int := 0;
+  v_cnt  jsonb;
+  v_trap jsonb;
+begin
+  if not study_private.feature_on('pulse') then return 0; end if;
+  for g in
+    select x.id from public.study_groups x
+     where (p_group is null or x.id = p_group)
+       and (p_force or not exists (select 1 from study_private.pulse_runs pr where pr.group_id = x.id and pr.cutoff >= c))
+  loop
+    -- One count at a time per group (cron and a first reader may meet).
+    perform pg_advisory_xact_lock(hashtext('study_pulse:' || g::text));
+    if not p_force and exists (select 1 from study_private.pulse_runs pr where pr.group_id = g and pr.cutoff >= c) then
+      continue;
+    end if;
+
+    -- ── 1. Questions: who answered, who is wrong now, the options that caught people ──
+    delete from study_private.pulse_q x where x.group_id = g;
+    insert into study_private.pulse_q (group_id, question_id, lecture_id, cutoff, people, missed, week_missed, sure_wrong,
+                                       trap_option, trap_people, sure_option, sure_people)
+    with ev as (
+      select * from study_private.pulse_answers(g, w, c)
+    ), latest as (
+      select distinct on (e.user_id, e.question_id) e.user_id, e.question_id, e.correct
+        from ev e order by e.user_id, e.question_id, e.answered_at desc
+    ), per_q as (
+      select e.question_id, min(e.lecture_id::text)::uuid as lecture_id,
+             count(distinct e.user_id)::int as people,
+             (count(distinct e.user_id) filter (where not e.correct and e.answered_at >= wk))::int as week_missed,
+             (count(distinct e.user_id) filter (where not e.correct and e.sure))::int as sure_wrong
+        from ev e group by e.question_id
+    ), lat as (
+      select l.question_id, (count(*) filter (where not l.correct))::int as missed from latest l group by l.question_id
+    ), opt as (
+      select e.question_id, e.choice, count(distinct e.user_id)::int as people,
+             (count(distinct e.user_id) filter (where e.sure))::int as sure_people
+        from ev e where not e.correct and e.choice is not null group by e.question_id, e.choice
+    ), top_opt as (
+      select distinct on (o.question_id) o.question_id, o.choice, o.people
+        from opt o order by o.question_id, o.people desc, o.choice
+    ), top_sure as (
+      select distinct on (o.question_id) o.question_id, o.choice, o.sure_people
+        from opt o where o.sure_people > 0 order by o.question_id, o.sure_people desc, o.choice
+    )
+    select g, p.question_id, p.lecture_id, c, p.people, coalesce(l.missed, 0), p.week_missed, p.sure_wrong,
+           t.choice, coalesce(t.people, 0), s.choice, coalesce(s.sure_people, 0)
+      from per_q p
+      left join lat l on l.question_id = p.question_id
+      left join top_opt t on t.question_id = p.question_id
+      left join top_sure s on s.question_id = p.question_id
+     where p.people >= fl;
+
+    delete from public.study_pulse_questions x where x.group_id = g;
+    insert into public.study_pulse_questions (group_id, lecture_id, question_id, signal, cutoff)
+    select g, x.lecture_id, x.question_id, s.signal, c
+      from study_private.pulse_q x
+      cross join lateral (select case
+               when x.sure_wrong >= fl then 'sure'
+               when x.week_missed >= fl or x.missed * 2 > x.people then 'missed'
+               when (x.people - x.missed)::numeric / x.people between 0.3 and 0.7 then 'split'
+             end as signal) s
+     where x.group_id = g and x.people >= fl and s.signal is not null;
+
+    -- ── 2. Topics × aspects of each lecture: how many of those who practised struggle ──
+    delete from public.study_pulse_topics x where x.group_id = g;
+    with qa as (
+      select e.* from study_private.pulse_answers(g, w, c) e where e.topic_key <> '' and e.lecture_id is not null
+    ), q_latest as (
+      select distinct on (e.user_id, e.question_id) e.user_id, e.lecture_id, e.topic_key, e.topic, e.aspect,
+             not e.correct as wrong, e.slides
+        from qa e order by e.user_id, e.question_id, e.answered_at desc
+    ), cr as (
+      select v.* from study_private.pulse_reviews(g, w, c) v where v.topic_key <> ''
+    ), c_latest as (
+      select distinct on (v.user_id, v.card_id) v.user_id, v.lecture_id, v.topic_key, v.topic, v.aspect, v.again as wrong, v.slides
+        from cr v order by v.user_id, v.card_id, v.reviewed_at desc
+    ), items as (
+      select * from q_latest union all select * from c_latest
+    ), per_user as (
+      select i.lecture_id, i.topic_key, i.aspect, i.user_id, count(*) as n, count(*) filter (where i.wrong) as bad
+        from items i group by i.lecture_id, i.topic_key, i.aspect, i.user_id
+    ), cell as (
+      select u.lecture_id, u.topic_key, u.aspect, count(*)::int as people,
+             (count(*) filter (where u.bad * 2 >= u.n))::int as struggling
+        from per_user u group by u.lecture_id, u.topic_key, u.aspect
+    ), named as (
+      select i.lecture_id, i.topic_key, i.aspect, min(i.topic) as topic from items i group by 1, 2, 3
+    ), sl as (
+      select z.lecture_id, z.topic_key, z.aspect, array_agg(z.n order by z.k desc, z.n) filter (where z.rk <= 2) as slides
+        from (select i.lecture_id, i.topic_key, i.aspect, s.n, count(distinct i.user_id) as k,
+                     row_number() over (partition by i.lecture_id, i.topic_key, i.aspect order by count(distinct i.user_id) desc, s.n) as rk
+                from items i cross join lateral unnest(i.slides) as s(n)
+               where i.wrong
+               group by i.lecture_id, i.topic_key, i.aspect, s.n) z
+       group by z.lecture_id, z.topic_key, z.aspect
+    ), up as (
+      insert into study_private.pulse_cells (group_id, lecture_id, topic_key, aspect, cutoff, people, struggling, hot_on)
+      select g, x.lecture_id, x.topic_key, x.aspect, c, x.people, x.struggling,
+             case when x.people >= fl and x.struggling >= fl and x.struggling * 2 >= x.people
+                  then ((c at time zone 'Asia/Jerusalem') - interval '4 hours')::date end
+        from cell x
+      on conflict (lecture_id, topic_key, aspect) do update
+         set cutoff = excluded.cutoff, people = excluded.people, struggling = excluded.struggling,
+             hot_on = coalesce(excluded.hot_on, study_private.pulse_cells.hot_on)
+      returning lecture_id, topic_key, aspect, people, struggling, hot_on
+    )
+    insert into public.study_pulse_topics (group_id, lecture_id, topic_key, topic, aspect, bucket, slides, closed_week, cutoff)
+    select g, u.lecture_id, u.topic_key, left(coalesce(nm.topic, u.topic_key), 120), u.aspect, b.bucket,
+           coalesce(s.slides, '{}'),
+           b.bucket = 'cool' and u.hot_on is not null
+             and u.hot_on >= ((c at time zone 'Asia/Jerusalem') - interval '4 hours')::date - study_private.pulse_week_days(),
+           c
+      from up u
+      left join named nm on nm.lecture_id = u.lecture_id and nm.topic_key = u.topic_key and nm.aspect = u.aspect
+      left join sl s on s.lecture_id = u.lecture_id and s.topic_key = u.topic_key and s.aspect = u.aspect
+      cross join lateral (select case
+               when u.struggling >= fl and u.struggling * 2 >= u.people then 'hot'
+               when u.struggling * 4 >= u.people and u.struggling >= 1 then 'warm'
+               else 'cool' end as bucket) b
+     where u.people >= fl;
+    -- Cells nobody has touched for 60 days are forgotten.
+    delete from study_private.pulse_cells x where x.group_id = g and x.cutoff < c - make_interval(days => study_private.pulse_forget_days());
+
+    -- ── 3. Cards at least 3 members forgot after learning them ("דרושה אסוציאציה") ──
+    delete from public.study_pulse_cards x where x.group_id = g;
+    insert into public.study_pulse_cards (group_id, lecture_id, card_id, cutoff)
+    select g, min(v.lecture_id::text)::uuid, v.card_id, c
+      from study_private.pulse_reviews(g, w, c) v
+     where v.lapse
+     group by v.card_id
+    having count(distinct v.user_id) >= fl;
+
+    -- ── 4. Paragraphs at least 3 members found hard (a wrong answer now, a lapse, a "?") ──
+    delete from public.study_pulse_spots x where x.group_id = g;
+    insert into public.study_pulse_spots (group_id, lecture_id, part_idx, anchor, cutoff)
+    select g, h.lecture_id, h.part_idx, h.anchor, c
+      from (
+        select l.user_id, l.lecture_id, l.part_idx, l.anchor
+          from (select distinct on (e.user_id, e.question_id) e.user_id, e.lecture_id, e.part_idx, e.anchor, e.correct
+                  from study_private.pulse_answers(g, w, c) e
+                 order by e.user_id, e.question_id, e.answered_at desc) l
+         where not l.correct
+        union
+        select v.user_id, v.lecture_id, v.part_idx, v.anchor from study_private.pulse_reviews(g, w, c) v where v.lapse
+        union
+        select u.user_id, u.lecture_id, u.part_idx, u.anchor
+          from study_private.pulse_unclear(g, w, c) u
+         where u.user_id in (select x.user_id from study_private.pulse_counted(g, c) x)
+      ) h
+      join public.study_lectures lec on lec.id = h.lecture_id and lec.group_id = g
+     where h.part_idx is not null and h.anchor is not null
+     group by h.lecture_id, h.part_idx, h.anchor
+    having count(distinct h.user_id) >= fl;
+
+    -- ── 5. Traps and the museum (U-3's hook; nothing until U-3) ──
+    v_trap := coalesce(study_private.pulse_night__traps(g, c), '{}'::jsonb);
+
+    select jsonb_build_object(
+             'questions', (select count(*) from public.study_pulse_questions x where x.group_id = g),
+             'topics', (select count(*) from public.study_pulse_topics x where x.group_id = g),
+             'cards', (select count(*) from public.study_pulse_cards x where x.group_id = g),
+             'spots', (select count(*) from public.study_pulse_spots x where x.group_id = g)) || v_trap
+      into v_cnt;
+    insert into study_private.pulse_runs (group_id, cutoff, ran_at, counted, members)
+    values (g, c, now(), v_cnt, array(select x.user_id from study_private.pulse_counted(g, c) x))
+    on conflict (group_id) do update set cutoff = excluded.cutoff, ran_at = excluded.ran_at, counted = excluded.counted,
+                                         members = excluded.members;
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  What the phones call
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- The study day's counts are ready: runs the night's count first when
+-- pg_cron has not (the first read of the study day). Returns the cut-off
+-- they cover, or null while the switch 'pulse' is off or the caller is not
+-- among the members the night counted (review SEC-8). Every pulse read
+-- starts here.
+create or replace function public.study_pulse_ready(p_group uuid)
+returns timestamptz language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  if not study_private.feature_on('pulse') then return null; end if;
+  perform study_private.pulse_night(p_group);
+  if not public.study_pulse_reader(p_group) then return null; end if;    -- review SEC-8: reciprocal
+  return (select r.cutoff from study_private.pulse_runs r where r.group_id = p_group);
+end;
+$$;
+
+-- Decision 3: where the caller stands, and how far each lecture is from its
+-- first row, from the night's real counts (never invented). Runs the night
+-- first, as study_pulse_ready does.
+--   state  'off'      the switch is off: nothing else
+--          'out'      the caller opted out: nothing else (reading is reciprocal)
+--          'waiting'  the caller is not counted yet: join_days_left (from her
+--                     own joining date; 1 means the next night counts her)
+--          'open'     the caller reads: cutoff, group_need (how many more
+--                     counted members the group needs, 0 from 3), and per
+--                     lecture with evidence: open (rows members see), waiting
+--                     (cells with 1 or 2 members), need (3 minus the most
+--                     members in a waiting cell: "עוד אדם אחד וזה נפתח")
+create or replace function public.study_pulse_meter(p_group uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  fl     int := study_private.pulse_floor();
+  r      study_private.pulse_runs;
+  joined timestamptz;
+  lec    jsonb;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  if not study_private.feature_on('pulse') then return jsonb_build_object('state', 'off', 'floor', fl); end if;
+  if exists (select 1 from public.study_pulse_optout o where o.group_id = p_group and o.user_id = auth.uid()) then
+    return jsonb_build_object('state', 'out', 'floor', fl);
+  end if;
+  perform study_private.pulse_night(p_group);
+  if not public.study_pulse_reader(p_group) then
+    select m.joined_at into joined from public.study_members m where m.group_id = p_group and m.user_id = auth.uid();
+    -- The night that first counts her: the first study day whose start is a
+    -- full joining week after she joined (at least the next one: a member
+    -- back from opting out is counted again from the next night).
+    return jsonb_build_object('state', 'waiting', 'floor', fl, 'join_days', study_private.pulse_join_days(),
+             'join_days_left', greatest(1, ceil(extract(epoch from (joined + make_interval(days => study_private.pulse_join_days())
+                                                                    - study_private.pulse_cutoff(now()))) / 86400)::int));
+  end if;
+  select * into r from study_private.pulse_runs x where x.group_id = p_group;
+  select coalesce(jsonb_agg(jsonb_build_object('lecture_id', z.lecture_id, 'open', z.open, 'waiting', z.waiting, 'need', z.need)
+                            order by z.lecture_id), '[]'::jsonb)
+    into lec
+    from (select c.lecture_id,
+                 (count(*) filter (where c.people >= fl))::int as open,
+                 (count(*) filter (where c.people < fl))::int as waiting,
+                 fl - max(c.people) filter (where c.people < fl) as need
+            from study_private.pulse_cells c
+            join public.study_lectures l on l.id = c.lecture_id and l.deleted_at is null
+           where c.group_id = p_group and c.cutoff = r.cutoff and c.people > 0
+           group by c.lecture_id) z;
+  return jsonb_build_object('state', 'open', 'floor', fl, 'cutoff', r.cutoff,
+           'group_need', greatest(0, fl - cardinality(r.members)), 'lectures', lec);
+end;
+$$;
+
+-- PU1: the group's pulse, every lecture or one. Words only.
+create or replace function public.study_pulse(p_group uuid, p_lecture uuid default null)
+returns table (lecture_id uuid, topic_key text, topic text, aspect text, bucket text, slides int[],
+               closed_week boolean, cutoff timestamptz)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if public.study_pulse_ready(p_group) is null then return; end if;   -- the switch is off, or not a reader
+  return query
+  select t.lecture_id, t.topic_key, t.topic, t.aspect, t.bucket, t.slides, t.closed_week, t.cutoff
+    from public.study_pulse_topics t
+    join public.study_lectures l on l.id = t.lecture_id and l.deleted_at is null
+   where t.group_id = p_group and (p_lecture is null or t.lecture_id = p_lecture)
+   order by t.lecture_id, case t.bucket when 'hot' then 0 when 'warm' then 1 else 2 end, t.topic_key, t.aspect;
+end;
+$$;
+
+-- PU1: "אצלך", the caller's own bucket per topic × aspect, from the caller's
+-- own answers and reviews of the last 28 days, live (security invoker: RLS
+-- keeps every row the caller's). Never counted for anyone else, and shown
+-- even below the floor (a member always sees their own data, decision 3).
+create or replace function public.study_my_pulse(p_group uuid, p_lecture uuid default null)
+returns table (lecture_id uuid, topic_key text, aspect text, items int, wrong int, mine text, topic text)
+language sql stable set search_path = public as $$
+  with q_first as (
+    select a.question_id, a.correct, a.answered_at,
+           row_number() over (partition by a.question_id, ((a.answered_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date
+                              order by a.answered_at, a.id) as rn
+      from public.study_answers a
+     where a.user_id = auth.uid() and a.answered_at >= now() - make_interval(days => 28)
+  ), q_latest as (
+    select distinct on (f.question_id) f.question_id, f.correct
+      from q_first f where f.rn = 1 order by f.question_id, f.answered_at desc
+  ), qi as (
+    select coalesce(q.lecture_id, q.ref_lecture) as lecture_id, lower(btrim(q.topic)) as topic_key, q.aspect, not l.correct as wrong, btrim(q.topic) as topic
+      from q_latest l join public.study_questions q on q.id = l.question_id
+     where q.group_id = p_group and q.retired_at is null and q.hidden_at is null and btrim(q.topic) <> ''
+       and not exists (select 1 from public.study_question_flags f
+                        where f.question_id = q.id and f.reason in ('wrong_key', 'two_answers', 'not_in_slides'))
+  ), ci as (
+    select c.lecture_id, lower(btrim(c.topic)) as topic_key, c.aspect, r.rating = 1 as wrong, btrim(c.topic) as topic
+      from (select distinct on (x.card_id) x.card_id, x.rating
+              from public.study_card_reviews x
+             where x.user_id = auth.uid() and x.reviewed_at >= now() - make_interval(days => 28)
+             order by x.card_id, x.reviewed_at desc) r
+      join public.study_cards c on c.id = r.card_id
+     where c.group_id = p_group and c.deleted_at is null and btrim(c.topic) <> ''
+  ), it as (select * from qi union all select * from ci)
+  select i.lecture_id, i.topic_key, i.aspect, count(*)::int, (count(*) filter (where i.wrong))::int,
+         case when count(*) filter (where i.wrong) * 2 >= count(*) then 'hot'
+              when count(*) filter (where i.wrong) * 4 >= count(*) and count(*) filter (where i.wrong) >= 1 then 'warm'
+              else 'cool' end,
+         left(min(i.topic), 120)
+    from it i
+   where i.lecture_id is not null and (p_lecture is null or i.lecture_id = p_lecture)
+   group by i.lecture_id, i.topic_key, i.aspect;
+$$;
+
+-- "מחר בפגישה": the lecture's hottest topic and the question its next quiz
+-- would ask first (the strongest signal; the stem only, never the key).
+create or replace function public.study_pulse_brief(p_lecture uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  g uuid := public.study_lecture_group(p_lecture);
+  v_hot jsonb;
+  v_q   jsonb;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not coalesce(public.study_is_member(g), false) then raise exception 'lecture not found'; end if;
+  if public.study_pulse_ready(g) is null then return jsonb_build_object('hot', null, 'question', null); end if;
+  select jsonb_build_object('topic', t.topic, 'aspect', t.aspect, 'slides', to_jsonb(t.slides)) into v_hot
+    from public.study_pulse_topics t
+    left join study_private.pulse_cells c on c.lecture_id = t.lecture_id and c.topic_key = t.topic_key and c.aspect = t.aspect
+   where t.lecture_id = p_lecture and t.bucket = 'hot'
+   order by c.struggling::numeric / greatest(c.people, 1) desc nulls last, t.topic_key, t.aspect limit 1;
+  select jsonb_build_object('question_id', q.id, 'question', q.question, 'kind', q.kind, 'slides', to_jsonb(q.slides)) into v_q
+    from public.study_pulse_questions s join public.study_questions q on q.id = s.question_id
+   where s.lecture_id = p_lecture and q.retired_at is null and q.hidden_at is null
+   order by case s.signal when 'sure' then 0 when 'missed' then 1 else 2 end, q.created_at, q.id limit 1;
+  return jsonb_build_object('hot', v_hot, 'question', v_q);
+end;
+$$;
+
+-- "דרושה אסוציאציה" (section J's tab "דרושות" and its request card): the
+-- cards at least 3 members keep forgetting, on their paragraphs, leaving
+-- out a paragraph whose wall already has a winner (section J's
+-- study_aid_winners, read when it exists). The card's front only.
+create or replace function public.study_pulse_needed(p_group uuid, p_lecture uuid default null)
+returns table (card_id uuid, lecture_id uuid, part_idx int, anchor int, front text, slides int[])
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare has_winners boolean := to_regclass('public.study_aid_winners') is not null;
+begin
+  if public.study_pulse_ready(p_group) is null then return; end if;
+  return query execute
+    'select c.id, c.lecture_id, c.part_idx, (to_jsonb(c) ->> ''anchor'')::int, c.front, c.slides
+       from public.study_pulse_cards p
+       join public.study_cards c on c.id = p.card_id and c.deleted_at is null
+       join public.study_lectures l on l.id = c.lecture_id and l.deleted_at is null
+      where p.group_id = $1 and ($2::uuid is null or c.lecture_id = $2)'
+    || case when has_winners then
+       ' and not exists (select 1 from public.study_aid_winners w where w.lecture_id = c.lecture_id
+                            and w.part_idx = c.part_idx and w.anchor = (to_jsonb(c) ->> ''anchor'')::int)' else '' end
+    || ' order by c.lecture_id, c.part_idx nulls last, (to_jsonb(c) ->> ''anchor'')::int nulls last, c.id'
+    using p_group, p_lecture;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security and privileges
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_pulse_optout    enable row level security;
+alter table public.study_pulse_topics    enable row level security;
+alter table public.study_pulse_questions enable row level security;
+alter table public.study_pulse_cards     enable row level security;
+alter table public.study_pulse_spots     enable row level security;
+
+drop policy if exists "study pulse optout own"    on public.study_pulse_optout;
+drop policy if exists "study pulse optout add"    on public.study_pulse_optout;
+drop policy if exists "study pulse optout remove" on public.study_pulse_optout;
+drop policy if exists "study pulse topics read"    on public.study_pulse_topics;
+drop policy if exists "study pulse questions read" on public.study_pulse_questions;
+drop policy if exists "study pulse cards read"     on public.study_pulse_cards;
+drop policy if exists "study pulse spots read"     on public.study_pulse_spots;
+
+create policy "study pulse optout own" on public.study_pulse_optout
+  for select using (user_id = auth.uid());
+create policy "study pulse optout add" on public.study_pulse_optout
+  for insert with check (user_id = auth.uid() and public.study_is_member(group_id));
+create policy "study pulse optout remove" on public.study_pulse_optout
+  for delete using (user_id = auth.uid());
+create policy "study pulse topics read" on public.study_pulse_topics
+  for select using (public.study_is_member(group_id) and public.study_feature_on('pulse') and public.study_pulse_reader(group_id));
+create policy "study pulse questions read" on public.study_pulse_questions
+  for select using (public.study_is_member(group_id) and public.study_feature_on('pulse') and public.study_pulse_reader(group_id));
+create policy "study pulse cards read" on public.study_pulse_cards
+  for select using (public.study_is_member(group_id) and public.study_feature_on('pulse') and public.study_pulse_reader(group_id));
+create policy "study pulse spots read" on public.study_pulse_spots
+  for select using (public.study_is_member(group_id) and public.study_feature_on('pulse') and public.study_pulse_reader(group_id));
+
+revoke all on public.study_pulse_optout, public.study_pulse_topics, public.study_pulse_questions, public.study_pulse_cards,
+  public.study_pulse_spots from anon, authenticated;
+grant select, delete on public.study_pulse_optout to authenticated;
+grant insert (group_id) on public.study_pulse_optout to authenticated;
+grant select on public.study_pulse_topics, public.study_pulse_questions, public.study_pulse_cards, public.study_pulse_spots to authenticated;
+
+revoke all on function study_private.pulse_floor(), study_private.pulse_join_days(), study_private.pulse_window_days(),
+  study_private.pulse_week_days(), study_private.pulse_forget_days(),
+  study_private.pulse_cutoff(timestamptz), study_private.pulse_next_cutoff(timestamptz),
+  study_private.pulse_counted(uuid, timestamptz), study_private.pulse_unclear(uuid, timestamptz, timestamptz),
+  study_private.pulse_answers(uuid, timestamptz, timestamptz), study_private.pulse_reviews(uuid, timestamptz, timestamptz),
+  study_private.pulse_night__traps(uuid, timestamptz), study_private.pulse_night(uuid, timestamptz, boolean) from public;
+revoke all on function public.study_pulse_reader(uuid), public.study_pulse_ready(uuid), public.study_pulse_meter(uuid),
+  public.study_pulse(uuid, uuid), public.study_my_pulse(uuid, uuid), public.study_pulse_brief(uuid),
+  public.study_pulse_needed(uuid, uuid)
+  from public, anon;
+grant execute on function public.study_pulse_reader(uuid), public.study_pulse_ready(uuid), public.study_pulse_meter(uuid),
+  public.study_pulse(uuid, uuid), public.study_my_pulse(uuid, uuid), public.study_pulse_brief(uuid),
+  public.study_pulse_needed(uuid, uuid)
+  to authenticated;
+
+-- ── The quiz picks from the counts (Q10): replaces section Z's stub, same
+--  name, argument and result. 3 confident errors, 2 missed, 1 split, 0 none
+--  (and 0 while the switch is off: nothing counted shows anywhere).
+create or replace function public.study_quiz__signal(p_question uuid)
+returns int language sql stable security definer set search_path = public as $$
+  select case when not study_private.feature_on('pulse') then 0 else
+         coalesce((select case s.signal when 'sure' then 3 when 'missed' then 2 when 'split' then 1 else 0 end
+                     from public.study_pulse_questions s where s.question_id = p_question), 0) end
+$$;
+revoke all on function public.study_quiz__signal(uuid) from public, anon, authenticated;
+
+-- ── The agenda's hot spot (section M's hook, same name, argument and
+--  result): the meeting lecture's hottest topic, for a member who reads the
+--  pulse (reciprocal), while the switch is on. Last night's count: the
+--  agenda never runs the night itself (it is read often; the pulse's own
+--  reads run it).
+create or replace function study_private.meeting__hot_spot(p_meeting uuid)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select case when study_private.feature_on('pulse') and public.study_pulse_reader(m.group_id) then
+           (select jsonb_build_object('title', t.topic, 'aspect', t.aspect, 'slides', to_jsonb(t.slides), 'lecture_id', t.lecture_id)
+              from public.study_pulse_topics t
+              left join study_private.pulse_cells c on c.lecture_id = t.lecture_id and c.topic_key = t.topic_key and c.aspect = t.aspect
+             where t.lecture_id = m.lecture_id and t.group_id = m.group_id and t.bucket = 'hot'
+             order by c.struggling::numeric / greatest(c.people, 1) desc nulls last, t.topic_key, t.aspect limit 1)
+         end
+    from public.study_meetings m where m.id = p_meeting
+$$;
+revoke all on function study_private.meeting__hot_spot(uuid) from public;
+
+-- ── The night, on pg_cron: 02:17 UTC is 04:17 in an Israeli winter and
+--  05:17 in summer, after the study day starts either way. Without pg_cron
+--  the first read of the study day counts (study_pulse_ready).
+do $$
+begin
+  if to_regnamespace('cron') is null then
+    raise notice 'pg_cron is off: the pulse counts on the first read of each study day instead.';
+  else
+    perform cron.schedule('study-pulse-night', '17 2 * * *', 'select study_private.pulse_night()');
+  end if;
+end $$;
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION U, U-3 · TRAPS AND THE MUSEUM   (package U, milestone U-3; spec
+--  §12.5.U, the fun design §2.3, MU1-MU4; Yoad's decisions 1 and 3 of 17
+--  Nov 2026). Section U at version 2. Re-runnable, and safe on a database
+--  with data: one new table (study_traps), new functions, and the night's
+--  hook study_private.pulse_night__traps replaced with the same name,
+--  arguments and result.
+--
+--  What it adds
+--    - A trap: a wrong option at least 3 counted members chose (their first
+--      answer of a study day, in the night's window). It opens the next study
+--      day, and then its card (section C's trap card maker, source 'trap',
+--      key 'q:<question>:<option>': the live quiz's trap of the same option
+--      is the same card) joins every deck through C's queue.
+--    - An exhibit ("מוצג"): a trap at least 3 counted members chose "על
+--      בטוח". Numbered per lecture, it opens in the museum the next study
+--      day, so nobody can tell who from when it appeared.
+--    - Retirement ("בפנסיה"): at least 3 members, and every member active in
+--      the last 14 days, answered it right on two different study days since
+--      it opened, the latest right. "עוד נופלים": a third or more of those
+--      who tried it since are wrong now. A retired trap's card leaves the
+--      decks; the exhibit stays in the museum, retired.
+--    - Withdrawn: the question was retired, hidden, marked by a correction
+--      or flagged as wrong; its card leaves the decks, and it is never shown.
+--
+--  Decision 3 (a meter instead of a dead end): study_museum_meter() says how
+--  many exhibits there are, how many open tomorrow, and how many more wrong
+--  "על בטוח" bets the closest candidate needs (3 minus the most members who
+--  bet the same wrong option of one question "על בטוח", from the night's
+--  window: "עוד 2 הימורי ׳על בטוח׳ שגויים למוצג הבא"), never which question
+--  or who. Below the floor of 3 members nothing is an exhibit or a trap.
+--  The thresholds: pulse_floor() (3), and museum_retire_days() (2),
+--  museum_active_days() (14), museum_new_days() (3) below; shared/study/
+--  museum.ts mirrors them and its unit test reads them from this file.
+--
+--  Who sees what: study_traps has no read policy on purpose; members read
+--  it only through study_museum and study_trap_cards (definer functions that
+--  start with study_pulse_ready: the switch 'pulse' on, and only a member
+--  the last night counted, review SEC-8), so nothing shows before it opens.
+--  An exhibit shows its question's key and the explanation of the right and
+--  of the trap option, a deliberate reveal to the whole group as a quiz's
+--  reveal is ("החיסון"); never a count or a name.
+--
+--  Not here (deferred): the optional plaque written by Claude (op 'plaque');
+--  the museum shows the exhibit's own text instead (study_trap_plaque_begin
+--  and study_trap_plaque are here for the op when it is built).
+-- ════════════════════════════════════════════════════════════════════════
+
+create or replace function study_private.museum_retire_days() returns int language sql immutable as $$ select 2 $$;   -- right on this many different study days
+create or replace function study_private.museum_active_days() returns int language sql immutable as $$ select 14 $$;  -- "every member active" means in these days
+create or replace function study_private.museum_new_days() returns int language sql immutable as $$ select 3 $$;      -- an exhibit is "חדש" this long
+
+-- ── U4. Traps and exhibits (no read policy: read through the functions below) ──
+create table if not exists public.study_traps (
+  id           uuid        primary key default gen_random_uuid(),
+  group_id     uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id   uuid        references public.study_lectures (id) on delete cascade,
+  question_id  uuid        not null references public.study_questions (id) on delete cascade,
+  option       smallint    not null check (option >= 0),
+  source       text        not null default 'pulse' check (source in ('pulse', 'quiz', 'var')),
+  exhibit_no   int         check (exhibit_no >= 1),          -- museum exhibits only, numbered per lecture
+  exhibit_at   timestamptz,                                  -- when the exhibit opens
+  card_id      uuid        references public.study_cards (id) on delete set null,
+  state        text        not null default 'pending' check (state in ('pending', 'open', 'retired', 'withdrawn')),
+  falling      boolean     not null default false,           -- "עוד נופלים"
+  found_at     timestamptz not null,                         -- the cut-off of the night that found it
+  opens_at     timestamptz not null,                         -- the next study day
+  opened_at    timestamptz,
+  retired_at   timestamptz,
+  shown_at     timestamptz,                                  -- a meeting opened with it (MU4)
+  plaque       jsonb,                                        -- {claim, line}: the optional plaque by Claude
+  plaque_until timestamptz,                                  -- op 'plaque' holds the exhibit (review SEC-15)
+  unique (question_id, option)
+);
+create index if not exists study_traps_group on public.study_traps (group_id, lecture_id);
+
+-- The trap card: the question, the right answer, and the trap with why it
+-- is wrong here, from the question's own checked text (no Claude), through
+-- section C's trap card maker. Returns the card, or null when the text does
+-- not fit a card (the exhibit still shows).
+create or replace function study_private.trap_make(p_trap uuid)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  t   public.study_traps;
+  q   public.study_questions;
+  k   public.study_question_keys;
+  f   text;
+  b   text;
+  e   text;
+  cid uuid;
+begin
+  select * into t from public.study_traps x where x.id = p_trap;
+  if not found then return null; end if;
+  if t.card_id is not null and exists (select 1 from public.study_cards c where c.id = t.card_id and c.deleted_at is null) then
+    return t.card_id;
+  end if;
+  select * into q from public.study_questions x where x.id = t.question_id;
+  select * into k from public.study_question_keys x where x.question_id = t.question_id;
+  if q.lecture_id is null or k.answer is null or t.option = k.answer or t.option >= cardinality(q.options) then
+    return null;
+  end if;
+  if to_regprocedure('study_private.trap_card(uuid,integer,integer,text,text,text,text,integer[],text,timestamp with time zone)') is null then
+    return null;
+  end if;
+  f := case
+         when btrim(coalesce(q.vignette, '')) = '' then btrim(q.question)
+         when char_length(btrim(q.vignette)) + 1 + char_length(btrim(q.question)) <= 400 then btrim(q.vignette) || ' ' || btrim(q.question)
+         else regexp_replace(left(btrim(q.vignette), greatest(0, 396 - char_length(btrim(q.question)))), '\s+\S*$', '') || '… ' || btrim(q.question)
+       end;
+  if char_length(f) > 400 then f := left(btrim(q.question), 399) || '…'; end if;
+  b := left(btrim(q.options[k.answer + 1]), 300);
+  e := left('המלכודת: ' || btrim(q.options[t.option + 1])
+            || coalesce(' · ' || nullif(btrim(k.explanations[t.option + 1]), ''), ''), 500);
+  cid := study_private.trap_card(q.lecture_id, q.part_idx, (to_jsonb(q) ->> 'anchor')::int, coalesce(to_jsonb(q) ->> 'quote', ''),
+                                 f, b, e, coalesce(q.slides[1:12], '{}'), 'q:' || q.id::text || ':' || t.option::text);
+  if cid is null then return null; end if;
+  update public.study_cards c set topic = q.topic, aspect = q.aspect where c.id = cid and c.topic = '';
+  update public.study_traps x set card_id = cid where x.id = p_trap;
+  return cid;
+end;
+$$;
+
+-- A trap's card leaves every deck (retired or withdrawn), with a history row.
+create or replace function study_private.trap_unmake(p_trap uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare c public.study_cards;
+begin
+  select x.* into c from public.study_cards x join public.study_traps t on t.card_id = x.id
+   where t.id = p_trap and x.deleted_at is null;
+  if not found then return; end if;
+  update public.study_cards x set deleted_at = now(), deleted_by = null where x.id = c.id;
+  insert into public.study_card_edits (card_id, action, version, before, after, edited_by)
+  values (c.id, 'delete', c.version, jsonb_build_object('kind', c.kind, 'front', c.front, 'back', c.back), '{}'::jsonb, null);
+end;
+$$;
+
+-- Adds a trap (or finds it): pending, opening at the next study day.
+-- Internal: no grants.
+create or replace function study_private.trap_add(p_question uuid, p_option int, p_source text, p_found timestamptz)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  q   public.study_questions;
+  tid uuid;
+begin
+  select * into q from public.study_questions x where x.id = p_question;
+  if not found or q.lecture_id is null then return null; end if;
+  insert into public.study_traps (group_id, lecture_id, question_id, option, source, found_at, opens_at)
+  values (q.group_id, q.lecture_id, p_question, p_option, p_source, p_found, study_private.pulse_next_cutoff(p_found))
+  on conflict (question_id, option) do nothing
+  returning id into tid;
+  if tid is null then
+    select x.id into tid from public.study_traps x where x.question_id = p_question and x.option = p_option;
+  end if;
+  return tid;
+end;
+$$;
+
+-- The night's hook (replaces section U's stub, same name, arguments and
+-- result): finds tonight's traps and exhibits, withdraws, opens what is due,
+-- and marks open traps "עוד נופלים" or retired. Returns what it counted
+-- (merged into pulse_runs.counted, which no member reads).
+create or replace function study_private.pulse_night__traps(p_group uuid, p_cut timestamptz)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  fl   int := study_private.pulse_floor();
+  w    timestamptz := p_cut - make_interval(days => study_private.pulse_window_days());
+  act  timestamptz := p_cut - make_interval(days => study_private.museum_active_days());
+  r    record;
+  best int;
+begin
+  -- 1. Found tonight: a wrong option at least `fl` counted members chose; "על בטוח" by `fl`: also an exhibit.
+  for r in
+    with ev as (
+      select e.* from study_private.pulse_answers(p_group, w, p_cut) e
+       where not e.correct and e.choice is not null and e.lecture_id is not null
+    )
+    select e.question_id, e.choice, count(distinct e.user_id) as people,
+           count(distinct e.user_id) filter (where e.sure) as sure_people
+      from ev e group by e.question_id, e.choice
+    having count(distinct e.user_id) >= fl
+  loop
+    perform study_private.trap_add(r.question_id, r.choice, 'pulse', p_cut);
+    if r.sure_people >= fl then
+      update public.study_traps t
+         set exhibit_no = (select coalesce(max(t2.exhibit_no), 0) + 1 from public.study_traps t2 where t2.lecture_id = t.lecture_id),
+             exhibit_at = study_private.pulse_next_cutoff(p_cut)
+       where t.question_id = r.question_id and t.option = r.choice and t.exhibit_no is null and t.state in ('pending', 'open');
+    end if;
+  end loop;
+  -- 2. Withdrawn: the question was retired, hidden, marked by a correction or flagged as wrong.
+  for r in
+    select t.id from public.study_traps t
+      join public.study_questions q on q.id = t.question_id
+     where t.group_id = p_group and t.state in ('pending', 'open')
+       and (q.retired_at is not null or q.hidden_at is not null or (to_jsonb(q) ->> 'stale_at') is not null
+            or exists (select 1 from public.study_question_flags f
+                        where f.question_id = q.id and f.reason in ('wrong_key', 'two_answers', 'not_in_slides')))
+  loop
+    update public.study_traps t set state = 'withdrawn', falling = false where t.id = r.id;
+    perform study_private.trap_unmake(r.id);
+  end loop;
+  -- 3. Open what is due: its card joins every deck.
+  for r in
+    select t.id from public.study_traps t where t.group_id = p_group and t.state = 'pending' and t.opens_at <= p_cut
+  loop
+    update public.study_traps t set state = 'open', opened_at = p_cut where t.id = r.id;
+    perform study_private.trap_make(r.id);
+  end loop;
+  -- 4. Open traps: still falling? retired? A retest is a counted member's
+  --    first answer of a study day to the trap's question, or a review of
+  --    its card, since it opened.
+  for r in
+    with t as (
+      select x.id, x.question_id, x.card_id, x.opened_at from public.study_traps x
+       where x.group_id = p_group and x.state = 'open' and x.opened_at is not null
+    ), rt as (
+      select t.id as trap_id, e.user_id, e.day, e.correct, e.answered_at as at
+        from t join study_private.pulse_answers(p_group, w, p_cut) e on e.question_id = t.question_id and e.answered_at >= t.opened_at
+      union all
+      select t.id, v.user_id, ((v.reviewed_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date, not v.again, v.reviewed_at
+        from t join study_private.pulse_reviews(p_group, w, p_cut) v on v.card_id = t.card_id and v.reviewed_at >= t.opened_at
+    ), per_user as (
+      select x.trap_id, x.user_id,
+             count(distinct x.day) filter (where x.correct) as right_days,
+             (array_agg(x.correct order by x.at desc))[1] as last_right
+        from rt x group by x.trap_id, x.user_id
+    ), active as (
+      select distinct y.user_id from (
+        select e.user_id from study_private.pulse_answers(p_group, act, p_cut) e
+        union select v.user_id from study_private.pulse_reviews(p_group, act, p_cut) v) y
+    )
+    select t.id,
+           (select count(*) from per_user p where p.trap_id = t.id) as tested,
+           (select count(*) from per_user p where p.trap_id = t.id and not p.last_right) as wrong_now,
+           (select count(*) from per_user p where p.trap_id = t.id
+                                               and p.right_days >= study_private.museum_retire_days() and p.last_right) as done,
+           (select count(*) from active a
+             where not exists (select 1 from per_user p where p.trap_id = t.id and p.user_id = a.user_id
+                                 and p.right_days >= study_private.museum_retire_days() and p.last_right)) as missing
+      from t
+  loop
+    if r.done >= fl and r.missing = 0 then
+      update public.study_traps t set state = 'retired', retired_at = p_cut, falling = false where t.id = r.id;
+      perform study_private.trap_unmake(r.id);
+    else
+      update public.study_traps t set falling = (r.tested >= fl and r.wrong_now * 3 >= r.tested) where t.id = r.id;
+    end if;
+  end loop;
+  -- 5. Decision 3's meter: the closest candidate exhibit, from the same
+  --    window: the most counted members who bet one wrong option of one
+  --    question "על בטוח", below the floor (never which, never who).
+  select max(z.n) into best
+    from (select e.question_id, e.choice, count(distinct e.user_id)::int as n
+            from study_private.pulse_answers(p_group, w, p_cut) e
+           where not e.correct and e.sure and e.choice is not null and e.lecture_id is not null
+           group by e.question_id, e.choice) z
+   where z.n < fl
+     and not exists (select 1 from public.study_traps t where t.question_id = z.question_id and t.option = z.choice and t.exhibit_no is not null);
+  return jsonb_build_object(
+    'traps_open', (select count(*) from public.study_traps x where x.group_id = p_group and x.state = 'open'),
+    'exhibits', (select count(*) from public.study_traps x where x.group_id = p_group and x.exhibit_no is not null
+                                                           and x.state in ('pending', 'open', 'retired')),
+    'exhibit_need', fl - coalesce(best, 0));
+end;
+$$;
+
+-- MU2: the museum of a lecture (or of the group), exhibits that are open.
+--   state  'new' (opened in the last museum_new_days()), 'falling' ("עוד
+--          נופלים"), 'hanging' ("עדיין תלוי"), 'retired' ("בפנסיה")
+create or replace function public.study_museum(p_group uuid, p_lecture uuid default null)
+returns table (trap_id uuid, lecture_id uuid, lecture_title text, course text, exhibit_no int, state text, question_id uuid,
+               stem text, claim text, truth text, takeaway text, confused text, slides int[], plaque jsonb,
+               opened_at timestamptz, card_id uuid)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if public.study_pulse_ready(p_group) is null then return; end if;   -- the switch is off, or not a reader (SEC-8)
+  return query
+  select t.id, t.lecture_id, l.title, btrim(l.course), t.exhibit_no,
+         case when t.state = 'retired' then 'retired'
+              when t.falling then 'falling'
+              when t.exhibit_at > now() - make_interval(days => study_private.museum_new_days()) then 'new'
+              else 'hanging' end,
+         q.id, q.question, q.options[t.option + 1], q.options[k.answer + 1], k.takeaway,
+         coalesce(k.explanations[t.option + 1], ''), q.slides, t.plaque, t.exhibit_at,
+         case when t.state = 'open' then t.card_id end
+    from public.study_traps t
+    join public.study_questions q on q.id = t.question_id
+    join public.study_question_keys k on k.question_id = t.question_id
+    join public.study_lectures l on l.id = t.lecture_id and l.deleted_at is null
+   where t.group_id = p_group and (p_lecture is null or t.lecture_id = p_lecture)
+     and t.exhibit_no is not null and t.exhibit_at <= now() and t.state in ('open', 'retired')
+     and k.answer is not null
+   order by (t.state = 'retired'), t.exhibit_at desc, t.exhibit_no desc;
+end;
+$$;
+
+-- Decision 3: the museum's meter, from the night's real counts. The pulse's
+-- own meter first (off, out, waiting with the days left, or open with how
+-- many more counted members the group needs); then, for a reader: exhibits
+-- open in the museum (and retired), exhibits found that open the next study
+-- day, open trap cards, and how many more wrong "על בטוח" bets the closest
+-- candidate needs (1 to 3).
+create or replace function public.study_museum_meter(p_group uuid, p_lecture uuid default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  m jsonb := public.study_pulse_meter(p_group);    -- runs the night first; members only
+  c jsonb;
+begin
+  if m ->> 'state' <> 'open' then return m - 'lectures'; end if;
+  select r.counted into c from study_private.pulse_runs r where r.group_id = p_group;
+  return (m - 'lectures') || jsonb_build_object(
+    'exhibits', (select count(*) from public.study_traps t join public.study_lectures l on l.id = t.lecture_id and l.deleted_at is null
+                  where t.group_id = p_group and (p_lecture is null or t.lecture_id = p_lecture)
+                    and t.exhibit_no is not null and t.exhibit_at <= now() and t.state in ('open', 'retired')),
+    'retired', (select count(*) from public.study_traps t join public.study_lectures l on l.id = t.lecture_id and l.deleted_at is null
+                 where t.group_id = p_group and (p_lecture is null or t.lecture_id = p_lecture)
+                   and t.exhibit_no is not null and t.exhibit_at <= now() and t.state = 'retired'),
+    'soon', (select count(*) from public.study_traps t join public.study_lectures l on l.id = t.lecture_id and l.deleted_at is null
+              where t.group_id = p_group and (p_lecture is null or t.lecture_id = p_lecture)
+                and t.exhibit_no is not null and t.exhibit_at > now() and t.state in ('pending', 'open')),
+    'traps', (select count(*) from public.study_traps t join public.study_cards x on x.id = t.card_id and x.deleted_at is null
+               where t.group_id = p_group and t.state = 'open'),
+    'need', coalesce((c ->> 'exhibit_need')::int, study_private.pulse_floor()));
+end;
+$$;
+
+-- The open trap cards, for the decks' one chip ("חיסון · ממוזיאון המלכודות ·
+-- מוצג מס׳ 3", "מלכודת של הקבוצה").
+create or replace function public.study_trap_cards(p_group uuid)
+returns table (card_id uuid, trap_id uuid, lecture_id uuid, exhibit_no int, kind text)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if public.study_pulse_ready(p_group) is null then return; end if;
+  return query
+  select t.card_id, t.id, t.lecture_id,
+         case when t.exhibit_no is not null and t.exhibit_at <= now() then t.exhibit_no end,
+         case when t.exhibit_no is not null and t.exhibit_at <= now() then 'museum' else 'trap' end
+    from public.study_traps t
+    join public.study_cards c on c.id = t.card_id and c.deleted_at is null
+   where t.group_id = p_group and t.state = 'open';
+end;
+$$;
+
+-- MU4: the exhibit a meeting may open with: the newest open exhibit of the
+-- lecture not yet shown, else the one still catching people.
+create or replace function public.study_museum_pick(p_lecture uuid)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare g uuid := public.study_lecture_group(p_lecture);
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not coalesce(public.study_is_member(g), false) then raise exception 'lecture not found'; end if;
+  if public.study_pulse_ready(g) is null then return null; end if;
+  return (select t.id from public.study_traps t
+           where t.lecture_id = p_lecture and t.state = 'open' and t.exhibit_no is not null and t.exhibit_at <= now()
+           order by (t.shown_at is null) desc, t.falling desc, t.exhibit_at desc limit 1);
+end;
+$$;
+
+-- MU4: the meeting opened with it (any member who reads the museum; once is enough).
+create or replace function public.study_museum_shown(p_trap uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare g uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select t.group_id into g from public.study_traps t where t.id = p_trap;
+  if g is null or not coalesce(public.study_is_member(g), false) or public.study_pulse_ready(g) is null then
+    raise exception 'exhibit not found';
+  end if;
+  update public.study_traps t set shown_at = coalesce(t.shown_at, now())
+   where t.id = p_trap and t.state = 'open' and t.exhibit_no is not null and t.exhibit_at <= now();
+  if not found then raise exception 'exhibit not found'; end if;
+end;
+$$;
+
+-- For op 'plaque' (deferred): takes the exhibit for 2 minutes before the op
+-- reserves the budget, so a second phone gets 'busy' and pays nothing
+-- (review SEC-15). Errors: 'forbidden', 'exhibit not found', 'checked', 'busy'.
+create or replace function public.study_trap_plaque_begin(p_trap uuid, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare t public.study_traps;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into t from public.study_traps x where x.id = p_trap for update;
+  if not found or not coalesce(public.study_is_member(t.group_id), false)
+     or t.exhibit_no is null or t.exhibit_at > now() or t.state <> 'open' then
+    raise exception 'exhibit not found';
+  end if;
+  if t.plaque is not null then raise exception 'checked'; end if;
+  if t.plaque_until > now() then raise exception 'busy'; end if;
+  update public.study_traps x set plaque_until = now() + interval '2 minutes' where x.id = p_trap;
+end;
+$$;
+
+-- The optional plaque (op 'plaque'): written once, with the server key.
+create or replace function public.study_trap_plaque(p_trap uuid, p_claim text, p_line text, p_key text default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if char_length(btrim(coalesce(p_claim, ''))) not between 3 and 120 or char_length(btrim(coalesce(p_line, ''))) not between 3 and 160 then
+    raise exception 'bad plaque';
+  end if;
+  update public.study_traps t
+     set plaque = jsonb_build_object('claim', btrim(p_claim), 'line', btrim(p_line)), plaque_until = null
+   where t.id = p_trap and coalesce(public.study_is_member(t.group_id), false)
+     and t.exhibit_no is not null and t.exhibit_at <= now() and t.plaque is null;
+  return found;
+end;
+$$;
+
+alter table public.study_traps enable row level security;
+-- study_traps: no policy on purpose (read through study_museum / study_trap_cards, so nothing shows before it opens).
+revoke all on public.study_traps from anon, authenticated;
+revoke all on function study_private.museum_retire_days(), study_private.museum_active_days(), study_private.museum_new_days(),
+  study_private.trap_make(uuid), study_private.trap_unmake(uuid), study_private.trap_add(uuid, int, text, timestamptz),
+  study_private.pulse_night__traps(uuid, timestamptz) from public;
+revoke all on function public.study_museum(uuid, uuid), public.study_museum_meter(uuid, uuid), public.study_trap_cards(uuid),
+  public.study_museum_pick(uuid), public.study_museum_shown(uuid), public.study_trap_plaque_begin(uuid, text),
+  public.study_trap_plaque(uuid, text, text, text)
+  from public, anon;
+grant execute on function public.study_museum(uuid, uuid), public.study_museum_meter(uuid, uuid), public.study_trap_cards(uuid),
+  public.study_museum_pick(uuid), public.study_museum_shown(uuid), public.study_trap_plaque_begin(uuid, text),
+  public.study_trap_plaque(uuid, text, text, text)
+  to authenticated;
+
+-- U at 2: U-3's traps and the museum (version 1 was U-1 and U-2).
+insert into study_private.schema_sections (section, version) values ('U', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION U ════
+
+-- ════ BEGIN SECTION J · the association wall (package J) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION J · THE ASSOCIATION WALL   (package J; spec §12.5.J, the fun
+--  design's W1-W8, C4, K6, decision 10). After section U in the file: the
+--  wall's "דרושות" will read U's study_pulse_cards, but nothing here does
+--  (the tab is the phone's, and it hides while U and the flag `pulse` are
+--  missing), so this section loads and runs on study/wave3's database
+--  without U. A card's paragraph (section C's end, study_cards.anchor) is
+--  read through to_jsonb, so the section also loads without C's end (no
+--  card then has a hint). Re-runnable, and safe on a database with data: it
+--  adds tables and functions only, and touches no other section's rows.
+--
+--  As the addendum printed it, with two hardenings (checks J15, J16):
+--  a check (op wall_check) is taken only for an entry that could win (2
+--  votes at least, not marked), so one member cannot spend the group's
+--  month checking every entry; and a draft ("לפרסם כמו שהיא") must name a
+--  draft of its own row, not any row's number.
+--
+--  Who sees what
+--  ─────────────
+--  The wall is the group's: every entry, its fact and slides, its vote
+--  totals, its author's name when posted by name, a credit once the credited
+--  member said yes, and who marked it "לא מדויק". Private to each member:
+--  which entries are theirs (an entry posted without a name keeps its author
+--  only here, for editing and deleting: decision 10), their votes, their
+--  pins ("שלי") and the credit requests addressed to them. Claude's drafts
+--  ("תנו לי 3") are saved once per paragraph for everyone and written only
+--  with the server key; nothing reaches the wall without a member posting
+--  it. The paragraph's winner (top votes, checked once against the
+--  paragraph, not marked "לא מדויק") rides on everyone's cards.
+--  Realtime: study_aids only (its own uuid key; no author column).
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ── J1. Claude's drafts for a paragraph: three techniques, one deciding fact
+--  (the drafts that passed the op's checks: 1 to 3, one per technique).
+--  src_hash = sha256 of the paragraph's text as written then, so a corrected
+--  paragraph may get new drafts; the same text never pays twice.
+create table if not exists public.study_aid_drafts (
+  id         uuid        primary key default gen_random_uuid(),
+  group_id   uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null check (part_idx >= 0),
+  anchor     int         not null check (anchor between 0 and 9999),
+  src_hash   text        not null check (src_hash ~ '^[0-9a-f]{64}$'),
+  fact       text        not null check (char_length(btrim(fact)) between 3 and 300),
+  slides     int[]       not null default '{}' check (cardinality(slides) <= 6),
+  drafts     jsonb       not null check (jsonb_typeof(drafts) = 'array' and jsonb_array_length(drafts) between 1 and 3),
+  model      text        check (char_length(model) <= 80),
+  created_at timestamptz not null default now(),
+  unique (lecture_id, part_idx, anchor, src_hash)
+);
+-- The hold op "mnemonic" takes BEFORE it reserves (review SEC4-3, as
+-- wall_check's): two phones tapping "תנו לי 3" on one paragraph at once
+-- pay once; the second answers "busy" until the drafts are saved (which
+-- clears the hold), the call fails (the op clears it), or 2 minutes pass.
+create table if not exists study_private.aid_draft_holds (
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null,
+  anchor     int         not null,
+  src_hash   text        not null,
+  held_until timestamptz not null,
+  primary key (lecture_id, part_idx, anchor, src_hash)
+);
+
+-- ── J2. The wall's entries.
+--   kind: line (משלי) · remix (of an entry or a draft) · sketch, meme (a
+--   photo, with its caption as body) · moment (לנעוץ רגע, during a reading)
+--   · draft (a draft posted as it is)
+--   fact: "על מה זה?", required: the fact and its slide, so the entry means
+--   something to whoever was not there.
+--   named_by: the author, only when posted by name. Anonymous: null here,
+--   the author only in study_aid_authors (owner-only).
+create table if not exists public.study_aids (
+  id          uuid        primary key default gen_random_uuid(),
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id  uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx    int         not null check (part_idx >= 0),
+  anchor      int         not null check (anchor between 0 and 9999),
+  quote       text        not null default '' check (char_length(quote) <= 200),
+  drug        text        not null default '' check (char_length(drug) <= 60),
+  kind        text        not null check (kind in ('line', 'remix', 'sketch', 'meme', 'moment', 'draft')),
+  body        text        not null check (char_length(btrim(body)) between 3 and 500),
+  fact        text        not null check (char_length(btrim(fact)) between 3 and 300),
+  slides      int[]       not null default '{}' check (cardinality(slides) <= 6),
+  photo       text        check (photo is null or photo ~ '^[0-9a-f-]{36}/wall/[0-9a-f-]{36}\.(jpg|webp)$'),
+  figure      text        check (figure is null or figure ~ '^fig:[0-9]{1,4}-[0-9]{1,3}$'),
+  remix_of    uuid        references public.study_aids (id) on delete set null,
+  draft_id    uuid        references public.study_aid_drafts (id) on delete set null,
+  draft_no    smallint    check (draft_no between 1 and 3),
+  named_by    uuid        references auth.users (id) on delete set null,
+  credit_id   uuid        references auth.users (id) on delete set null,   -- shown only after that member said yes
+  funny_n     int         not null default 0 check (funny_n >= 0),
+  stuck_n     int         not null default 0 check (stuck_n >= 0),
+  flag        text        check (flag in ('inaccurate', 'not_ok')),          -- "לא מדויק" · "לא מתאים"
+  flagged_by  uuid        references auth.users (id) on delete set null,    -- null with a flag: the check found it
+  check_state text        not null default 'no' check (check_state in ('no', 'checking', 'ok', 'bad')),
+  checked_at  timestamptz,
+  check_note  text        not null default '' check (char_length(check_note) <= 300),
+  edited_at   timestamptz,
+  created_at  timestamptz not null default now(),
+  check ((kind in ('sketch', 'meme')) = (photo is not null)),
+  check (draft_no is null or draft_id is not null)
+);
+create index if not exists study_aids_spot on public.study_aids (lecture_id, part_idx, anchor);
+create index if not exists study_aids_group on public.study_aids (group_id, created_at desc);
+create index if not exists study_aids_drug on public.study_aids (group_id, drug) where drug <> '';
+
+-- ── J3. Private rows ──
+create table if not exists public.study_aid_authors (
+  aid_id  uuid primary key references public.study_aids (id) on delete cascade,
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade
+);
+create index if not exists study_aid_authors_user on public.study_aid_authors (user_id);
+
+create table if not exists public.study_aid_votes (
+  aid_id     uuid        not null references public.study_aids (id) on delete cascade,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  kind       text        not null check (kind in ('funny', 'stuck')),            -- "מצחיק" · "נתקע לי"
+  created_at timestamptz not null default now(),
+  primary key (aid_id, user_id, kind)
+);
+create index if not exists study_aid_votes_user on public.study_aid_votes (user_id);
+
+-- "שלי": one pinned entry per member per paragraph, seen only by that member;
+-- it replaces the group's winner on that member's cards.
+create table if not exists public.study_aid_pins (
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null,
+  anchor     int         not null,
+  aid_id     uuid        not null references public.study_aids (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, lecture_id, part_idx, anchor)
+);
+
+-- A name in a pin only with that member's yes (decision 10). The request is
+-- the credited member's row; the entry shows the name only after "לאשר".
+create table if not exists public.study_aid_credits (
+  aid_id      uuid        primary key references public.study_aids (id) on delete cascade,
+  user_id     uuid        not null references auth.users (id) on delete cascade,
+  state       text        not null default 'asked' check (state in ('asked', 'ok', 'no')),
+  asked_at    timestamptz not null default now(),
+  answered_at timestamptz
+);
+create index if not exists study_aid_credits_user on public.study_aid_credits (user_id, state);
+
+-- ── J4. Each paragraph's winner, kept by the functions below (for cards and Anki) ──
+create table if not exists public.study_aid_winners (
+  lecture_id uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx   int         not null,
+  anchor     int         not null,
+  aid_id     uuid        not null references public.study_aids (id) on delete cascade,
+  since      timestamptz not null default now(),        -- an Anki re-export updates the note from here
+  primary key (lecture_id, part_idx, anchor)
+);
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Helpers
+-- ═══════════════════════════════════════════════════════════════════════
+-- An entry's group, for the caller's own groups only (null otherwise).
+create or replace function public.study_aid_group(a uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select x.group_id from public.study_aids x where x.id = a and coalesce(public.study_is_member(x.group_id), false);
+$$;
+
+-- A member's name in a group ('' for someone who left).
+create or replace function study_private.member_name(p_group uuid, p_user uuid)
+returns text language sql stable security definer set search_path = public as $$
+  select coalesce((select m.name from public.study_members m where m.group_id = p_group and m.user_id = p_user), '')
+$$;
+
+-- The paragraph's winner again, after a vote, a flag, a check, an edit or a
+-- delete: the most votes (2 at least), then more "נתקע לי", then the older,
+-- among entries checked against the paragraph and not marked. Returns the
+-- entry that should be checked next (it would win and was never checked),
+-- or null.
+create or replace function study_private.aid_rewin(p_lecture uuid, p_part int, p_anchor int)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  top  uuid;
+  best public.study_aids;
+begin
+  select a.id into top from public.study_aids a
+   where a.lecture_id = p_lecture and a.part_idx = p_part and a.anchor = p_anchor
+     and a.flag is null and a.check_state = 'ok' and a.funny_n + a.stuck_n >= 2
+   order by a.funny_n + a.stuck_n desc, a.stuck_n desc, a.created_at, a.id limit 1;
+  if top is null then
+    delete from public.study_aid_winners w where w.lecture_id = p_lecture and w.part_idx = p_part and w.anchor = p_anchor;
+  else
+    insert into public.study_aid_winners (lecture_id, part_idx, anchor, aid_id, since)
+    values (p_lecture, p_part, p_anchor, top, now())
+    on conflict (lecture_id, part_idx, anchor) do update
+       set aid_id = excluded.aid_id, since = excluded.since
+     where public.study_aid_winners.aid_id is distinct from excluded.aid_id;
+  end if;
+  select a.* into best from public.study_aids a
+   where a.lecture_id = p_lecture and a.part_idx = p_part and a.anchor = p_anchor
+     and a.flag is null and a.check_state <> 'bad' and a.funny_n + a.stuck_n >= 2
+   order by a.funny_n + a.stuck_n desc, a.stuck_n desc, a.created_at, a.id limit 1;
+  if found and best.check_state = 'no' then return best.id; end if;
+  return null;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  What the phones call
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Posts an entry (W3, W8, K6). Errors: 'not signed in', 'lecture not found',
+-- 'part not found', 'bad kind', 'bad body', 'bad fact', 'unknown slide',
+-- 'bad photo', 'bad figure', 'bad remix', 'bad draft', 'bad credit',
+-- 'daily_limit' (30 entries a day, Israel time, as the budget's daily limits).
+create or replace function public.study_aid_post(p_lecture uuid, p_part int, p_anchor int, p_quote text, p_kind text,
+  p_body text, p_fact text, p_slides int[], p_drug text default '', p_named boolean default true,
+  p_remix_of uuid default null, p_draft uuid default null, p_draft_no int default null,
+  p_photo text default null, p_figure text default null, p_credit uuid default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  me   uuid := auth.uid();
+  g    uuid := public.study_lecture_group(p_lecture);
+  have int[];
+  fn   int;
+  fk   int;
+  aid  uuid;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if g is null or not coalesce(public.study_is_member(g), false)
+     or exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is not null) then
+    raise exception 'lecture not found';
+  end if;
+  if not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.idx = p_part)
+     or p_anchor is null or p_anchor not between 0 and 9999 then
+    raise exception 'part not found';
+  end if;
+  if coalesce(p_kind, '') not in ('line', 'remix', 'sketch', 'meme', 'moment', 'draft') then raise exception 'bad kind'; end if;
+  if char_length(btrim(coalesce(p_body, ''))) not between 3 and 500 then raise exception 'bad body'; end if;
+  if char_length(btrim(coalesce(p_fact, ''))) not between 3 and 300 then raise exception 'bad fact'; end if;
+  select coalesce(array_agg((s ->> 'n')::int), '{}') into have
+    from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = p_lecture;
+  if cardinality(coalesce(p_slides, '{}')) > 6 or not (coalesce(p_slides, '{}') <@ have) then raise exception 'unknown slide'; end if;
+  if (p_kind in ('sketch', 'meme')) <> (p_photo is not null)
+     or (p_photo is not null and (p_photo !~ ('^' || g::text || '/wall/[0-9a-f-]{36}\.(jpg|webp)$')
+                                  or not exists (select 1 from storage.objects o
+                                                  where o.bucket_id = 'study' and o.name = p_photo
+                                                    and o.owner_id = auth.uid()::text)          -- review SEC-14: her own upload
+                                  or exists (select 1 from public.study_aids x where x.photo = p_photo))) then
+    raise exception 'bad photo';
+  end if;
+  if p_figure is not null then
+    if p_figure !~ '^fig:[0-9]{1,4}-[0-9]{1,3}$' then raise exception 'bad figure'; end if;
+    fn := split_part(substr(p_figure, 5), '-', 1)::int;
+    fk := split_part(substr(p_figure, 5), '-', 2)::int;
+    if not exists (select 1 from public.study_lectures l, jsonb_array_elements(l.slides) s,
+                          jsonb_array_elements(coalesce(s -> 'figures', '[]'::jsonb)) f
+                    where l.id = p_lecture and (s ->> 'n')::int = fn and (f ->> 'k')::int = fk) then
+      raise exception 'bad figure';
+    end if;
+  end if;
+  -- A remix names what it remixes (an entry of the group, or a draft); only a remix names an entry.
+  if (p_kind = 'remix' and p_remix_of is null and p_draft is null)
+     or (p_kind <> 'remix' and p_remix_of is not null)
+     or (p_remix_of is not null and public.study_aid_group(p_remix_of) is distinct from g) then
+    raise exception 'bad remix';
+  end if;
+  -- A draft is posted from its own paragraph; "לפרסם כמו שהיא" posts its exact text
+  -- (anything else is a remix, posted as the member's own words).
+  if (p_kind = 'draft' and p_draft is null)
+     or (p_kind not in ('remix', 'draft') and p_draft is not null)
+     or (p_draft is not null and (
+           p_draft_no is null or p_draft_no not between 1 and 3
+           or not exists (select 1 from public.study_aid_drafts d
+                           where d.id = p_draft and d.lecture_id = p_lecture and d.part_idx = p_part and d.anchor = p_anchor
+                             and jsonb_array_length(d.drafts) >= p_draft_no)))
+     or (p_kind = 'draft' and not exists (select 1 from public.study_aid_drafts d
+                                           where d.id = p_draft and btrim(d.drafts -> (p_draft_no - 1) ->> 'hook') = btrim(p_body))) then
+    raise exception 'bad draft';
+  end if;
+  if p_credit is not null and (p_credit = me or not exists (select 1 from public.study_members m where m.group_id = g and m.user_id = p_credit)) then
+    raise exception 'bad credit';
+  end if;
+  if (select count(*) from public.study_aid_authors w join public.study_aids a on a.id = w.aid_id
+       where w.user_id = me
+         and a.created_at >= (date_trunc('day', now() at time zone 'Asia/Jerusalem') at time zone 'Asia/Jerusalem')) >= 30 then
+    raise exception 'daily_limit';
+  end if;
+  insert into public.study_aids (group_id, lecture_id, part_idx, anchor, quote, drug, kind, body, fact, slides,
+                                 photo, figure, remix_of, draft_id, draft_no, named_by)
+  values (g, p_lecture, p_part, p_anchor, left(coalesce(p_quote, ''), 200), left(lower(btrim(coalesce(p_drug, ''))), 60),
+          p_kind, btrim(p_body), btrim(p_fact), coalesce(p_slides, '{}'), p_photo, p_figure, p_remix_of, p_draft,
+          p_draft_no, case when coalesce(p_named, true) then me end)
+  returning id into aid;
+  insert into public.study_aid_authors (aid_id, user_id) values (aid, me);
+  if p_credit is not null then
+    insert into public.study_aid_credits (aid_id, user_id) values (aid, p_credit);
+  end if;
+  return aid;
+end;
+$$;
+
+-- The author fixes an entry: its check and any "לא מדויק"/"לא מתאים" mark
+-- start over. Errors: 'aid not found' (or not the caller's), 'bad body',
+-- 'bad fact', 'unknown slide'. Returns the entry to check next, if any.
+create or replace function public.study_aid_edit(p_aid uuid, p_body text, p_fact text, p_slides int[])
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  a    public.study_aids;
+  have int[];
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select x.* into a from public.study_aids x join public.study_aid_authors w on w.aid_id = x.id
+   where x.id = p_aid and w.user_id = auth.uid() for update of x;
+  if not found then raise exception 'aid not found'; end if;
+  if char_length(btrim(coalesce(p_body, ''))) not between 3 and 500 then raise exception 'bad body'; end if;
+  if char_length(btrim(coalesce(p_fact, ''))) not between 3 and 300 then raise exception 'bad fact'; end if;
+  select coalesce(array_agg((s ->> 'n')::int), '{}') into have
+    from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = a.lecture_id;
+  if cardinality(coalesce(p_slides, '{}')) > 6 or not (coalesce(p_slides, '{}') <@ have) then raise exception 'unknown slide'; end if;
+  update public.study_aids x
+     set body = btrim(p_body), fact = btrim(p_fact), slides = coalesce(p_slides, '{}'), edited_at = now(),
+         flag = null, flagged_by = null, check_state = 'no', checked_at = null, check_note = ''
+   where x.id = p_aid;
+  return study_private.aid_rewin(a.lecture_id, a.part_idx, a.anchor);
+end;
+$$;
+
+-- The author deletes an entry. Returns its photo's path, which the phone
+-- then removes from Storage (only the Storage API removes files).
+create or replace function public.study_aid_delete(p_aid uuid)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare a public.study_aids;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select x.* into a from public.study_aids x join public.study_aid_authors w on w.aid_id = x.id
+   where x.id = p_aid and w.user_id = auth.uid();
+  if not found then raise exception 'aid not found'; end if;
+  delete from public.study_aids x where x.id = p_aid;
+  perform study_private.aid_rewin(a.lecture_id, a.part_idx, a.anchor);
+  return a.photo;
+end;
+$$;
+
+-- A vote, on or off (W4). Never on one's own entry. Who voted stays private;
+-- the totals are the group's. Returns {funny, stuck, check}: check is the
+-- entry to check against its paragraph now (op wall_check), if any.
+-- Errors: 'aid not found', 'bad vote', 'own aid'.
+create or replace function public.study_aid_vote(p_aid uuid, p_kind text, p_on boolean)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  me  uuid := auth.uid();
+  a   public.study_aids;
+  chg int;
+  nxt uuid;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into a from public.study_aids x where x.id = p_aid for update;
+  if not found or not coalesce(public.study_is_member(a.group_id), false) then raise exception 'aid not found'; end if;
+  if coalesce(p_kind, '') not in ('funny', 'stuck') then raise exception 'bad vote'; end if;
+  if exists (select 1 from public.study_aid_authors w where w.aid_id = p_aid and w.user_id = me) then raise exception 'own aid'; end if;
+  if p_on then
+    insert into public.study_aid_votes (aid_id, user_id, kind) values (p_aid, me, p_kind) on conflict do nothing;
+  else
+    delete from public.study_aid_votes v where v.aid_id = p_aid and v.user_id = me and v.kind = p_kind;
+  end if;
+  get diagnostics chg = row_count;
+  if chg > 0 then
+    update public.study_aids x
+       set funny_n = x.funny_n + case when p_kind = 'funny' then (case when p_on then 1 else -1 end) else 0 end,
+           stuck_n = x.stuck_n + case when p_kind = 'stuck' then (case when p_on then 1 else -1 end) else 0 end
+     where x.id = p_aid
+    returning * into a;
+  end if;
+  nxt := study_private.aid_rewin(a.lecture_id, a.part_idx, a.anchor);
+  return jsonb_build_object('funny', a.funny_n, 'stuck', a.stuck_n, 'check', nxt);
+end;
+$$;
+
+-- "לא מדויק" keeps an entry off the cards until it is fixed; "לא מתאים"
+-- (the house rule: roast the drug, never people or patients) also hides it
+-- from the wall. Any member marks, with their name; the marker or the author
+-- clears it (an edit clears it too). Errors: 'aid not found', 'bad flag', 'not yours'.
+create or replace function public.study_aid_flag(p_aid uuid, p_flag text)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  a  public.study_aids;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into a from public.study_aids x where x.id = p_aid for update;
+  if not found or not coalesce(public.study_is_member(a.group_id), false) then raise exception 'aid not found'; end if;
+  if p_flag is not null and p_flag not in ('inaccurate', 'not_ok') then raise exception 'bad flag'; end if;
+  if p_flag is null then
+    if a.flag is null then return; end if;
+    -- A mark the check made (no marker) goes only with a fix (study_aid_edit).
+    if a.flagged_by is null
+       or (a.flagged_by is distinct from me
+           and not exists (select 1 from public.study_aid_authors w where w.aid_id = p_aid and w.user_id = me)) then
+      raise exception 'not yours';
+    end if;
+    update public.study_aids x set flag = null, flagged_by = null where x.id = p_aid;
+  else
+    update public.study_aids x set flag = p_flag, flagged_by = me where x.id = p_aid;
+  end if;
+  perform study_private.aid_rewin(a.lecture_id, a.part_idx, a.anchor);
+end;
+$$;
+
+-- "שלי" (W6): pin an entry for oneself on its paragraph, or take the pin off.
+create or replace function public.study_aid_pin(p_aid uuid, p_on boolean)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare a public.study_aids;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into a from public.study_aids x where x.id = p_aid;
+  if not found or not coalesce(public.study_is_member(a.group_id), false) then raise exception 'aid not found'; end if;
+  if p_on then
+    insert into public.study_aid_pins (user_id, lecture_id, part_idx, anchor, aid_id)
+    values (auth.uid(), a.lecture_id, a.part_idx, a.anchor, p_aid)
+    on conflict (user_id, lecture_id, part_idx, anchor) do update set aid_id = excluded.aid_id, created_at = now();
+  else
+    delete from public.study_aid_pins p where p.user_id = auth.uid() and p.aid_id = p_aid;
+  end if;
+end;
+$$;
+
+-- W8: the credit requests waiting for the caller.
+create or replace function public.study_aid_credit_requests(p_group uuid)
+returns table (aid_id uuid, lecture_id uuid, part_idx int, anchor int, body text, fact text, slides int[], asked_by text, asked_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select a.id, a.lecture_id, a.part_idx, a.anchor, a.body, a.fact, a.slides,
+         case when a.named_by is not null then study_private.member_name(a.group_id, a.named_by) else '' end, r.asked_at
+    from public.study_aid_credits r join public.study_aids a on a.id = r.aid_id
+   where r.user_id = auth.uid() and r.state = 'asked' and a.group_id = p_group and public.study_is_member(p_group)
+   order by r.asked_at
+$$;
+
+-- W8: "לאשר" puts the caller's name on the entry; "לא" leaves it without.
+create or replace function public.study_aid_credit_answer(p_aid uuid, p_ok boolean)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_aid_credits r set state = case when p_ok then 'ok' else 'no' end, answered_at = now()
+   where r.aid_id = p_aid and r.user_id = auth.uid() and r.state = 'asked';
+  if not found then raise exception 'credit not found'; end if;
+  if p_ok then
+    update public.study_aids a set credit_id = auth.uid() where a.id = p_aid;
+  end if;
+end;
+$$;
+
+-- The week's winner ("מנצחת השבוע"; read aloud on Thursday): the most votes
+-- cast since Sunday 04:00 (Israel time), 2 at least, not marked.
+create or replace function public.study_aid_week(p_group uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  with wk as (
+    select ((d - extract(dow from d)::int + time '04:00') at time zone 'Asia/Jerusalem') as since
+      from (select ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date as d) x
+  )
+  select v.aid_id
+    from public.study_aid_votes v
+    join public.study_aids a on a.id = v.aid_id
+    cross join wk
+   where a.group_id = p_group and public.study_is_member(p_group) and a.flag is null and v.created_at >= wk.since
+   group by v.aid_id, a.created_at
+  having count(*) >= 2
+   order by count(*) desc, count(*) filter (where v.kind = 'stuck') desc, a.created_at, v.aid_id
+   limit 1
+$$;
+
+-- W1: the wall, for the caller: one lecture, one drug across lectures
+-- (p_drug), or the whole group. Hidden ("לא מתאים") entries show only to
+-- their author. Names: the author's when posted by name, the credited
+-- member's after "לאשר". mine / my_* / pinned are the caller's own.
+create or replace function public.study_aid_wall(p_group uuid, p_lecture uuid default null, p_drug text default null)
+returns table (id uuid, lecture_id uuid, lecture_title text, part_idx int, anchor int, quote text, drug text, kind text,
+               body text, fact text, slides int[], photo text, figure text, author text, credit text,
+               funny_n int, stuck_n int, my_funny boolean, my_stuck boolean, mine boolean, pinned boolean,
+               on_cards boolean, week boolean, flag text, flagged_by text, check_note text,
+               remix_of uuid, draft_id uuid, draft_no smallint, created_at timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me uuid := auth.uid();
+  wk uuid;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  wk := public.study_aid_week(p_group);
+  return query
+  select a.id, a.lecture_id, l.title, a.part_idx, a.anchor, a.quote, a.drug, a.kind, a.body, a.fact, a.slides, a.photo, a.figure,
+         case when a.named_by is not null then study_private.member_name(a.group_id, a.named_by) end,
+         case when a.credit_id is not null then study_private.member_name(a.group_id, a.credit_id) end,
+         a.funny_n, a.stuck_n,
+         exists (select 1 from public.study_aid_votes v where v.aid_id = a.id and v.user_id = me and v.kind = 'funny'),
+         exists (select 1 from public.study_aid_votes v where v.aid_id = a.id and v.user_id = me and v.kind = 'stuck'),
+         exists (select 1 from public.study_aid_authors w where w.aid_id = a.id and w.user_id = me),
+         exists (select 1 from public.study_aid_pins p where p.aid_id = a.id and p.user_id = me),
+         exists (select 1 from public.study_aid_winners w where w.aid_id = a.id),
+         a.id = wk,
+         a.flag,
+         case when a.flagged_by is not null then study_private.member_name(a.group_id, a.flagged_by) end,
+         a.check_note, a.remix_of, a.draft_id, a.draft_no, a.created_at
+    from public.study_aids a
+    join public.study_lectures l on l.id = a.lecture_id and l.deleted_at is null
+   where a.group_id = p_group
+     and (p_lecture is null or a.lecture_id = p_lecture)
+     and (p_drug is null or a.drug = lower(btrim(p_drug)))
+     and (a.flag is distinct from 'not_ok'
+          or exists (select 1 from public.study_aid_authors w where w.aid_id = a.id and w.user_id = me))
+   order by a.created_at desc;
+end;
+$$;
+
+-- C4: the hint for one of the caller's cards (after two lapses): the
+-- caller's own pin on the card's paragraph, else the group's winner.
+create or replace function public.study_aid_hint(p_card uuid)
+returns table (aid_id uuid, body text, fact text, slides int[], photo text, figure text, author text, pinned boolean)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  c   record;
+  aid uuid;
+  pin boolean := true;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select x.lecture_id, x.part_idx, (to_jsonb(x) ->> 'anchor')::int as anchor, x.group_id into c from public.study_cards x where x.id = p_card;
+  if not found or not coalesce(public.study_is_member(c.group_id), false) then raise exception 'card not found'; end if;
+  if c.anchor is null or c.part_idx is null then return; end if;
+  select p.aid_id into aid from public.study_aid_pins p
+   where p.user_id = auth.uid() and p.lecture_id = c.lecture_id and p.part_idx = c.part_idx and p.anchor = c.anchor;
+  if aid is null then
+    pin := false;
+    select w.aid_id into aid from public.study_aid_winners w
+     where w.lecture_id = c.lecture_id and w.part_idx = c.part_idx and w.anchor = c.anchor;
+  end if;
+  if aid is null then return; end if;
+  return query
+  select a.id, a.body, a.fact, a.slides, a.photo, a.figure,
+         case when a.named_by is not null then study_private.member_name(a.group_id, a.named_by) end, pin
+    from public.study_aids a where a.id = aid;
+end;
+$$;
+
+-- W5: the association on each card of a lecture, for the card's back in the
+-- app and the Extra field of the Anki export: the caller's pin, else the
+-- group's winner. since: when it became this card's (the note's mod time
+-- moves with it, so a re-export updates the card in Anki).
+create or replace function public.study_aid_for_cards(p_lecture uuid)
+returns table (card_id uuid, aid_id uuid, body text, fact text, slides int[], author text, pinned boolean, since timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare g uuid := public.study_lecture_group(p_lecture);
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not coalesce(public.study_is_member(g), false) then raise exception 'lecture not found'; end if;
+  return query
+  select c.id, a.id, a.body, a.fact, a.slides,
+         case when a.named_by is not null then study_private.member_name(a.group_id, a.named_by) end,
+         p.aid_id is not null, coalesce(p.created_at, w.since)
+    from (select x.id, x.lecture_id, x.part_idx, (to_jsonb(x) ->> 'anchor')::int as anc
+            from public.study_cards x where x.lecture_id = p_lecture and x.deleted_at is null) c
+    left join public.study_aid_pins p on p.user_id = auth.uid() and p.lecture_id = c.lecture_id
+                                     and p.part_idx = c.part_idx and p.anchor = c.anc
+    left join public.study_aid_winners w on w.lecture_id = c.lecture_id and w.part_idx = c.part_idx and w.anchor = c.anc
+    join public.study_aids a on a.id = coalesce(p.aid_id, w.aid_id)
+   where c.anc is not null;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Written only by /api/study/ai with the server key
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- op "mnemonic" (W2): the drafts of a paragraph that passed the op's
+-- checks (1 to 3, one per technique), once per text. Returns the saved
+-- row's id (an existing one when two phones raced).
+create or replace function public.study_aid_drafts_save(p_lecture uuid, p_part int, p_anchor int, p_hash text,
+  p_fact text, p_slides int[], p_drafts jsonb, p_model text, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  g    uuid := public.study_lecture_group(p_lecture);
+  have int[];
+  did  uuid;
+  d    jsonb;
+  tech text[] := '{}';
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not coalesce(public.study_is_member(g), false) then raise exception 'lecture not found'; end if;
+  if not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.idx = p_part) then raise exception 'part not found'; end if;
+  if coalesce(p_hash, '') !~ '^[0-9a-f]{64}$' then raise exception 'bad drafts'; end if;
+  if jsonb_typeof(p_drafts) is distinct from 'array' or jsonb_array_length(p_drafts) not between 1 and 3 then raise exception 'bad drafts'; end if;
+  for d in select * from jsonb_array_elements(p_drafts) loop
+    if coalesce(d ->> 'technique', '') not in ('משחק מילים', 'חרוז', 'סצנה הזויה')
+       or char_length(btrim(coalesce(d ->> 'hook', ''))) not between 3 and 200
+       or char_length(coalesce(d ->> 'decode', '')) > 400 then
+      raise exception 'bad drafts';
+    end if;
+    tech := tech || (d ->> 'technique');
+  end loop;
+  if (select count(distinct x) from unnest(tech) x) <> cardinality(tech) then raise exception 'bad drafts'; end if;
+  if char_length(btrim(coalesce(p_fact, ''))) not between 3 and 300 then raise exception 'bad drafts'; end if;
+  select coalesce(array_agg((s ->> 'n')::int), '{}') into have
+    from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = p_lecture;
+  if cardinality(coalesce(p_slides, '{}')) > 6 or not (coalesce(p_slides, '{}') <@ have) then raise exception 'unknown slide'; end if;
+  insert into public.study_aid_drafts (group_id, lecture_id, part_idx, anchor, src_hash, fact, slides, drafts, model)
+  values (g, p_lecture, p_part, p_anchor, p_hash, btrim(p_fact), coalesce(p_slides, '{}'), p_drafts, left(p_model, 80))
+  on conflict (lecture_id, part_idx, anchor, src_hash) do nothing
+  returning id into did;
+  if did is null then
+    select x.id into did from public.study_aid_drafts x
+     where x.lecture_id = p_lecture and x.part_idx = p_part and x.anchor = p_anchor and x.src_hash = p_hash;
+  end if;
+  delete from study_private.aid_draft_holds h
+   where h.lecture_id = p_lecture and h.part_idx = p_part and h.anchor = p_anchor and h.src_hash = p_hash;
+  return did;
+end;
+$$;
+
+-- op "mnemonic", before it reserves (review SEC4-3): holds the paragraph's
+-- text for 2 minutes. Returns 'held', or 'saved' when the drafts of this
+-- text are saved already (the op answers them, $0). Errors: 'busy' (another
+-- phone's request holds it), 'lecture not found', 'bad drafts' (the hash).
+create or replace function public.study_aid_drafts_begin(p_lecture uuid, p_part int, p_anchor int, p_hash text, p_key text default null)
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare g uuid := public.study_lecture_group(p_lecture);
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not coalesce(public.study_is_member(g), false) then raise exception 'lecture not found'; end if;
+  if coalesce(p_hash, '') !~ '^[0-9a-f]{64}$' or p_part is null or p_anchor is null then raise exception 'bad drafts'; end if;
+  if exists (select 1 from public.study_aid_drafts x
+              where x.lecture_id = p_lecture and x.part_idx = p_part and x.anchor = p_anchor and x.src_hash = p_hash) then
+    return 'saved';
+  end if;
+  -- A concurrent insert of the same key waits for the first, then finds its live hold.
+  insert into study_private.aid_draft_holds as h (lecture_id, part_idx, anchor, src_hash, held_until)
+  values (p_lecture, p_part, p_anchor, p_hash, now() + interval '2 minutes')
+  on conflict (lecture_id, part_idx, anchor, src_hash) do update set held_until = excluded.held_until
+   where h.held_until <= now();
+  if not found then raise exception 'busy'; end if;
+  return 'held';
+end;
+$$;
+
+-- op "mnemonic", when its call failed or was refused after the hold: gives
+-- the paragraph back at once, so a retry need not wait 2 minutes.
+create or replace function public.study_aid_drafts_end(p_lecture uuid, p_part int, p_anchor int, p_hash text, p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then raise exception 'lecture not found'; end if;
+  delete from study_private.aid_draft_holds h
+   where h.lecture_id = p_lecture and h.part_idx = p_part and h.anchor = p_anchor and h.src_hash = p_hash;
+end;
+$$;
+
+-- op "wall_check" (W5), before: takes the entry for checking. Errors:
+-- 'aid not found', 'checked' (already checked), 'busy' (another phone is
+-- checking it, for 2 minutes).
+create or replace function public.study_aid_check_begin(p_aid uuid, p_key text default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare a public.study_aids;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into a from public.study_aids x where x.id = p_aid for update;
+  if not found or not coalesce(public.study_is_member(a.group_id), false) then raise exception 'aid not found'; end if;
+  if a.check_state in ('ok', 'bad') then raise exception 'checked'; end if;
+  -- Only an entry that could win is checked (2 votes at least, not marked):
+  -- the check costs the group's month, so a member cannot check them all.
+  if a.flag is not null or a.funny_n + a.stuck_n < 2 then raise exception 'checked'; end if;
+  if a.check_state = 'checking' and a.checked_at > now() - interval '2 minutes' then raise exception 'busy'; end if;
+  update public.study_aids x set check_state = 'checking', checked_at = now() where x.id = p_aid;
+  return jsonb_build_object('lecture_id', a.lecture_id, 'part', a.part_idx, 'anchor', a.anchor, 'kind', a.kind,
+                            'body', a.body, 'fact', a.fact, 'slides', to_jsonb(a.slides), 'group_id', a.group_id);
+end;
+$$;
+
+-- op "wall_check", after: ok, or not (with what is wrong: the entry is
+-- marked "לא מדויק" by the check until its author fixes it); p_ok null =
+-- the check did not finish, try again later. Returns the next entry to
+-- check on that paragraph, if any.
+create or replace function public.study_aid_check_done(p_aid uuid, p_ok boolean, p_note text, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare a public.study_aids;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into a from public.study_aids x where x.id = p_aid for update;
+  if not found or not coalesce(public.study_is_member(a.group_id), false) then raise exception 'aid not found'; end if;
+  if a.check_state <> 'checking' then raise exception 'checked'; end if;
+  update public.study_aids x
+     set check_state = case when p_ok is null then 'no' when p_ok then 'ok' else 'bad' end,
+         checked_at = now(),
+         check_note = case when p_ok is false then left(btrim(coalesce(p_note, '')), 300) else '' end,
+         flag = case when p_ok is false then 'inaccurate' else x.flag end,
+         flagged_by = case when p_ok is false then null else x.flagged_by end
+   where x.id = p_aid;
+  return study_private.aid_rewin(a.lecture_id, a.part_idx, a.anchor);
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security and privileges
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_aid_drafts  enable row level security;
+alter table public.study_aids        enable row level security;
+alter table public.study_aid_authors enable row level security;
+alter table public.study_aid_votes   enable row level security;
+alter table public.study_aid_pins    enable row level security;
+alter table public.study_aid_credits enable row level security;
+alter table public.study_aid_winners enable row level security;
+
+drop policy if exists "study aid drafts read"  on public.study_aid_drafts;
+drop policy if exists "study aids read"        on public.study_aids;
+drop policy if exists "study aid authors own"  on public.study_aid_authors;
+drop policy if exists "study aid votes own"    on public.study_aid_votes;
+drop policy if exists "study aid pins own"     on public.study_aid_pins;
+drop policy if exists "study aid credits own"  on public.study_aid_credits;
+drop policy if exists "study aid winners read" on public.study_aid_winners;
+
+create policy "study aid drafts read" on public.study_aid_drafts
+  for select using (public.study_is_member(group_id));
+-- Hidden ("לא מתאים") entries are left out by study_aid_wall; a direct read
+-- (Realtime) still carries them to members, with no author.
+create policy "study aids read" on public.study_aids
+  for select using (public.study_is_member(group_id));
+create policy "study aid authors own" on public.study_aid_authors
+  for select using (user_id = auth.uid());
+create policy "study aid votes own" on public.study_aid_votes
+  for select using (user_id = auth.uid());
+create policy "study aid pins own" on public.study_aid_pins
+  for select using (user_id = auth.uid());
+create policy "study aid credits own" on public.study_aid_credits
+  for select using (user_id = auth.uid());
+create policy "study aid winners read" on public.study_aid_winners
+  for select using (public.study_is_member(public.study_lecture_group(lecture_id)));
+
+revoke all on public.study_aid_drafts, public.study_aids, public.study_aid_authors, public.study_aid_votes,
+  public.study_aid_pins, public.study_aid_credits, public.study_aid_winners from anon, authenticated;
+grant select on public.study_aid_drafts, public.study_aids, public.study_aid_authors, public.study_aid_votes,
+  public.study_aid_pins, public.study_aid_credits, public.study_aid_winners to authenticated;
+
+revoke all on function study_private.member_name(uuid, uuid), study_private.aid_rewin(uuid, int, int) from public;
+revoke all on function public.study_aid_group(uuid),
+  public.study_aid_post(uuid, int, int, text, text, text, text, int[], text, boolean, uuid, uuid, int, text, text, uuid),
+  public.study_aid_edit(uuid, text, text, int[]), public.study_aid_delete(uuid), public.study_aid_vote(uuid, text, boolean),
+  public.study_aid_flag(uuid, text), public.study_aid_pin(uuid, boolean), public.study_aid_credit_requests(uuid),
+  public.study_aid_credit_answer(uuid, boolean), public.study_aid_week(uuid), public.study_aid_wall(uuid, uuid, text),
+  public.study_aid_hint(uuid), public.study_aid_for_cards(uuid),
+  public.study_aid_drafts_save(uuid, int, int, text, text, int[], jsonb, text, text),
+  public.study_aid_drafts_begin(uuid, int, int, text, text), public.study_aid_drafts_end(uuid, int, int, text, text),
+  public.study_aid_check_begin(uuid, text), public.study_aid_check_done(uuid, boolean, text, text)
+  from public, anon;
+-- The five server-only ones need the server key inside; the grant only lets the op's call reach them.
+grant execute on function public.study_aid_group(uuid),
+  public.study_aid_post(uuid, int, int, text, text, text, text, int[], text, boolean, uuid, uuid, int, text, text, uuid),
+  public.study_aid_edit(uuid, text, text, int[]), public.study_aid_delete(uuid), public.study_aid_vote(uuid, text, boolean),
+  public.study_aid_flag(uuid, text), public.study_aid_pin(uuid, boolean), public.study_aid_credit_requests(uuid),
+  public.study_aid_credit_answer(uuid, boolean), public.study_aid_week(uuid), public.study_aid_wall(uuid, uuid, text),
+  public.study_aid_hint(uuid), public.study_aid_for_cards(uuid),
+  public.study_aid_drafts_save(uuid, int, int, text, text, int[], jsonb, text, text),
+  public.study_aid_drafts_begin(uuid, int, int, text, text), public.study_aid_drafts_end(uuid, int, int, text, text),
+  public.study_aid_check_begin(uuid, text), public.study_aid_check_done(uuid, boolean, text, text)
+  to authenticated;
+
+-- ── Realtime: a new entry, a fix, a vote total and a deletion reach every
+--  open wall (study-wall-<lecture>). Never authors, votes, pins or credits.
+do $$
+begin
+  execute 'alter publication supabase_realtime add table public.study_aids';
+exception when duplicate_object then
+  null;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('J', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION J ════
+
+-- ════ BEGIN SECTION H · the boss battle (package H) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION H · THE BOSS BATTLE   (package H, H-1; spec §12.5.H, the fun
+--  design B1-B3; Yoad's decisions 1 and 3 of 17 Nov 2026)
+--  After sections Z (the quiz engine, with its boss hook points) and U (the
+--  pulse's hot topics, the museum's exhibits). A battle is a live quiz in
+--  mode 'boss': Z keeps the clock, the key and the answers; this section
+--  chooses the rounds, turns each reveal into hit points, and adds the
+--  relapse rounds. No Claude: a battle costs $0. Re-runnable, and safe on a
+--  database with data: two new tables, new functions, and Z's three boss
+--  hooks replaced with the same names, arguments and results.
+--
+--  Decision 1 (no accounts): the heads are the pulse's, so only a member the
+--  last night counted (a week in the group, not opted out: section U) sees
+--  them before a battle. In a battle every player sees the heads on the
+--  HUD, as the battle is the group's.
+--  Decision 3 (usable early, with a meter): a battle opens from 2 heads (2
+--  hot topics or museum exhibits of the chosen lectures). study_boss_open
+--  says, for the chosen lectures, how many topics are hot out of the topics
+--  the lectures have ("3 מתוך 8 נושאים חמים"), and roughly how many more
+--  answers the next topic needs before the night can weigh it ("עוד כ-20
+--  תשובות לנושא הבא": the members the closest waiting topic still needs to
+--  reach the floor of 3, times the group's own answers per member and topic
+--  in the night's window), from real counts. The thresholds are functions
+--  below (boss_min_heads 2, boss_max_heads 4, boss_head_questions 3,
+--  boss_players 3, boss_trap_hp 20, boss_relapses 2, boss_hit_pct 80,
+--  boss_loot_days 3); shared/study/boss.ts mirrors them, and its unit test
+--  reads them from this file.
+--
+--  Who sees what
+--  ─────────────
+--  The battle (heads, hit points, the moments) is the group's and holds
+--  aggregates only: a round counts only when at least 3 answered, a wrong
+--  answer costs the team, never a person, and no moment names anyone. Each
+--  player's own mistakes ("השלל") are theirs alone (study_loot, owner-only).
+-- ════════════════════════════════════════════════════════════════════════
+
+-- Section Z must carry the boss hook points (its pick, its scored reveal and
+-- its state call them). Without them a battle could be opened but never
+-- played, so this section refuses to load, and H: 1 in the registry also
+-- means "Z has the hooks".
+create or replace function study_private.boss_hooks_ok()
+returns boolean language sql stable set search_path = public as $$
+  select coalesce((select bool_or(position('study_quiz__pick_boss(' in p.prosrc) > 0)
+                     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                    where n.nspname = 'public' and p.proname = 'study_quiz__pick'), false)
+     and coalesce((select bool_or(position('study_quiz__after_reveal(' in p.prosrc) > 0)
+                     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                    where n.nspname = 'public' and p.proname in ('study_quiz__reveal', 'study_quiz__score')), false)
+     and coalesce((select bool_or(position('study_quiz__boss_state(' in p.prosrc) > 0)
+                     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                    where n.nspname = 'public' and p.proname = 'study_quiz_state'), false)
+$$;
+revoke all on function study_private.boss_hooks_ok() from public;
+do $$
+begin
+  if not study_private.boss_hooks_ok() then
+    raise exception 'section H needs section Z with the boss hook points (section Z, its end)';
+  end if;
+  if to_regclass('public.study_traps') is null then
+    raise exception 'section H needs section U at version 2 (the museum''s traps)';
+  end if;
+end $$;
+
+-- ── The thresholds (one place; shared/study/boss.ts mirrors them) ──
+create or replace function study_private.boss_min_heads() returns int language sql immutable as $$ select 2 $$;       -- a battle opens from this many heads
+create or replace function study_private.boss_max_heads() returns int language sql immutable as $$ select 4 $$;       -- a hydra has at most this many
+create or replace function study_private.boss_head_questions() returns int language sql immutable as $$ select 3 $$;  -- questions per head
+create or replace function study_private.boss_players() returns int language sql immutable as $$ select 3 $$;         -- players a battle needs, answers a round needs
+create or replace function study_private.boss_trap_hp() returns int language sql immutable as $$ select 20 $$;        -- the trap's cost to the team
+create or replace function study_private.boss_relapses() returns int language sql immutable as $$ select 2 $$;        -- relapses per head at most
+create or replace function study_private.boss_hit_pct() returns int language sql immutable as $$ select 80 $$;        -- right answers for a full hit ("עברנו")
+create or replace function study_private.boss_loot_days() returns int language sql immutable as $$ select 3 $$;       -- the loot spreads over this many study days
+
+create table if not exists public.study_boss_battles (
+  id          uuid        primary key default gen_random_uuid(),
+  quiz_id     uuid        not null unique references public.study_quizzes (id) on delete cascade,
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  name        text        not null check (char_length(name) between 1 and 160),
+  lecture_ids uuid[]      not null check (cardinality(lecture_ids) between 1 and 40),
+  -- [{k: topic key, name, max, hp, qs: [question ids], key_q, trap_q, trap_opt, slides, relapses, down}]
+  heads       jsonb       not null check (jsonb_typeof(heads) = 'array' and jsonb_array_length(heads) between 1 and 4),
+  -- one entry per round, by idx: {h: head, q: question, relapse, done, dmg, loss, few}
+  rounds      jsonb       not null default '[]'::jsonb,
+  planned     int         not null check (planned between 3 and 30),
+  team_hp     int         not null default 100 check (team_hp between 0 and 100),
+  log         jsonb       not null default '[]'::jsonb,       -- the moments, without names
+  outcome     text        check (outcome in ('won', 'lost')),
+  revenge_of  uuid        references public.study_boss_battles (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  ended_at    timestamptz
+);
+create index if not exists study_boss_battles_group on public.study_boss_battles (group_id, created_at desc);
+
+-- "השלל": the caller's own battle mistakes, spread over 3 study days
+-- ("לתוכנית שלי"). Owner-only; Today's queue reads it (section T).
+create table if not exists public.study_loot (
+  user_id     uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  quiz_id     uuid        not null references public.study_quizzes (id) on delete cascade,
+  question_id uuid        not null references public.study_questions (id) on delete cascade,
+  due_on      date        not null,
+  done_at     timestamptz,
+  primary key (user_id, quiz_id, question_id)
+);
+
+-- A question a battle may ask: on the group's lectures, keyed, not retired,
+-- hidden, marked by a correction or flagged as wrong (review F-6).
+create or replace function study_private.boss_askable(p_question uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.study_questions q
+                  where q.id = p_question and q.retired_at is null and q.hidden_at is null and q.has_key
+                    and (to_jsonb(q) ->> 'stale_at') is null
+                    and not exists (select 1 from public.study_question_flags f
+                                     where f.question_id = q.id and f.reason in ('wrong_key', 'two_answers', 'not_in_slides')))
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Choosing the heads: the hot topics of the chosen lectures (at least 3
+--  members struggle with each: the pulse's "חם"), then the museum's open
+--  exhibits, at most p_max. Each head gets up to boss_head_questions()
+--  questions on its topic, the strongest group signal first; its first is
+--  the "key" question it relapses on; its trap (an open trap's option)
+--  costs the team boss_trap_hp() when half the answers fall for it.
+-- ═══════════════════════════════════════════════════════════════════════
+create or replace function study_private.boss_heads(p_group uuid, p_lectures uuid[], p_max int default 4)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  v_heads jsonb := '[]'::jsonb;
+  r       record;
+  qs      uuid[];
+  sl      int[];
+  tq      uuid;
+  topt    int;
+begin
+  for r in
+    with hot as (
+      select t.topic_key, max(t.topic) as name, max(c.struggling::numeric / greatest(c.people, 1)) as share, 0 as src
+        from public.study_pulse_topics t
+        join study_private.pulse_cells c on c.lecture_id = t.lecture_id and c.topic_key = t.topic_key and c.aspect = t.aspect
+       where t.group_id = p_group and t.lecture_id = any (p_lectures) and t.bucket = 'hot'
+       group by t.topic_key
+    ), museum as (
+      select lower(btrim(q.topic)) as topic_key, max(btrim(q.topic)) as name, 0::numeric as share, 1 as src
+        from public.study_traps x join public.study_questions q on q.id = x.question_id
+       where x.group_id = p_group and x.lecture_id = any (p_lectures) and x.state = 'open'
+         and x.exhibit_no is not null and x.exhibit_at <= now() and btrim(q.topic) <> ''
+       group by lower(btrim(q.topic))
+    )
+    select * from (
+      select h.* from hot h
+      union all
+      select m.* from museum m where not exists (select 1 from hot h where h.topic_key = m.topic_key)
+    ) z order by z.src, z.share desc, z.topic_key
+  loop
+    exit when jsonb_array_length(v_heads) >= p_max;
+    select array_agg(x.id order by x.ord) into qs
+      from (select q.id, row_number() over (order by public.study_quiz__signal(q.id) desc,
+                                                    exists (select 1 from public.study_traps t where t.question_id = q.id and t.state = 'open') desc,
+                                                    q.created_at, q.id) as ord
+              from public.study_questions q
+             where q.group_id = p_group and coalesce(q.lecture_id, q.ref_lecture) = any (p_lectures)
+               and lower(btrim(q.topic)) = r.topic_key and study_private.boss_askable(q.id)) x
+     where x.ord <= study_private.boss_head_questions();
+    continue when qs is null;
+    tq := null; topt := null;
+    select t.question_id, t.option into tq, topt from public.study_traps t
+     where t.question_id = any (qs) and t.state = 'open' order by t.exhibit_no nulls last, t.found_at limit 1;
+    select coalesce(array_agg(distinct s.n order by s.n), '{}') into sl
+      from public.study_questions q cross join lateral unnest(q.slides[1:2]) as s(n) where q.id = any (qs);
+    v_heads := v_heads || jsonb_build_array(jsonb_build_object(
+      'k', r.topic_key, 'name', left(r.name, 60), 'qs', to_jsonb(qs), 'key_q', qs[1],
+      'trap_q', tq, 'trap_opt', topt, 'slides', to_jsonb(sl[1:4]), 'relapses', 0, 'down', false));
+  end loop;
+  return v_heads;
+end;
+$$;
+
+-- Opens a battle (B1) as a live quiz in mode 'boss' (the lobby; the host
+-- starts it as any quiz). p_revenge: "סבב נקמה", the heads still standing
+-- at the end of a lost battle, from the next study day on.
+-- Errors: 'not signed in', 'group not found', 'off' (the switch 'pulse'),
+-- 'lecture not found', 'no heads', 'revenge not yet', 'quiz open' and
+-- Z's errors of study_quiz_create.
+create or replace function public.study_boss_create(p_group uuid, p_lectures uuid[], p_seconds int default 45,
+  p_revenge uuid default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  me      uuid := auth.uid();
+  lec     uuid[];
+  v_heads jsonb;
+  old     public.study_boss_battles;
+  k       int;
+  base    int;
+  planned int;
+  v_name  text;
+  course  text;
+  qid     uuid;
+  rounds  jsonb := '[]'::jsonb;
+  h       int;
+  q       jsonb;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_group is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  if not study_private.feature_on('pulse') then raise exception 'off'; end if;
+  -- review SEC-8: the heads are the pulse's hot topics; a member the night
+  -- did not count (opted out, or less than a week in the group) reads none
+  if public.study_pulse_ready(p_group) is null then raise exception 'no heads'; end if;
+  if p_revenge is not null then
+    select * into old from public.study_boss_battles b where b.id = p_revenge and b.group_id = p_group;
+    if not found or old.outcome is distinct from 'lost' then raise exception 'no heads'; end if;
+    if study_private.pulse_cutoff(now()) <= old.ended_at then raise exception 'revenge not yet'; end if;
+    lec := old.lecture_ids;
+    select coalesce(jsonb_agg(x.e - 'hp' - 'max' || jsonb_build_object('relapses', 0, 'down', false,
+                                'qs', (select coalesce(jsonb_agg(y.v), '[]'::jsonb) from jsonb_array_elements(x.e -> 'qs') y(v)
+                                        where study_private.boss_askable((y.v #>> '{}')::uuid)))
+                              order by x.o), '[]'::jsonb)
+      into v_heads
+      from jsonb_array_elements(old.heads) with ordinality as x(e, o)
+     where not (x.e ->> 'down')::boolean;
+    select coalesce(jsonb_agg(x.e), '[]'::jsonb) into v_heads from jsonb_array_elements(v_heads) x(e) where jsonb_array_length(x.e -> 'qs') > 0;
+  else
+    select array_agg(x.l order by x.o) into lec
+      from (select u.l, min(u.o) as o from unnest(p_lectures) with ordinality as u(l, o) where u.l is not null group by u.l) x;
+    if lec is null or cardinality(lec) > 40
+       or exists (select 1 from unnest(lec) as l(id) where public.study_lecture_group(l.id) is distinct from p_group) then
+      raise exception 'lecture not found';
+    end if;
+    v_heads := study_private.boss_heads(p_group, lec, study_private.boss_max_heads());
+  end if;
+  k := jsonb_array_length(v_heads);
+  if k < study_private.boss_min_heads() and p_revenge is null then raise exception 'no heads'; end if;
+  if k < 1 then raise exception 'no heads'; end if;
+  -- Hit points: 100 shared out, the first head takes the remainder.
+  base := 100 / k;
+  select coalesce(jsonb_agg(x.e || jsonb_build_object('max', m.mx, 'hp', m.mx) order by x.o), '[]'::jsonb) into v_heads
+    from jsonb_array_elements(v_heads) with ordinality as x(e, o)
+    cross join lateral (select case when x.o = 1 then 100 - base * (k - 1) else base end as mx) m;
+  for h in 0 .. k - 1 loop
+    for q in select * from jsonb_array_elements(v_heads -> h -> 'qs') loop
+      rounds := rounds || jsonb_build_array(jsonb_build_object('h', h, 'q', q #>> '{}', 'relapse', false, 'done', false));
+    end loop;
+  end loop;
+  planned := jsonb_array_length(rounds);
+  if planned < 3 then raise exception 'no heads'; end if;
+  -- The boss's name: the lectures' course, or the lecture.
+  select case when count(distinct btrim(l.course)) = 1 and min(btrim(l.course)) <> '' then min(btrim(l.course)) end into course
+    from public.study_lectures l where l.id = any (lec);
+  if cardinality(lec) = 1 or course is null then
+    select l.title into v_name from public.study_lectures l where l.id = lec[1];
+  else
+    v_name := course;
+  end if;
+  v_name := left('ההידרה של ' || coalesce(v_name, 'הקורס'), 160);
+  qid := public.study_quiz_create(p_group, 'boss', lec, planned, coalesce(p_seconds, 45), 'all');
+  update public.study_quizzes z set title = left('קרב הבוס · ' || v_name, 200) where z.id = qid;
+  insert into public.study_boss_battles (quiz_id, group_id, name, lecture_ids, heads, rounds, planned, revenge_of)
+  values (qid, p_group, v_name, lec, v_heads, rounds, planned, p_revenge);
+  return qid;
+end;
+$$;
+
+-- Z's hook: the battle's rounds, in head order (replaces Z's stub). At least
+-- 3 players: below three, every hit would tell who missed.
+create or replace function public.study_quiz__pick_boss(p_quiz uuid)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  z public.study_quizzes;
+  b public.study_boss_battles;
+  n int;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  select * into b from public.study_boss_battles x where x.quiz_id = p_quiz;
+  if not found then return 0; end if;
+  if (select count(*) from public.study_quiz_players p where p.quiz_id = p_quiz and p.left_at is null) < study_private.boss_players() then
+    raise exception 'need 3';
+  end if;
+  insert into public.study_quiz_rounds (quiz_id, idx, question_id, seconds)
+  select p_quiz, (r.o - 1)::int, q.id,
+         public.study_quiz__seconds(z.seconds, char_length(q.vignette) + char_length(q.question)
+                                    + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0)::int)
+    from jsonb_array_elements(b.rounds) with ordinality as r(e, o)
+    join public.study_questions q on q.id = (r.e ->> 'q')::uuid
+   where study_private.boss_askable(q.id) and r.o <= 30;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- Z's hook after each scored reveal (replaces Z's stub). Mechanics (B2):
+--   * a round counts only when at least boss_players() answered;
+--   * the head on screen loses up to its share (its HP / its questions),
+--     in full at boss_hit_pct() right or more ("עברנו");
+--   * the team loses up to 150 / planned rounds × the share of wrong
+--     answers; when half or more of the answers chose the head's trap, at
+--     least boss_trap_hp();
+--   * a head still standing after its questions relapses (boss_relapses()
+--     at most): it regains half a share and its key question comes back;
+--     answered boss_hit_pct() right, the head falls at once;
+--   * all heads down: won; team at 0, or nothing left to ask: lost.
+create or replace function public.study_quiz__after_reveal(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  z        public.study_quizzes;
+  b        public.study_boss_battles;
+  e        jsonb;
+  h        int;
+  hd       jsonb;
+  nq       int;
+  per_q    int;
+  answered int;
+  rgt      int;
+  trapn    int;
+  dmg      int;
+  loss     int;
+  hp       int;
+  hit      numeric := study_private.boss_hit_pct() / 100.0;
+  v_log    jsonb;
+  v_rounds jsonb;
+  v_heads  jsonb;
+  team     int;
+  later    boolean;
+  ni       int;
+  left_q   int;
+  sec      int;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.mode <> 'boss' then return; end if;
+  select * into b from public.study_boss_battles x where x.quiz_id = p_quiz for update;
+  if not found or b.outcome is not null then return; end if;
+  e := b.rounds -> p_idx;
+  if e is null or coalesce((e ->> 'done')::boolean, false) then return; end if;
+  h := (e ->> 'h')::int;
+  hd := b.heads -> h;
+  v_log := b.log; v_rounds := b.rounds; v_heads := b.heads; team := b.team_hp;
+  select count(*), count(*) filter (where a.correct),
+         count(*) filter (where (hd ->> 'trap_q') is not null and r.question_id = (hd ->> 'trap_q')::uuid
+                                and a.choice = (hd ->> 'trap_opt')::int)
+    into answered, rgt, trapn
+    from public.study_quiz_answers a join public.study_quiz_rounds r on r.id = a.round_id
+   where r.quiz_id = p_quiz and r.idx = p_idx and a.vote = 1;
+  if answered < study_private.boss_players() then
+    v_rounds := jsonb_set(v_rounds, array[p_idx::text], e || '{"done": true, "few": true}'::jsonb);
+  else
+    nq := greatest(1, jsonb_array_length(hd -> 'qs'));
+    per_q := ceil((hd ->> 'max')::numeric / nq)::int;
+    dmg := round(per_q * least(1.0, (rgt::numeric / answered) / hit))::int;
+    if (e ->> 'relapse')::boolean and rgt::numeric / answered >= hit then dmg := (hd ->> 'hp')::int; end if;
+    hp := greatest(0, (hd ->> 'hp')::int - dmg);
+    loss := round(ceil(150.0 / b.planned) * (answered - rgt)::numeric / answered)::int;
+    if trapn > 0 and trapn * 2 >= answered then
+      loss := greatest(loss, study_private.boss_trap_hp());
+      v_log := v_log || jsonb_build_array(jsonb_build_object('t', 'trap', 'head', hd ->> 'name', 'q', hd ->> 'trap_q',
+                                                             'opt', (hd ->> 'trap_opt')::int, 'hp', -study_private.boss_trap_hp(),
+                                                             'slides', hd -> 'slides'));
+    end if;
+    team := greatest(0, team - loss);
+    hd := hd || jsonb_build_object('hp', hp);
+    v_rounds := jsonb_set(v_rounds, array[p_idx::text], e || jsonb_build_object('done', true, 'dmg', dmg, 'loss', loss));
+    if hp = 0 and not (hd ->> 'down')::boolean then
+      hd := hd || '{"down": true}'::jsonb;
+      v_log := v_log || jsonb_build_array(jsonb_build_object('t', 'down', 'head', hd ->> 'name',
+                                                             'relapses', (hd ->> 'relapses')::int, 'slides', hd -> 'slides'));
+      -- A fallen head's questions not yet asked are skipped.
+      update public.study_quiz_rounds r set question_id = null
+       where r.quiz_id = p_quiz and r.idx > p_idx and r.opens_at is null
+         and r.idx in (select (x.o - 1)::int from jsonb_array_elements(v_rounds) with ordinality as x(e2, o)
+                        where (x.e2 ->> 'h')::int = h);
+    else
+      -- Its last round so far, and still standing: relapse.
+      select exists (select 1 from jsonb_array_elements(v_rounds) with ordinality as x(r, o)
+                      where (x.r ->> 'h')::int = h and x.o - 1 > p_idx) into later;
+      if hp > 0 and team > 0 and not later and (hd ->> 'relapses')::int < study_private.boss_relapses()
+         and jsonb_array_length(v_rounds) < 30 then
+        ni := jsonb_array_length(v_rounds);
+        sec := null;
+        if study_private.boss_askable((hd ->> 'key_q')::uuid) then
+          select public.study_quiz__seconds(z.seconds, char_length(x.vignette) + char_length(x.question)
+                   + coalesce((select sum(char_length(o)) from unnest(x.options) as o), 0)::int)
+            into sec
+            from public.study_questions x where x.id = (hd ->> 'key_q')::uuid;
+        end if;
+        if sec is not null then
+          hd := hd || jsonb_build_object('relapses', (hd ->> 'relapses')::int + 1,
+                                         'hp', least((hd ->> 'max')::int, hp + ceil(per_q / 2.0)::int));
+          v_rounds := v_rounds || jsonb_build_array(jsonb_build_object('h', h, 'q', hd ->> 'key_q', 'relapse', true, 'done', false));
+          insert into public.study_quiz_rounds (quiz_id, idx, question_id, seconds)
+          values (p_quiz, ni, (hd ->> 'key_q')::uuid, sec);
+          update public.study_quizzes x set n_total = x.n_total + 1 where x.id = p_quiz;
+          v_log := v_log || jsonb_build_array(jsonb_build_object('t', 'relapse', 'head', hd ->> 'name', 'slides', hd -> 'slides'));
+        end if;
+      end if;
+    end if;
+    v_heads := jsonb_set(v_heads, array[h::text], hd);
+  end if;
+  -- Decided?
+  if not exists (select 1 from jsonb_array_elements(v_heads) x where not (x ->> 'down')::boolean) then
+    update public.study_boss_battles x
+       set heads = v_heads, rounds = v_rounds, team_hp = team, outcome = 'won', ended_at = now(),
+           log = v_log || jsonb_build_array(jsonb_build_object('t', 'last', 'head', hd ->> 'name', 'slides', hd -> 'slides'))
+     where x.id = b.id;
+    update public.study_quiz_rounds r set question_id = null where r.quiz_id = p_quiz and r.idx > p_idx and r.opens_at is null;
+    return;
+  end if;
+  select count(*) into left_q from public.study_quiz_rounds r
+   where r.quiz_id = p_quiz and r.idx > p_idx and r.opens_at is null and r.question_id is not null;
+  if team = 0 or left_q = 0 then
+    update public.study_boss_battles x
+       set heads = v_heads, rounds = v_rounds, team_hp = team, outcome = 'lost', ended_at = now(),
+           log = v_log || case when team = 0 then '[{"t": "fall"}]'::jsonb else '[]'::jsonb end
+     where x.id = b.id;
+    update public.study_quiz_rounds r set question_id = null where r.quiz_id = p_quiz and r.idx > p_idx and r.opens_at is null;
+    return;
+  end if;
+  update public.study_boss_battles x set heads = v_heads, rounds = v_rounds, team_hp = team, log = v_log where x.id = b.id;
+end;
+$$;
+
+-- Z's hook: the battle as every phone shows it (replaces Z's stub). The
+-- current head is the one whose round is on screen.
+create or replace function public.study_quiz__boss_state(p_quiz uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  z public.study_quizzes;
+  b public.study_boss_battles;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  select * into b from public.study_boss_battles x where x.quiz_id = p_quiz;
+  if not found then return null; end if;
+  return jsonb_build_object(
+    'id', b.id, 'name', b.name, 'team_hp', b.team_hp, 'planned', b.planned,
+    'boss_hp', (select coalesce(sum((x ->> 'hp')::int), 0) from jsonb_array_elements(b.heads) x),
+    'heads', (select jsonb_agg(jsonb_build_object('name', x.e ->> 'name', 'hp', (x.e ->> 'hp')::int, 'max', (x.e ->> 'max')::int,
+                                                  'down', (x.e ->> 'down')::boolean, 'relapses', (x.e ->> 'relapses')::int,
+                                                  'slides', coalesce(x.e -> 'slides', '[]'::jsonb))
+                               order by x.o)
+                from jsonb_array_elements(b.heads) with ordinality as x(e, o)),
+    'head', case when z.idx >= 0 then (b.rounds -> z.idx ->> 'h')::int end,
+    'relapse', case when z.idx >= 0 then coalesce((b.rounds -> z.idx ->> 'relapse')::boolean, false) end,
+    'trap', case when z.idx >= 0 and (b.rounds -> z.idx ->> 'q') = (b.heads -> ((b.rounds -> z.idx ->> 'h')::int) ->> 'trap_q')
+                 then true else false end,
+    'last_round', case when z.state = 'reveal' and z.idx >= 0 then b.rounds -> z.idx end,
+    'moments', b.log, 'outcome', b.outcome, 'revenge_of', b.revenge_of,
+    'revenge_on', case when b.outcome = 'lost' then (((b.ended_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date + 1) end);
+end;
+$$;
+
+-- B3: the caller's own loot, previewed: every question the caller got wrong
+-- in this battle, its topic grouped onto one of the next boss_loot_days()
+-- study days, topic after topic.
+create or replace function public.study_boss_loot(p_quiz uuid)
+returns table (question_id uuid, topic text, question text, slides int[], due_on date)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  b public.study_boss_battles;
+  today date := ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into b from public.study_boss_battles x where x.quiz_id = p_quiz;
+  if not found or not coalesce(public.study_is_member(b.group_id), false) then raise exception 'quiz not found'; end if;
+  return query
+  with mine as (
+    select r.question_id, min(r.idx) as first_idx
+      from public.study_quiz_answers a join public.study_quiz_rounds r on r.id = a.round_id
+     where r.quiz_id = p_quiz and a.user_id = auth.uid() and a.correct is false and r.voided_at is null
+       and r.question_id is not null
+     group by r.question_id
+  ), topics as (
+    select lower(btrim(q.topic)) as k, min(m.first_idx) as first_idx
+      from mine m join public.study_questions q on q.id = m.question_id group by lower(btrim(q.topic))
+  ), days as (
+    select t.k, ((row_number() over (order by t.first_idx) - 1) % study_private.boss_loot_days())::int + 1 as d from topics t
+  )
+  select m.question_id, btrim(q.topic), q.question, q.slides, today + d.d
+    from mine m join public.study_questions q on q.id = m.question_id
+    join days d on d.k = lower(btrim(q.topic))
+   order by d.d, m.first_idx;
+end;
+$$;
+
+-- "לתוכנית שלי": the loot becomes the caller's private review list.
+create or replace function public.study_boss_loot_save(p_quiz uuid)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare n int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  insert into public.study_loot (user_id, quiz_id, question_id, due_on)
+  select auth.uid(), p_quiz, l.question_id, l.due_on from public.study_boss_loot(p_quiz) l
+  on conflict (user_id, quiz_id, question_id) do nothing;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- What of the caller's loot is due (Today's queue reads this, section T).
+create or replace function public.study_my_loot(p_group uuid)
+returns table (question_id uuid, quiz_id uuid, due_on date, question text, topic text, slides int[], kind text)
+language sql stable set search_path = public as $$
+  select l.question_id, l.quiz_id, l.due_on, q.question, btrim(q.topic), q.slides, q.kind
+    from public.study_loot l join public.study_questions q on q.id = l.question_id
+   where l.user_id = auth.uid() and q.group_id = p_group and l.done_at is null
+     and q.retired_at is null and q.hidden_at is null
+     and l.due_on <= ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date
+   order by l.due_on, l.question_id
+$$;
+
+-- A loot item answered in the queue.
+create or replace function public.study_loot_done(p_question uuid)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare n int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  update public.study_loot l set done_at = now() where l.user_id = auth.uid() and l.question_id = p_question and l.done_at is null;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- The "יחד" card and the new battle's screen: which heads a battle on these
+-- lectures (every lecture by default) would have now, a revenge round when
+-- the group's last battle was lost, and decision 3's meter.
+--   state       the pulse's meter's: 'off', 'out', 'waiting' (join_days_left), 'open'
+--   heads       the names of the heads a battle would have (at most 4)
+--   hot         topics a battle could take as heads (hot topics and exhibits)
+--   topics      the topics the chosen lectures' askable questions have
+--   min_heads   a battle opens from this many heads
+--   answers_next  roughly how many more answers the next topic needs before
+--               the night can weigh it (null when every topic is weighed)
+--   group_need  how many more counted members the group needs (0 from 3)
+create or replace function public.study_boss_open(p_group uuid, p_lectures uuid[] default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  fl    int := study_private.pulse_floor();
+  m     jsonb;
+  lec   uuid[];
+  last  public.study_boss_battles;
+  run   study_private.pulse_runs;
+  all_h jsonb;
+  n_top int;
+  close int;
+  unseen boolean;
+  per   numeric;
+  ans   int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  m := public.study_pulse_meter(p_group);            -- runs the night first
+  lec := coalesce(p_lectures, (select array_agg(l.id) from public.study_lectures l where l.group_id = p_group and l.deleted_at is null), '{}');
+  select count(distinct lower(btrim(q.topic))) into n_top
+    from public.study_questions q
+   where q.group_id = p_group and coalesce(q.lecture_id, q.ref_lecture) = any (lec) and btrim(q.topic) <> ''
+     and study_private.boss_askable(q.id);
+  if m ->> 'state' <> 'open' then
+    return (m - 'lectures') || jsonb_build_object('heads', '[]'::jsonb, 'hot', 0, 'topics', n_top,
+                                                  'min_heads', study_private.boss_min_heads(), 'answers_next', null);
+  end if;
+  select * into run from study_private.pulse_runs r where r.group_id = p_group;
+  all_h := study_private.boss_heads(p_group, lec, 100);
+  -- The meter's "לנושא הבא": the topic of these lectures closest to the floor.
+  select fl - max(z.people) into close
+    from (select c.topic_key, max(c.people) as people from study_private.pulse_cells c
+           where c.group_id = p_group and c.lecture_id = any (lec) and c.cutoff = run.cutoff
+           group by c.topic_key having max(c.people) < fl) z
+   where z.people > 0;
+  select exists (select 1 from public.study_questions q
+                  where q.group_id = p_group and coalesce(q.lecture_id, q.ref_lecture) = any (lec) and btrim(q.topic) <> ''
+                    and study_private.boss_askable(q.id)
+                    and not exists (select 1 from study_private.pulse_cells c
+                                     where c.lecture_id = coalesce(q.lecture_id, q.ref_lecture) and c.topic_key = lower(btrim(q.topic))
+                                       and c.cutoff = run.cutoff and c.people > 0))
+    into unseen;
+  if close is null and unseen then close := fl; end if;   -- no waiting topic: a topic nobody practised yet needs 3
+  -- The group's own answers per member and topic, in the night's window.
+  select avg(z.n) into per
+    from (select e.user_id, e.topic_key, count(*) as n
+            from study_private.pulse_answers(p_group, run.cutoff - make_interval(days => study_private.pulse_window_days()), run.cutoff) e
+           where e.lecture_id = any (lec) and e.topic_key <> ''
+           group by e.user_id, e.topic_key) z;
+  ans := case when close is null then null else greatest(close, ceil(close * coalesce(per, 1))::int) end;
+  select * into last from public.study_boss_battles b where b.group_id = p_group and b.outcome is not null
+   order by b.ended_at desc limit 1;
+  return (m - 'lectures') || jsonb_build_object(
+    'heads', coalesce((select jsonb_agg(x.e ->> 'name' order by x.o)
+                         from jsonb_array_elements(all_h) with ordinality as x(e, o) where x.o <= study_private.boss_max_heads()), '[]'::jsonb),
+    'hot', jsonb_array_length(all_h), 'topics', n_top, 'min_heads', study_private.boss_min_heads(), 'answers_next', ans,
+    'revenge', case when last.outcome = 'lost' then jsonb_build_object(
+                 'battle', last.id, 'name', last.name,
+                 'heads', (select jsonb_agg(x ->> 'name') from jsonb_array_elements(last.heads) x where not (x ->> 'down')::boolean),
+                 'open', study_private.pulse_cutoff(now()) > last.ended_at) end);
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  Row Level Security and privileges
+-- ═══════════════════════════════════════════════════════════════════════
+alter table public.study_boss_battles enable row level security;
+alter table public.study_loot         enable row level security;
+drop policy if exists "study boss battles read" on public.study_boss_battles;
+drop policy if exists "study loot own"          on public.study_loot;
+create policy "study boss battles read" on public.study_boss_battles
+  for select using (public.study_is_member(group_id));
+create policy "study loot own" on public.study_loot
+  for select using (user_id = auth.uid());
+revoke all on public.study_boss_battles, public.study_loot from anon, authenticated;
+-- H 2 (review H-BATTLE-ROW-READ): a member reads a battle's plain facts only.
+-- Its heads (the pulse's hot topics, each head's questions and open trap),
+-- its rounds (the planned questions, in order: section Z hides them) and its
+-- log never leave the definer functions; the HUD comes from
+-- study_quiz__boss_state through study_quiz_state. REVOKE ALL above also
+-- drops column grants, so a re-run grants exactly these columns.
+grant select (id, quiz_id, group_id, name, lecture_ids, planned, team_hp, outcome, revenge_of, created_at, ended_at)
+  on public.study_boss_battles to authenticated;
+grant select on public.study_loot to authenticated;
+
+revoke all on function study_private.boss_min_heads(), study_private.boss_max_heads(), study_private.boss_head_questions(),
+  study_private.boss_players(), study_private.boss_trap_hp(), study_private.boss_relapses(), study_private.boss_hit_pct(),
+  study_private.boss_loot_days(), study_private.boss_askable(uuid), study_private.boss_heads(uuid, uuid[], int) from public;
+revoke all on function public.study_quiz__pick_boss(uuid), public.study_quiz__after_reveal(uuid, int),
+  public.study_quiz__boss_state(uuid) from public, anon, authenticated;
+revoke all on function public.study_boss_create(uuid, uuid[], int, uuid), public.study_boss_loot(uuid),
+  public.study_boss_loot_save(uuid), public.study_my_loot(uuid), public.study_loot_done(uuid), public.study_boss_open(uuid, uuid[])
+  from public, anon;
+grant execute on function public.study_boss_create(uuid, uuid[], int, uuid), public.study_boss_loot(uuid),
+  public.study_boss_loot_save(uuid), public.study_my_loot(uuid), public.study_loot_done(uuid), public.study_boss_open(uuid, uuid[])
+  to authenticated;
+
+-- (the check at the top of this section already stopped the run when Z lacks its hooks)
+-- H 2: a battle's heads, rounds and log are no longer readable from the table (above).
+insert into study_private.schema_sections (section, version) values ('H', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION H ════
+
+-- ════ BEGIN SECTION B · the bank written ahead (package B) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION B · THE POINTS TO KNOW, READ AHEAD   (package B, as Yoad's
+--  decision 2 of 17 Nov 2026 redefines it: no question or card is written
+--  automatically; docs/study/practice-2-api.md §10)
+--  After section Q (practice 2.0's points to know) and section W (the
+--  server writer, pg_net). Re-runnable, and safe on wave 3's database with
+--  data: it adds a column, a switch, functions and a trigger, and changes no
+--  row of anyone's.
+--
+--  When the server's writer finishes a lecture's summary (study_finish sets
+--  the lecture 'ready': every part written), the database kicks the worker
+--  (pg_net, POST /api/study/work {"points": <lecture>}), which reads the
+--  parts' points to know as action "points" does (server/study/points.ts:
+--  part by part, six calls at once), so "מה ליצור" opens with its numbers.
+--
+--  BA1 The switch `points_ahead`, on by default (a row in
+--      study_private.features). Off: no kick, and the worker claims nothing.
+--  BA2 Only parts never tried on their text: a part whose points are current,
+--      or whose text this read or a member's tap already tried (try_md5), is
+--      never read ahead, so no text is read ahead twice and a read that
+--      failed waits for a member's "לנסות שוב". Nothing while a read holds a
+--      live lease (a member's, or an earlier read ahead's).
+--  BA3 Every call goes through the ledger (kind "points", the worker's rows
+--      name no member); a refusal at the cap (the optional features stop at
+--      80% of it) gives the claim back quietly (study_points_ahead_release):
+--      the parts look as before, and "לקרוא את הנקודות" stays on the setup
+--      screen.
+--  BA4 study_point_parts.ahead_at: the claim's time on the parts a read ahead
+--      took, so the setup screen says the server reads them (not "במכשיר
+--      אחר"). A member's claim leaves it; the screen compares it with the
+--      claim's own time.
+--  BA5 Recoverable: a part the read ahead could not save fails with its
+--      reason (study_points_fail), and one whose function died keeps its
+--      lease until it runs out; both are offered again on the setup screen.
+--  The worker path in section Q's study_points_save and study_points_fail
+--  (study_private.may_bank: the key alone, no member) is what lets the
+--  worker save; the grants to anon below only let its call reach them.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- BA1. The switch: on unless Yoad turns it off
+--   update study_private.features set enabled = false, changed_at = now() where name = 'points_ahead';
+insert into study_private.features (name, enabled) values ('points_ahead', true) on conflict (name) do nothing;
+
+-- BA4. Which read took a part: the read ahead's claim time.
+alter table public.study_point_parts add column if not exists ahead_at timestamptz;
+
+-- Is the lecture's summary written, with a part whose text was never tried?
+-- (BA2; the switch, the lecture and its summary.) No lock: a hint for the
+-- kick; the claim decides under the lecture's lock.
+create or replace function study_private.points_ahead_due(p_lecture uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select study_private.feature_on('points_ahead')
+     and exists (select 1 from public.study_lectures l where l.id = p_lecture and l.deleted_at is null)
+     and exists (select 1 from public.study_sections s where s.lecture_id = p_lecture)
+     and not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.status <> 'ready')
+     and exists (select 1 from public.study_sections s
+                   left join public.study_point_parts pp on pp.lecture_id = s.lecture_id and pp.part_idx = s.idx
+                  where s.lecture_id = p_lecture
+                    and coalesce(pp.src_md5, '') <> md5(s.markdown) and coalesce(pp.try_md5, '') <> md5(s.markdown))
+     and not exists (select 1 from public.study_point_parts pp
+                      where pp.lecture_id = p_lecture and pp.status = 'writing' and pp.lease_until > now())
+$$;
+
+-- Kick the worker for the lecture's read ahead (sent after the commit, as
+-- section W's kicks). False: server writing is not set up, the switch is
+-- off, or nothing is due.
+create or replace function study_private.points_ahead_kick(p_lecture uuid)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.server_on() or not study_private.points_ahead_due(p_lecture) then return false; end if;
+  perform net.http_post(
+    url := rtrim(study_private.secret('study_site_url'), '/') || '/api/study/work',
+    body := jsonb_build_object('points', p_lecture),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || study_private.secret('study_worker_key')),
+    timeout_milliseconds := 10000);
+  return true;
+end;
+$$;
+
+-- When the summary is written: study_finish sets the lecture 'ready' once no
+-- part is left (and again after a part is written anew).
+create or replace function study_private.points_ahead_after_ready()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  perform study_private.points_ahead_kick(new.id);
+  return null;
+end;
+$$;
+drop trigger if exists study_points_ahead_after_ready on public.study_lectures;
+create trigger study_points_ahead_after_ready
+  after update of status on public.study_lectures
+  for each row when (new.status = 'ready' and new.deleted_at is null)
+  execute function study_private.points_ahead_after_ready();
+
+-- BA2. The worker's claim (the key alone, no member): the parts never tried
+-- on their text, with what the worker cannot read itself (the parts' text,
+-- their earlier points for the ids, the lecture's group and slides). Null:
+-- nothing to read ahead now (the switch, a deleted lecture, a part not
+-- written, a live read, nothing new), never an error the worker must handle.
+--   { group_id, slides: [n…], parts: [{ part_idx, heading, slide_from, slide_to, md5, markdown,
+--                                       old: [{ id, kind, subject, text }] }] }
+create or replace function public.study_points_ahead_claim(p_lecture uuid, p_key text default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  l   public.study_lectures;
+  out jsonb;
+begin
+  if not study_private.is_worker(p_key) or auth.uid() is not null then raise exception 'forbidden'; end if;
+  if not study_private.feature_on('points_ahead') then return null; end if;
+  select * into l from public.study_lectures x where x.id = p_lecture;
+  if not found or l.deleted_at is not null then return null; end if;
+  if not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture)
+     or exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.status <> 'ready') then
+    return null;
+  end if;
+  -- The lock of every read of this lecture's points (section Q's claim takes it too).
+  perform pg_advisory_xact_lock(hashtext('study_points:' || p_lecture::text));
+  insert into public.study_point_parts (lecture_id, part_idx)
+  select s.lecture_id, s.idx from public.study_sections s where s.lecture_id = p_lecture
+  on conflict do nothing;
+  if exists (select 1 from public.study_point_parts pp
+              where pp.lecture_id = p_lecture and pp.status = 'writing' and pp.lease_until > now()) then
+    return null;
+  end if;
+  with s as (
+    select x.idx, x.title, x.slide_from, x.slide_to, x.markdown, md5(x.markdown) as h
+      from public.study_sections x where x.lecture_id = p_lecture
+  ), claimed as (
+    update public.study_point_parts pp
+       set status = 'writing', lease_until = now() + interval '6 minutes', attempts = 1,
+           try_md5 = s.h, error = null, updated_at = now(), ahead_at = now()
+      from s
+     where pp.lecture_id = p_lecture and pp.part_idx = s.idx and pp.src_md5 <> s.h and pp.try_md5 <> s.h
+    returning pp.part_idx as idx, s.title, s.slide_from, s.slide_to, s.h, s.markdown
+  )
+  select jsonb_agg(jsonb_build_object(
+           'part_idx', c.idx, 'heading', left(c.title, 200), 'slide_from', c.slide_from, 'slide_to', c.slide_to,
+           'md5', c.h, 'markdown', c.markdown,
+           'old', coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'kind', p.kind, 'subject', p.subject, 'text', p.text) order by p.n)
+                              from public.study_points p where p.lecture_id = p_lecture and p.part_idx = c.idx), '[]'::jsonb))
+         order by c.idx)
+    into out from claimed c;
+  if out is null then return null; end if;
+  return jsonb_build_object(
+    'group_id', l.group_id,
+    'slides', coalesce((select jsonb_agg((x ->> 'n')::int order by (x ->> 'n')::int)
+                          from jsonb_array_elements(l.slides) x where (x ->> 'n') ~ '^[0-9]{1,4}$'), '[]'::jsonb),
+    'parts', out);
+end;
+$$;
+
+-- BA3. A read ahead the ledger refused before any call (the cap): the claim
+-- is given back quietly. The parts return to how a member saw them (read on
+-- an older text, or never read), their try given back; the text stays
+-- marked as tried, so the read ahead does not come back to it, and a
+-- member's "לקרוא את הנקודות" reads it.
+create or replace function public.study_points_ahead_release(p_lecture uuid, p_parts int[], p_key text default null)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare n int;
+begin
+  if not study_private.is_worker(p_key) or auth.uid() is not null then raise exception 'forbidden'; end if;
+  update public.study_point_parts y
+     set status = case when y.src_md5 = '' then 'pending' else 'ready' end, lease_until = null, error = null,
+         attempts = greatest(0, y.attempts - 1), ahead_at = null, updated_at = now()
+   where y.lecture_id = p_lecture and y.part_idx = any (coalesce(p_parts, '{}')) and y.status = 'writing'
+     and y.ahead_at is not null;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+revoke all on function study_private.points_ahead_due(uuid), study_private.points_ahead_kick(uuid),
+  study_private.points_ahead_after_ready() from public;
+revoke all on function public.study_points_ahead_claim(uuid, text), public.study_points_ahead_release(uuid, int[], text) from public;
+-- The worker calls these as anon with its key (each checks it inside, and
+-- refuses a member's token); the two of section Q it saves and fails through.
+grant execute on function public.study_points_ahead_claim(uuid, text), public.study_points_ahead_release(uuid, int[], text) to anon;
+grant execute on function public.study_points_save(uuid, int, text, jsonb, text, numeric, text),
+  public.study_points_fail(uuid, int[], text, numeric, text, boolean) to anon;
+
+do $$
+begin
+  if not study_private.server_on() then
+    raise notice 'Server writing is not set up (pg_net, Vault): the points are read only on a member''s tap, as before.';
+  end if;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('B', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION B ════
+
+-- ════ BEGIN SECTION G · the group's marathon plan (package G) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION G · THE GROUP'S MARATHON PLAN: TWO LANES   (package G; spec
+--  §12.6.G; plan.html; Yoad's decision 3 of 17 Nov 2026: usable early)
+--  PL1 set up once from the block exam: the date, its lectures, a shared
+--      pass over every summary from about 3 weeks out (about 3 hours a day),
+--      then study leave (about 10 hours a day): past exams, weak points.
+--  PL2 the group lane: one marathon (section P's run-of-show, any member
+--      edits, with names) per study day of the plan, for the next 7 days
+--      only; checkpoints are the plan's own milestones, computed.
+--  PL3 the private lane is computed on the phone ($0) from the caller's own
+--      rows; PL4's relearning state is study_my_relearning() below.
+--  PL5 a day that slipped: the lane moves its blocks to the next day and the
+--      group picks the price (more time a day until a date, or one review
+--      day less); the choice is recorded with its name. Nothing is "late".
+--  PL6 who read what and the practice reshape the lane: who read what is
+--      what every member already sees (study_reads); the practice is
+--      study_group_plan_meter() below, anonymous and only from 3 members.
+--  REC4 "זה למבחן" paragraphs from the recording's notes (W) move up in the
+--      plan and in Today: study_exam_marks().
+--
+--  Decision 3: the plan opens at once, from the lectures and the exam date
+--  alone. It grows more exact as the group practises, and says how far it is
+--  ("התוכנית מדייקת ככל שמתרגלים: 12 מתוך 30 הרצאות עם נתונים"): a lecture
+--  "has data" once plan_lecture_answers() answers from plan_floor() different
+--  members (in the last plan_window_days() days) are on its questions. Below
+--  that, the meter says only how many more answers and how many more people
+--  ("עוד אדם אחד"), never who. The thresholds are the functions below,
+--  mirrored by shared/study/lane.ts's PLAN (lane.test.ts reads this block).
+--
+--  Yoad's decision 1 (17 Nov 2026): no account. A member is the device's
+--  anonymous identity; the plan and its days are the group's, with names on
+--  every change, as the marathons are; the relearning rounds are the
+--  caller's own and nobody else's.
+--  Needs: F, Q, C, P (marathons; its end for "moved"). Reads W's notes when
+--  they exist. Re-runnable; changes no row of another section.
+-- ════════════════════════════════════════════════════════════════════════
+create or replace function study_private.plan_lecture_answers() returns int language sql immutable as $$ select 20 $$; -- answers before a lecture "has data"
+create or replace function study_private.plan_floor() returns int language sql immutable as $$ select 3 $$;            -- different members behind any group number
+create or replace function study_private.plan_window_days() returns int language sql immutable as $$ select 28 $$;    -- the answers' window
+create or replace function study_private.plan_hot_below() returns int language sql immutable as $$ select 60 $$;      -- % right below which a lecture is hot
+create or replace function study_private.plan_ok_from() returns int language sql immutable as $$ select 80 $$;        -- % right from which it sits well
+revoke all on function study_private.plan_lecture_answers(), study_private.plan_floor(), study_private.plan_window_days(),
+  study_private.plan_hot_below(), study_private.plan_ok_from() from public;
+
+create table if not exists public.study_group_plans (
+  id             uuid        primary key default gen_random_uuid(),
+  group_id       uuid        not null references public.study_groups (id) on delete cascade,
+  title          text        not null check (char_length(btrim(title)) between 1 and 120),
+  exam_date      date        not null,
+  lecture_ids    uuid[]      not null default '{}' check (cardinality(lecture_ids) <= 40),
+  shared_from    date        not null,              -- the shared pass over every summary
+  leave_from     date        not null,              -- study leave: past exams and what did not sit well
+  shared_minutes int         not null default 180 check (shared_minutes between 30 and 600),
+  leave_minutes  int         not null default 600 check (leave_minutes between 60 and 840),
+  rounds         smallint    not null default 3 check (rounds between 2 and 4),
+  day_start      time        not null default '09:00',
+  slips          jsonb       not null default '[]'::jsonb check (jsonb_typeof(slips) = 'array' and jsonb_array_length(slips) <= 60),
+  state          text        not null default 'active' check (state in ('active', 'archived')),
+  version        int         not null default 1 check (version >= 1),
+  created_by     uuid        default auth.uid() references auth.users (id) on delete set null,
+  updated_by     uuid        references auth.users (id) on delete set null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  check (shared_from <= leave_from and leave_from <= exam_date)
+);
+create unique index if not exists study_group_plans_active on public.study_group_plans (group_id) where state = 'active';
+
+alter table public.study_marathons
+  add column if not exists plan_id  uuid references public.study_group_plans (id) on delete set null,
+  add column if not exists plan_day date;
+create unique index if not exists study_marathons_plan_day on public.study_marathons (plan_id, plan_day)
+  where plan_id is not null and state <> 'cancelled';
+
+alter table public.study_group_plans enable row level security;
+drop policy if exists "study group plans read" on public.study_group_plans;
+create policy "study group plans read" on public.study_group_plans for select using (public.study_is_member(group_id));
+revoke all on public.study_group_plans from anon, authenticated;
+grant select on public.study_group_plans to authenticated;
+do $$
+begin
+  execute 'alter publication supabase_realtime add table public.study_group_plans';
+exception when duplicate_object then
+  null;
+end $$;
+
+-- PL1: the plan (any member creates or changes it; a new one archives the
+-- previous). Errors: 'not signed in', 'group not found', 'bad title',
+-- 'bad date', 'bad minutes', 'bad rounds', 'lecture not found', 'plan not found', 'conflict'.
+create or replace function public.study_group_plan_save(p_id uuid, p_version int, p_group uuid, p_title text, p_exam_date date,
+  p_lectures uuid[], p_shared_from date default null, p_leave_from date default null, p_shared_minutes int default 180,
+  p_leave_minutes int default 600, p_rounds int default 3, p_day_start time default '09:00')
+returns table (id uuid, version int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me  uuid := auth.uid();
+  pl  public.study_group_plans;
+  lec uuid[];
+  v_sf date := coalesce(p_shared_from, p_exam_date - 21);
+  v_lf date := coalesce(p_leave_from, p_exam_date - 14);
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_group is null or not public.study_is_member(p_group) then raise exception 'group not found'; end if;
+  if char_length(btrim(coalesce(p_title, ''))) not between 1 and 120 then raise exception 'bad title'; end if;
+  if p_exam_date is null or p_exam_date < current_date or p_exam_date > current_date + 180
+     or v_sf > v_lf or v_lf > p_exam_date or v_sf < current_date - 60 then
+    raise exception 'bad date';
+  end if;
+  if coalesce(p_shared_minutes, 0) not between 30 and 600 or coalesce(p_leave_minutes, 0) not between 60 and 840 then
+    raise exception 'bad minutes';
+  end if;
+  if coalesce(p_rounds, 0) not between 2 and 4 then raise exception 'bad rounds'; end if;
+  select array_agg(x.l order by x.o) into lec
+    from (select u.l, min(u.o) as o from unnest(coalesce(p_lectures, '{}')) with ordinality as u(l, o)
+           where u.l is not null group by u.l) x;
+  lec := coalesce(lec, '{}');
+  if cardinality(lec) = 0 or cardinality(lec) > 40
+     or exists (select 1 from unnest(lec) as t(l) where public.study_lecture_group(t.l) is distinct from p_group) then
+    raise exception 'lecture not found';
+  end if;
+  if p_id is null then
+    update public.study_group_plans x set state = 'archived', updated_by = me, updated_at = now()
+     where x.group_id = p_group and x.state = 'active';
+    insert into public.study_group_plans (group_id, title, exam_date, lecture_ids, shared_from, leave_from, shared_minutes,
+                                          leave_minutes, rounds, day_start, created_by, updated_by)
+    values (p_group, btrim(p_title), p_exam_date, lec, v_sf, v_lf, p_shared_minutes, p_leave_minutes, p_rounds,
+            coalesce(p_day_start, '09:00'), me, me)
+    returning * into pl;
+  else
+    select * into pl from public.study_group_plans x where x.id = p_id and x.group_id = p_group for update;
+    if not found or pl.state <> 'active' then raise exception 'plan not found'; end if;
+    if pl.version <> coalesce(p_version, -1) then raise exception 'conflict'; end if;
+    update public.study_group_plans x
+       set title = btrim(p_title), exam_date = p_exam_date, lecture_ids = lec, shared_from = v_sf, leave_from = v_lf,
+           shared_minutes = p_shared_minutes, leave_minutes = p_leave_minutes, rounds = p_rounds,
+           day_start = coalesce(p_day_start, x.day_start), version = x.version + 1, updated_by = me, updated_at = now()
+     where x.id = p_id
+    returning * into pl;
+  end if;
+  return query select pl.id, pl.version;
+end;
+$$;
+
+-- PL2: one day of the group lane, as a marathon of the plan (created, or
+-- changed when the day's marathon is still at p_version). The lane's
+-- generator on the phone calls it for the days it (re)builds; a day a member
+-- edited meanwhile answers 'conflict' and stays as she left it.
+create or replace function public.study_group_plan_day(p_plan uuid, p_day date, p_version int, p_title text,
+  p_starts_at timestamptz, p_minutes int, p_lectures uuid[], p_agenda jsonb)
+returns table (id uuid, version int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  pl public.study_group_plans;
+  m  public.study_marathons;
+  r  record;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into pl from public.study_group_plans x where x.id = p_plan;
+  if not found or not public.study_is_member(pl.group_id) or pl.state <> 'active' then raise exception 'plan not found'; end if;
+  if p_day is null or p_day < pl.shared_from or p_day > pl.exam_date then raise exception 'bad date'; end if;
+  select * into m from public.study_marathons x where x.plan_id = p_plan and x.plan_day = p_day and x.state <> 'cancelled';
+  select s.id, s.version into r
+    from public.study_marathon_save(case when m.id is null then null else m.id end, coalesce(p_version, m.version), pl.group_id,
+                                    p_title, p_starts_at, p_minutes, '', '', p_lectures, p_agenda) s;
+  update public.study_marathons x set plan_id = p_plan, plan_day = p_day where x.id = r.id;
+  return query select r.id, r.version;
+end;
+$$;
+
+-- PL5: the price chosen for a day that slipped, with its name: 'longer'
+-- ("עוד שעה ביום עד שישי": p_until) or 'drop_review' ("לוותר על יום חזרה
+-- אחד"). The phone's lane applies it when it rebuilds the next days.
+create or replace function public.study_group_plan_slip(p_plan uuid, p_day date, p_choice text, p_until date default null)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare pl public.study_group_plans;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into pl from public.study_group_plans x where x.id = p_plan for update;
+  if not found or not public.study_is_member(pl.group_id) or pl.state <> 'active' then raise exception 'plan not found'; end if;
+  if coalesce(p_choice, '') not in ('longer', 'drop_review') then raise exception 'bad choice'; end if;
+  if p_day is null or p_day < pl.shared_from or p_day > pl.exam_date
+     or (p_choice = 'longer' and (p_until is null or p_until <= p_day or p_until > pl.exam_date)) then
+    raise exception 'bad date';
+  end if;
+  update public.study_group_plans x
+     set slips = (case when jsonb_array_length(x.slips) >= 60 then x.slips - 0 else x.slips end)
+                 || jsonb_build_array(jsonb_build_object('day', p_day, 'choice', p_choice, 'until', p_until,
+                                                         'by', auth.uid(), 'at', now())),
+         version = x.version + 1, updated_by = auth.uid(), updated_at = now()
+   where x.id = p_plan;
+  return pl.version + 1;
+end;
+$$;
+
+-- PL4: a lecture's key questions: one per paragraph of the bank (the oldest
+-- active, keyed, unmarked question on it), in reading order, at most 12;
+-- without paragraphs, the oldest of each part.
+create or replace function study_private.key_questions(p_lecture uuid)
+returns setof uuid language sql stable security definer set search_path = public as $$
+  select x.id from (
+    select distinct on (q.part_idx, coalesce((to_jsonb(q) ->> 'anchor')::int, -1)) q.id, q.part_idx,
+           coalesce((to_jsonb(q) ->> 'anchor')::int, -1) as a
+      from public.study_questions q
+     where q.lecture_id = p_lecture and q.retired_at is null and q.has_key
+       and (to_jsonb(q) ->> 'stale_at') is null and (to_jsonb(q) ->> 'hidden_at') is null
+     order by q.part_idx, coalesce((to_jsonb(q) ->> 'anchor')::int, -1), q.created_at, q.id
+  ) x
+  order by x.part_idx, x.a
+  limit 12
+$$;
+revoke all on function study_private.key_questions(uuid) from public;
+
+-- PL4: the caller's own rounds of each lecture of the plan. Round 1 is the
+-- reading (the caller's "קראתי" mark, or the group's reading she was at);
+-- every next round ends on the study day by which each key question has a
+-- right answer after the previous round. Gaps grow (1, 3, 7, 14 days),
+-- capped so the last round lands before the exam. Only her own rows.
+create or replace function public.study_my_relearning(p_plan uuid, p_now timestamptz default now())
+returns table (lecture_id uuid, rounds int, key_total int, key_left int, last_day date, next_day date)
+language plpgsql stable security definer set search_path = public as $$
+declare
+  pl     public.study_group_plans;
+  l      uuid;
+  v_prev int;
+  v_r    int;
+  v_end  int;
+  v_tot  int;
+  v_left int;
+  v_gap  int;
+  today  int := public.study_day(p_now);
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into pl from public.study_group_plans x where x.id = p_plan;
+  if not found or not public.study_is_member(pl.group_id) then raise exception 'plan not found'; end if;
+  foreach l in array pl.lecture_ids loop
+    v_prev := null;
+    select public.study_day(r.read_at) into v_prev from public.study_reads r where r.lecture_id = l and r.user_id = auth.uid();
+    v_r := case when v_prev is null then 0 else 1 end;
+    select count(*)::int into v_tot from study_private.key_questions(l);
+    loop
+      exit when v_prev is null or v_tot = 0 or v_r >= pl.rounds;
+      select max(d), count(d) into v_end, v_left from (
+        select (select min(public.study_day(a.answered_at)) from public.study_answers a
+                 where a.user_id = auth.uid() and a.question_id = k and a.correct
+                   and public.study_day(a.answered_at) > v_prev and a.answered_at <= p_now) as d
+          from study_private.key_questions(l) as k) z;
+      exit when v_left < v_tot;                                          -- some key question still waits
+      v_r := v_r + 1;
+      v_prev := v_end;
+    end loop;
+    select count(*)::int into v_left from study_private.key_questions(l) k
+     where v_prev is null or not exists (select 1 from public.study_answers a
+                       where a.user_id = auth.uid() and a.question_id = k and a.correct
+                         and public.study_day(a.answered_at) > v_prev and a.answered_at <= p_now);
+    v_gap := case v_r when 0 then 0 when 1 then 1 when 2 then 3 when 3 then 7 else 14 end;
+    if v_prev is not null and v_r < pl.rounds and pl.rounds > v_r then
+      v_gap := least(v_gap, greatest(1, ((pl.exam_date - date '1970-01-01') - 1 - v_prev) / (pl.rounds - v_r)));
+    end if;
+    return query select l, v_r, v_tot, case when v_r >= pl.rounds then 0 else v_left end,
+                        case when v_prev is null then null else date '1970-01-01' + v_prev end,
+                        case when v_prev is null or v_r >= pl.rounds then null
+                             else greatest(date '1970-01-01' + today, date '1970-01-01' + v_prev + v_gap) end;
+  end loop;
+end;
+$$;
+
+-- PL6 and decision 3: the plan's meter, one row per lecture of the plan.
+-- answers: first answers per member, question and study day in the window,
+-- on the lecture's active questions, by current members (never a name);
+-- answers_short and members_short: how many more until the lecture "has
+-- data"; bucket ('hot' · 'warm' · 'ok') only once it has: the share of
+-- those answers that were right, below plan_hot_below() hot, from
+-- plan_ok_from() sitting well. Members only.
+--
+-- G 2 (review G-METER-PNOW): the window ends at the start of today's study
+-- day (section U's pulse_cutoff, 04:00 Israel time), as the pulse's counts
+-- do, and the caller passes no time. Practice done today changes nothing
+-- anyone sees until tomorrow, so no member can time another's answers
+-- (G 1 took any p_now and counted up to it, to the second). G 1's
+-- (uuid, timestamptz) form is dropped; the app always called it with
+-- p_plan alone.
+drop function if exists public.study_group_plan_meter(uuid, timestamptz);
+create or replace function public.study_group_plan_meter(p_plan uuid)
+returns table (lecture_id uuid, answers int, answers_short int, members_short int, bucket text)
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_cut timestamptz := study_private.pulse_cutoff(now());
+  pl public.study_group_plans;
+  na int := study_private.plan_lecture_answers();
+  fl int := study_private.plan_floor();
+  wd int := study_private.plan_window_days();
+  hb int := study_private.plan_hot_below();
+  ok int := study_private.plan_ok_from();
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into pl from public.study_group_plans x where x.id = p_plan;
+  if not found or not public.study_is_member(pl.group_id) then raise exception 'plan not found'; end if;
+  return query
+  with lec as (
+    select u.l, u.o from unnest(pl.lecture_ids) with ordinality as u(l, o)
+  ), ev as (
+    select q.lecture_id, a.user_id, a.correct,
+           row_number() over (partition by a.user_id, a.question_id, public.study_day(a.answered_at) order by a.answered_at, a.id) as rn
+      from public.study_answers a
+      join public.study_questions q on q.id = a.question_id and q.lecture_id = any (pl.lecture_ids)
+                                   and q.retired_at is null and (to_jsonb(q) ->> 'hidden_at') is null
+      join public.study_members m on m.group_id = pl.group_id and m.user_id = a.user_id
+     where a.answered_at < v_cut and a.answered_at >= v_cut - make_interval(days => wd)
+  ), c as (
+    select ev.lecture_id, count(*)::int as n, count(distinct ev.user_id)::int as people,
+           (count(*) filter (where ev.correct))::int as r
+      from ev where ev.rn = 1 group by ev.lecture_id
+  )
+  select lec.l, coalesce(c.n, 0), greatest(0, na - coalesce(c.n, 0)), greatest(0, fl - coalesce(c.people, 0)),
+         case when coalesce(c.n, 0) < na or coalesce(c.people, 0) < fl then null
+              when c.r * 100 < hb * c.n then 'hot'
+              when c.r * 100 >= ok * c.n then 'ok'
+              else 'warm' end
+    from lec left join c on c.lecture_id = lec.l
+   order by lec.o;
+end;
+$$;
+
+-- REC4: the paragraphs the lecturer marked for the exam ("זה למבחן"), from
+-- the recording's notes (section W: an item with kind 'exam'). Members only;
+-- the plan, Today and practice put them first.
+create or replace function public.study_exam_marks(p_lecture uuid)
+returns table (part_idx int, anchor int, at_s int, text text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(public.study_lecture_group(p_lecture)), false) then
+    raise exception 'lecture not found';
+  end if;
+  if to_regclass('public.study_recording_notes') is null or not study_private.feature_on('recordings') then return; end if;
+  return query execute
+    'select n.part_idx, (i ->> ''anchor'')::int, (i ->> ''at_s'')::int, left(i ->> ''text'', 300)
+       from public.study_recording_notes n, jsonb_array_elements(n.items) i
+      where n.lecture_id = $1 and n.status = ''ready'' and i ->> ''kind'' = ''exam''
+        and (i ->> ''anchor'') ~ ''^-?[0-9]{1,5}$''
+      order by n.part_idx, (i ->> ''anchor'')::int'
+    using p_lecture;
+end;
+$$;
+
+revoke all on function public.study_group_plan_save(uuid, int, uuid, text, date, uuid[], date, date, int, int, int, time),
+  public.study_group_plan_day(uuid, date, int, text, timestamptz, int, uuid[], jsonb),
+  public.study_group_plan_slip(uuid, date, text, date), public.study_my_relearning(uuid, timestamptz),
+  public.study_group_plan_meter(uuid), public.study_exam_marks(uuid) from public, anon;
+grant execute on function public.study_group_plan_save(uuid, int, uuid, text, date, uuid[], date, date, int, int, int, time),
+  public.study_group_plan_day(uuid, date, int, text, timestamptz, int, uuid[], jsonb),
+  public.study_group_plan_slip(uuid, date, text, date), public.study_my_relearning(uuid, timestamptz),
+  public.study_group_plan_meter(uuid), public.study_exam_marks(uuid) to authenticated;
+
+-- G 2: the meter counts up to the study day's start, with no caller's time (above).
+insert into study_private.schema_sections (section, version) values ('G', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION G ════
+
+-- ════ BEGIN SECTION E · phase-3 extras (package E) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION E · PHASE-3 EXTRAS: A MEMBER'S OWN TRAP, THE BLANK TABLE'S
+--  TABLES   (package E; spec §12.6.E; approved phase 3, usable early by
+--  Yoad's decision 3 of 17 Nov 2026)
+--  P11 "להוסיף מלכודת משלי": a member writes a trap question on a
+--      paragraph; Claude checks it against the slides without rewriting it
+--      (op trap_check, through the ledger) and writes only the explanations
+--      of its options; it joins everyone's bank with no author. Its author
+--      shows only once a live quiz has revealed it ("נכתבה ע״י רוני ·
+--      נבדקה מול השקפים"), through section Z's hook study_quiz__revealed,
+--      never from practice (review SEC-7). The draft is the author's alone.
+--  P10 "טבלה ריקה": a slide's table from memory. A wrong cell becomes a
+--      private card through section C's study_my_card_add(origin 'table');
+--      here only study_slide_tables, the meter's real count of the tables
+--      the group's slides hold (decision 3: open with what there is, say
+--      what more needs). Under the caller's own rights: what she may read.
+--  Q11 the quiz rounds "המלכודות שלנו" and "מי אני?" are design only.
+--  Needs: F, Q (+ its end), Z (its reveal calls the hook), C's end (the
+--  private cards). Re-runnable, and safe on wave 3's, wave 4's and wave 5's
+--  databases with data: it adds two columns, one table and functions, and
+--  widens section Q's source check by one value; no row of anyone's changes.
+--  Additions to §12.6.E's text, each noted where it is: the options are
+--  shuffled once the trap passes (section Q's rule: "options are stored in
+--  display order, shuffled on the server"), so the author's habit of where
+--  the key sits does not carry into the bank; and study_slide_tables.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- Section Q's table: a third source, 'member', with its author shown only
+-- once unmasked. (E's lines in another package's table, reviewed by Q.)
+alter table public.study_questions
+  add column if not exists author_id   uuid references auth.users (id) on delete set null,   -- null until unmasked
+  add column if not exists unmasked_at timestamptz;
+alter table public.study_questions drop constraint if exists study_questions_source_check;
+alter table public.study_questions add constraint study_questions_source_check check (source in ('ai', 'exam', 'member'));
+do $$
+declare c record;
+begin
+  -- Section Q's "source = 'ai' or an exam item" becomes "an exam item, or not an exam".
+  for c in select con.conname from pg_constraint con
+            where con.conrelid = 'public.study_questions'::regclass and con.contype = 'c'
+              and pg_get_constraintdef(con.oid) like '%source = ''ai''::text) OR ((exam_id IS NOT NULL) AND (lecture_id IS NULL))%'
+  loop
+    execute format('alter table public.study_questions drop constraint %I', c.conname);
+  end loop;
+end $$;
+alter table public.study_questions drop constraint if exists study_questions_exam_shape;
+alter table public.study_questions add constraint study_questions_exam_shape
+  check (source <> 'exam' or (exam_id is not null and lecture_id is null));
+-- An author is named only on a member's trap, and only with the moment it was unmasked.
+alter table public.study_questions drop constraint if exists study_questions_author_shape;
+alter table public.study_questions add constraint study_questions_author_shape
+  check (author_id is null or (source = 'member' and unmasked_at is not null));
+
+-- The author's drafts (owner-only, never published).
+create table if not exists public.study_trap_drafts (
+  id          uuid        primary key default gen_random_uuid(),
+  user_id     uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  lecture_id  uuid        not null references public.study_lectures (id) on delete cascade,
+  part_idx    int         not null check (part_idx >= 0),
+  anchor      int         check (anchor between 0 and 9999),
+  quote       text        not null default '' check (char_length(quote) <= 200),
+  vignette    text        not null default '' check (char_length(vignette) <= 1200),
+  question    text        not null check (char_length(btrim(question)) between 8 and 400),
+  options     text[]      not null check (cardinality(options) between 4 and 5),
+  answer      smallint    not null check (answer between 0 and 4),
+  note        text        not null default '' check (char_length(note) <= 300),   -- the trap, in the author's words
+  slides      int[]       not null check (cardinality(slides) between 1 and 6),
+  state       text        not null default 'draft' check (state in ('draft', 'ok', 'rejected')),
+  problem     text        not null default '' check (char_length(problem) <= 300),
+  question_id uuid        references public.study_questions (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  check (answer < cardinality(options))
+);
+create index if not exists study_trap_drafts_question on public.study_trap_drafts (question_id) where question_id is not null;
+create index if not exists study_trap_drafts_mine on public.study_trap_drafts (user_id, created_at);
+alter table public.study_trap_drafts enable row level security;
+drop policy if exists "study trap drafts own" on public.study_trap_drafts;
+create policy "study trap drafts own" on public.study_trap_drafts for select using (user_id = auth.uid());
+revoke all on public.study_trap_drafts from anon, authenticated;
+grant select on public.study_trap_drafts to authenticated;
+
+-- The author writes (or rewrites, after a rejection) her trap on a paragraph.
+-- Returns the draft's id; op trap_check then checks it. At most 10 new
+-- drafts a day (shared/study/extras.ts TRAP_DRAFTS_A_DAY says the same).
+create or replace function public.study_trap_submit(p_draft uuid, p_lecture uuid, p_part int, p_anchor int, p_quote text,
+  p_vignette text, p_question text, p_options text[], p_answer int, p_note text, p_slides int[])
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  g    uuid := public.study_lecture_group(p_lecture);
+  have int[];
+  v_id uuid;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if g is null or not public.study_is_member(g) then raise exception 'lecture not found'; end if;
+  if not exists (select 1 from public.study_sections s where s.lecture_id = p_lecture and s.idx = p_part) then raise exception 'bad parts'; end if;
+  if p_anchor is not null and p_anchor not between 0 and 9999 then raise exception 'bad parts'; end if;
+  if char_length(btrim(coalesce(p_question, ''))) not between 8 and 400 or btrim(p_question) !~ '\?$' then raise exception 'bad question'; end if;
+  if char_length(btrim(coalesce(p_vignette, ''))) > 1200 or char_length(btrim(coalesce(p_note, ''))) > 300 then raise exception 'bad question'; end if;
+  if cardinality(coalesce(p_options, '{}')) not between 4 and 5
+     or exists (select 1 from unnest(p_options) o where char_length(btrim(coalesce(o, ''))) not between 1 and 220)
+     or (select count(distinct lower(btrim(o))) from unnest(p_options) o) <> cardinality(p_options) then
+    raise exception 'bad options';
+  end if;
+  if p_answer is null or p_answer < 0 or p_answer >= cardinality(p_options) then raise exception 'bad answer'; end if;
+  select coalesce(array_agg((s ->> 'n')::int), '{}') into have
+    from public.study_lectures l, jsonb_array_elements(l.slides) s where l.id = p_lecture;
+  if cardinality(coalesce(p_slides, '{}')) not between 1 and 6 or not (p_slides <@ have) then raise exception 'bad source'; end if;
+  if (select count(*) from public.study_trap_drafts d where d.user_id = auth.uid() and d.created_at > now() - interval '1 day') >= 10
+     and p_draft is null then
+    raise exception 'daily_limit';
+  end if;
+  if p_draft is null then
+    insert into public.study_trap_drafts (user_id, group_id, lecture_id, part_idx, anchor, quote, vignette, question, options,
+                                          answer, note, slides)
+    values (auth.uid(), g, p_lecture, p_part, p_anchor, left(coalesce(p_quote, ''), 200), btrim(coalesce(p_vignette, '')),
+            btrim(p_question), array(select btrim(o) from unnest(p_options) o), p_answer, btrim(coalesce(p_note, '')), p_slides)
+    returning id into v_id;
+  else
+    update public.study_trap_drafts d
+       set part_idx = p_part, anchor = p_anchor, quote = left(coalesce(p_quote, ''), 200), vignette = btrim(coalesce(p_vignette, '')),
+           question = btrim(p_question), options = array(select btrim(o) from unnest(p_options) o), answer = p_answer,
+           note = btrim(coalesce(p_note, '')), slides = p_slides, state = 'draft', problem = '', updated_at = now()
+     where d.id = p_draft and d.user_id = auth.uid() and d.lecture_id = p_lecture and d.state <> 'ok'
+    returning d.id into v_id;
+    if v_id is null then raise exception 'draft not found'; end if;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- op trap_check (the author's token and the server key): Claude's verdict.
+-- ok: the trap joins the bank as written, with Claude's explanation and
+-- "מתי כן" for each option (the author's text is never changed); its author
+-- stays hidden. Not ok: the draft keeps the problem, for the author to fix.
+-- (Addition) The options are shuffled here, with their explanations, once:
+-- the bank's order is the server's, as section Q's items' is.
+create or replace function public.study_trap_checked(p_draft uuid, p_ok boolean, p_problem text, p_whys text[], p_whens text[],
+  p_takeaway text, p_topic text, p_aspect text, p_key text default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  d    public.study_trap_drafts;
+  qid  uuid;
+  n    int;
+  perm int[];
+  opts text[];
+  whys text[];
+  whns text[];
+begin
+  if not study_private.is_worker(p_key) or auth.uid() is null then raise exception 'forbidden'; end if;
+  select * into d from public.study_trap_drafts x where x.id = p_draft and x.user_id = auth.uid() for update;
+  if not found then raise exception 'draft not found'; end if;
+  if d.state = 'ok' then raise exception 'checked'; end if;
+  if not coalesce(p_ok, false) then
+    update public.study_trap_drafts x set state = 'rejected', problem = left(btrim(coalesce(p_problem, '')), 300), updated_at = now()
+     where x.id = p_draft;
+    return null;
+  end if;
+  n := cardinality(d.options);
+  if cardinality(coalesce(p_whys, '{}')) <> n or cardinality(coalesce(p_whens, '{}')) not in (0, n) then
+    raise exception 'explanations do not match options';
+  end if;
+  -- perm[i] = the draft's option shown at i (1-based).
+  perm := array(select i from generate_series(1, n) i order by random());
+  opts := array(select d.options[p] from unnest(perm) with ordinality u(p, o) order by o);
+  whys := array(select left(p_whys[p], 450) from unnest(perm) with ordinality u(p, o) order by o);
+  whns := case when cardinality(coalesce(p_whens, '{}')) = 0 then '{}'::text[]
+               else array(select left(coalesce(p_whens[p], ''), 300) from unnest(perm) with ordinality u(p, o) order by o) end;
+  insert into public.study_questions (group_id, lecture_id, source, part_idx, kind, difficulty, vignette, question, options, slides,
+                                      topic, aspect, has_key, model, anchor, quote, part_gen, created_by)
+  values (d.group_id, d.lecture_id, 'member', d.part_idx, case when d.vignette <> '' then 'case' else 'mcq' end, 2, d.vignette,
+          d.question, opts, d.slides, left(coalesce(p_topic, ''), 120),
+          case when p_aspect in ('mechanism', 'uses', 'pk', 'adverse', 'contra', 'interactions', 'resistance', 'dosing', 'classification',
+                                 'epidemiology', 'lifecycle', 'pathogenesis', 'clinical', 'diagnosis', 'treatment', 'prevention')
+               then p_aspect else 'other' end,
+          true, 'member', d.anchor, case when d.anchor is null then '' else d.quote end,
+          case when d.anchor is null then null else (select s.gen from public.study_sections s where s.lecture_id = d.lecture_id and s.idx = d.part_idx) end,
+          null)
+  returning id into qid;
+  insert into public.study_question_keys (question_id, answer, explanations, takeaway, whens)
+  values (qid, (array_position(perm, d.answer + 1) - 1)::smallint, whys, left(coalesce(p_takeaway, ''), 600), whns);
+  update public.study_trap_drafts x set state = 'ok', problem = '', question_id = qid, updated_at = now() where x.id = p_draft;
+  return qid;
+end;
+$$;
+
+-- The author shows once a live quiz revealed her trap: section Z's final
+-- reveal (study_quiz__score) calls this hook; its no-op body is section Z's
+-- end's. Review SEC-7: not a trigger on study_answers, whose 'quiz' rows a
+-- member could once write.
+drop trigger if exists study_answers_unmask on public.study_answers;
+drop function if exists public.study_answers_unmask();
+create or replace function public.study_quiz__revealed(p_quiz uuid, p_question uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  update public.study_questions q
+     set unmasked_at = now(),
+         author_id = (select d.user_id from public.study_trap_drafts d where d.question_id = q.id)
+   where q.id = p_question and q.source = 'member' and q.unmasked_at is null;
+end;
+$$;
+revoke all on function public.study_quiz__revealed(uuid, uuid) from public, anon, authenticated;
+
+-- P10's meter (decision 3): every table on the slides of the caller's
+-- group's lectures, by its shape. Which are fillable (rows, columns, cell
+-- length) is decided in one place, shared/study/blankTable.ts, from these
+-- counts; nothing is invented. Security invoker: RLS shows only what she
+-- may read (no deleted lecture, no other group's).
+create or replace function public.study_slide_tables(p_group uuid)
+returns table (lecture_id uuid, slide int, tbl int, n_rows int, n_cols int, max_cell int)
+language sql stable security invoker set search_path = public as $$
+  select l.id, (s ->> 'n')::int, (t.o - 1)::int, jsonb_array_length(t.v)::int,
+         coalesce((select max(jsonb_array_length(r)) from jsonb_array_elements(t.v) r where jsonb_typeof(r) = 'array'), 0)::int,
+         coalesce((select max(char_length(c #>> '{}')) from jsonb_array_elements(t.v) r, jsonb_array_elements(r) c
+                    where jsonb_typeof(r) = 'array'), 0)::int
+    from public.study_lectures l
+    cross join lateral jsonb_array_elements(case when jsonb_typeof(l.slides) = 'array' then l.slides else '[]'::jsonb end) s
+    cross join lateral jsonb_array_elements(case when jsonb_typeof(s -> 'tables') = 'array' then s -> 'tables' else '[]'::jsonb end)
+               with ordinality t(v, o)
+   where l.group_id = p_group and l.deleted_at is null and jsonb_typeof(t.v) = 'array' and (s ->> 'n') ~ '^[0-9]{1,4}$'
+   order by l.id, 2, 3
+$$;
+
+revoke all on function public.study_trap_submit(uuid, uuid, int, int, text, text, text, text[], int, text, int[]),
+  public.study_trap_checked(uuid, boolean, text, text[], text[], text, text, text, text),
+  public.study_slide_tables(uuid) from public, anon;
+grant execute on function public.study_trap_submit(uuid, uuid, int, int, text, text, text, text[], int, text, int[]),
+  public.study_trap_checked(uuid, boolean, text, text[], text[], text, text, text, text),
+  public.study_slide_tables(uuid) to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('E', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION E ════
+
+-- ════ BEGIN SECTION T · Today (package T) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION T · TODAY ("היום")   (package T, T-1; spec §12.4.T)
+--  The last section of the file (review F-9): it reads Q, Z, C, M and V,
+--  and, when they are loaded, section P's danger list and reading log and
+--  section H's loot (each looked up by name at run time, so this section
+--  loads and runs on M, N, V and the spec's sections alone: stage "T
+--  without U J H B G E", §12.8.4). Re-runnable. Everything here is the
+--  caller's own, computed for her alone; nothing is published, and no table
+--  is made. The queue's other sources are the phone's: due cards and trap
+--  cards through section C's queue (vaccines are trap cards, never a row of
+--  their own), "רק אצלך חם" from section U's two reads, the private lane
+--  from section G's lane (spec §12.4.T's table).
+--
+--  Yoad's decision 1 (17 Nov 2026): no account. A member is the device's
+--  anonymous identity; every read here is that member's own and opens
+--  without anything saved.
+--
+--  T2  the private queue's sources the database must answer (cards come
+--      from section C's own queue on the phone): the returns of live-quiz
+--      misses after 1 and 3 days (Q9, "הבנתי בדיון" when vote 2 was right),
+--      one confident error to try again in another wording (section P's
+--      danger list, its first due row), the "לא ברור" paragraphs (section
+--      M), the "עדכון" rows (section V), a missed meeting (section M), and
+--      "בקבוצה": the newest open question that is not hers.
+--  T5  the private flame: active study days among the last 7, lit from 4;
+--      it never resets on one missed day, and nobody else sees it.
+--  T-2 ("הקבוצה צריכה אותך", D11) is this section's end, below (T 2):
+--      study_today calls study_needs_me only once that block has made it,
+--      so this block alone still loads and runs as T 1.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- Q9: the caller's wrong first votes in live quizzes (30 days) that are due
+-- again: step 1 from the next study day until answered on or after it;
+-- step 2 from the third day until answered on or after it.
+create or replace function public.study_my_quiz_returns(p_group uuid, p_now timestamptz default now())
+returns table (question_id uuid, lecture_id uuid, wrong_at timestamptz, step int, choice int, bet int, fixed_in_discussion boolean)
+language sql stable security definer set search_path = public as $$
+  with w as (
+    select distinct on (a.question_id) a.question_id, q.lecture_id, a.answered_at, study_private.day_of(a.answered_at) as d,
+           a.choice::int as choice, a.confidence::int as bet
+      from public.study_answers a
+      join public.study_questions q on q.id = a.question_id and q.group_id = p_group
+                                   and q.retired_at is null and q.stale_at is null and q.hidden_at is null and q.has_key
+     where a.user_id = auth.uid() and a.mode = 'quiz' and not a.correct
+       and a.answered_at > p_now - interval '30 days' and a.answered_at <= p_now
+     order by a.question_id, a.answered_at desc
+  ),
+  s as (
+    select w.*,
+           exists (select 1 from public.study_answers b where b.user_id = auth.uid() and b.question_id = w.question_id
+                     and b.answered_at <= p_now and study_private.day_of(b.answered_at) >= w.d + 1) as s1,
+           exists (select 1 from public.study_answers b where b.user_id = auth.uid() and b.question_id = w.question_id
+                     and b.answered_at <= p_now and study_private.day_of(b.answered_at) >= w.d + 3) as s2,
+           study_private.day_of(p_now) as today
+      from w
+  )
+  select s.question_id, s.lecture_id, s.answered_at,
+         case when not s.s1 then 1 else 2 end,
+         s.choice, s.bet,
+         exists (select 1 from public.study_quiz_answers a1
+                   join public.study_quiz_answers a2 on a2.round_id = a1.round_id and a2.user_id = a1.user_id and a2.vote = 2 and a2.correct
+                  where a1.user_id = auth.uid() and a1.vote = 1 and a1.answered_at = s.answered_at)
+    from s
+   where public.study_is_member(p_group)
+     and ((not s.s1 and s.today >= s.d + 1) or (s.s1 and not s.s2 and s.today >= s.d + 3))
+   order by s.answered_at;
+$$;
+
+-- Today's "על בטוח" row: the first due row of the danger list (section P's
+-- study_my_danger_list: back the next day in another wording and 3 days
+-- later, until right "על בטוח" twice). One rule for the one approved row
+-- (review F-9). Without section P there is no list, and no row.
+create or replace function public.study_my_danger(p_group uuid, p_now timestamptz default now())
+returns table (question_id uuid, ask_id uuid, lecture_id uuid, wrong_at timestamptz, other_wording boolean)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  if to_regprocedure('public.study_my_danger_list(uuid, timestamptz)') is null then return; end if;
+  return query execute
+    'select d.question_id, coalesce(d.ask_id, d.question_id), d.lecture_id, d.wrong_at, coalesce(d.ask_id, d.question_id) is distinct from d.question_id
+       from public.study_my_danger_list($1, $2) d
+      where d.due_day <= study_private.day_of($2)
+      order by d.due_day, d.wrong_at
+      limit 1'
+    using p_group, p_now;
+end;
+$$;
+
+-- T5: the private flame. A study day counts when the member answered a
+-- question, reviewed a card (the group's or her own), tapped "לא ברור",
+-- was at a meeting, guessed before one or caught up on one, or finished
+-- reading a part (section P's reading log, when it is loaded).
+create or replace function public.study_my_flame(p_group uuid, p_now timestamptz default now())
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  today date := study_private.day_of(p_now);
+  days  date[];
+  more  date[] := '{}';
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  select coalesce(array_agg(distinct x.d), '{}') into days from (
+    select study_private.day_of(a.answered_at) as d from public.study_answers a join public.study_questions q on q.id = a.question_id
+     where a.user_id = auth.uid() and q.group_id = p_group and a.answered_at > p_now - interval '8 days' and a.answered_at <= p_now
+    union select study_private.day_of(v.reviewed_at) from public.study_card_reviews v join public.study_cards c on c.id = v.card_id
+     where v.user_id = auth.uid() and c.group_id = p_group and v.reviewed_at > p_now - interval '8 days' and v.reviewed_at <= p_now
+    union select study_private.day_of(m.last_review) from public.study_my_cards m
+     where m.user_id = auth.uid() and m.group_id = p_group and m.last_review > p_now - interval '8 days' and m.last_review <= p_now
+    union select study_private.day_of(t.created_at) from public.study_meeting_taps t join public.study_meetings m on m.id = t.meeting_id
+     where t.user_id = auth.uid() and m.group_id = p_group and t.created_at > p_now - interval '8 days' and t.created_at <= p_now
+    union select study_private.day_of(x.first_at) from public.study_meeting_presence x join public.study_meetings m on m.id = x.meeting_id
+     where x.user_id = auth.uid() and m.group_id = p_group and x.first_at > p_now - interval '8 days' and x.first_at <= p_now
+    union select study_private.day_of(g.answered_at) from public.study_meeting_guess_answers g join public.study_meetings m on m.id = g.meeting_id
+     where g.user_id = auth.uid() and m.group_id = p_group and g.answered_at > p_now - interval '8 days' and g.answered_at <= p_now
+    union select study_private.day_of(c.done_at) from public.study_meeting_catchups c join public.study_meetings m on m.id = c.meeting_id
+     where c.user_id = auth.uid() and m.group_id = p_group and c.done_at > p_now - interval '8 days' and c.done_at <= p_now
+  ) x;
+  if to_regclass('public.study_read_parts') is not null then              -- section P's reading log
+    execute 'select coalesce(array_agg(distinct study_private.day_of(r.done_at)), ''{}'')
+               from public.study_read_parts r join public.study_lectures l on l.id = r.lecture_id
+              where r.user_id = auth.uid() and l.group_id = $1 and r.done_at > $2 - interval ''8 days'' and r.done_at <= $2'
+      into more using p_group, p_now;
+  end if;
+  select coalesce(array_agg(distinct d order by d), '{}') into days
+    from unnest(days || more) d where d between today - 6 and today;
+  return jsonb_build_object('days', cardinality(days), 'lit', cardinality(days) >= 4, 'list', to_jsonb(days));
+end;
+$$;
+
+-- Everything Today's queue needs from the database, in one call. The quiz
+-- returns and the danger row carry the question's stem, kind and slides (as
+-- practice shows them to every member, never the key), the lecture's title
+-- for the row's example; "בקבוצה" is the newest open question of another
+-- member, except the one "הקבוצה צריכה אותך" (T-2) already brings her: one
+-- question shows once (review UI-3, T 3). Error: 'group not found'.
+create or replace function public.study_today(p_group uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  loot    jsonb := '[]'::jsonb;
+  danger  jsonb := '[]'::jsonb;
+  unclear jsonb := '[]'::jsonb;
+  updates jsonb := '[]'::jsonb;
+  missed  jsonb := '[]'::jsonb;
+  needs   jsonb := '[]'::jsonb;
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  if to_regprocedure('public.study_my_loot(uuid)') is not null then          -- section H (review F-9)
+    execute 'select coalesce(jsonb_agg(to_jsonb(x)), ''[]''::jsonb) from public.study_my_loot($1) x' into loot using p_group;
+  end if;
+  select coalesce(jsonb_agg(to_jsonb(d) || jsonb_build_object('question', q.question, 'kind', q.kind, 'slides', to_jsonb(q.slides), 'lecture_title', l.title)
+                            order by d.wrong_at), '[]'::jsonb)
+    into danger
+    from public.study_my_danger(p_group) d
+    join public.study_questions q on q.id = d.ask_id
+    left join public.study_lectures l on l.id = coalesce(q.lecture_id, q.ref_lecture);
+  if to_regprocedure('public.study_my_unclear(uuid)') is not null then        -- section M
+    execute 'select coalesce(jsonb_agg(to_jsonb(x) order by x.tapped_at), ''[]''::jsonb) from public.study_my_unclear($1) x' into unclear using p_group;
+  end if;
+  if to_regprocedure('public.study_my_missed(uuid)') is not null then
+    execute 'select coalesce(jsonb_agg(to_jsonb(x) order by x.day desc), ''[]''::jsonb) from public.study_my_missed($1) x' into missed using p_group;
+  end if;
+  if to_regprocedure('public.study_my_updates(uuid)') is not null then        -- section V
+    execute 'select coalesce(jsonb_agg(to_jsonb(x) order by x.created_at), ''[]''::jsonb) from public.study_my_updates($1) x' into updates using p_group;
+  end if;
+  if to_regprocedure('public.study_needs_me(uuid)') is not null then          -- T-2, phase 3
+    execute 'select public.study_needs_me($1)' into needs using p_group;
+  end if;
+  return jsonb_build_object(
+    'quiz_returns', (select coalesce(jsonb_agg(to_jsonb(x) || jsonb_build_object('question', q.question, 'kind', q.kind, 'slides', to_jsonb(q.slides), 'lecture_title', l.title)
+                                               order by x.step, x.wrong_at), '[]'::jsonb)
+                       from public.study_my_quiz_returns(p_group) x
+                       join public.study_questions q on q.id = x.question_id
+                       left join public.study_lectures l on l.id = x.lecture_id),
+    'danger',       danger,
+    'unclear',      unclear,
+    'updates',      updates,
+    'loot',         loot,
+    'missed',       missed,
+    'needs_me',     coalesce(needs, '[]'::jsonb),
+    'open_question', (select jsonb_build_object('id', c.id, 'lecture_id', c.lecture_id, 'lecture_title', l.title, 'part', c.part_idx,
+                                                'anchor', c.anchor, 'quote', c.quote, 'body', c.body, 'author_id', c.author_id,
+                                                'created_at', c.created_at)
+                        from public.study_comments c
+                        join public.study_lectures l on l.id = c.lecture_id and l.group_id = p_group and l.deleted_at is null
+                       where c.kind = 'question' and c.parent_id is null and not c.resolved and c.author_id is distinct from auth.uid()
+                         -- review UI-3 (T 3): the question "הקבוצה צריכה אותך" brings her is shown there, not twice
+                         and c.id is distinct from (select (x ->> 'comment_id')::uuid from jsonb_array_elements(coalesce(needs, '[]'::jsonb)) x
+                                                     where x ->> 'kind' = 'question' limit 1)
+                       order by c.created_at desc
+                       limit 1),
+    'flame',        public.study_my_flame(p_group),
+    'day',          study_private.day_of(now()));
+end;
+$$;
+
+revoke all on function public.study_my_quiz_returns(uuid, timestamptz), public.study_my_danger(uuid, timestamptz),
+  public.study_my_flame(uuid, timestamptz), public.study_today(uuid)
+  from public, anon;
+grant execute on function public.study_my_quiz_returns(uuid, timestamptz), public.study_my_danger(uuid, timestamptz),
+  public.study_my_flame(uuid, timestamptz), public.study_today(uuid)
+  to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('T', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION T, its end · T-2: "הקבוצה צריכה אותך"   (package T, T-2; spec
+--  §12.4.T's D11; Yoad's decision 3 of 17 Nov 2026: usable early, with a
+--  meter). Appended inside section T's markers. T becomes 2.
+--
+--  D11 opt-in, off by default (שלי → הגדרות). An open question of another
+--      member (2 hours to 14 days old) goes to one opted-in member who has
+--      mastered its topic: at least needs_me_min_answers() of the topic's
+--      questions answered, needs_me_master_pct()% of them right (her latest
+--      answer to each). Only she sees it, and only she sees why. Plus one
+--      correction awaiting a second approval (section K's end), to any
+--      opted-in member but its author.
+--  Decision 3: an opted-in member whom nothing is waiting for sees a meter
+--      of her own instead of an empty block: how many topics she has
+--      mastered, and how many more right answers her nearest topic needs
+--      (study_needs_me_meter). It is her own data alone; nobody learns who
+--      opted in, who was chosen, or why.
+--  The thresholds are the functions below, mirrored by
+--  shared/study/today.ts's NEEDS_ME (today.test.ts reads this block).
+--  Nothing here is published; study_member_prefs is readable by its owner
+--  only.
+-- ════════════════════════════════════════════════════════════════════════
+create or replace function study_private.needs_me_min_answers() returns int language sql immutable as $$ select 3 $$;  -- a topic's answers before it can be mastered
+create or replace function study_private.needs_me_master_pct() returns int language sql immutable as $$ select 80 $$;  -- % right that masters it (4 of 5)
+create or replace function study_private.needs_me_window_days() returns int language sql immutable as $$ select 14 $$; -- an open question this old at most
+create or replace function study_private.needs_me_wait_hours() returns int language sql immutable as $$ select 2 $$;   -- the group gets 2 hours first
+revoke all on function study_private.needs_me_min_answers(), study_private.needs_me_master_pct(),
+  study_private.needs_me_window_days(), study_private.needs_me_wait_hours() from public;
+
+create table if not exists public.study_member_prefs (
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  group_id   uuid        not null references public.study_groups (id) on delete cascade,
+  needs_me   boolean     not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, group_id)
+);
+alter table public.study_member_prefs enable row level security;
+drop policy if exists "study member prefs own" on public.study_member_prefs;
+create policy "study member prefs own" on public.study_member_prefs for select using (user_id = auth.uid());
+revoke all on public.study_member_prefs from anon, authenticated;
+grant select on public.study_member_prefs to authenticated;
+
+-- "הקבוצה צריכה אותך" on or off (שלי → הגדרות).
+create or replace function public.study_set_needs_me(p_group uuid, p_on boolean)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  insert into public.study_member_prefs (user_id, group_id, needs_me) values (auth.uid(), p_group, coalesce(p_on, false))
+  on conflict (user_id, group_id) do update set needs_me = excluded.needs_me, updated_at = now();
+end;
+$$;
+
+-- D11: at most two rows, only for a member who opted in. The question's row
+-- carries its topic and the member's own count on it ("why", hers alone).
+create or replace function public.study_needs_me(p_group uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  q   jsonb;
+  a   jsonb;
+  mn  int := study_private.needs_me_min_answers();
+  pct int := study_private.needs_me_master_pct();
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  if not coalesce((select p.needs_me from public.study_member_prefs p where p.user_id = auth.uid() and p.group_id = p_group), false) then
+    return '[]'::jsonb;
+  end if;
+  with cand as (
+    select c.id, c.lecture_id, c.part_idx, c.anchor, c.quote, c.body, c.author_id, c.created_at, l.title
+      from public.study_comments c
+      join public.study_lectures l on l.id = c.lecture_id and l.group_id = p_group and l.deleted_at is null
+     where c.kind = 'question' and c.parent_id is null and not c.resolved
+       and c.created_at between now() - make_interval(days => study_private.needs_me_window_days())
+                            and now() - make_interval(hours => study_private.needs_me_wait_hours())
+  ),
+  topics as (
+    select cd.id as cid, q.topic
+      from cand cd
+      join public.study_questions q on q.lecture_id = cd.lecture_id and q.part_idx = cd.part_idx and q.topic <> ''
+                                   and (q.anchor = cd.anchor
+                                        or not exists (select 1 from public.study_questions q3
+                                                        where q3.lecture_id = cd.lecture_id and q3.part_idx = cd.part_idx and q3.anchor = cd.anchor))
+     group by cd.id, q.topic
+  ),
+  latest as (
+    select distinct on (x.user_id, x.question_id) x.user_id, x.question_id, x.correct
+      from public.study_answers x join public.study_questions q on q.id = x.question_id and q.group_id = p_group
+     order by x.user_id, x.question_id, x.answered_at desc
+  ),
+  mastery as (
+    select t.cid, t.topic, l.user_id, count(*)::int as n, (count(*) filter (where l.correct))::int as ok
+      from topics t
+      join cand cd on cd.id = t.cid
+      join public.study_questions q on q.lecture_id = cd.lecture_id and q.topic = t.topic and q.retired_at is null and q.hidden_at is null
+      join latest l on l.question_id = q.id
+     group by t.cid, t.topic, l.user_id
+  ),
+  eligible as (
+    select m.cid, m.topic, m.user_id, m.n, m.ok
+      from mastery m
+      join public.study_member_prefs p on p.user_id = m.user_id and p.group_id = p_group and p.needs_me
+      join cand cd on cd.id = m.cid
+     where m.n >= mn and m.ok * 100 >= m.n * pct and m.user_id is distinct from cd.author_id
+  ),
+  chosen as (
+    select distinct on (e.cid) e.cid, e.topic, e.user_id, e.n, e.ok from eligible e order by e.cid, e.ok desc, md5(e.cid::text || e.user_id::text)
+  )
+  select jsonb_build_object('kind', 'question', 'comment_id', cd.id, 'lecture_id', cd.lecture_id, 'lecture_title', cd.title,
+                            'part', cd.part_idx, 'anchor', cd.anchor, 'quote', cd.quote, 'body', cd.body,
+                            'topic', ch.topic, 'right', ch.ok, 'of', ch.n)
+    into q
+    from chosen ch join cand cd on cd.id = ch.cid
+   where ch.user_id = auth.uid()
+   order by cd.created_at
+   limit 1;
+  select jsonb_build_object('kind', 'approval', 'proposal_id', p.id, 'lecture_id', p.lecture_id, 'lecture_title', l.title,
+                            'part', p.part_idx, 'anchor', p.anchor, 'note', p.note,
+                            'by', (select m.name from public.study_members m where m.group_id = p_group and m.user_id = p.proposed_by))
+    into a
+    from public.study_edit_proposals p
+    join public.study_lectures l on l.id = p.lecture_id and l.group_id = p_group and l.deleted_at is null
+   where p.state = 'pending' and p.proposed_by is distinct from auth.uid()
+   order by p.created_at
+   limit 1;
+  return (case when q is null then '[]'::jsonb else jsonb_build_array(q) end) || (case when a is null then '[]'::jsonb else jsonb_build_array(a) end);
+end;
+$$;
+
+-- Decision 3: the caller's own meter for "הקבוצה צריכה אותך". on: opted
+-- in; topics: the topics (a lecture's topic) she has mastered by the rule
+-- above; next: her nearest topic not mastered yet and how many more right
+-- answers would master it (at least one more answer each, so "כ-"); open:
+-- the group's open questions in the window that are not hers (what "יחד"
+-- already lists). Her own rows only; nothing about anyone else.
+create or replace function public.study_needs_me_meter(p_group uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  mn  int := study_private.needs_me_min_answers();
+  pct int := study_private.needs_me_master_pct();
+  v_on boolean;
+  v_topics int;
+  v_next jsonb;
+  v_open int;
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  v_on := coalesce((select p.needs_me from public.study_member_prefs p where p.user_id = auth.uid() and p.group_id = p_group), false);
+  with latest as (
+    select distinct on (x.question_id) x.question_id, x.correct
+      from public.study_answers x
+     where x.user_id = auth.uid()
+     order by x.question_id, x.answered_at desc
+  ), t as (
+    select q.lecture_id, q.topic, count(*)::int as n, (count(*) filter (where l.correct))::int as ok
+      from latest l
+      join public.study_questions q on q.id = l.question_id and q.group_id = p_group and q.topic <> '' and q.lecture_id is not null
+                                   and q.retired_at is null and q.hidden_at is null
+     group by q.lecture_id, q.topic
+  ), s as (
+    select t.*, (t.n >= mn and t.ok * 100 >= t.n * pct) as mastered,
+           greatest(mn - t.n, ceil((pct * t.n - 100 * t.ok)::numeric / (100 - pct))::int, 1) as short
+      from t
+  )
+  select (select count(*)::int from s where s.mastered),
+         (select jsonb_build_object('topic', s.topic, 'lecture_id', s.lecture_id, 'short', s.short)
+            from s where not s.mastered order by s.short, s.n desc, s.topic limit 1)
+    into v_topics, v_next;
+  select count(*)::int into v_open
+    from public.study_comments c
+    join public.study_lectures l on l.id = c.lecture_id and l.group_id = p_group and l.deleted_at is null
+   where c.kind = 'question' and c.parent_id is null and not c.resolved and c.author_id is distinct from auth.uid()
+     and c.created_at > now() - make_interval(days => study_private.needs_me_window_days());
+  return jsonb_build_object('on', v_on, 'topics', v_topics, 'next', v_next, 'open', v_open);
+end;
+$$;
+
+revoke all on function public.study_set_needs_me(uuid, boolean), public.study_needs_me(uuid), public.study_needs_me_meter(uuid)
+  from public, anon;
+grant execute on function public.study_set_needs_me(uuid, boolean), public.study_needs_me(uuid), public.study_needs_me_meter(uuid)
+  to authenticated;
+
+-- T 3 (review UI-3): study_today, above, leaves the question needs_me brings
+-- out of "בקבוצה". Same arguments, same keys; only that one row differs.
+insert into study_private.schema_sections (section, version) values ('T', 3)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION T ════

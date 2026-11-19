@@ -1,0 +1,292 @@
+[
+ {
+  "n": 1,
+  "title": "משתנים: מבוא",
+  "lines": [
+   "משתנים: מבוא",
+   "מטרת הטיפול: הפרשת Na+ ומים",
+   "Hypertension, heart failure, בצקות"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 2,
+  "title": "ספיגת Na+ לאורך הנפרון",
+  "lines": [
+   "ספיגת Na+ לאורך הנפרון",
+   "Proximal tubule ~65%",
+   "Thick ascending limb ~25%",
+   "Distal convoluted tubule ~5%",
+   "Collecting duct ~3%"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 3,
+  "title": "מקטעי הנפרון",
+  "lines": [
+   "מקטעי הנפרון",
+   "Collecting duct: 1-8%",
+   "ENaC בבקרת aldosterone",
+   "Furosemide IV (לאט) בבצקת ריאות"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 1
+ },
+ {
+  "n": 4,
+  "title": "Acetazolamide",
+  "lines": [
+   "Acetazolamide",
+   "מעכב carbonic anhydrase",
+   "שתן בסיסי",
+   "Glaucoma, acute mountain sickness"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 5,
+  "title": "Acetazolamide: תופעות לוואי",
+  "lines": [
+   "Acetazolamide: תופעות לוואי",
+   "Hyperchloremic metabolic acidosis",
+   "אבנים בכליות",
+   "Hypokalemia"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 6,
+  "title": "Loop diuretics",
+  "lines": [
+   "Loop diuretics",
+   "Furosemide, Bumetanide",
+   "מעכבות NKCC2",
+   "Bioavailability 10-90%"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 7,
+  "title": "Loop: שימושים",
+  "lines": [
+   "Loop: שימושים",
+   "בצקת ריאות חריפה",
+   "Hypercalcemia",
+   "Hyperkalemia"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 8,
+  "title": "Loop: תופעות לוואי",
+  "lines": [
+   "Loop: תופעות לוואי",
+   "Hypokalemia",
+   "Ototoxicity",
+   "Hypovolemia"
+  ],
+  "tables": [
+   [
+    "Drug",
+    "t1/2"
+   ],
+   [
+    "Furosemide",
+    "1.5 h"
+   ],
+   [
+    "Bumetanide",
+    "1 h"
+   ]
+  ],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 9,
+  "title": "Thiazides",
+  "lines": [
+   "Thiazides",
+   "Hydrochlorothiazide, Chlorthalidone",
+   "מעכבות NCC"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 10,
+  "title": "Thiazides: שימושים",
+  "lines": [
+   "Thiazides: שימושים",
+   "Hypertension: קו ראשון",
+   "Nephrolithiasis של calcium"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 1
+ },
+ {
+  "n": 11,
+  "title": "Thiazides: תופעות לוואי",
+  "lines": [
+   "Thiazides: תופעות לוואי",
+   "Hyperglycemia, hyperlipidemia, hyperuricemia",
+   "GFR < 30 mL/min"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 12,
+  "title": "Spironolactone",
+  "lines": [
+   "Spironolactone",
+   "Mineralocorticoid receptor antagonist",
+   "Heart failure, hyperaldosteronism"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 13,
+  "title": "Spironolactone: תופעות לוואי",
+  "lines": [
+   "Spironolactone: תופעות לוואי",
+   "Hyperkalemia",
+   "Gynecomastia"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 14,
+  "title": "Amiloride, Triamterene",
+  "lines": [
+   "Amiloride, Triamterene",
+   "חוסמות ENaC",
+   "עם ACE inhibitors: hyperkalemia"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 15,
+  "title": "Mannitol",
+  "lines": [
+   "Mannitol",
+   "Osmotic diuretic",
+   "IV בלבד"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 16,
+  "title": "Mannitol: שימושים",
+  "lines": [
+   "Mannitol: שימושים",
+   "לחץ תוך-גולגולתי",
+   "התוויית נגד: heart failure"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 17,
+  "title": "אינטראקציות",
+  "lines": [
+   "אינטראקציות",
+   "NSAIDs מבטלים את ההשפעה",
+   "Digoxin + hypokalemia"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 18,
+  "title": "אינטראקציות 2",
+  "lines": [
+   "אינטראקציות 2",
+   "Lithium",
+   "Aminoglycosides",
+   "NSAIDs מחלישים"
+  ],
+  "tables": [],
+  "notes": "",
+  "pictures": 1
+ },
+ {
+  "n": 19,
+  "title": "השוואה: אתר וכוח",
+  "lines": [
+   "השוואה: אתר וכוח"
+  ],
+  "tables": [
+   [
+    "Class",
+    "Site",
+    "Na+"
+   ],
+   [
+    "Loop",
+    "TAL",
+    "25%"
+   ],
+   [
+    "Thiazides",
+    "DCT",
+    "5%"
+   ]
+  ],
+  "notes": "",
+  "pictures": 0
+ },
+ {
+  "n": 20,
+  "title": "השוואה: אלקטרוליטים",
+  "lines": [
+   "השוואה: אלקטרוליטים"
+  ],
+  "tables": [
+   [
+    "Class",
+    "K+",
+    "Ca2+"
+   ],
+   [
+    "Loop",
+    "down",
+    "up"
+   ],
+   [
+    "Thiazides",
+    "down",
+    "down"
+   ]
+  ],
+  "notes": "",
+  "pictures": 0
+ }
+]

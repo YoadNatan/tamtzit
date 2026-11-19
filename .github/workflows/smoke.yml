@@ -1,0 +1,91 @@
+name: Deploy smoke test
+
+# Checks the live site after a push to main. The agent that writes this repo
+# cannot reach vercel.app from its sandbox, so the check lives here and the
+# answer shows up in the Actions log. The site is the repository variable
+# SITE_URL when set (Settings → Secrets and variables → Actions → Variables),
+# else https://tamtzit.vercel.app.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Site to check (blank: SITE_URL or https://tamtzit.vercel.app)"
+        required: false
+        default: ""
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe the app
+        # תמצית, the study group's lecture summaries: the page at the root,
+        # and its server functions. /api/study/health answering JSON (not the
+        # page's HTML) proves the functions are deployed and that the SPA
+        # catch-all in vercel.json does not swallow /api routes. Health's
+        # schemaOk false fails the run: the code was merged before its SQL
+        # ran (spec §2.11, review FE-2). GET /api/study/work proves the server
+        # writer is deployed with Fluid compute and 300 s (secondsLeft near
+        # 295); anything else is a warning, because writing still works from
+        # the phones without it.
+        env:
+          BASE: ${{ github.event.inputs.base_url || vars.SITE_URL || 'https://tamtzit.vercel.app' }}
+        run: |
+          set -u
+          want="${{ github.sha }}"
+          wanttitle="תמצית"
+          title=""
+          live=""
+          deadline=$(( SECONDS + 240 ))
+          while :; do
+            page=$(curl -sS -L --max-time 25 "$BASE/" 2>/dev/null)
+            title=$(printf '%s' "$page" | grep -o '<title>[^<]*</title>' | head -1 | sed 's/<[^>]*>//g')
+            live=$(printf '%s' "$page" | grep -o '<meta name="build" content="[^"]*"' | head -1 | sed 's/.*content="//; s/"$//')
+            [ -n "$want" ] && [ "$live" = "$want" ] && break
+            [ "$SECONDS" -ge "$deadline" ] && break
+            sleep 15
+          done
+          old=$(curl -sS -L --max-time 25 "$BASE/study/?v=library" 2>/dev/null | grep -o '<title>[^<]*</title>' | head -1 | sed 's/<[^>]*>//g')
+          health=$(curl -sS -L --max-time 25 -w '\n%{content_type}' "$BASE/api/study/health" 2>/dev/null || printf '\nnone')
+          hbody=$(printf '%s' "$health" | sed '$d')
+          hctype=$(printf '%s' "$health" | tail -n1)
+          echo "/                    title: $title"
+          echo "/study/?v=library    title: $old (an old-style link, redirected to /)"
+          echo "/                    built from: $live"
+          echo "/api/study/health    $hctype  $hbody"
+          work=$(curl -sS -L --max-time 25 -w '\n%{content_type}' "$BASE/api/study/work" 2>/dev/null || printf '\nnone')
+          wbody=$(printf '%s' "$work" | sed '$d')
+          wctype=$(printf '%s' "$work" | tail -n1)
+          echo "/api/study/work      $wctype  $wbody"
+          worker=$(printf '%s' "$hbody" | grep -o '"worker":[a-z]*' | head -1 | cut -d: -f2)
+          echo "worker (STUDY_WORKER_KEY set on Vercel): ${worker:-unknown}"
+
+          ok=1
+          printf '%s' "$title" | grep -q "$wanttitle" || { echo "❌ / is not serving the study app."; ok=0; }
+          printf '%s' "$old" | grep -q "$wanttitle" || { echo "❌ an old /study/ link does not reach the app."; ok=0; }
+          case "$hctype" in
+            *json*) ;;
+            *) echo "❌ /api/study/health is not answered by the function ($hctype): functions are missing from the deploy, or the catch-all rewrite takes /api."; ok=0 ;;
+          esac
+          printf '%s' "$hbody" | grep -q '"anthropicKey":true' || echo "::warning::ANTHROPIC_API_KEY is not set on Vercel: summaries cannot be written until it is."
+          if printf '%s' "$hbody" | grep -q '"schemaOk":false'; then
+            echo "❌ /api/study/health says schemaOk:false: this code needs SQL the database does not have. Run supabase/study-schema.sql from this commit in the SQL Editor (README, Updating)."
+            ok=0
+          fi
+          [ "${worker:-}" = "true" ] || echo "::warning::STUDY_WORKER_KEY is not set on Vercel: every call to Claude is refused until it is."
+          left=$(printf '%s' "$wbody" | grep -o '"secondsLeft":[0-9]*' | head -1 | cut -d: -f2)
+          case "$wctype" in
+            *json*)
+              if [ -z "$left" ] || [ "$left" -lt 250 ]; then
+                echo "::warning::/api/study/work answers, but secondsLeft is '${left:-none}', not 250 or more: Fluid compute or maxDuration 300 is not in effect, so the server writer may be cut off before a part is saved."
+              fi ;;
+            *) echo "::warning::/api/study/work is not answered by the function ($wctype): the server writer is not deployed, and the phones write the summaries." ;;
+          esac
+          [ "$ok" = 1 ] || exit 1
+          if [ "$live" = "$want" ]; then
+            echo "✅ / serves this commit's build, and its functions answer"
+          else
+            echo "::warning::/ serves the app, but not this commit's build after 4 minutes."
+          fi

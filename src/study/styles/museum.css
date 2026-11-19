@@ -1,0 +1,59 @@
+/* ── מוזיאון המלכודות (package U, U-3; museum.html screen 1) ──
+   The kit's pieces placed (styles/kit.css), tokens only. An exhibit's state
+   is a word on a chip (חדש · עוד נופלים · עדיין תלוי · בפנסיה), never colour
+   alone; the meter's bar always has its words above it. No horizontal
+   scroll at 360 px: claims and truths wrap, Latin isolated. */
+
+.museum-feature {
+  border-color: var(--fun-line);
+  display: grid;
+  gap: var(--sp-3);
+}
+.museum-feature .a-h2,
+.museum-feature .a-para,
+.museum-stem {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.museum-li {
+  display: grid;
+  gap: var(--sp-1);
+  width: 100%;
+  min-width: 0;
+}
+.museum-li .a-row b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.museum-li .a-chip,
+.museum-feature .a-chip {
+  flex: none;
+}
+.museum-meter,
+.museum-state {
+  display: grid;
+  gap: var(--sp-3);
+}
+.museum-meter p,
+.museum-state p {
+  margin: 0;
+}
+.museum-nonames {
+  color: var(--ink);
+}
+.museum-card-claim {
+  overflow-wrap: anywhere;
+}
+/* The meeting's opening exhibit (MU4) and the vaccine's "למה זה כאן?". */
+.museum-opening {
+  border-color: var(--fun-line);
+  display: grid;
+  gap: var(--sp-2);
+}
+.museum-opening p {
+  margin: 0;
+}
+.trap-badge-row {
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}

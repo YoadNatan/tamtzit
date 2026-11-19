@@ -1,0 +1,1000 @@
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Z, its end · THE APPROVED GROUP QUIZ: PRESETS, THE BET, MAZUR'S
+--  REVOTE, THE ROUND'S TRAP, THE GROUP'S RECORD   (package Z, milestone Z-2;
+--  meeting addendum §3.2)
+--  Appended at the END of section Z, inside its markers. Section Z's tables
+--  gain columns; its functions are defined again here with the approved
+--  rules (create or replace; the three whose arguments or result change are
+--  dropped first, which matters only while section Z's own text precedes
+--  this block: when package Z folds the block into its functions, the drops
+--  go). Z becomes version 2.
+--
+--  Q1  a quiz on what was read: a part range of one lecture, and presets:
+--      'end' (סוף הקריאה, 5 questions by default), 'coffee' (3 לקפה: three
+--      questions chosen by the meeting's hook, section M), 'stop' (one
+--      question at a chapter's end, decision 7), 'free' (as before).
+--  Q2  co-op ("כולנו נגד המבחן", the default) has no personal table: the
+--      group's share of right final answers is its score, 80% is "עברנו",
+--      and the best score is the group's record (study_quiz_record).
+--  Q3  a bet on every first vote (1 ניחוש · 2 נראה לי · 3 על בטוח): right
+--      +1/+2/+3, wrong 0/−2/−6. Private in co-op; in a race ("מירוץ") it is
+--      the score (decision 2), and speed only breaks ties (ms_total).
+--  Q5  Mazur's rule in co-op, from at least 3 first votes: ≥ 70% right →
+--      explain; 30-70% → stage 'argue' (vote 1's counts, no key, 90 s),
+--      then vote 2; < 30% → explain and every phone jumps to the
+--      question's paragraph (next_step 'source').
+--  Q7  the round's trap: the wrong option most chosen in vote 1 (unique,
+--      on ≥ 2 of ≥ 3 answers), named at the reveal and made into a group
+--      trap card once per question and option (section C's end).
+--  Q9  every first vote, wrong ones fixed in the discussion too, lands in
+--      its owner's study_answers with its bet (mode 'quiz'); vote 2 never
+--      does. Section T derives the returns after 1 and 3 days.
+--  Coffee never argues and its reveal carries no counts: only a majority
+--  word ('most_right' · 'split' · 'most_wrong'), and none below 3 answers.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- ── Columns ──
+alter table public.study_quizzes
+  add column if not exists preset      text not null default 'free' check (preset in ('free', 'end', 'coffee', 'stop')),
+  add column if not exists meeting_id  uuid,                          -- study_meetings.id (section M is later: no foreign key)
+  add column if not exists part_from   int check (part_from between 0 and 199),
+  add column if not exists part_to     int check (part_to between 0 and 199),
+  add column if not exists vote        smallint not null default 1 check (vote in (1, 2)),
+  add column if not exists stage       text not null default 'final' check (stage in ('final', 'argue')),
+  add column if not exists argue_until timestamptz;
+alter table public.study_quizzes drop constraint if exists study_quizzes_n_wanted_check;
+alter table public.study_quizzes add constraint study_quizzes_n_wanted_check check (n_wanted between 1 and 30);
+-- One opening and one closing quiz per meeting (decision 7); a cancelled lobby frees its place.
+create unique index if not exists study_quizzes_meeting_preset on public.study_quizzes (meeting_id, preset)
+  where meeting_id is not null and preset in ('coffee', 'end') and state <> 'cancelled';
+
+alter table public.study_quiz_rounds
+  add column if not exists vote      smallint not null default 1 check (vote in (1, 2)),   -- the last vote opened
+  add column if not exists next_step text check (next_step in ('explain', 'argue', 'source')),
+  add column if not exists answered1 int check (answered1 >= 0),
+  add column if not exists right1    int check (right1 >= 0),
+  add column if not exists counts1   int[],
+  add column if not exists trap      smallint check (trap >= 0),
+  add column if not exists trap_card uuid;                           -- study_cards.id (section C's end)
+
+alter table public.study_quiz_answers
+  add column if not exists vote smallint not null default 1 check (vote in (1, 2)),
+  add column if not exists bet  smallint check (bet between 1 and 3);
+alter table public.study_quiz_answers drop constraint if exists study_quiz_answers_points_check;
+alter table public.study_quiz_answers add constraint study_quiz_answers_points_check check (points between -6 and 3);
+do $$
+begin
+  if (select array_length(k.conkey, 1) from pg_constraint k
+       where k.conrelid = 'public.study_quiz_answers'::regclass and k.contype = 'p') = 2 then
+    alter table public.study_quiz_answers drop constraint study_quiz_answers_pkey;
+    alter table public.study_quiz_answers add constraint study_quiz_answers_pkey primary key (round_id, user_id, vote);
+  end if;
+end $$;
+
+alter table public.study_quiz_players add column if not exists ms_total bigint not null default 0;
+alter table public.study_quiz_players drop constraint if exists study_quiz_players_score_check;   -- a bet can take a score below 0
+
+-- ── Hooks that later sections fill (the pattern of section F's
+--    study_corrections_of: same names, arguments and results, so a later
+--    section's create-or-replace swaps the body on every run). Here they do
+--    nothing: the group's anonymous signal per question, 3 confident errors ·
+--    2 missed · 1 split · 0 (section U, Q10), and a boss battle's rounds, hit
+--    points and state (section H). ──
+-- A boss battle (section H) is a quiz in mode 'boss': co-op, no points.
+alter table public.study_quizzes drop constraint if exists study_quizzes_mode_check;
+alter table public.study_quizzes add constraint study_quizzes_mode_check check (mode in ('coop', 'race', 'boss'));
+create or replace function public.study_quiz__signal(p_question uuid)
+returns int language sql stable set search_path = public as $$ select 0 $$;
+create or replace function public.study_quiz__pick_boss(p_quiz uuid)
+returns int language sql volatile set search_path = public as $$ select 0 $$;
+create or replace function public.study_quiz__after_reveal(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile set search_path = public as $$ begin null; end $$;
+create or replace function public.study_quiz__boss_state(p_quiz uuid)
+returns jsonb language sql stable set search_path = public as $$ select null::jsonb $$;
+-- A question was revealed in a live quiz (section E unmasks a member's trap
+-- here, review SEC-7: never from a column a member can set).
+create or replace function public.study_quiz__revealed(p_quiz uuid, p_question uuid)
+returns void language plpgsql volatile set search_path = public as $$ begin null; end $$;
+
+-- ── Internal helpers (no grants) ──
+-- A first vote's points: right +bet; wrong 0, −2, −6; "לא יודעים" or none 0.
+-- A vote sent without a bet counts as ניחוש (1).
+create or replace function public.study_quiz__points(p_choice smallint, p_key smallint, p_bet smallint)
+returns int language sql immutable set search_path = public as $$
+  select case when p_choice is null or p_key is null then 0
+              when p_choice = p_key then coalesce(p_bet, 1)
+              else case coalesce(p_bet, 1) when 1 then 0 when 2 then -2 else -6 end end
+$$;
+
+-- The count per option of one vote of a round (options in display order).
+create or replace function public.study_quiz__counts(p_round uuid, p_vote int, p_n int)
+returns int[] language sql stable security definer set search_path = public as $$
+  select coalesce(array_agg(coalesce(c.n, 0) order by o.i), '{}')
+    from generate_series(0, greatest(coalesce(p_n, 0), 0) - 1) as o(i)
+    left join (select a.choice, count(*)::int as n from public.study_quiz_answers a
+                where a.round_id = p_round and a.vote = p_vote and a.choice is not null group by a.choice) c
+           on c.choice = o.i
+$$;
+
+-- Everyone still playing and not away has answered the open vote of round p_idx.
+create or replace function public.study_quiz__all_answered(p_quiz uuid, p_idx int)
+returns boolean language sql volatile security definer set search_path = public as $$
+  select not exists (
+    select 1 from public.study_quiz_players p
+     where p.quiz_id = p_quiz and p.left_at is null
+       and p.seen_at > clock_timestamp() - interval '30 seconds'
+       and not exists (select 1 from public.study_quiz_answers a
+                         join public.study_quiz_rounds r on r.id = a.round_id
+                        where r.quiz_id = p_quiz and r.idx = p_idx and a.user_id = p.user_id
+                          and a.vote = (select z.vote from public.study_quizzes z where z.id = p_quiz)));
+$$;
+
+-- The hook for preset 'coffee': section M replaces this stub with the
+-- opening's picker (same name, argument and result). null = no choice made.
+create or replace function public.study_quiz__pick_preset(p_quiz uuid)
+returns uuid[] language sql stable security definer set search_path = public as $$
+  select null::uuid[]
+$$;
+
+-- Chooses the questions when the quiz starts: as section Z (keyed, not
+-- retired, chosen lectures and kinds, spread over parts, flagged last,
+-- fewest seen by these players, then random), plus: only the quiz's part
+-- range when it has one, never a question a correction marked (stale) or
+-- two members' flags hid (review F-6), the group's nightly signal first
+-- (section U's hook), "fewest seen" only when 3 or more play (review SEC-5:
+-- with two players it would read the other's private answers), and the
+-- opening's own choice for preset 'coffee'.
+create or replace function public.study_quiz__pick(p_quiz uuid)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  z   public.study_quizzes;
+  n   int;
+  ids uuid[];
+  np  int;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  delete from public.study_quiz_rounds r where r.quiz_id = p_quiz;
+  select count(*) into np from public.study_quiz_players p where p.quiz_id = p_quiz and p.left_at is null;
+  if z.mode = 'boss' then
+    return public.study_quiz__pick_boss(p_quiz);   -- section H chooses a battle's rounds
+  end if;
+  if z.preset = 'coffee' then
+    ids := public.study_quiz__pick_preset(p_quiz);
+    if ids is not null then
+      insert into public.study_quiz_rounds (quiz_id, idx, question_id, seconds)
+      select p_quiz, (u.o - 1)::int, u.id,
+             public.study_quiz__seconds(z.seconds, (char_length(q.vignette) + char_length(q.question)
+               + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0))::int)
+        from unnest(ids) with ordinality as u(id, o)
+        join public.study_questions q on q.id = u.id
+       where u.o <= z.n_wanted;
+      get diagnostics n = row_count;
+      return n;
+    end if;
+  end if;
+  with pool as (
+    select q.id,
+           char_length(q.vignette) + char_length(q.question)
+             + coalesce((select sum(char_length(o)) from unnest(q.options) as o), 0) as chars,
+           array_position(z.lecture_ids, coalesce(q.lecture_id, q.ref_lecture)) as lec_pos,
+           coalesce(q.part_idx, -1) as part_idx,
+           coalesce(q.anchor, -1) as anchor,
+           exists (select 1 from public.study_question_flags f
+                    where f.question_id = q.id and f.reason in ('wrong_key', 'two_answers', 'not_in_slides')) as flagged,
+           case when np >= 3 then                                -- review SEC-5: an aggregate of 3 players at least
+             (select count(distinct a.user_id)
+                from public.study_answers a
+                join public.study_quiz_players p on p.user_id = a.user_id and p.quiz_id = p_quiz and p.left_at is null
+               where a.question_id = q.id) else 0 end as seen,
+           public.study_quiz__signal(q.id) as sig,   -- the group's anonymous signal (section U)
+           random() as rnd
+      from public.study_questions q
+     where q.group_id = z.group_id
+       and coalesce(q.lecture_id, q.ref_lecture) = any (z.lecture_ids)
+       and q.retired_at is null
+       and q.stale_at is null
+       and q.hidden_at is null                                   -- review F-6: two flags hide it everywhere
+       and q.has_key
+       and (z.kinds = 'all' or q.kind = z.kinds)
+       and (z.part_from is null or coalesce(q.part_idx, -1) between z.part_from and z.part_to)
+  ),
+  ranked as (
+    select p.*, row_number() over (partition by p.lec_pos, p.part_idx order by p.flagged, p.sig desc, p.seen, p.rnd) as rk
+      from pool p
+  ),
+  chosen as (
+    select c.* from ranked c order by c.flagged, (c.sig > 0) desc, c.rk, c.sig desc, c.seen, c.rnd limit z.n_wanted
+  )
+  insert into public.study_quiz_rounds (quiz_id, idx, question_id, seconds)
+  select p_quiz,
+         (row_number() over (order by case when z.mode = 'coop' then c.lec_pos end,
+                                      case when z.mode = 'coop' then c.part_idx end,
+                                      case when z.mode = 'coop' then c.anchor end,
+                                      c.rnd))::int - 1,
+         c.id,
+         public.study_quiz__seconds(z.seconds, c.chars::int)
+    from chosen c;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- Opens the first round at or after p_idx that still has its question, at
+-- vote 1, 3 seconds from now (or ends the quiz when none is left).
+create or replace function public.study_quiz__open(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  r  public.study_quiz_rounds;
+  t0 timestamptz := clock_timestamp() + interval '3 seconds';
+begin
+  select * into r from public.study_quiz_rounds x
+   where x.quiz_id = p_quiz and x.idx >= p_idx and x.question_id is not null
+   order by x.idx limit 1;
+  if not found then
+    perform public.study_quiz__finish(p_quiz);
+    return;
+  end if;
+  update public.study_quiz_rounds x
+     set opens_at = t0, closes_at = t0 + make_interval(secs => x.seconds), vote = 1
+   where x.id = r.id;
+  update public.study_question_keys k
+     set held_until = t0 + make_interval(secs => r.seconds) + interval '10 minutes'
+   where k.question_id = r.question_id;
+  update public.study_quizzes z
+     set state = 'question', idx = r.idx, opens_at = t0, closes_at = t0 + make_interval(secs => r.seconds),
+         vote = 1, stage = 'final', argue_until = null,
+         answered_n = 0, version = z.version + 1, updated_at = now()
+   where z.id = p_quiz;
+end;
+$$;
+
+-- A group trap card from the round's trap (section C's end makes it, once
+-- per question and option). Nothing when section C is not there. Only when 3
+-- or more players chose the trap, and the card opens at the next study day's
+-- start (review SEC-6: the museum's own rule, "so nobody can guess who").
+create or replace function public.study_quiz__trap_card(p_round uuid)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  r   public.study_quiz_rounds;
+  q   public.study_questions;
+  k   public.study_question_keys;
+  why text;
+  cid uuid;
+begin
+  select * into r from public.study_quiz_rounds x where x.id = p_round;
+  if r.trap is null or r.question_id is null then return null; end if;
+  if coalesce(r.counts1[r.trap + 1], 0) < 3 then return null; end if;                 -- review SEC-6: chosen by 3 at least
+  if to_regprocedure('study_private.trap_card(uuid,integer,integer,text,text,text,text,integer[],text,timestamp with time zone)') is null then
+    return null;
+  end if;
+  select * into q from public.study_questions x where x.id = r.question_id;
+  select * into k from public.study_question_keys x where x.question_id = r.question_id;
+  if q.lecture_id is null or k.answer is null or cardinality(k.explanations) <= r.trap then return null; end if;
+  why := left(btrim(k.explanations[r.trap + 1]), 300);
+  if why = '' then return null; end if;
+  cid := study_private.trap_card(
+    q.lecture_id, q.part_idx, q.anchor, q.quote,
+    left(coalesce(nullif(btrim(q.teaser), ''), btrim(q.question)), 300) || E'\nלמה לא ' || q.options[r.trap + 1] || '?',
+    why,
+    left('התשובה הנכונה: ' || q.options[k.answer + 1] || '. ' || coalesce(k.takeaway, ''), 500),
+    (select coalesce(array_agg(s), '{}') from (select s from unnest(q.slides) s limit 12) x),
+    'q:' || q.id::text || ':' || r.trap::text,
+    -- review SEC-6: it opens at the next study day's start (04:00, Israel)
+    ((((coalesce(r.revealed_at, now()) at time zone 'Asia/Jerusalem') - interval '4 hours')::date + 1) + time '04:00')
+      at time zone 'Asia/Jerusalem');
+  if cid is not null then
+    update public.study_quiz_rounds x set trap_card = cid where x.id = p_round;
+  end if;
+  return cid;
+end;
+$$;
+
+-- The final reveal of round p_round: the key is read here, every vote is
+-- marked, the first votes are scored by their bet and copied (with the bet)
+-- into their owners' private study_answers, the hold lets go, and the
+-- round's trap becomes a card.
+create or replace function public.study_quiz__score(p_quiz uuid, p_round uuid, p_key smallint, p_step text, p_t timestamptz)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare r public.study_quiz_rounds;
+begin
+  select * into r from public.study_quiz_rounds x where x.id = p_round;
+  update public.study_question_keys x set held_until = null where x.question_id = r.question_id;
+  update public.study_quiz_answers a
+     set correct = (a.choice is not null and a.choice = p_key),
+         points = case when a.vote = 1 then public.study_quiz__points(a.choice, p_key, a.bet) else 0 end
+   where a.round_id = r.id;
+  update public.study_quiz_players p
+     set score = p.score + a.points,
+         correct_n = p.correct_n + case when a.correct then 1 else 0 end,
+         answered_n = p.answered_n + 1,
+         ms_total = p.ms_total + a.ms
+    from public.study_quiz_answers a
+   where a.round_id = r.id and a.vote = 1 and p.quiz_id = p_quiz and p.user_id = a.user_id;
+  insert into public.study_answers (user_id, question_id, choice, correct, mode, ms, answered_at, confidence)
+  select a.user_id, r.question_id, a.choice, a.correct, 'quiz', a.ms, a.answered_at, a.bet
+    from public.study_quiz_answers a
+   where a.round_id = r.id and a.vote = 1;
+  update public.study_quiz_rounds x
+     set revealed_at = p_t, answer = p_key, closes_at = least(x.closes_at, p_t), next_step = p_step
+   where x.id = r.id;
+  perform public.study_quiz__after_reveal(p_quiz, r.idx);   -- a boss battle's hit points (section H)
+  perform public.study_quiz__revealed(p_quiz, r.question_id);   -- a member's trap is named (section E, review SEC-7)
+  if r.trap is not null then
+    perform public.study_quiz__trap_card(r.id);
+  end if;
+  update public.study_quizzes x
+     set state = 'reveal', stage = 'final', argue_until = null, closes_at = least(x.closes_at, p_t),
+         answered_n = (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = x.vote),
+         version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+end;
+$$;
+
+-- Closes the open vote of round p_idx. Vote 1 of a co-op round with at
+-- least 3 answers follows Mazur's rule; a split opens the 'argue' stage
+-- (vote 1's counts, no key, 90 s), anything else reveals at once. Vote 2
+-- always reveals. A round whose question went is voided, as in section Z.
+create or replace function public.study_quiz__reveal(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  z      public.study_quizzes;
+  r      public.study_quiz_rounds;
+  k      smallint;
+  nopt   int;
+  t      timestamptz := clock_timestamp();
+  n1     int;
+  ok1    int;
+  c1     int[];
+  top    int;
+  v_trap smallint;
+  v_step text := 'explain';
+  share  numeric;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.state <> 'question' or z.idx <> p_idx then return; end if;
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = p_idx;
+  if r.question_id is not null then
+    select x.answer into k from public.study_question_keys x where x.question_id = r.question_id;
+    select cardinality(q.options) into nopt from public.study_questions q where q.id = r.question_id;
+  end if;
+  if k is null then
+    if r.question_id is not null then
+      update public.study_question_keys x set held_until = null where x.question_id = r.question_id;
+    end if;
+    update public.study_quiz_rounds x set revealed_at = t, voided_at = t, closes_at = least(x.closes_at, t)
+     where x.id = r.id;
+    update public.study_quizzes x
+       set state = 'reveal', stage = 'final', argue_until = null, closes_at = least(x.closes_at, t),
+           answered_n = (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = x.vote),
+           version = x.version + 1, updated_at = now()
+     where x.id = p_quiz;
+    return;
+  end if;
+  if z.vote = 1 then
+    select count(*), count(*) filter (where a.choice = k) into n1, ok1
+      from public.study_quiz_answers a where a.round_id = r.id and a.vote = 1;
+    c1 := public.study_quiz__counts(r.id, 1, nopt);
+    if n1 >= 3 then
+      select max(c1[o.i + 1]) into top from generate_series(0, nopt - 1) as o(i) where o.i <> k;
+      if top >= 2 and (select count(*) from generate_series(0, nopt - 1) as o(i) where o.i <> k and c1[o.i + 1] = top) = 1 then
+        select o.i into v_trap from generate_series(0, nopt - 1) as o(i) where o.i <> k and c1[o.i + 1] = top;
+      end if;
+    end if;
+    if z.mode = 'coop' and z.preset <> 'coffee' and n1 >= 3 then
+      share := ok1::numeric / n1;
+      v_step := case when share >= 0.7 then 'explain' when share >= 0.3 then 'argue' else 'source' end;
+    end if;
+    update public.study_quiz_rounds x set answered1 = n1, right1 = ok1, counts1 = c1, trap = v_trap where x.id = r.id;
+    if v_step = 'argue' then
+      update public.study_question_keys x
+         set held_until = t + interval '93 seconds' + make_interval(secs => least(r.seconds, 30)) + interval '10 minutes'
+       where x.question_id = r.question_id;
+      update public.study_quiz_rounds x set next_step = 'argue', closes_at = least(x.closes_at, t) where x.id = r.id;
+      update public.study_quizzes x
+         set state = 'reveal', stage = 'argue', argue_until = t + interval '90 seconds', closes_at = least(x.closes_at, t),
+             answered_n = n1, version = x.version + 1, updated_at = now()
+       where x.id = p_quiz;
+      return;
+    end if;
+  end if;
+  perform public.study_quiz__score(p_quiz, r.id, k, v_step, t);
+end;
+$$;
+
+-- After the argue stage: vote 2 of the same round opens 3 seconds from now,
+-- for 30 seconds at most (the question was already read).
+create or replace function public.study_quiz__open_vote2(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  z    public.study_quizzes;
+  r    public.study_quiz_rounds;
+  t0   timestamptz := clock_timestamp() + interval '3 seconds';
+  secs int;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.state <> 'reveal' or z.stage <> 'argue' then return; end if;
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = z.idx;
+  secs := least(r.seconds, 30);
+  update public.study_quiz_rounds x set vote = 2, opens_at = t0, closes_at = t0 + make_interval(secs => secs) where x.id = r.id;
+  update public.study_question_keys k set held_until = t0 + make_interval(secs => secs) + interval '10 minutes'
+   where k.question_id = r.question_id;
+  update public.study_quizzes x
+     set state = 'question', vote = 2, stage = 'final', argue_until = null, opens_at = t0,
+         closes_at = t0 + make_interval(secs => secs), answered_n = 0, version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+end;
+$$;
+
+-- Ends the quiz: an open vote is revealed first, a round left in the argue
+-- stage is scored as it stands (its first votes count), then 'ended'
+-- ('cancelled' if it never left the lobby).
+create or replace function public.study_quiz__finish(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  z public.study_quizzes;
+  r public.study_quiz_rounds;
+  k smallint;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or z.state not in ('lobby', 'question', 'reveal') then return; end if;
+  if z.state = 'question' then
+    perform public.study_quiz__reveal(p_quiz, z.idx);
+    select * into z from public.study_quizzes x where x.id = p_quiz;
+  end if;
+  if z.state = 'reveal' and z.stage = 'argue' then
+    select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = z.idx;
+    select x.answer into k from public.study_question_keys x where x.question_id = r.question_id;
+    perform public.study_quiz__score(p_quiz, r.id, k, 'explain', clock_timestamp());
+  end if;
+  update public.study_quizzes x
+     set state = case when z.state = 'lobby' then 'cancelled' else 'ended' end, ended_at = now(),
+         opens_at = null, closes_at = null, stage = 'final', argue_until = null,
+         version = x.version + 1, updated_at = now()
+   where x.id = p_quiz;
+end;
+$$;
+
+-- A vote whose time ran out (plus the grace) and that nobody revealed, or an
+-- argue stage whose 90 s are over, moves on when any phone asks next.
+create or replace function public.study_quiz__due(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare z public.study_quizzes;
+begin
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found then return; end if;
+  if z.state = 'question' and clock_timestamp() > z.closes_at + interval '4.5 seconds' then
+    perform public.study_quiz__reveal(p_quiz, z.idx);
+  elsif z.state = 'reveal' and z.stage = 'argue' and clock_timestamp() > z.argue_until + interval '1 second' then
+    perform public.study_quiz__open_vote2(p_quiz);
+  end if;
+end;
+$$;
+
+-- The group's record: the best share of right final answers in an ended
+-- co-op quiz ('free' or 'end') of at least 5 rounds and 3 players, before p_before.
+create or replace function public.study_quiz__record(p_group uuid, p_before timestamptz)
+returns int language sql stable security definer set search_path = public as $$
+  select max(t.pct)::int from (
+    select round(100.0 * count(*) filter (where a.correct) / nullif(count(*), 0)) as pct
+      from public.study_quizzes z
+      join public.study_quiz_rounds r on r.quiz_id = z.id and r.revealed_at is not null and r.voided_at is null
+      join public.study_quiz_answers a on a.round_id = r.id and a.vote = r.vote
+     where z.group_id = p_group and z.state = 'ended' and z.mode = 'coop' and z.preset in ('free', 'end')
+       and z.ended_at < p_before
+       and (select count(*) from public.study_quiz_rounds r2 where r2.quiz_id = z.id and r2.revealed_at is not null and r2.voided_at is null) >= 5
+       and (select count(*) from public.study_quiz_players p where p.quiz_id = z.id) >= 3
+     group by z.id) t
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  What the phones call (signatures that change are dropped first)
+-- ═══════════════════════════════════════════════════════════════════════
+drop function if exists public.study_quiz_create(uuid, text, uuid[], int, int, text);
+drop function if exists public.study_quiz_answer(uuid, int, int);
+
+-- Opens a quiz in the lobby. New: p_preset ('free' · 'end' · 'coffee' ·
+-- 'stop'), p_meeting (the day's meeting, section M), p_part_from/p_part_to
+-- (one lecture's parts). Errors as section Z, plus 'bad preset', 'bad parts',
+-- 'meeting not found', 'already' (this meeting's opening or closing quiz exists).
+create or replace function public.study_quiz_create(p_group uuid, p_mode text, p_lectures uuid[],
+  p_count int, p_seconds int, p_kinds text default 'all', p_preset text default 'free',
+  p_meeting uuid default null, p_part_from int default null, p_part_to int default null)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare
+  me     uuid := auth.uid();
+  lec    uuid[];
+  t      text;
+  course text;
+  stale  uuid;
+  qid    uuid;
+  mg     uuid;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  if p_group is null or not public.study_is_member(p_group) then raise exception 'group not found'; end if;
+  if coalesce(p_preset, '') not in ('free', 'end', 'coffee', 'stop') then raise exception 'bad preset'; end if;
+  if coalesce(p_mode, '') not in ('coop', 'race', 'boss') then raise exception 'bad mode'; end if;
+  if p_preset in ('coffee', 'stop') and p_mode <> 'coop' then raise exception 'bad mode'; end if;
+  if coalesce(p_kinds, '') not in ('all', 'mcq', 'case') then raise exception 'bad kinds'; end if;
+  if p_count is null
+     or (p_preset = 'stop' and p_count <> 1)
+     or (p_preset = 'coffee' and p_count <> 3)
+     or (p_preset in ('free', 'end') and p_count not between 3 and 30) then
+    raise exception 'bad count';
+  end if;
+  if p_seconds is null or p_seconds not between 15 and 120 then raise exception 'bad seconds'; end if;
+  select array_agg(x.l order by x.o) into lec
+    from (select u.l, min(u.o) as o
+            from unnest(p_lectures) with ordinality as u(l, o)
+           where u.l is not null
+           group by u.l) x;
+  if lec is null or cardinality(lec) > 40
+     or exists (select 1 from unnest(lec) as l(id) where public.study_lecture_group(l.id) is distinct from p_group) then
+    raise exception 'lecture not found';
+  end if;
+  if (p_part_from is null) <> (p_part_to is null) then raise exception 'bad parts'; end if;
+  if p_part_from is not null then
+    if cardinality(lec) <> 1 or p_part_from < 0 or p_part_to < p_part_from
+       or (select count(*) from public.study_sections s
+            where s.lecture_id = lec[1] and s.idx in (p_part_from, p_part_to)) <> (case when p_part_from = p_part_to then 1 else 2 end) then
+      raise exception 'bad parts';
+    end if;
+  elsif p_preset = 'stop' then
+    raise exception 'bad parts';
+  end if;
+  if p_preset in ('coffee', 'stop') and p_meeting is null then raise exception 'meeting not found'; end if;
+  if p_meeting is not null then
+    if to_regclass('public.study_meetings') is null then raise exception 'meeting not found'; end if;
+    execute 'select m.group_id from public.study_meetings m where m.id = $1 and m.cancelled_at is null' into mg using p_meeting;
+    if mg is distinct from p_group then raise exception 'meeting not found'; end if;
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_quiz_create:' || p_group::text));
+  for stale in
+    select x.id from public.study_quizzes x
+     where x.group_id = p_group and x.state in ('lobby', 'question', 'reveal')
+       and x.updated_at < now() - interval '20 minutes'
+       and not exists (select 1 from public.study_quiz_players p
+                        where p.quiz_id = x.id and p.seen_at > now() - interval '20 minutes')
+  loop
+    perform 1 from public.study_quizzes x where x.id = stale for update;
+    perform public.study_quiz__finish(stale);
+  end loop;
+  if exists (select 1 from public.study_quizzes x
+              where x.group_id = p_group and x.state in ('lobby', 'question', 'reveal')) then
+    raise exception 'quiz open';
+  end if;
+  if p_preset in ('coffee', 'end')
+     and exists (select 1 from public.study_quizzes x
+                  where x.group_id = p_group and x.preset = p_preset and x.state <> 'cancelled'
+                    and ((x.created_at at time zone 'Asia/Jerusalem') - interval '4 hours')::date
+                      = ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date) then
+    raise exception 'already';                              -- review F-15: one opening and one closing a study day
+  end if;
+  select case when count(distinct btrim(l.course)) = 1 then min(btrim(l.course)) end into course
+    from public.study_lectures l where l.id = any (lec);
+  if p_preset = 'coffee' then
+    t := '3 לקפה';
+  elsif p_preset = 'stop' then
+    select 'עצירה: ' || coalesce(nullif(btrim(s.title), ''), l.title) into t
+      from public.study_lectures l left join public.study_sections s on s.lecture_id = l.id and s.idx = p_part_from
+     where l.id = lec[1];
+  elsif cardinality(lec) = 1 then
+    select l.title into t from public.study_lectures l where l.id = lec[1];
+  elsif coalesce(course, '') <> '' then
+    t := course || ' · ' || cardinality(lec) || ' הרצאות';
+  else
+    select string_agg(l.title, ' · ' order by u.o) into t
+      from unnest(lec) with ordinality as u(id, o)
+      join public.study_lectures l on l.id = u.id;
+  end if;
+  insert into public.study_quizzes (group_id, mode, title, lecture_ids, kinds, n_wanted, seconds,
+                                    host_id, created_by, players_n, version, preset, meeting_id, part_from, part_to)
+  values (p_group, p_mode, left(coalesce(nullif(btrim(t), ''), 'מבחן'), 200), lec, p_kinds, p_count, p_seconds,
+          me, me, 1, 1, p_preset, p_meeting, p_part_from, p_part_to)
+  returning id into qid;
+  insert into public.study_quiz_players (quiz_id, user_id) values (qid, me);
+  return qid;
+end;
+$$;
+
+-- Host only. From the lobby it chooses the questions and opens the first;
+-- in the argue stage it opens vote 2 now ("לסבב 2"); after a final reveal it
+-- opens the next round or ends the quiz after the last.
+create or replace function public.study_quiz_next(p_quiz uuid, p_from int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+  n  int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.state not in ('lobby', 'question', 'reveal') then raise exception 'quiz over'; end if;
+  if z.host_id is distinct from me then raise exception 'not host'; end if;
+  perform public.study_quiz__seen(p_quiz);
+  if z.idx <> p_from then return; end if;
+  if z.state = 'question' then raise exception 'not revealed'; end if;
+  if z.state = 'lobby' then
+    n := public.study_quiz__pick(p_quiz);
+    if n = 0 then raise exception 'no questions'; end if;
+    update public.study_quizzes x set n_total = n, started_at = now() where x.id = p_quiz;
+    perform public.study_quiz__open(p_quiz, 0);
+  elsif z.stage = 'argue' then
+    perform public.study_quiz__open_vote2(p_quiz);
+  else
+    perform public.study_quiz__open(p_quiz, z.idx + 1);
+  end if;
+end;
+$$;
+
+-- The one thing a player sends: an option (and, in vote 1, a bet). Returns
+-- the answer kept for this vote (a retry gets the first one back), never
+-- whether it is right. p_vote, when sent, must be the vote on screen.
+-- Errors as section Z, plus 'bad bet'.
+create or replace function public.study_quiz_answer(p_quiz uuid, p_idx int, p_choice int, p_bet int default null, p_vote int default null)
+returns table (idx int, choice int, ms int, answered_at timestamptz, vote int, bet int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me   uuid := auth.uid();
+  t    timestamptz := now();
+  z    public.study_quizzes;
+  r    public.study_quiz_rounds;
+  v    int;
+  b    int;
+  nopt int;
+  took int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if not public.study_quiz__playing(p_quiz) then raise exception 'not playing'; end if;
+  v := coalesce(p_vote, z.vote);
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = p_idx;
+  if found and exists (select 1 from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = v) then
+    return query select p_idx, a.choice::int, a.ms, a.answered_at, a.vote::int, a.bet::int
+                   from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = v;
+    return;
+  end if;
+  if z.state <> 'question' or z.idx <> p_idx or v <> z.vote then raise exception 'closed'; end if;
+  if t < r.opens_at then raise exception 'not open'; end if;
+  if t > r.closes_at + interval '1.5 seconds' then raise exception 'closed'; end if;
+  select cardinality(q.options) into nopt from public.study_questions q where q.id = r.question_id;
+  if nopt is null then raise exception 'closed'; end if;
+  if p_choice is null then
+    if z.mode not in ('coop', 'boss') then raise exception 'bad choice'; end if;
+  elsif p_choice < 0 or p_choice >= nopt then
+    raise exception 'bad choice';
+  end if;
+  if p_bet is not null and p_bet not between 1 and 3 then raise exception 'bad bet'; end if;
+  b := case when v = 1 and p_choice is not null then coalesce(p_bet, 1) end;
+  took := least(r.seconds * 1000, greatest(0, floor(extract(epoch from (t - r.opens_at)) * 1000)::int));
+  insert into public.study_quiz_answers (round_id, user_id, choice, ms, answered_at, vote, bet)
+  values (r.id, me, p_choice, took, t, v, b);
+  update public.study_quiz_players p set seen_at = clock_timestamp() where p.quiz_id = p_quiz and p.user_id = me;
+  if public.study_quiz__all_answered(p_quiz, p_idx) then
+    perform public.study_quiz__reveal(p_quiz, p_idx);
+  else
+    update public.study_quizzes x
+       set answered_n = (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = v),
+           updated_at = now()
+     where x.id = p_quiz;
+  end if;
+  return query select p_idx, p_choice, took, t, v, b;
+end;
+$$;
+
+-- Host only, after a final reveal: the question was wrong. Its first votes'
+-- points come off, their private copies go, and an unedited trap card made
+-- from it is removed.
+create or replace function public.study_quiz_void(p_quiz uuid, p_idx int)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  z  public.study_quizzes;
+  r  public.study_quiz_rounds;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz for update;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if z.host_id is distinct from me then raise exception 'not host'; end if;
+  select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = p_idx;
+  if not found or r.revealed_at is null then raise exception 'not revealed'; end if;
+  if r.voided_at is not null then return; end if;
+  if z.mode = 'race' and z.idx is distinct from p_idx then raise exception 'too late'; end if;
+  update public.study_quiz_players p
+     set score = p.score - a.points,
+         correct_n = greatest(0, p.correct_n - case when a.correct then 1 else 0 end),
+         answered_n = greatest(0, p.answered_n - 1),
+         ms_total = greatest(0, p.ms_total - a.ms)
+    from public.study_quiz_answers a
+   where a.round_id = r.id and a.vote = 1 and p.quiz_id = p_quiz and p.user_id = a.user_id;
+  delete from public.study_answers s
+   using public.study_quiz_answers a
+   where a.round_id = r.id and a.vote = 1 and s.user_id = a.user_id and s.question_id = r.question_id
+     and s.mode = 'quiz' and s.answered_at = a.answered_at;
+  update public.study_quiz_answers a set points = 0 where a.round_id = r.id;
+  if r.trap_card is not null and to_regprocedure('study_private.trap_card_drop(uuid)') is not null then
+    perform study_private.trap_card_drop(r.trap_card);
+  end if;
+  update public.study_quiz_rounds x set voided_at = clock_timestamp(), voided_by = me where x.id = r.id;
+  update public.study_quizzes x set version = x.version + 1, updated_at = now() where x.id = p_quiz;
+end;
+$$;
+
+-- Every 15 s while the quiz screen is visible: as section Z, and an argue
+-- stage that ran out moves on to vote 2.
+create or replace function public.study_quiz_ping(p_quiz uuid)
+returns table (server_now timestamptz, version int, state text, idx int, answered_n int, host_here boolean)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare z public.study_quizzes;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  perform public.study_quiz__seen(p_quiz);
+  if (z.state = 'question' and clock_timestamp() > z.closes_at + interval '4.5 seconds')
+     or (z.state = 'reveal' and z.stage = 'argue' and clock_timestamp() > z.argue_until + interval '1 second') then
+    perform public.study_quiz__due(p_quiz);
+  end if;
+  return query select clock_timestamp(), x.version, x.state, x.idx, x.answered_n, public.study_quiz__host_here(p_quiz)
+                 from public.study_quizzes x where x.id = p_quiz;
+end;
+$$;
+
+-- Everything one screen shows, filtered for the caller. New beside section Z:
+-- quiz.preset/meeting_id/part_from/part_to/vote/stage/argue_until/record;
+-- round.vote, the argue stage (counts1, answered1, argue_until: no key),
+-- mine (this vote) and mine1 (the first vote, with its bet), next_step,
+-- trap, jump (the paragraph, when next_step is 'source'), counts1/right1/
+-- answered1 beside the final counts after a revote, correct2; coffee's
+-- reveal has a majority word and no numbers; the end summary has the team
+-- result (co-op 'free'/'end'): right_pct, passed (≥ 80), record_before, new_record.
+create or replace function public.study_quiz_state(p_quiz uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  me     uuid := auth.uid();
+  z      public.study_quizzes;
+  r      public.study_quiz_rounds;
+  q      public.study_questions;
+  k      public.study_question_keys;
+  player boolean;
+  v_me   jsonb;
+  v_rnd  jsonb;
+  v_ppl  jsonb;
+  v_sum  jsonb;
+  v_team jsonb;
+  v_rec  int;
+  n_fin  int;
+  ok_fin int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into z from public.study_quizzes x where x.id = p_quiz;
+  if not found or not public.study_is_member(z.group_id) then raise exception 'quiz not found'; end if;
+  if (z.state = 'question' and clock_timestamp() > z.closes_at + interval '4.5 seconds')
+     or (z.state = 'reveal' and z.stage = 'argue' and clock_timestamp() > z.argue_until + interval '1 second') then
+    perform public.study_quiz__due(p_quiz);
+    select * into z from public.study_quizzes x where x.id = p_quiz;
+  end if;
+  player := exists (select 1 from public.study_quiz_players p where p.quiz_id = p_quiz and p.user_id = me);
+
+  select jsonb_build_object('playing', p.left_at is null, 'score', p.score, 'correct_n', p.correct_n,
+                            'answered_n', p.answered_n, 'joined_idx', p.joined_idx, 'ms_total', p.ms_total)
+    into v_me
+    from public.study_quiz_players p where p.quiz_id = p_quiz and p.user_id = me;
+
+  if z.state in ('question', 'reveal') then
+    select * into r from public.study_quiz_rounds x where x.quiz_id = p_quiz and x.idx = z.idx;
+    select * into q from public.study_questions x where x.id = r.question_id;
+    v_rnd := jsonb_build_object(
+      'idx', r.idx, 'seconds', r.seconds, 'opens_at', r.opens_at, 'closes_at', r.closes_at,
+      'vote', r.vote, 'stage', z.stage,
+      'voided', r.voided_at is not null, 'voided_by', r.voided_by,
+      'q', case when q.id is null then null else jsonb_build_object(
+             'id', q.id, 'kind', q.kind, 'vignette', q.vignette, 'question', q.question, 'teaser', q.teaser,
+             'options', to_jsonb(q.options), 'slides', to_jsonb(q.slides), 'topic', q.topic, 'aspect', q.aspect,
+             'lecture_id', coalesce(q.lecture_id, q.ref_lecture), 'part_idx', q.part_idx, 'anchor', q.anchor,
+             'lecture_title', (select l.title from public.study_lectures l where l.id = coalesce(q.lecture_id, q.ref_lecture)))
+           end,
+      'mine', (select jsonb_build_object('choice', a.choice, 'ms', a.ms, 'bet', a.bet)
+                 from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = r.vote),
+      'mine1', (select jsonb_build_object('choice', a.choice, 'bet', a.bet)
+                  from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = 1));
+    if z.state = 'reveal' and z.stage = 'argue' then
+      -- vote 1's distribution (from 3 answers), no key: 90 seconds to argue
+      v_rnd := v_rnd || jsonb_build_object(
+        'argue_until', z.argue_until, 'answered1', r.answered1,
+        'counts1', case when r.answered1 >= 3 then to_jsonb(r.counts1) end);
+    elsif z.state = 'reveal' then
+      select * into k from public.study_question_keys x where x.question_id = r.question_id;
+      select count(*), count(*) filter (where a.correct) into n_fin, ok_fin
+        from public.study_quiz_answers a where a.round_id = r.id and a.vote = r.vote;
+      v_rnd := v_rnd || jsonb_build_object(
+        'answer', r.answer,
+        'explanations', to_jsonb(coalesce(k.explanations, '{}'::text[])),
+        'takeaway', coalesce(k.takeaway, ''),
+        'next_step', r.next_step,
+        'points', (select a.points from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = 1),
+        'correct', (select a.correct from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = 1));
+      if not player then
+        -- review SEC-6: a member who does not play sees the question and the
+        -- key at the reveal, never how the players answered
+        v_rnd := v_rnd || jsonb_build_object('answered', n_fin);
+      elsif z.preset = 'coffee' then
+        v_rnd := v_rnd || jsonb_build_object(
+          'majority', case when coalesce(r.answered1, 0) < 3 then null
+                           when r.right1 * 2 > r.answered1 then 'most_right'
+                           when r.right1 * 2 = r.answered1 then 'split'
+                           else 'most_wrong' end);
+      else
+        v_rnd := v_rnd || jsonb_build_object(
+          -- review SEC-6: how many chose what, only from 3 answers (else only how many answered)
+          'counts', case when n_fin >= 3 then to_jsonb(public.study_quiz__counts(r.id, r.vote, coalesce(cardinality(q.options), 0))) end,
+          'dont_know', case when n_fin >= 3 then
+                         (select count(*) from public.study_quiz_answers a where a.round_id = r.id and a.vote = r.vote and a.choice is null) end,
+          'answered', n_fin, 'right', case when n_fin >= 3 then ok_fin end,
+          'trap', r.trap,
+          'correct2', (select a.correct from public.study_quiz_answers a where a.round_id = r.id and a.user_id = me and a.vote = 2),
+          'jump', case when r.next_step = 'source' and q.anchor is not null then
+                    jsonb_build_object('lecture_id', q.lecture_id, 'part', q.part_idx, 'anchor', q.anchor, 'quote', q.quote) end)
+          || case when r.vote = 2 then jsonb_build_object('counts1', to_jsonb(r.counts1), 'answered1', r.answered1, 'right1', r.right1)
+                  else '{}'::jsonb end;
+      end if;
+    end if;
+  end if;
+
+  select coalesce(jsonb_agg(
+           jsonb_build_object(
+             'user_id', p.user_id,
+             'name', coalesce(m.name, ''),
+             'host', p.user_id is not distinct from z.host_id,
+             'here', p.left_at is null and p.seen_at > clock_timestamp() - interval '30 seconds',
+             'left', p.left_at is not null,
+             'joined_idx', p.joined_idx)
+           || case when z.mode = 'race' and player
+                   then jsonb_build_object('score', p.score, 'correct_n', p.correct_n, 'ms', p.ms_total,
+                          'last_points', case when z.state = 'reveal' and z.stage = 'final' then
+                              (select a.points from public.study_quiz_answers a where a.round_id = r.id and a.user_id = p.user_id and a.vote = 1)
+                            end)
+                   else '{}'::jsonb end
+           order by p.joined_at), '[]'::jsonb)
+    into v_ppl
+    from public.study_quiz_players p
+    left join public.study_members m on m.group_id = z.group_id and m.user_id = p.user_id
+   where p.quiz_id = p_quiz;
+
+  if z.state = 'ended' and player then
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'idx', r2.idx, 'voided', r2.voided_at is not null, 'vote', r2.vote, 'trap', r2.trap,
+             'q', case when q2.id is null then null else jsonb_build_object(
+                    'id', q2.id, 'kind', q2.kind, 'vignette', q2.vignette, 'question', q2.question, 'teaser', q2.teaser,
+                    'options', to_jsonb(q2.options), 'slides', to_jsonb(q2.slides), 'topic', q2.topic,
+                    'aspect', q2.aspect, 'lecture_id', coalesce(q2.lecture_id, q2.ref_lecture),
+                    'part_idx', q2.part_idx, 'anchor', q2.anchor) end,
+             'answer', r2.answer, 'explanations', to_jsonb(coalesce(k2.explanations, '{}'::text[])),
+             'takeaway', coalesce(k2.takeaway, ''))
+           || case when z.preset = 'coffee' then jsonb_build_object(
+                'majority', case when coalesce(r2.answered1, 0) < 3 then null
+                                 when r2.right1 * 2 > r2.answered1 then 'most_right'
+                                 when r2.right1 * 2 = r2.answered1 then 'split' else 'most_wrong' end)
+              else jsonb_build_object(
+                'answered', (select count(*) from public.study_quiz_answers a where a.round_id = r2.id and a.vote = r2.vote))
+              || case when (select count(*) from public.study_quiz_answers a where a.round_id = r2.id and a.vote = r2.vote) >= 3
+                      then jsonb_build_object(                    -- review SEC-6: from 3 answers only
+                'right', (select count(*) from public.study_quiz_answers a where a.round_id = r2.id and a.vote = r2.vote and a.correct),
+                'counts', to_jsonb(public.study_quiz__counts(r2.id, r2.vote, coalesce(cardinality(q2.options), 0))),
+                'counts1', case when r2.vote = 2 then to_jsonb(r2.counts1) end,
+                'right1', case when r2.vote = 2 then r2.right1 end)
+                      else '{}'::jsonb end end
+           || jsonb_build_object(
+             'mine', (select jsonb_build_object('choice', a.choice, 'correct', a.correct, 'points', a.points, 'bet', a.bet,
+                                                'choice2', (select a2.choice from public.study_quiz_answers a2
+                                                             where a2.round_id = r2.id and a2.user_id = me and a2.vote = 2),
+                                                'correct2', (select a2.correct from public.study_quiz_answers a2
+                                                              where a2.round_id = r2.id and a2.user_id = me and a2.vote = 2))
+                        from public.study_quiz_answers a where a.round_id = r2.id and a.user_id = me and a.vote = 1))
+             order by r2.idx), '[]'::jsonb)
+      into v_sum
+      from public.study_quiz_rounds r2
+      left join public.study_questions q2 on q2.id = r2.question_id
+      left join public.study_question_keys k2 on k2.question_id = r2.question_id
+     where r2.quiz_id = p_quiz and r2.revealed_at is not null;
+    if z.mode = 'coop' and z.preset in ('free', 'end')
+       and (select count(*) from public.study_quiz_players p where p.quiz_id = p_quiz) >= 3 then   -- review SEC-6
+      select round(100.0 * count(*) filter (where a.correct) / nullif(count(*), 0))::int into ok_fin
+        from public.study_quiz_rounds r3
+        join public.study_quiz_answers a on a.round_id = r3.id and a.vote = r3.vote
+       where r3.quiz_id = p_quiz and r3.revealed_at is not null and r3.voided_at is null;
+      v_rec := public.study_quiz__record(z.group_id, z.ended_at);
+      v_team := jsonb_build_object('right_pct', ok_fin, 'passed', coalesce(ok_fin >= 80, false), 'record_before', v_rec,
+                                   'new_record', ok_fin is not null and ok_fin > coalesce(v_rec, -1)
+                                     and (select count(*) from public.study_quiz_rounds r4
+                                           where r4.quiz_id = p_quiz and r4.revealed_at is not null and r4.voided_at is null) >= 5
+                                     and (select count(*) from public.study_quiz_players p where p.quiz_id = p_quiz) >= 3);
+    end if;
+  end if;
+
+  return jsonb_build_object(
+    'now', clock_timestamp(),
+    'quiz', jsonb_build_object(
+      'id', z.id, 'group_id', z.group_id, 'mode', z.mode, 'title', z.title, 'lecture_ids', to_jsonb(z.lecture_ids),
+      'kinds', z.kinds, 'n_wanted', z.n_wanted, 'seconds', z.seconds, 'state', z.state, 'idx', z.idx,
+      'n_total', z.n_total, 'opens_at', z.opens_at, 'closes_at', z.closes_at, 'answered_n', z.answered_n,
+      'players_n', z.players_n, 'version', z.version, 'host_id', z.host_id,
+      'created_at', z.created_at, 'started_at', z.started_at, 'ended_at', z.ended_at,
+      'preset', z.preset, 'meeting_id', z.meeting_id, 'part_from', z.part_from, 'part_to', z.part_to,
+      'vote', z.vote, 'stage', z.stage, 'argue_until', z.argue_until,
+      'record', case when z.mode = 'coop' and z.preset in ('free', 'end') then public.study_quiz__record(z.group_id, coalesce(z.ended_at, now())) end),
+    'me', v_me,
+    'host_here', public.study_quiz__host_here(p_quiz),
+    'players', v_ppl,
+    'round', v_rnd,
+    'summary', v_sum,
+    'team', v_team,
+    'boss', case when z.mode = 'boss' then public.study_quiz__boss_state(p_quiz) end);
+end;
+$$;
+
+-- The "יחד" card: as section Z (same result, so its signature stays); the
+-- group's share counts final votes, none for an opening (its reveal shows
+-- no numbers) and none for a quiz of fewer than 3 players (review SEC-6: a
+-- solo quiz would publish its host's score); the caller's place in a race breaks ties by time. The
+-- banner keeps section Z's study_quiz_open: the row it names carries
+-- preset and meeting_id (study_quizzes is readable and published).
+create or replace function public.study_quiz_recent(p_group uuid, p_limit int default 5)
+returns table (id uuid, mode text, title text, ended_at timestamptz, players_n int, rounds int,
+               right_pct int, played boolean, my_correct int, my_answered int, my_rank int)
+language sql stable security definer set search_path = public as $$
+  select z.id, z.mode, z.title, z.ended_at,
+         (select count(*) from public.study_quiz_players p where p.quiz_id = z.id)::int,
+         (select count(*) from public.study_quiz_rounds r
+           where r.quiz_id = z.id and r.revealed_at is not null and r.voided_at is null)::int,
+         case when z.preset <> 'coffee'
+                   and (select count(*) from public.study_quiz_players p where p.quiz_id = z.id) >= 3 then   -- review SEC-6
+           (select round(100.0 * count(*) filter (where a.correct) / nullif(count(*), 0))::int
+              from public.study_quiz_answers a join public.study_quiz_rounds r on r.id = a.round_id and a.vote = r.vote
+             where r.quiz_id = z.id and r.voided_at is null) end,
+         me.user_id is not null, me.correct_n, me.answered_n,
+         case when z.mode = 'race' and me.user_id is not null then
+           (select count(*) + 1 from public.study_quiz_players o
+             where o.quiz_id = z.id and (o.score > me.score or (o.score = me.score and o.ms_total < me.ms_total)))::int
+         end
+    from public.study_quizzes z
+    left join public.study_quiz_players me on me.quiz_id = z.id and me.user_id = auth.uid()
+   where z.group_id = p_group and public.study_is_member(p_group) and z.state = 'ended'
+   order by z.ended_at desc
+   limit greatest(1, least(coalesce(p_limit, 5), 50));
+$$;
+
+-- The lobby's "השיא: 90%": the group's record in co-op (null before the first).
+create or replace function public.study_quiz_record(p_group uuid)
+returns int language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'group not found'; end if;
+  return public.study_quiz__record(p_group, now());
+end;
+$$;
+
+-- ── Privileges (the redefined and new functions) ──
+revoke all on function public.study_quiz__points(smallint, smallint, smallint), public.study_quiz__counts(uuid, int, int),
+  public.study_quiz__pick_preset(uuid), public.study_quiz__trap_card(uuid),
+  public.study_quiz__score(uuid, uuid, smallint, text, timestamptz), public.study_quiz__open_vote2(uuid),
+  public.study_quiz__record(uuid, timestamptz), public.study_quiz__all_answered(uuid, int), public.study_quiz__pick(uuid),
+  public.study_quiz__open(uuid, int), public.study_quiz__reveal(uuid, int), public.study_quiz__finish(uuid), public.study_quiz__due(uuid),
+  public.study_quiz__signal(uuid), public.study_quiz__pick_boss(uuid), public.study_quiz__after_reveal(uuid, int),
+  public.study_quiz__boss_state(uuid), public.study_quiz__revealed(uuid, uuid)
+  from public, anon, authenticated;
+revoke all on function public.study_quiz_create(uuid, text, uuid[], int, int, text, text, uuid, int, int),
+  public.study_quiz_answer(uuid, int, int, int, int), public.study_quiz_recent(uuid, int),
+  public.study_quiz_record(uuid), public.study_quiz_next(uuid, int), public.study_quiz_void(uuid, int),
+  public.study_quiz_ping(uuid), public.study_quiz_state(uuid)
+  from public, anon;
+grant execute on function public.study_quiz_create(uuid, text, uuid[], int, int, text, text, uuid, int, int),
+  public.study_quiz_answer(uuid, int, int, int, int), public.study_quiz_recent(uuid, int),
+  public.study_quiz_record(uuid), public.study_quiz_next(uuid, int), public.study_quiz_void(uuid, int),
+  public.study_quiz_ping(uuid), public.study_quiz_state(uuid)
+  to authenticated;
+
+insert into study_private.schema_sections (section, version) values ('Z', 2)
+on conflict (section) do update set version = excluded.version, loaded_at = now();

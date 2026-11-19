@@ -1,0 +1,72 @@
+/* Package W's screens (spec §5.8): the server note under a lecture's title,
+   the share sheet, and the "מההקלטה" boxes. The design system's tokens and
+   components only (styles/tokens.css, styles/kit.css), so light and dark
+   both hold; the print layout's own rules are PRINT_CSS
+   (shared/study/print-css.ts), added only while printing. */
+
+/* "הסיכום נכתב בשרת…": under the title while the server writes, a flat
+   card with the pen and the parts written so far (the kit's a-bar). */
+.server-note {
+  margin-top: var(--sp-3);
+  gap: var(--sp-4);
+}
+.server-note-line {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.server-note-line p {
+  margin: 0;
+  line-height: 1.5;
+}
+.server-note-icon,
+.share-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* The share sheet: the kit's list, a row per way out (a title and a line). */
+.share-options > li {
+  display: grid;
+}
+.share-option {
+  align-items: center;
+}
+.share-option:disabled {
+  cursor: default;
+}
+.share-option:disabled > div,
+.share-option:disabled .share-icon {
+  opacity: 0.6;
+}
+.share-acts {
+  margin-top: var(--sp-3);
+}
+.share-ready {
+  align-items: flex-start;
+}
+.share-check,
+.share-foot {
+  margin: 0;
+}
+
+/* A "מההקלטה" box after its paragraph: the lecturer's box, with its time. */
+.rec-note .rec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+.rec-time {
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,996 @@
+/* תמצית: the shell and F's screens (the library, upload, the reader and
+   reading together, "יחד", "שלי", help, Join). A reading app first: long
+   Hebrew prose with English terms, read on a phone, often late at night.
+
+   Every colour, size and component comes from the design system
+   (styles/tokens.css, styles/kit.css; docs/study/design-system.md). This file
+   only places the kit's pieces on these screens and draws what is theirs
+   alone: the summary's text, the live banner, the reading room. */
+
+/* ═════════════ the shell ═════════════ */
+
+#root {
+  min-height: 100vh;
+}
+
+/* One sticky stack at the top: the live banner, above a screen's own top bar. */
+.shell-stack {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-stack);
+}
+.live-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-height: 52px;
+  padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px)) var(--gutter-right) var(--sp-2) var(--gutter-left);
+  background: var(--accent-soft);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+.live-banner.is-empty {
+  display: none;
+}
+.live-slot {
+  display: none;
+  align-items: center;
+  gap: var(--sp-4);
+  flex: 1;
+  min-width: 0;
+}
+.live-slot.is-shown {
+  display: flex;
+}
+.live-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-act {
+  flex: none;
+}
+.live-more {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--hit);
+  min-height: var(--hit);
+  border-radius: var(--r-pill);
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* What focus or scrollIntoView brings into view stays clear of the fixed
+   bars: the banner and a screen's top bar above (the reader's taller top
+   when it is open: --study-head-h), the tab bar or the bottom bar below
+   (WCAG 2.4.11). */
+html {
+  scroll-padding-top: calc(var(--study-banner-h, 0px) + var(--study-head-h, var(--head-h)));
+}
+html:has(body.has-tabs) {
+  scroll-padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-4));
+}
+html:has(.ph-foot) {
+  scroll-padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px) + var(--sp-4));
+}
+
+/* The toast: over everything, clear of the tab bar and of a bottom bar. A
+   tap on its words reaches what is under it; only its action takes a tap. */
+.shell > .a-toast {
+  position: fixed;
+  inset-inline: 0;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--z-toast);
+  width: max-content;
+  max-width: calc(100% - 2 * var(--gutter));
+  margin: 0 auto;
+  pointer-events: none;
+}
+body.has-tabs .shell > .a-toast {
+  bottom: calc(var(--tabbar-h) + var(--sp-8) + env(safe-area-inset-bottom, 0px));
+}
+html:has(.ph-foot) body.has-tabs .shell > .a-toast {
+  bottom: calc(var(--tabbar-h) + 84px + env(safe-area-inset-bottom, 0px));
+}
+/* While a sheet is open the toast goes to the top, over the scrim above the
+   sheet (a sheet is at most 80% of the screen): never over the sheet's own
+   words, such as the cost line before a paid action. */
+html:has(.a-sheet[aria-modal="true"]) body .shell > .a-toast {
+  top: calc(var(--study-banner-h, 0px) + var(--sp-6) + env(safe-area-inset-top, 0px));
+  bottom: auto;
+}
+.toast-act {
+  pointer-events: auto;
+  position: relative;
+  min-height: 32px;
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: none;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.toast-act::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, calc((100% - var(--hit)) / 2));
+}
+
+/* "טוען…", and the schema gate's and a placeholder's words. */
+.loading {
+  padding: var(--sp-12) 0;
+  text-align: center;
+}
+/* Three lane dots over "טוען…": they take turns to light up where motion
+   is welcome, and simply sit there under prefers-reduced-motion. */
+.loading::before {
+  content: "";
+  display: block;
+  width: 44px;
+  height: 10px;
+  margin: 0 auto var(--sp-5);
+  background:
+    radial-gradient(circle closest-side, var(--me-pop) 0 92%, transparent) 0 50% / 10px 10px no-repeat,
+    radial-gradient(circle closest-side, var(--group-pop) 0 92%, transparent) 50% 50% / 10px 10px no-repeat,
+    radial-gradient(circle closest-side, var(--fun-pop) 0 92%, transparent) 100% 50% / 10px 10px no-repeat;
+}
+@keyframes loading-dots {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.92);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .loading::before {
+    animation: loading-dots 1s ease-in-out infinite;
+  }
+}
+.gate {
+  justify-content: center;
+}
+.gate-card {
+  justify-items: start;
+}
+
+/* ═════════════ Join ═════════════ */
+
+main.join {
+  justify-content: center;
+  padding-top: calc(var(--sp-12) + env(safe-area-inset-top, 0px));
+}
+.join-card {
+  display: grid;
+  gap: var(--sp-6);
+  width: 100%;
+  max-width: 460px;
+  min-width: 0;
+  margin: 0 auto;
+}
+.join-kicker {
+  color: var(--accent);
+  font-size: var(--text-small);
+  font-weight: 800;
+}
+/* Four lane tiles over the name: the app's colours, at a glance. */
+.join-kicker::before {
+  content: "";
+  display: block;
+  width: 22px;
+  height: 22px;
+  margin-bottom: var(--sp-8);
+  border-radius: 7px;
+  background: var(--me-pop);
+  /* toward the line's end: leftward, as the app is right to left */
+  box-shadow:
+    -30px 0 0 var(--group-pop),
+    -60px 0 0 var(--fun-pop),
+    -90px 0 0 var(--ok-pop);
+  transform: rotate(4deg);
+}
+.join-name {
+  font-size: 3rem;
+  font-weight: 900;
+  line-height: 1.05;
+}
+.join-name::after {
+  content: "";
+  display: inline-block;
+  width: 0.22em;
+  height: 0.22em;
+  margin-inline-start: 0.06em;
+  border-radius: 50%;
+  background: var(--sun-pop);
+}
+.join-form {
+  gap: var(--sp-6);
+}
+/* "יש לי קוד" | "פתיחת קבוצה חדשה": two tiles of one height, each on one line. */
+.join .a-seg > .a-btn {
+  padding-inline: var(--sp-3);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+/* A field's own width (the code field's letter spacing) never widens the form. */
+.code-input {
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-align: center;
+}
+.join-signin,
+.join-privacy {
+  justify-self: start;
+}
+
+/* ═════════════ the library ═════════════ */
+
+.lib-actions .a-btn:not(.wide) {
+  flex: none;
+}
+.lecture-list {
+  gap: var(--sp-5);
+}
+/* A lecture's card: the whole card opens it (its link stretches over the
+   card); the packages' chips under it are links of their own, above it. */
+.lc {
+  position: relative;
+  gap: var(--sp-4);
+}
+.lecture-card {
+  display: grid;
+  gap: var(--sp-2);
+  color: inherit;
+  text-decoration: none;
+}
+.lecture-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-lg);
+}
+.lc-title {
+  font-size: var(--text-body);
+  font-weight: 700;
+  line-height: 1.4;
+}
+.lc-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3) var(--sp-4);
+  margin-top: var(--sp-2);
+}
+.lc-together {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3) var(--sp-4);
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+.lc-chips {
+  position: relative;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+.ask-bar {
+  position: relative;
+  display: grid;
+  gap: var(--sp-2);
+}
+.ask-hit {
+  align-items: center;
+}
+.ask-row {
+  color: var(--accent);
+  font-weight: 600;
+}
+.empty {
+  gap: var(--sp-5);
+}
+
+/* ═════════════ upload ═════════════ */
+
+.drop {
+  position: relative;
+  place-items: center;
+  min-height: 140px;
+  padding: var(--sp-10);
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--me-pop) 55%, var(--line));
+  background: color-mix(in srgb, var(--me-pop) 5%, var(--surface));
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+}
+/* The drop zone's tile: an arrow into a tray, in my lane (decoration). */
+.drop::before {
+  content: "";
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: var(--me-pop)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231c1838' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V4'/%3E%3Cpath d='m7 9 5-5 5 5'/%3E%3Cpath d='M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3'/%3E%3C/svg%3E")
+    center / 24px no-repeat;
+  box-shadow: inset 0 -3px 0 rgba(28, 24, 56, 0.16);
+}
+@media (hover: hover) {
+  .drop:hover {
+    background: color-mix(in srgb, var(--me-pop) 10%, var(--surface));
+  }
+}
+.drop strong {
+  color: var(--ink);
+}
+.drop.has-file {
+  border-style: solid;
+  border-color: var(--accent);
+}
+.drop input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.privacy-line a {
+  font-weight: 600;
+}
+
+/* ═════════════ the reader ═════════════ */
+
+.reader-top > .ph-head {
+  justify-content: space-between;
+}
+/* The reader's tools (תוכן, א-, א+, שיתוף): one group of pills in a tray,
+   44 px tall together, each pill a 44 px target. */
+.head-tools {
+  display: flex;
+  flex: none;
+  gap: var(--sp-1);
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--line);
+}
+.head-tools .a-btn {
+  min-height: 38px;
+  min-width: 40px;
+  padding-inline: var(--sp-5);
+  border-radius: var(--r-pill);
+  color: var(--ink);
+  font-weight: 700;
+}
+.head-tools .a-btn[aria-expanded="true"] {
+  background: var(--surface);
+  box-shadow: 0 2px 0 var(--edge);
+  color: var(--accent);
+}
+@media (hover: hover) {
+  .head-tools .a-btn:not(:disabled):hover {
+    background: var(--surface);
+  }
+}
+@media (max-width: 374px) {
+  .head-tools .a-btn {
+    padding-inline: var(--sp-4);
+  }
+}
+/* The reader's bar: one wrapping row of chips and buttons (the kit's
+ * ph-sub), so the sticky top stays small while reading aloud. */
+.reader-extra {
+  gap: var(--sp-2) var(--sp-3);
+}
+.toc {
+  max-height: 60vh;
+  overflow: auto;
+}
+.toc ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.toc li + li {
+  border-top: 1px solid var(--line);
+}
+.toc li a {
+  display: flex;
+  align-items: center;
+  min-height: var(--hit);
+  padding: var(--sp-2) 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+.toc li.lvl2 a {
+  font-weight: 700;
+}
+.toc li.lvl3 a {
+  padding-inline-start: var(--sp-8);
+  color: var(--muted);
+  font-size: var(--text-btn);
+}
+.lecture-title {
+  display: grid;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+}
+/* The lecture's action row: route chips, then the packages' chips. */
+.lecture-actions {
+  display: flex;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+  padding: var(--sp-1) 0 calc(var(--sp-2) + var(--press));
+  padding-inline-end: var(--sp-16);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  /* It scrolls: the row fades out at its end (the left, in a right-to-left
+     row), so a chip cut at the edge reads as "more this way". The fade has
+     a fixed width, 24 px, under the 32 px end padding, so the last chip
+     and its focus ring scroll fully clear of it (never dimmed under 4.5:1). */
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 24px), transparent);
+}
+.lecture-actions:dir(ltr) {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+.lecture-actions > * {
+  flex: none;
+  scroll-snap-align: start;
+}
+.part {
+  margin-top: var(--sp-4);
+}
+.part.placeholder {
+  margin: var(--sp-8) 0;
+}
+.part-wait {
+  margin: var(--sp-12) 0;
+}
+.writing-note {
+  color: var(--accent);
+  font-weight: 600;
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: var(--sp-3);
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+.lecture-foot {
+  display: grid;
+  gap: var(--sp-6);
+  margin-top: var(--sp-16);
+  padding-top: var(--sp-8);
+  border-top: 1px solid var(--line);
+}
+.after-reading {
+  justify-self: start;
+}
+.confirm {
+  display: grid;
+  gap: var(--sp-4);
+}
+/* The follower's one sticky bar (M's "לא ברור לי", then J's "לנעוץ רגע"). */
+.follow-bar {
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 0;
+}
+
+/* ═════════════ the summary ═════════════ */
+
+.summary {
+  font-size: var(--reading-size, 17px);
+  line-height: var(--leading-read);
+}
+/* The reader's ink and weight are the screen's: a printed page keeps the
+   print layout's own (shared/study/print-css.ts). */
+@media screen {
+  .summary {
+    color: var(--read-ink);
+    font-weight: var(--read-weight);
+  }
+}
+.summary h1,
+.summary h2,
+.summary h3 {
+  scroll-margin-top: var(--sp-4);
+}
+.summary h1 {
+  margin: 1.2em 0 0.4em;
+  font-size: 1.4em;
+  font-weight: 800;
+}
+.summary h2 {
+  margin: 1.5em 0 0.45em;
+  font-size: 1.3em;
+  font-weight: 700;
+}
+.summary h3 {
+  margin: 1.25em 0 0.3em;
+  font-size: 1.1em;
+  font-weight: 600;
+}
+.summary p,
+.summary li {
+  max-width: 68ch;
+}
+.summary p {
+  margin: 0.55em 0;
+}
+.summary strong {
+  font-weight: 600;
+}
+.summary ul,
+.summary ol {
+  margin: 0.55em 0;
+  padding-inline-start: 1.3em;
+}
+.summary li + li {
+  margin-top: 0.25em;
+}
+.summary em {
+  font-style: italic;
+}
+.summary .a-tag {
+  margin-inline-start: var(--sp-2);
+}
+.summary .a-callout {
+  margin: 1em 0;
+}
+.summary .a-callout p {
+  margin: 0.3em 0;
+}
+.table-wrap {
+  margin: 1em 0;
+  overflow-x: auto;
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.summary table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+.summary th,
+.summary td {
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+  text-align: start;
+  vertical-align: top;
+}
+.summary tr:last-child td {
+  border-bottom: 0;
+}
+.summary th {
+  color: var(--muted);
+  font-size: 0.92em;
+  font-weight: 700;
+}
+.slide-figure {
+  margin: 1.2em 0;
+  text-align: center;
+}
+.slide-figure img {
+  max-width: 100%;
+  max-height: 70vh;
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.slide-figure figcaption {
+  margin-top: var(--sp-3);
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.summary.compact {
+  font-size: 0.95em;
+  line-height: 1.65;
+}
+.summary.compact > :first-child {
+  margin-top: 0;
+}
+.summary.compact > :last-child {
+  margin-bottom: 0;
+}
+.link-text bdi {
+  color: var(--muted);
+}
+
+/* A paragraph that can be tapped, the one tapped, and the reader's place
+   (the kit's marked paragraph). */
+.summary .blk {
+  border-radius: var(--r-sm);
+  transition: background-color 0.3s;
+  -webkit-tap-highlight-color: transparent;
+  scroll-margin-top: var(--sp-4);
+}
+.summary .blk:focus {
+  outline: none;
+}
+.summary .blk:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+/* The tapped paragraph: a quiet frame around a soft well, calmer than the
+   focus ring (the reader's text stays the loudest thing). The well has real
+   room inside: padding pushed out into the gutter by a negative margin of
+   the same size, so the lines keep their width and their breaks, and the
+   frame sits 10 px from the words and the action pills (a callout or a
+   table keeps its own box and padding). */
+.summary :is(p, li).blk.blk-selected {
+  max-width: calc(68ch + 2 * var(--sp-5));
+}
+.summary :is(p, li, h1, h2, h3).blk.blk-selected {
+  margin-inline: calc(-1 * var(--sp-5));
+  padding: var(--sp-4) var(--sp-5);
+  border-radius: var(--r-md);
+}
+.summary .blk.blk-selected:not(:focus-visible) {
+  outline: 1.5px solid var(--field-line);
+  outline-offset: 0;
+  background: var(--surface-2);
+}
+.summary .blk-marked {
+  background: var(--accent-soft);
+  box-shadow: -4px 0 0 var(--accent), 4px 0 0 var(--accent-soft);
+}
+.blk-updated {
+  animation: blk-updated 2s ease-out;
+}
+@keyframes blk-updated {
+  from {
+    background: var(--warn-bg);
+  }
+}
+/* A paragraph's comment count, "תגובה או שאלה", its corrections chip: chips
+   in the line of text, 44 px to the finger. */
+.note-dot,
+.note-add,
+.edit-dot {
+  margin-inline-start: var(--sp-3);
+  vertical-align: middle;
+  font-size: var(--text-chip);
+  -webkit-tap-highlight-color: transparent;
+}
+.note-dot svg,
+.note-add svg {
+  flex: none;
+}
+/* A tapped paragraph's actions: one line of pills under it, at 360 too
+   (they share the line and never wrap one onto a line of its own). */
+.blk-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+  width: 100%;
+  margin-top: var(--sp-4);
+}
+.blk-actions > .a-btn.small {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  padding-inline: var(--sp-3);
+  border-radius: var(--r-pill);
+  font-size: var(--text-chip);
+  white-space: nowrap;
+}
+.summary li.blk-extras {
+  list-style: none;
+}
+.rec-note {
+  margin-top: 0.4em;
+}
+
+/* ═════════════ reading together ═════════════ */
+
+/* The room: one line, whatever the width: the names give way first, then the status. */
+.room-bar {
+  flex-wrap: nowrap;
+  gap: var(--sp-4);
+}
+.room-here {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.room-names {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent);
+}
+.room-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+  margin-inline-start: auto;
+}
+.room-status {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-status.following {
+  color: var(--accent);
+}
+.room-bar .a-btn {
+  flex: none;
+  white-space: nowrap;
+}
+/* "להקריא לקבוצה", "שאלות", "להפסיק": pills of the same tray as the tools above. */
+.room-bar .a-btn.ghost {
+  min-height: 36px;
+  padding-inline: var(--sp-6);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  color: var(--accent);
+}
+.room-bar .a-btn:not(.ghost):not(.primary) {
+  border-radius: var(--r-pill);
+}
+.q-btn .q-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-pill);
+  background: var(--badge-bg);
+  color: var(--badge-ink);
+  font-size: 0.75rem;
+}
+
+/* A paragraph's thread, and the lecture's open questions. */
+.sheet-quote {
+  padding-top: var(--sp-5);
+}
+/* One card per thread: the first note, then each reply under a rule. */
+.thread {
+  gap: var(--sp-4);
+}
+.thread.question {
+  border-color: var(--warn-line);
+}
+.thread.question.resolved {
+  border-color: var(--line);
+}
+.note {
+  display: grid;
+  gap: var(--sp-2);
+}
+.note-head {
+  gap: var(--sp-2) var(--sp-4);
+}
+.note-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.note-actions {
+  gap: var(--sp-8);
+}
+.a-link.push {
+  margin-inline-start: auto;
+}
+.note-jump .m {
+  overflow-wrap: anywhere;
+}
+.composer {
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+.composer-kind {
+  justify-self: start;
+  grid-auto-columns: auto;
+}
+.composer-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: var(--sp-4);
+}
+.composer-row .a-input {
+  min-height: 64px;
+  background: var(--paper);
+}
+
+/* Sheets: the slide, the privacy note. */
+.slide-body {
+  display: grid;
+  gap: var(--sp-2);
+}
+.slide-body .table-wrap {
+  margin: var(--sp-2) 0;
+}
+.slide-sheet .slide-figure {
+  margin: var(--sp-2) 0;
+}
+.slide-sheet .slide-figure img {
+  max-height: 40vh;
+  object-fit: contain;
+}
+.sheet-actions {
+  padding-top: var(--sp-2);
+}
+.privacy-note {
+  display: grid;
+  gap: var(--sp-3);
+}
+.privacy-note ul {
+  display: grid;
+  gap: var(--sp-4);
+  margin: 0;
+  padding-inline-start: 1.1em;
+}
+.privacy-note .is-highlight {
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--warn-bg);
+}
+
+/* ═════════════ "יחד", "שלי", help ═════════════ */
+
+.now-row {
+  align-items: center;
+}
+.question-link .q-body {
+  font-weight: 600;
+}
+.setting-row {
+  align-items: center;
+  min-height: 52px;
+}
+.size-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.size-now {
+  min-width: 2ch;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.setting-check {
+  cursor: pointer;
+}
+.setting-check {
+  gap: var(--sp-8);
+}
+.member > .a-li {
+  align-items: center;
+  min-height: 52px;
+}
+.member-name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+}
+.member .confirm {
+  margin-bottom: var(--sp-5);
+}
+.row-link {
+  align-items: center;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Help: one list of collapsible rows, a chevron on each. */
+.help-rows {
+  padding-block: 0;
+}
+.help details {
+  padding: 0;
+}
+/* Help's head carries the app's signature after its title: the four lane
+   tiles, small. Decoration only. */
+main.help > .ph-head > .t::after {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-inline: var(--sp-5) 44px;
+  border-radius: 3px;
+  background: var(--me-pop);
+  box-shadow:
+    -14px 0 0 var(--group-pop),
+    -28px 0 0 var(--fun-pop),
+    -42px 0 0 var(--ok-pop);
+  vertical-align: 0.1em;
+}
+.help summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-height: 52px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+/* display: flex drops the summary's marker: one chevron instead, on every platform. */
+.help summary::-webkit-details-marker {
+  display: none;
+}
+.help summary::after {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-inline-start: auto;
+  margin-inline-end: var(--sp-3);
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 0.2s;
+}
+.help details[open] summary {
+  color: var(--accent);
+}
+.help details[open] summary::after {
+  transform: translateY(2px) rotate(-135deg);
+}
+.help details > :not(summary) {
+  margin-bottom: var(--sp-6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+  .blk-updated {
+    animation: none;
+  }
+  .help summary::after {
+    transition: none;
+  }
+}
+
+/* The upload's small print under a reading error: build, size and the step that failed. */
+.upload-detail {
+  margin-block-start: 4px;
+  overflow-wrap: anywhere;
+  text-align: start;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+/* ── "יחד" in the group's lane (the playful look, tokens.css) ──
+   The group's screens (its home, the meeting, the live quiz and its setup)
+   wear the group's section tiles. A lane tints only decoration: their
+   primary buttons and chosen tiles stay the accent's, as everywhere. */
+:is(main.group-screen, main.m-screen, main.quiz-room, main.quiz-setup) .a-sec > :is(b, h2, h3)::before {
+  background: var(--group-pop);
+  box-shadow: 2px 2px 0 var(--group-soft);
+}

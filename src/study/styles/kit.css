@@ -1,0 +1,1846 @@
+/* ── תמצית's component kit ──
+   The approved proposal's phone kit (docs/study/proposal/kit.css), made the
+   app's own: the same class names, so an approved mockup's markup is the
+   app's markup, at full size (tokens.css: the kit's sizes × 16/13). Usage,
+   one example per component and the rules: docs/study/design-system.md.
+
+     ph-*  the frame of a screen: its top bar, the line under it, its sticky
+           bottom bar, the tab bar
+     a-*   the pieces inside it
+
+   Every control is at least 44 × 44 px to the finger (a smaller one grows an
+   invisible ::after), and its text is at least 4.5:1 in both themes. A
+   screen's own stylesheet only places these pieces; it never restyles them.
+
+   The playful look: a control is chunky and "pressable": a 2 px border and
+   a solid bottom edge (--press tall) that it sinks onto while pressed. ONLY
+   what can be tapped stands on that edge (a button, an option, a grade, a
+   card that is a link or a button, a checkbox); a card that only holds
+   things rests flat on a soft shadow, so the edge always means "tap me".
+   Text colours sit on solid background colours (never on a gradient), so
+   the contrast check reads them true. */
+
+/* ═════════════ base ═════════════ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: var(--leading);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
+}
+
+p {
+  margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+bdi {
+  unicode-bidi: isolate;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* Read by screen readers, not shown ("בערך" for the spend line's "≈"). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ═════════════ the frame (ph-*) ═════════════ */
+
+/* A screen: a column of blocks with the kit's rhythm between them, its top
+   bar flush with the edges, at most --measure wide. */
+main {
+  max-width: var(--measure);
+  min-height: calc(100vh - var(--study-banner-h, 0px));
+  min-height: calc(100dvh - var(--study-banner-h, 0px));
+  margin: 0 auto;
+  padding: 0 var(--gutter-right) calc(var(--sp-12) + env(safe-area-inset-bottom, 0px)) var(--gutter-left);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+body.has-tabs main {
+  padding-bottom: calc(var(--tabbar-h) + var(--sp-12) + env(safe-area-inset-bottom, 0px));
+}
+/* With a bottom bar, the bar ends the screen. */
+main:has(> .ph-foot) {
+  padding-bottom: 0;
+}
+body.has-tabs main:has(> .ph-foot) {
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+}
+
+/* The top bar: back, the title, a chip or tools at the end. It stays under
+   the live banner while the screen scrolls. */
+.ph-head,
+.ph-top {
+  position: sticky;
+  top: var(--study-banner-h, 0px);
+  z-index: var(--z-bar);
+  margin: 0 calc(-1 * var(--gutter-right)) 0 calc(-1 * var(--gutter-left));
+  background: var(--paper);
+  border-bottom: var(--b) solid var(--line);
+}
+/* Frosted only where the browser can blur; solid --paper everywhere else. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .ph-head,
+  .ph-top {
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
+    backdrop-filter: blur(12px) saturate(1.4);
+  }
+}
+.ph-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--head-h);
+  padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px)) max(var(--sp-4), env(safe-area-inset-right, 0px)) var(--sp-2)
+    max(var(--sp-4), env(safe-area-inset-left, 0px));
+}
+/* Head and sub-line that stay together (the reader's room). */
+.ph-top > .ph-head,
+.ph-top > .ph-sub {
+  position: static;
+  margin: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.ph-top > .ph-head {
+  border-bottom: 0;
+}
+.ph-top > .ph-sub:last-child {
+  border-bottom: 0;
+}
+/* The title wraps to a second line rather than cut: a lecture's name is
+   often English, and an ellipsis in a right-to-left line cuts it from its
+   start ("…etics)"). */
+.ph-head > .t {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: 800 var(--text-title) / 1.3 var(--font-display);
+  overflow: hidden;
+  overflow-wrap: break-word;
+}
+.ph-head > .t:first-child {
+  padding-inline-start: var(--sp-4);
+}
+@media (max-width: 374px) {
+  .ph-head > .t {
+    font-size: 1rem;
+  }
+}
+.ph-head .back {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 var(--sp-6);
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--accent);
+  font: 700 var(--text-btn) / 1.2 var(--font-body);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ph-head .back:hover {
+  background: var(--accent-soft);
+}
+.ph-head .back:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ph-head > .a-chip {
+  flex: none;
+}
+
+/* The line under the top bar: a muted line of context, chips. */
+.ph-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+  min-width: 0;
+  margin: 0 calc(-1 * var(--gutter-right)) 0 calc(-1 * var(--gutter-left));
+  padding: var(--sp-3) var(--gutter-right) var(--sp-3) var(--gutter-left);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--text-small);
+  line-height: 1.45;
+}
+/* Right under the top bar, with no gap. */
+.ph-head + .ph-sub {
+  margin-top: calc(-1 * var(--sp-5));
+}
+
+/* The bottom bar of an immersive screen: its one primary action. */
+.ph-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-bar);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: auto calc(-1 * var(--gutter-right)) 0 calc(-1 * var(--gutter-left));
+  padding: var(--sp-5) var(--gutter-right) calc(var(--sp-6) + var(--press) + env(safe-area-inset-bottom, 0px)) var(--gutter-left);
+  background: var(--paper);
+  border-top: var(--b) solid var(--line);
+}
+body.has-tabs .ph-foot {
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(var(--sp-6) + var(--press));
+}
+.ph-foot > .a-btn.wide {
+  flex: 1;
+  width: auto;
+}
+
+/* The tab bar: four tabs, an icon tile over a word. The current tab's tile
+   fills with the accent and stands on its edge; the others are quiet. */
+.ph-tabs {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: var(--z-tabs);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  height: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+  padding: 0 max(var(--sp-3), env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(var(--sp-3), env(safe-area-inset-left, 0px));
+  background: var(--surface);
+  border-top: var(--b) solid var(--line);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  box-shadow: 0 -8px 24px -18px rgba(28, 24, 56, 0.45);
+}
+/* What scrolls under the bar fades out above it (and fills its rounded
+   corners): decoration, never a target. */
+.ph-tabs::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 100%;
+  height: 10px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--paper) 0%, transparent),
+    var(--paper)
+  );
+  pointer-events: none;
+}
+.ph-tab {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--sp-1);
+  min-width: var(--hit);
+  min-height: var(--tabbar-h);
+  color: var(--muted);
+  font: 600 var(--text-tab) / 1.2 var(--font-body);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.ph-tab svg {
+  box-sizing: content-box;
+  width: 22px;
+  height: 22px;
+  padding: 4px 13px;
+  border-radius: 12px;
+  transition: transform var(--t-press) ease;
+}
+.ph-tab:hover svg {
+  background: var(--surface-2);
+}
+.ph-tab:active svg {
+  transform: scale(0.92);
+}
+.ph-tab[aria-current="page"] {
+  color: var(--accent);
+  font-weight: 800;
+}
+.ph-tab[aria-current="page"] svg {
+  background: var(--accent-fill);
+  color: var(--accent-fill-ink);
+  box-shadow: 0 3px 0 var(--accent-edge);
+}
+/* The tile wears its tab's lane: "יחד" is the group's. */
+.ph-tab[href*="v=group"][aria-current="page"] {
+  color: var(--group-text);
+}
+.ph-tab[href*="v=group"][aria-current="page"] svg {
+  background: var(--group-pop);
+  color: var(--pop-ink);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--group-pop) 55%, #000);
+}
+
+/* A tab's home (היום, ספרייה, יחד, שלי): its title is the screen's big
+   title, in the display face, and the guide's "?" sits in a round tile. */
+:is(main.today:not(.t-session), main.library, main.group-screen, main.me-screen)
+  > .ph-head {
+  padding-block: calc(var(--sp-6) + env(safe-area-inset-top, 0px)) var(--sp-6);
+  border-bottom-color: transparent;
+}
+:is(main.today:not(.t-session), main.library, main.group-screen, main.me-screen)
+  > .ph-head
+  > .t {
+  font-size: var(--text-h1);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.ph-head .guide-btn {
+  border-radius: 50%;
+}
+.ph-head .guide-btn::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--line);
+}
+/* The rule under a tab home's big title shows once the page scrolls under
+   it (where the browser can tie a style to the scroll; elsewhere none). */
+@supports (animation-timeline: scroll()) {
+  @keyframes ph-head-rule {
+    to {
+      border-bottom-color: var(--line);
+    }
+  }
+  :is(
+      main.today:not(.t-session),
+      main.library,
+      main.group-screen,
+      main.me-screen
+    )
+    > .ph-head {
+    animation: ph-head-rule linear both;
+    animation-timeline: scroll(root);
+    animation-range: 0 24px;
+  }
+}
+.ph-head .guide-btn {
+  isolation: isolate;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+/* ═════════════ text ═════════════ */
+
+.a-h1 {
+  font-family: var(--font-display);
+  font-size: var(--text-h1);
+  font-weight: 800;
+  line-height: 1.2;
+}
+.a-h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-h2);
+  font-weight: 700;
+  line-height: 1.3;
+}
+.a-para {
+  font-size: var(--text-para);
+  line-height: 1.65;
+}
+.a-para.marked {
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  box-shadow: -4px 0 0 var(--accent);
+}
+.a-small {
+  font-size: var(--text-small);
+}
+.a-muted {
+  color: var(--muted);
+}
+.a-error {
+  color: var(--bad);
+}
+/* An error on its own line: a soft red panel with a "!" tile at its start
+   (decoration: the words say what went wrong), the words in the bad colour
+   (5:1 or more on the tint, both themes). The mark is drawn, not written:
+   generated text would be read out at the start of every role=alert. Its
+   ink is --pop-ink, the same in both themes. */
+p.a-error {
+  position: relative;
+  padding: var(--sp-4) var(--sp-6);
+  padding-inline-start: calc(var(--sp-6) + 30px);
+  border-radius: var(--r-md);
+  background: var(--bad-bg);
+  font-weight: 600;
+}
+p.a-error::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--sp-4) + 1px);
+  inset-inline-start: var(--sp-5);
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--bad-pop)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Crect x='9.4' y='5' width='3.2' height='8.4' rx='1.6' fill='%231c1838'/%3E%3Ccircle cx='11' cy='16.6' r='1.75' fill='%231c1838'/%3E%3C/svg%3E")
+    center / 22px 22px no-repeat;
+  box-shadow: inset 0 -2px 0 rgba(28, 24, 56, 0.16);
+}
+
+/* ═════════════ layout ═════════════ */
+
+.a-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.a-row.between {
+  justify-content: space-between;
+}
+.a-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.a-stack {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+ul.a-stack,
+ol.a-stack {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.a-grid2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+.a-divider {
+  height: var(--b);
+  border-radius: var(--r-pill);
+  background: var(--line);
+}
+
+/* ═════════════ controls ═════════════ */
+
+/* A button: secondary by default; .primary for the screen's one action,
+   .ghost for a quiet one, .danger to delete, .wide to fill its row, .small
+   inside a line of text or a list row. */
+.a-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  min-height: 40px;
+  min-width: var(--hit);
+  padding: var(--sp-3) var(--sp-8);
+  border: var(--b) solid var(--btn-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow:
+    var(--hi),
+    0 var(--press) 0 var(--edge);
+  color: var(--ink);
+  font: 700 var(--text-btn) / 1.25 var(--font-body);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  /* Only the press moves: colours never transition, so a theme switch
+     never shows text on a half-changed fill. */
+  transition:
+    transform var(--t-press) ease,
+    box-shadow var(--t-press) ease;
+}
+@media (hover: hover) {
+  .a-btn:not(:disabled):not([aria-disabled="true"]):hover {
+    background-color: var(--surface-2);
+  }
+  .a-btn.primary:not(:disabled):not([aria-disabled="true"]):hover {
+    background-color: color-mix(
+      in srgb,
+      var(--accent-fill) 88%,
+      var(--accent-2)
+    );
+  }
+}
+/* The press: the button sinks onto its edge. */
+.a-btn:not(:disabled):not([aria-disabled="true"]):active {
+  transform: translateY(calc(var(--press) - var(--press-down)));
+  box-shadow:
+    var(--hi),
+    0 var(--press-down) 0 var(--edge);
+}
+/* 44 × 44 to the finger, whatever its size on screen. */
+.a-btn::after,
+a.a-chip::after,
+button.a-chip::after,
+button.a-tag::after,
+.a-link::after,
+.ph-head .back::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, calc((100% - var(--hit)) / 2));
+}
+.a-btn.primary {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  box-shadow:
+    var(--hi),
+    0 var(--press) 0 var(--accent-edge);
+  color: var(--accent-fill-ink);
+}
+.a-btn.primary:not(:disabled):not([aria-disabled="true"]):active {
+  box-shadow:
+    var(--hi),
+    0 var(--press-down) 0 var(--accent-edge);
+}
+.a-btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+.a-btn.ghost:not(:disabled):not([aria-disabled="true"]):active {
+  transform: none;
+  box-shadow: none;
+}
+.a-btn.danger {
+  border-color: var(--bad);
+  background: var(--bad);
+  box-shadow: 0 var(--press) 0 color-mix(in srgb, var(--bad) 65%, #000);
+  color: var(--bad-ink);
+}
+.a-btn.danger:not(:disabled):not([aria-disabled="true"]):active {
+  box-shadow: 0 var(--press-down) 0 color-mix(in srgb, var(--bad) 65%, #000);
+}
+.a-btn.wide {
+  width: 100%;
+  min-height: 52px;
+  border-radius: var(--r-lg);
+  font-size: 1.0625rem;
+  font-weight: 800;
+}
+.a-btn.small {
+  --press: 3px;
+  min-height: 32px;
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: 11px;
+  font-size: 0.875rem;
+}
+/* A disabled button has no edge and no fill of its own: flat, legible and
+   plainly "not now" (never a faded colour). */
+.a-btn:disabled,
+.a-btn[aria-disabled="true"],
+.a-btn.primary:disabled,
+.a-btn.primary[aria-disabled="true"] {
+  border-color: var(--line);
+  background: var(--surface-2);
+  box-shadow: none;
+  color: var(--muted);
+  cursor: default;
+}
+.a-btn.ghost:disabled,
+.a-btn.ghost[aria-disabled="true"] {
+  border-color: transparent;
+  background: transparent;
+}
+.a-row > .a-btn.wide {
+  flex: 1;
+  width: auto;
+}
+
+/* A text action: "תשובה", "לסמן שנענתה", "עוד כרטיסיות". */
+.a-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--hit);
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 700 var(--text-btn) / 1.3 var(--font-body);
+  /* A thick, offset underline in my lane's bright colour: it reads as a
+     link without relying on colour alone. */
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--me-pop) 70%, transparent);
+  text-decoration-thickness: 2.5px;
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: auto;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .a-link:not(:disabled):hover {
+    text-decoration-color: currentColor;
+  }
+}
+.a-link.danger {
+  color: var(--bad);
+  text-decoration-color: color-mix(in srgb, var(--bad-pop) 70%, transparent);
+}
+/* In the group's lane ("יחד", the meeting band): the group's colour. */
+:is(main.group-screen, .m-band) .a-link:not(.danger) {
+  text-decoration-color: color-mix(in srgb, var(--group-pop) 75%, transparent);
+}
+.a-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A chip: a short state or count. A link or a button keeps the look. */
+.a-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: var(--sp-2);
+  padding: 1px var(--sp-5);
+  border-radius: var(--r-pill);
+  background: var(--line);
+  color: var(--chip-ink);
+  font: 700 var(--text-chip) / 1.5 var(--font-body);
+  white-space: nowrap;
+}
+.a-chip.ok {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+.a-chip.busy {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.a-chip.warn {
+  background: var(--warn-bg);
+  color: var(--ink);
+}
+.a-chip.bad {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+.a-chip.group {
+  background: var(--group-soft);
+  color: var(--group-text);
+}
+.a-chip.fun {
+  background: var(--fun-soft);
+  color: var(--fun);
+}
+a.a-chip,
+button.a-chip {
+  position: relative;
+  border: 0;
+  text-decoration: none;
+  cursor: pointer;
+}
+/* Only a chip that can be tapped wears a ring: a state is fill only. */
+a.a-chip,
+button.a-chip {
+  box-shadow: inset 0 0 0 1.5px var(--edge);
+}
+button.a-chip.busy,
+button.a-chip[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1.5px
+    color-mix(in srgb, var(--me-pop) 55%, transparent);
+}
+/* A chip that is one of a few (role=radio, aria-checked): the chosen one
+   wears a ring of its own colour, so the choice never rests on the tint alone. */
+button.a-chip[aria-checked="true"] {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, currentColor 60%, transparent);
+}
+/* One rule for every choice: a lane tints only decoration (section tiles,
+   card edges, strips, timers); a chosen chip is always the accent's, as a
+   chosen tile and the primary are, whatever screen or lane it sits in. */
+button.a-chip[role="radio"][aria-checked="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+button.a-chip:disabled {
+  background: var(--surface-2);
+  box-shadow: none;
+  color: var(--muted);
+  cursor: default;
+}
+
+/* A slide tag, "ש׳ 12": a quiet label after a sentence; a button opens the
+   slide. Inline-block, not flex: the space between "ש׳" and its number stays. */
+.a-tag {
+  display: inline-block;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-xs);
+  background: var(--line);
+  color: var(--chip-ink);
+  font-family: var(--font-body);
+  font-size: max(var(--text-tag), 0.72em);
+  font-weight: 700;
+  line-height: 1.6;
+  vertical-align: 0.1em;
+  white-space: nowrap;
+}
+button.a-tag {
+  position: relative;
+  cursor: pointer;
+}
+.a-tag.bad {
+  background: transparent;
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* ═════════════ blocks ═════════════ */
+
+/* A card: one thing (a lecture, a deck, a question). It rests on a soft
+   shadow; only a card that is itself a link or a button stands on the
+   pressable edge (a screen that gives it its lane's border-color gives its
+   edge that colour too). .flat inside another card or a sheet; .dashed for
+   an empty place or a drop zone. */
+.a-card {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-6) var(--sp-8);
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.a-card.flat {
+  box-shadow: none;
+}
+.a-card.dashed {
+  border-style: dashed;
+  border-bottom-width: var(--b);
+  border-color: color-mix(in srgb, var(--field-line) 55%, var(--paper));
+  background: transparent;
+}
+a.a-card,
+button.a-card {
+  border-bottom: calc(var(--b) + var(--press)) solid var(--edge);
+  box-shadow: var(--hi);
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform var(--t-press) ease,
+    box-shadow var(--t-press) ease;
+}
+a.a-card.flat,
+button.a-card.flat {
+  border-bottom: var(--b) solid var(--line);
+}
+a.a-card:active,
+button.a-card:not(:disabled):active {
+  transform: translateY(2px);
+}
+
+/* A lecture's hue (data-hue, lib/hue.ts): one of the four lane colours,
+   the same for the lecture everywhere, as a strip down the start side of
+   its card in the library and of the meeting band. It helps find one
+   lecture among many; it is never the only sign of anything. */
+[data-hue] {
+  --hue: var(--me-pop);
+}
+[data-hue="2"] {
+  --hue: var(--group-pop);
+}
+[data-hue="3"] {
+  --hue: var(--fun-pop);
+}
+[data-hue="4"] {
+  --hue: var(--ok-pop);
+}
+/* The strip is its own shape inside the card's one even border: a short
+   rounded bar inset from the corners, never a thick border that tapers into
+   the radius. Decoration only. */
+.a-card[data-hue] {
+  position: relative;
+}
+.a-card[data-hue]::before {
+  content: "";
+  position: absolute;
+  inset-block: var(--sp-8);
+  inset-inline-start: var(--sp-3);
+  width: 5px;
+  border-radius: var(--r-pill);
+  background: var(--hue);
+  pointer-events: none;
+}
+
+/* An empty place carries the app's signature: the four lane tiles (the
+   join screen's mark), small, over its words. Decoration only. */
+.a-card.dashed.empty::before,
+.a-card.dashed.practice-empty::before {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin-block: var(--sp-1) var(--sp-2);
+  margin-inline-end: 54px;
+  border-radius: 4px;
+  background: var(--me-pop);
+  box-shadow:
+    -17px 0 0 var(--group-pop),
+    -34px 0 0 var(--fun-pop),
+    -51px 0 0 var(--ok-pop);
+  transform: rotate(4deg);
+}
+
+/* A list: rows split by rules in one card. A row is a title (b), a muted
+   line (.m), and a chip or a button at the end. A row may be the list's
+   child or sit in an <li>; a link or a button may be the row. */
+.a-list {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-8);
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  list-style: none;
+}
+.a-list > * + * {
+  border-top: 1.5px solid var(--line);
+}
+.a-li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  min-width: 0;
+  padding: var(--sp-4) 0;
+}
+.a-li > div {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.a-li b {
+  font-size: var(--text-para);
+  font-weight: 700;
+  line-height: 1.4;
+}
+.a-li .m {
+  color: var(--muted);
+  font-size: var(--text-small);
+  line-height: 1.45;
+}
+.a-li > .a-chip,
+.a-li > .a-btn {
+  flex: none;
+  margin-top: var(--sp-1);
+}
+a.a-li,
+button.a-li {
+  width: 100%;
+  min-height: var(--hit);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* A section's header: its name in the display face, a note or a chip at the end. */
+.a-sec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-top: var(--sp-2);
+}
+.a-sec > b,
+.a-sec > h2,
+.a-sec > h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-sec);
+  font-weight: 800;
+  line-height: 1.3;
+}
+/* A small tilted tile before a section's name: the look's bullet. */
+.a-sec > b::before,
+.a-sec > h2::before,
+.a-sec > h3::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-inline-end: var(--sp-4);
+  border-radius: 3px;
+  background: var(--me-pop);
+  box-shadow: 2px 2px 0 var(--accent-soft);
+  transform: rotate(45deg) translateY(-2px);
+  vertical-align: 0.12em;
+}
+
+/* A box beside the text: "הרחבה" (the default), .warn ("שימו לב"), .rec
+   (the lecturer, the recording), .quiet (a plain quote). */
+.a-callout {
+  padding: var(--sp-6) var(--sp-7);
+  border-inline-start: 4px solid var(--extra-line);
+  border-radius: var(--r-md);
+  background: var(--extra-bg);
+  font-size: 0.9375em;
+}
+.a-callout.warn {
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+}
+.a-callout.rec {
+  border-color: var(--lecturer-line);
+  background: var(--lecturer-bg);
+}
+.a-callout.quiet {
+  border-color: var(--me-pop);
+  background: var(--surface-2);
+}
+.a-callout b,
+.a-callout strong {
+  font-weight: 700;
+}
+
+/* Progress. */
+/* A bar: a candy track, filled from the start with the lane's colour and a
+   soft inner highlight. */
+.a-bar {
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+.a-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background-color: var(--accent);
+  background-image: linear-gradient(to left, var(--accent), var(--me-pop));
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.28);
+  transition: width 0.45s var(--ease-bounce);
+}
+.a-bar.group > i {
+  background-color: var(--group-pop);
+  background-image: linear-gradient(to left, var(--group-pop), var(--sun-pop));
+}
+/* A ring: a thick conic track in the primary, the number in the middle. */
+.a-ring {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background-color: var(--track);
+  background-image: conic-gradient(var(--me-pop), var(--accent) var(--p, 60%), var(--track) 0);
+  font-size: var(--text-body);
+  font-weight: 800;
+}
+.a-ring::after {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: inset 0 2px 0 var(--track);
+}
+.a-ring > span {
+  position: relative;
+  z-index: 1;
+}
+.a-meter {
+  display: grid;
+  gap: var(--sp-2);
+}
+/* Bars in rows: the label, the bar, the count. The labels share one column
+   as wide as the widest label, at most 45% of the row, and wrap inside it
+   (never cut: a real part's or option's name is long, often English, and an
+   ellipsis in a right-to-left line cuts an English name from its start). The
+   bars start at one line; the count is text beside them. */
+.a-bars {
+  display: grid;
+  grid-template-columns: fit-content(45%) minmax(0, 1fr) auto;
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-2);
+}
+.a-bars .r {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: fit-content(45%) minmax(0, 1fr) 3.2em;
+  column-gap: var(--sp-3);
+  align-items: center;
+  font-size: var(--text-small);
+}
+@supports (grid-template-columns: subgrid) {
+  .a-bars .r {
+    grid-template-columns: subgrid;
+  }
+}
+.a-bars .r > span:first-child {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
+  line-height: 1.35;
+}
+/* An English label still sits against the column's right edge, as a Hebrew one. */
+.a-bars .r > span:first-child:dir(ltr) {
+  text-align: end;
+}
+.a-bars .r > b {
+  min-width: 2em;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+.a-bars .a-bar {
+  height: 12px;
+}
+.a-bars .r.ok {
+  color: var(--ok-text);
+  font-weight: 700;
+}
+.a-bars .r.ok .a-bar > i {
+  background-color: var(--ok-pop);
+  background-image: none;
+}
+.a-timer {
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+.a-timer > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background-color: var(--group-pop);
+  background-image: linear-gradient(to left, var(--group-pop), var(--sun-pop));
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.28);
+}
+
+/* People. */
+.a-avatar {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--avatar-1);
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--ring, var(--avatar-ring-1));
+  color: #fff;
+  font: 800 var(--text-chip) / 1 var(--font-body);
+}
+.a-avatar.c2 {
+  --ring: var(--avatar-ring-2);
+  background: var(--avatar-2);
+}
+.a-avatar.c3 {
+  --ring: var(--avatar-ring-3);
+  background: var(--avatar-3);
+}
+.a-avatar.c4 {
+  --ring: var(--avatar-ring-4);
+  background: var(--avatar-4);
+}
+.a-avatar.c5 {
+  --ring: var(--avatar-ring-5);
+  background: var(--avatar-5);
+}
+.a-avatar.c6 {
+  --ring: var(--avatar-ring-6);
+  background: var(--avatar-6);
+}
+.a-up {
+  display: inline-grid;
+  justify-items: center;
+  min-width: 37px;
+  padding: var(--sp-1) var(--sp-2);
+  border: var(--b) solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--chip-ink);
+  font: 700 var(--text-chip) / 1.2 var(--font-body);
+}
+.a-up.on {
+  border-color: var(--fun-pop);
+  background: var(--fun-soft);
+  color: var(--fun);
+}
+.a-lead {
+  display: grid;
+  grid-template-columns: 22px 28px minmax(0, 1fr) auto;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  font-size: var(--text-btn);
+}
+.a-lead.me {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 var(--b) color-mix(in srgb, var(--me-pop) 45%, transparent);
+}
+.a-lead .r {
+  color: var(--muted);
+  font-weight: 800;
+  text-align: center;
+}
+.a-lead .s {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.a-bubble {
+  max-width: 88%;
+  padding: var(--sp-4) var(--sp-6);
+  border-radius: 20px;
+  font-size: var(--text-btn);
+  line-height: 1.55;
+}
+.a-bubble.me {
+  justify-self: start;
+  border-bottom-right-radius: 5px;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.a-bubble.bot {
+  justify-self: end;
+  border: var(--b) solid var(--line);
+  border-bottom-left-radius: 6px;
+  background: var(--surface);
+}
+
+/* A small table inside a card or a sheet. */
+.a-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125em;
+  line-height: 1.4;
+}
+.a-table th,
+.a-table td {
+  padding: var(--sp-2) var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  text-align: start;
+  vertical-align: top;
+}
+.a-table th {
+  color: var(--muted);
+  font-size: 0.9em;
+  font-weight: 700;
+}
+
+/* ═════════════ questions and cards ═════════════ */
+
+.a-q {
+  font-size: var(--text-body);
+  font-weight: 600;
+  line-height: 1.6;
+}
+.a-opts {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* An answer: a chunky tile with a letter tile, the text, its explanation
+   (.x) under it. As a button it stands on its edge and sinks when tapped. */
+.a-opt {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-5);
+  align-items: start;
+  padding: var(--sp-5) var(--sp-6);
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow:
+    var(--hi),
+    0 var(--press) 0 var(--edge);
+  color: var(--ink);
+  font-size: var(--text-btn);
+  text-align: start;
+}
+button.a-opt {
+  width: 100%;
+  min-height: 52px;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    transform var(--t-press) ease,
+    box-shadow var(--t-press) ease;
+}
+@media (hover: hover) {
+  button.a-opt:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--me-pop) 55%, var(--line));
+  }
+}
+button.a-opt:not(:disabled):active {
+  transform: translateY(calc(var(--press) - var(--press-down)));
+  box-shadow: 0 var(--press-down) 0 var(--edge);
+}
+.a-opt > .l {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: inset 0 -2px 0 var(--edge);
+  color: var(--chip-ink);
+  font-size: var(--text-btn);
+  font-weight: 800;
+}
+.a-opt > .x {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+.a-opt.correct {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 8%, var(--surface));
+  box-shadow: 0 var(--press) 0 color-mix(in srgb, var(--ok) 55%, var(--edge));
+}
+.a-opt.correct > .l {
+  background: var(--ok);
+  box-shadow: none;
+  color: var(--ok-ink);
+}
+.a-opt.wrong {
+  border-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 7%, var(--surface));
+  box-shadow: 0 var(--press) 0 color-mix(in srgb, var(--bad) 45%, var(--edge));
+}
+.a-opt.wrong > .l {
+  background: var(--bad);
+  box-shadow: none;
+  color: var(--bad-ink);
+}
+.a-opt.picked {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 var(--press) 0 var(--accent-edge);
+}
+.a-opt.picked:not(.correct):not(.wrong) > .l {
+  background: var(--accent-fill);
+  box-shadow: none;
+  color: var(--accent-fill-ink);
+}
+.a-opt.correct.picked {
+  border-color: var(--ok);
+  box-shadow:
+    0 0 0 1px var(--ok),
+    0 var(--press) 0 color-mix(in srgb, var(--ok) 55%, var(--edge));
+}
+
+/* A flash card's face, and the four grades under it. The card sits on a
+   little deck: two more cards peek out under its bottom edge. */
+.a-flash {
+  display: grid;
+  gap: var(--sp-5);
+  align-content: center;
+  min-height: 210px;
+  margin-bottom: 10px;
+  padding: var(--sp-10) var(--sp-8);
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  box-shadow:
+    0 var(--press) 0 var(--edge),
+    0 9px 0 -4px var(--surface),
+    0 9px 0 -2px var(--line),
+    0 15px 0 -9px var(--surface),
+    0 15px 0 -7px var(--line);
+  text-align: center;
+}
+.a-flash .front {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+.a-grade {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.a-grade > * {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 52px;
+  padding: var(--sp-2) var(--sp-1);
+  border: var(--b) solid var(--btn-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow:
+    var(--hi),
+    0 var(--press) 0 var(--edge);
+  color: var(--ink);
+  font: 800 var(--text-chip) / 1.3 var(--font-body);
+  text-align: center;
+  transition:
+    transform var(--t-press) ease,
+    box-shadow var(--t-press) ease;
+}
+.a-grade > button:not(:disabled):active {
+  transform: translateY(calc(var(--press) - var(--press-down)));
+  box-shadow: 0 var(--press-down) 0 var(--edge);
+}
+.a-grade small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.a-grade > button {
+  cursor: pointer;
+}
+/* A grade or a level that is chosen (a radio): outlined in the accent, as a-seg's. */
+.a-grade > [aria-checked="true"],
+.a-grade > [aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 var(--press) 0 var(--accent-edge);
+  color: var(--accent);
+}
+
+/* ═════════════ forms ═════════════ */
+
+.a-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: var(--sp-5) var(--sp-7);
+  border: var(--b) solid var(--field-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: inset 0 3px 0 var(--surface-2);
+  color: var(--ink);
+  font: 400 16px / 1.5 var(--font-body);
+}
+/* A focused field wears the kit's own ring (the global :focus-visible, a
+   3 px solid accent outline: kept in forced colours, where box-shadow and
+   border colours are not) and an accent border; no soft halo under it. */
+.a-input:focus {
+  border-color: var(--accent);
+  box-shadow: none;
+}
+textarea.a-input {
+  min-height: 84px;
+  resize: vertical;
+}
+.a-input::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+/* A label over its field. */
+.a-field {
+  display: grid;
+  gap: var(--sp-3);
+  font-size: var(--text-btn);
+  font-weight: 700;
+}
+.a-field small {
+  color: var(--muted);
+  font-weight: 400;
+}
+/* One of a few: the chosen one outlined in the accent. */
+.a-seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--sp-3);
+}
+/* One of a few: the chosen one is an accent-filled tile on its edge. */
+.a-seg > .a-btn[aria-selected="true"],
+.a-seg > .a-btn[aria-checked="true"],
+.a-seg > .a-btn[aria-pressed="true"] {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  box-shadow:
+    var(--hi),
+    0 var(--press) 0 var(--accent-edge);
+  color: var(--accent-fill-ink);
+}
+@media (hover: hover) {
+  .a-seg > .a-btn[aria-selected="true"]:not(:disabled):hover,
+  .a-seg > .a-btn[aria-checked="true"]:not(:disabled):hover,
+  .a-seg > .a-btn[aria-pressed="true"]:not(:disabled):hover {
+    background-color: var(--accent-fill);
+  }
+}
+.a-seg > .a-btn {
+  padding-inline: var(--sp-4);
+}
+/* An option that is not available here ("20" with only 7 questions):
+   it recedes, so the row's strongest difference is never on what cannot
+   be picked: no fill, a dashed border, muted figures, no raised edge. */
+.a-seg > .a-btn:is(:disabled, [aria-disabled="true"]):not([aria-checked="true"]) {
+  border-style: dashed;
+  border-color: var(--field-line);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+/* The confidence bet (practice's .pq-bets, the quiz's .quiz-bets, a
+   meeting's .m-bets): three equal tiles on the same neutral surface, so no
+   bet looks chosen or recommended before the member picks. Only the one,
+   two or three little bars before each word show the scale (decoration:
+   the word says it). The chosen one fills with the primary, its bars in
+   white. */
+:is(.pq-bets, .quiz-bets, .m-bets) > .a-btn {
+  --bet: var(--surface);
+  --bar1: currentColor;
+  --bar2: color-mix(in srgb, currentColor 26%, transparent);
+  --bar3: color-mix(in srgb, currentColor 26%, transparent);
+  background: var(--bet);
+  color: var(--ink);
+}
+:is(.pq-bets, .quiz-bets, .m-bets) > .a-btn:nth-child(2) {
+  --bar2: currentColor;
+}
+:is(.pq-bets, .quiz-bets, .m-bets) > .a-btn:nth-child(3) {
+  --bar2: currentColor;
+  --bar3: currentColor;
+}
+:is(.pq-bets, .quiz-bets, .m-bets) > .a-btn::before {
+  content: "";
+  flex: none;
+  width: 13px;
+  height: 11px;
+  /* from short to tall along the line: rightward is "less", as the scale reads */
+  background:
+    linear-gradient(var(--bar1), var(--bar1)) 100% 100% / 3px 5px no-repeat,
+    linear-gradient(var(--bar2), var(--bar2)) 50% 100% / 3px 8px no-repeat,
+    linear-gradient(var(--bar3), var(--bar3)) 0 100% / 3px 11px no-repeat;
+  pointer-events: none;
+}
+:is(.pq-bets, .quiz-bets, .m-bets) > .a-btn:dir(ltr)::before {
+  transform: scaleX(-1);
+}
+@media (hover: hover) {
+  :is(.pq-bets, .quiz-bets, .m-bets) > .a-btn:not(:disabled):not([aria-disabled="true"]):hover {
+    background-color: color-mix(in srgb, var(--me-pop) 10%, var(--bet));
+  }
+}
+:is(.pq-bets, .quiz-bets, .m-bets) > .a-btn:is([aria-checked="true"], [aria-pressed="true"]) {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  box-shadow:
+    var(--hi),
+    0 var(--press) 0 var(--accent-edge);
+  color: var(--accent-fill-ink);
+}
+@media (hover: hover) {
+  :is(.pq-bets, .quiz-bets, .m-bets) > .a-btn:is([aria-checked="true"], [aria-pressed="true"]):not(:disabled):hover {
+    background-color: var(--accent-fill);
+  }
+}
+/* Not yet (the quiz's bets before an answer is picked): flat and muted, the
+   bars still showing the scale. */
+:is(.pq-bets, .quiz-bets, .m-bets) > .a-btn:is(:disabled, [aria-disabled="true"]):not([aria-checked="true"]) {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+/* A radio or a checkbox with its words: the whole row is the target. */
+.a-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  min-height: var(--hit);
+  font-weight: 500;
+  cursor: pointer;
+}
+.a-choice input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent-fill);
+}
+/* Every checkbox in the app: a chunky 26 px tile on its edge; checked, it
+   fills with the accent and shows a white tick. Its row (a label) is the
+   44 px target. With forced colours the system draws its own. */
+input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  border: var(--b) solid var(--field-line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 3px 0 var(--edge);
+  vertical-align: middle;
+  cursor: pointer;
+}
+input[type="checkbox"]:checked {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3L13 4.5' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 16px no-repeat;
+  box-shadow: 0 3px 0 var(--accent-edge);
+}
+input[type="checkbox"]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+input[type="checkbox"]:disabled {
+  border-color: var(--line);
+  background-color: var(--surface-2);
+  box-shadow: none;
+  cursor: default;
+}
+/* Every radio: a round 24 px tile on its edge; chosen, a ring of the
+   primary with a dot in it. With forced colours the system draws its own. */
+input[type="radio"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  border: var(--b) solid var(--field-line);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 2px 0 var(--edge);
+  vertical-align: middle;
+  cursor: pointer;
+}
+input[type="radio"]:checked {
+  border-color: var(--accent-fill);
+  background: radial-gradient(circle closest-side, var(--accent-fill) 0 52%, transparent 58%) var(--surface);
+  box-shadow: 0 2px 0 var(--accent-edge);
+}
+input[type="radio"]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+input[type="radio"]:disabled {
+  border-color: var(--line);
+  background-color: var(--surface-2);
+  box-shadow: none;
+  cursor: default;
+}
+/* A setting that is on or off (a .setting-check row on "שלי"): the same
+   checkbox, drawn as a switch. Off: an outlined track with a small knob at
+   its start. On: the track fills with the primary and a bigger white knob
+   moves to its end. Position and size change with the state, never colour
+   alone. The row (a label) is the 44 px target. */
+.setting-check input[type="checkbox"] {
+  width: 52px;
+  height: 32px;
+  border-radius: var(--r-pill);
+  background: var(--surface) radial-gradient(circle closest-side, var(--field-line) 0 92%, transparent) no-repeat;
+  background-size: 18px 18px;
+  background-position: right 5px center;
+  box-shadow: inset 0 2px 0 var(--surface-2);
+  accent-color: auto;
+}
+.setting-check input[type="checkbox"]:checked {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill) radial-gradient(circle closest-side, var(--accent-fill-ink) 0 92%, transparent) no-repeat;
+  background-size: 24px 24px;
+  background-position: left 2px center;
+  box-shadow: 0 3px 0 var(--accent-edge);
+}
+.setting-check input[type="checkbox"]:dir(ltr) {
+  background-position: left 5px center;
+}
+.setting-check input[type="checkbox"]:dir(ltr):checked {
+  background-position: right 2px center;
+}
+.setting-check input[type="checkbox"]:disabled {
+  border-color: var(--line);
+  background-color: var(--surface-2);
+  background-image: radial-gradient(circle closest-side, var(--faint) 0 92%, transparent);
+}
+.setting-check input[type="checkbox"]:checked:disabled {
+  background-color: color-mix(in srgb, var(--accent-fill) 45%, var(--surface-2));
+  background-image: radial-gradient(circle closest-side, var(--surface) 0 92%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .setting-check input[type="checkbox"] {
+    transition: background-position 0.16s ease, background-size 0.16s ease;
+  }
+}
+@media (forced-colors: active) {
+  input[type="checkbox"],
+  input[type="radio"],
+  .setting-check input[type="checkbox"] {
+    -webkit-appearance: auto;
+    appearance: auto;
+    width: 22px;
+    height: 22px;
+  }
+}
+.a-choice small {
+  color: var(--muted);
+}
+
+/* ═════════════ over the screen ═════════════ */
+
+/* A bottom sheet over a scrim: its head (a title and ✕), then its body. */
+.a-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: var(--scrim);
+}
+.a-sheet {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: var(--sp-4);
+  width: 100%;
+  max-width: var(--measure);
+  max-height: 85vh;
+  max-height: 85dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--sp-8) + var(--sp-1)) var(--sp-8) calc(var(--sp-8) + env(safe-area-inset-bottom, 0px));
+  border-top: var(--b) solid var(--line);
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  background: var(--surface);
+  box-shadow: var(--shadow-sheet);
+}
+/* The sheet's grip: a small pill at its top, decoration only. */
+.a-sheet::before {
+  content: "";
+  position: absolute;
+  top: var(--sp-4);
+  inset-inline: 0;
+  width: 44px;
+  height: 5px;
+  margin: 0 auto;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  pointer-events: none;
+}
+.a-sheet:focus {
+  outline: none;
+}
+.a-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.a-sheet-head h2 {
+  padding-top: var(--sp-3);
+  font-size: var(--text-h2);
+  font-weight: 800;
+}
+/* The sheet's closing ✕, and every square icon button. */
+.a-btn.icon {
+  flex: none;
+  min-width: var(--hit);
+  min-height: var(--hit);
+  padding: 0;
+  font-size: 1.05rem;
+}
+
+/* A short line about what just happened. */
+.a-toast {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  padding: var(--sp-4) var(--sp-10);
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow:
+    0 var(--press) 0 color-mix(in srgb, var(--ink) 70%, var(--accent)),
+    var(--shadow-pop);
+  font: 700 var(--text-small) / 1.4 var(--font-body);
+  text-align: center;
+}
+
+/* ═════════════ celebration ═════════════ */
+
+/* A burst of confetti for a right answer and a finished queue: a
+   decoration on ::before of the element that celebrates, CSS only, played
+   once. Under prefers-reduced-motion it is never drawn. A screen's
+   stylesheet opts an element in with .a-burst's rules (see practice.css,
+   today.css, cards.css, quiz.css). */
+@keyframes a-burst {
+  0% {
+    opacity: 0;
+    transform: scale(0.35) rotate(-8deg);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.25) rotate(6deg);
+  }
+}
+@keyframes a-confetti-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.4) translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes a-pop {
+  0% {
+    transform: scale(0.85);
+  }
+  60% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .a-bar > i,
+  .a-btn,
+  .a-card,
+  .a-opt,
+  .a-grade > *,
+  .a-input,
+  .ph-tab svg {
+    transition: none !important;
+  }
+}
+
+/* The confetti itself, shared by every celebration: dots and little tiles
+   in the lane colours, scattered over the box it is drawn in. A screen's
+   stylesheet sets it as a ::before's background (static, as a decoration
+   in a corner) or plays a-burst on it (moving, only under
+   prefers-reduced-motion: no-preference). */
+:root {
+  --confetti:
+    radial-gradient(circle, var(--sun-pop) 0 3.5px, transparent 4px) 6% 30% / 14px 14px no-repeat,
+    radial-gradient(circle, var(--fun-pop) 0 3px, transparent 3.5px) 18% 82% / 12px 12px no-repeat,
+    radial-gradient(circle, var(--me-pop) 0 4px, transparent 4.5px) 30% 12% / 14px 14px no-repeat,
+    radial-gradient(circle, var(--ok-pop) 0 3px, transparent 3.5px) 44% 70% / 12px 12px no-repeat,
+    radial-gradient(circle, var(--group-pop) 0 3.5px, transparent 4px) 58% 20% / 14px 14px no-repeat,
+    radial-gradient(circle, var(--sun-pop) 0 3px, transparent 3.5px) 70% 88% / 12px 12px no-repeat,
+    radial-gradient(circle, var(--fun-pop) 0 4px, transparent 4.5px) 82% 34% / 14px 14px no-repeat,
+    radial-gradient(circle, var(--me-pop) 0 3px, transparent 3.5px) 94% 76% / 12px 12px no-repeat,
+    radial-gradient(circle, var(--ok-pop) 0 2.5px, transparent 3px) 50% 4% / 10px 10px no-repeat,
+    radial-gradient(circle, var(--group-pop) 0 2.5px, transparent 3px) 12% 58% / 10px 10px no-repeat,
+    radial-gradient(circle, var(--fun-pop) 0 2.5px, transparent 3px) 88% 6% / 10px 10px no-repeat;
+}
+/* A bigger confetti for a celebration's hero (a right answer, a finished
+   round): round dots and little square tiles, spread over the whole box. */
+:root {
+  --confetti-lg:
+    radial-gradient(circle, var(--sun-pop) 0 5px, transparent 5.5px) 4% 22% / 16px 16px no-repeat,
+    linear-gradient(var(--fun-pop), var(--fun-pop)) 13% 78% / 8px 8px no-repeat,
+    radial-gradient(circle, var(--me-pop) 0 4px, transparent 4.5px) 24% 14% / 14px 14px no-repeat,
+    linear-gradient(var(--ok-pop), var(--ok-pop)) 33% 62% / 7px 7px no-repeat,
+    radial-gradient(circle, var(--group-pop) 0 5px, transparent 5.5px) 45% 8% / 16px 16px no-repeat,
+    radial-gradient(circle, var(--fun-pop) 0 3.5px, transparent 4px) 52% 88% / 12px 12px no-repeat,
+    linear-gradient(var(--sun-pop), var(--sun-pop)) 61% 30% / 8px 8px no-repeat,
+    radial-gradient(circle, var(--ok-pop) 0 4.5px, transparent 5px) 70% 76% / 14px 14px no-repeat,
+    linear-gradient(var(--me-pop), var(--me-pop)) 79% 12% / 7px 7px no-repeat,
+    radial-gradient(circle, var(--group-pop) 0 3.5px, transparent 4px) 88% 54% / 12px 12px no-repeat,
+    radial-gradient(circle, var(--sun-pop) 0 4px, transparent 4.5px) 96% 18% / 14px 14px no-repeat,
+    linear-gradient(var(--fun-pop), var(--fun-pop)) 92% 92% / 6px 6px no-repeat;
+}
+/* A celebration's entrance: the confetti flies out from the middle and
+   stays (no overshoot, so it never pushes past the screen's edge). */
+@keyframes a-burst-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+

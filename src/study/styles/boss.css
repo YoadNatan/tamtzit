@@ -1,0 +1,109 @@
+/* ── קרב הבוס (package H; boss.html) ──
+   The kit's pieces placed (styles/kit.css), tokens only. Hit points are
+   numbers beside their bars, never colour alone; a fallen head is "✓" and
+   the head on screen is the fun chip. Tap targets ≥ 44 px, no horizontal
+   scroll at 360 px: heads wrap, Latin isolated. */
+
+.boss-hud {
+  gap: var(--sp-3);
+}
+.boss-heads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.boss-heads .a-chip {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.boss-lectures .a-chip,
+.boss-screen .a-wrap > button.a-chip {
+  min-height: var(--hit);
+  min-width: 60px;
+  justify-content: center;
+  cursor: pointer;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.boss-meter,
+.boss-state,
+.boss-revenge {
+  display: grid;
+  gap: var(--sp-3);
+}
+.boss-meter p,
+.boss-state p,
+.boss-revenge p {
+  margin: 0;
+}
+.boss-result {
+  border-color: var(--fun-line);
+  background: var(--fun-soft);
+  display: grid;
+  gap: var(--sp-3);
+}
+.boss-result .a-para {
+  margin: 0;
+}
+.boss-players {
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.boss-loot {
+  border-color: var(--me-line);
+  display: grid;
+  gap: var(--sp-3);
+}
+.boss-loot p {
+  margin: 0;
+}
+.boss-moment {
+  display: grid;
+  gap: var(--sp-1);
+  width: 100%;
+  min-width: 0;
+}
+.boss-moment .a-chip {
+  flex: none;
+}
+.boss-last {
+  margin: 0;
+}
+.boss-revenge-line,
+.boss-card .boss-revenge {
+  margin: 0;
+}
+.boss-ended {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+/* ── the playful look on the boss fight (tokens.css) ──
+   The boss is the fun lane's game: its result card stands on a pink edge,
+   the loot on the primary's, and a win throws confetti. */
+.boss-result {
+  position: relative;
+  isolation: isolate;
+  border-color: var(--fun-pop);
+}
+.boss-loot {
+  border-color: var(--me-pop);
+}
+.boss-hud .a-bar {
+  height: 14px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .boss-result {
+    padding-top: calc(var(--sp-6) + 30px);
+  }
+  .boss-result::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: var(--sp-3) var(--sp-6) auto;
+    height: 28px;
+    background: var(--confetti);
+    pointer-events: none;
+    animation: a-burst-in 0.7s ease-out 0.05s 1 backwards;
+  }
+}

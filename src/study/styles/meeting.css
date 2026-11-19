@@ -1,0 +1,213 @@
+/* ── The day's meeting's placement (package M; proposal/mockups/meeting.html,
+ * today.html) ──
+ * Only places the kit's pieces: the band is an .a-card in the group's
+ * colours (today.html s1), the opening's questions .a-card.flat and .a-q /
+ * .a-opts (meeting.html s1), the agenda an .a-list, the reader's card an
+ * .a-callout.warn (s3), "לא ברור לי" an .a-btn in the follower's bar and the
+ * guess that lights up an .a-card in the fun layer's colours (s2). Sizes and
+ * colours are the kit's tokens. */
+
+/* The band (today.html s1): the lecture's hue as a strip inside its start
+   side (kit.css .a-card[data-hue]), on the plain surface. It only holds things, so it rests flat: it is
+   context on Today, not the screen's hero. */
+.m-band.a-card {
+  display: grid;
+  gap: var(--sp-3);
+  border-color: var(--line);
+  background: var(--surface);
+}
+.m-band .a-para {
+  margin: 0;
+}
+/* "הקבוצה היום · 20:41": the hour in tabular display figures. */
+.m-band > .a-row:first-child > b {
+  font-family: var(--font-display);
+  font-size: var(--text-body);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.m-band .a-row.between {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.m-band .m-band-links {
+  justify-content: flex-start;
+}
+/* At 360 the band gives the queue under it a little more room. */
+@media (max-width: 374px) {
+  .m-band.a-card {
+    gap: var(--sp-2);
+    padding: var(--sp-5) var(--sp-7);
+  }
+}
+.m-bands {
+  display: grid;
+  gap: var(--sp-4);
+}
+.m-missed .a-li {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* The meeting screen. */
+.m-screen .m-opening {
+  display: grid;
+  gap: var(--sp-3);
+}
+.m-screen .m-skip {
+  justify-self: start;
+}
+.m-inline {
+  display: grid;
+  gap: var(--sp-4);
+}
+.m-inline .a-q {
+  margin: 0;
+}
+.m-folded {
+  display: grid;
+  gap: var(--sp-2);
+}
+.m-folded .a-row.between {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.m-folded .a-chip {
+  flex: none;
+}
+.m-current {
+  display: grid;
+  gap: var(--sp-4);
+}
+.m-bets .a-btn {
+  flex: 1 1 0;
+}
+.m-later {
+  margin: 0;
+}
+.m-guesses .m-guess,
+.m-guesses .m-lit {
+  display: grid;
+  gap: var(--sp-3);
+}
+.m-guesses .a-q,
+.m-guesses p {
+  margin: 0;
+}
+/* The guess that lit up: the fun layer's card (meeting.html s2). */
+.m-lit.a-card,
+.m-ding.a-card {
+  background: var(--fun-soft);
+  border-color: var(--fun-line);
+}
+.m-agenda .a-li b {
+  font-weight: 700;
+}
+.m-agenda .m-open-q {
+  text-decoration: none;
+  color: inherit;
+}
+.m-links {
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+}
+
+/* Planning. */
+.m-plan .m-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.m-plan .m-fields legend {
+  padding: 0;
+}
+.m-plan .m-date,
+.m-plan .m-time {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.m-plan .m-cancel {
+  justify-self: start;
+}
+
+/* The reader's card (meeting.html s3): one line in the reader's bar, and
+ * its callout in the reading flow right after the paragraph it is about. */
+.reader-extra .m-reader-note {
+  flex: 1 1 100%;
+  margin: 0;
+}
+.m-tap-link,
+.m-part-stop {
+  white-space: nowrap;
+}
+.lecture-body .m-reader {
+  display: grid;
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0 var(--sp-5);
+}
+.m-reader .m-callout .a-stack {
+  gap: var(--sp-3);
+}
+.m-reader .m-callout .a-row {
+  flex-wrap: wrap;
+}
+.m-reader .m-quote {
+  color: var(--ink);
+}
+.m-reader .m-warn {
+  display: grid;
+  gap: var(--sp-2);
+}
+.m-reader p {
+  margin: 0;
+}
+
+/* The follower's bar: "לא ברור לי" (44 px) and, above it, the guess that lit up.
+ * The card is placed against the sticky bar itself (.ph-foot is positioned),
+ * gutter to gutter, never against the button: the button sits off-centre in
+ * the bar, and a card centred on it ran past the screen's start edge, which
+ * RTL cannot scroll to (review M-DING-CLIPPED). */
+.m-follow {
+  display: inline-flex;
+}
+.m-unclear.a-btn {
+  min-height: var(--hit);
+}
+.m-unclear.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.m-ding.a-card {
+  position: absolute;
+  bottom: calc(100% + var(--sp-5));
+  inset-inline: var(--gutter-right) var(--gutter-left);
+  width: auto;
+  display: grid;
+  gap: var(--sp-3);
+  box-shadow: var(--shadow-pop);
+  z-index: var(--z-layer);
+}
+.m-ding .a-btn {
+  justify-self: start;
+}
+/* While the guess's answer shows, the shell's toast ("סומן, בלי שם.") goes to
+ * the top instead of over the card (review M-DING-CLIPPED, meeting-08). */
+html:has(.m-ding) body .shell > .a-toast {
+  top: calc(var(--study-banner-h, 0px) + var(--sp-6) + env(safe-area-inset-top, 0px));
+  bottom: auto;
+}
+
+/* Catch-up (today.html s2). */
+.m-catchup .m-piece {
+  display: grid;
+  gap: var(--sp-2);
+}
+.m-catchup .m-piece .a-para {
+  margin: 0;
+}
+.m-catchup .m-check-line {
+  align-items: center;
+  flex-wrap: nowrap;
+}

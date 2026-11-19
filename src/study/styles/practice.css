@@ -1,0 +1,461 @@
+/* ── Practice questions (package Q; spec §5.8, design-questions §4.2) ──
+   The design system's tokens and kit (styles/tokens.css, styles/kit.css):
+   buttons, chips, cards, sheets and the bottom bar are the kit's; this file
+   draws practice's own pieces. The look follows the approved practice
+   screens (docs/study/proposal/mockups/practice.html): option cards with a
+   round letter badge (the kit's a-opt), the chosen one outlined in the
+   accent, the right one green and a wrong choice red, each with its
+   explanation under it, and one action bar at the bottom. Right and wrong
+   never by colour alone: a ✓/✗ and words go with them. Options are at least
+   52 px tall; the question's text follows the app's text size
+   (--reading-size, review UX-15). */
+
+/* ── practice 2.0: a question, its bet and its autopsy (PracticeQuestion) ──
+   The kit's a-q, a-opts and a-opt, the bet in a flat card; the text follows
+   the app's text size (--reading-size, review UX-15). */
+.practice-session {
+  --pq-size: calc(var(--reading-size, 17px) * 0.95);
+}
+.pq {
+  display: grid;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+.pq-meta .pq-chips {
+  gap: var(--sp-3);
+}
+.pq-vignette,
+.pq-lead {
+  margin: 0;
+  font-size: var(--pq-size, var(--text-body));
+}
+.pq-options .a-opt,
+.pq-autopsy .a-opt {
+  font-size: calc(var(--pq-size, var(--text-btn)) * 0.94);
+}
+.pq-options .a-opt {
+  min-height: 52px;
+}
+.pq-bet {
+  display: grid;
+  gap: var(--sp-4);
+}
+.pq-bet .a-seg .a-btn {
+  min-height: 44px;
+}
+.pq-dont-know {
+  justify-self: start;
+}
+.pq-verdict h2 {
+  margin: 0;
+}
+.pq-verdict h2:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.pq-mark {
+  color: var(--ink);
+}
+.pq-flags li {
+  padding: var(--sp-3) var(--sp-5);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+  color: var(--ink);
+}
+/* The autopsy's bottom bar, as approved: "לשאלה הבאה" on one line, the flag,
+   and "לפסקה: <part>" in the rest of the row, on up to two lines (the part's
+   name is already cut at a word: shortName). */
+.ph-foot > .pq-next {
+  flex: none;
+  white-space: nowrap;
+}
+.pq-paragraph {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline: var(--sp-4);
+}
+.pq-label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  font-size: var(--text-small);
+  line-height: 1.25;
+}
+.pq-flag {
+  flex: none;
+}
+
+/* ── the end of a round ── */
+.pq-end {
+  gap: var(--sp-5);
+}
+.pq-end .a-h1 {
+  margin: var(--sp-2) 0 0;
+}
+.pq-score {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-4);
+  margin: 0;
+}
+.pq-score b {
+  font-family: var(--font-display);
+  font-size: 2.4rem;
+  line-height: 1.1;
+}
+.pq-review-row {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.pq-review-row[aria-expanded="true"] b {
+  color: var(--accent);
+}
+.pq-review-body {
+  padding: var(--sp-4) var(--sp-2) var(--sp-6);
+}
+.pq-read,
+.pq-back,
+.pq-flag-link {
+  justify-self: start;
+}
+.pq-exam-item {
+  display: grid;
+  gap: var(--sp-5);
+  scroll-margin-top: calc(var(--study-banner-h, 0px) + 64px);
+}
+
+/* ── practice 2.0: מה ליצור, דוגמה ומיקוד, הבנק נבנה, סבב חדש ── */
+.pc-points {
+  display: grid;
+  gap: var(--sp-4);
+}
+.pc-points .a-h2 {
+  margin: 0;
+}
+.pc-level-line,
+.pc-hint {
+  margin: 0;
+}
+.pc-count {
+  max-width: 14rem;
+}
+.pc-example,
+.pc-cost {
+  display: grid;
+  gap: var(--sp-4);
+}
+.pc-example textarea {
+  background: var(--paper);
+}
+.pb-draft {
+  display: grid;
+  gap: var(--sp-4);
+}
+.pb-draft p {
+  margin: 0;
+}
+/* ✓ להשאיר and ↻ לנסח מחדש share the row on one line each; ✕ keeps its 44 px. */
+.pb-actions {
+  flex-wrap: nowrap;
+}
+.pb-actions > .a-btn:not(.icon) {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline: var(--sp-4);
+  white-space: nowrap;
+}
+.pb-options summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--hit);
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+.pb-options ol {
+  margin: 0;
+  padding: 0;
+}
+.pb-actions .a-btn:not(.icon) {
+  flex: 1;
+}
+.pb-more {
+  flex: 1;
+  color: var(--muted);
+  cursor: default;
+}
+.pb-failed {
+  margin: 0;
+}
+.pb-resume {
+  justify-self: start;
+}
+.pr-mode .a-opt {
+  min-height: 52px;
+}
+.pr-mode .a-opt > .l {
+  background: none;
+  color: var(--accent);
+  font-size: 1.1rem;
+}
+
+/* ── a lecture's practice and the hub ── */
+.practice-building,
+.practice-ready,
+.practice-empty {
+  display: grid;
+  gap: var(--sp-5);
+}
+.practice-building .a-h2,
+.practice-ready .a-h2,
+.practice-empty .a-h2 {
+  margin: 0;
+}
+.practice-ready p,
+.practice-empty p,
+.practice-building p {
+  margin: 0;
+}
+.practice-mine {
+  margin-inline-start: var(--sp-3);
+}
+.practice-building > .a-btn,
+.practice-empty > .a-btn {
+  justify-self: start;
+}
+.practice-quiz {
+  align-self: flex-start;
+}
+.practice-flagged summary,
+.practice-hidden summary {
+  min-height: var(--hit);
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+  cursor: pointer;
+}
+.flagged-q {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-4) 0;
+  border-bottom: 1px solid var(--line);
+}
+.flagged-q:last-child {
+  border-bottom: 0;
+}
+.flagged-q p {
+  margin: 0;
+}
+.fix-row b {
+  font-weight: 600;
+}
+.fix-extra .a-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 10rem;
+}
+/* One card per lecture: the row is one link (to P2), and "יצירה" sits beside
+   it inside the card, a link of its own, never a control inside a link. */
+.practice-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0;
+}
+.practice-row-link {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-7);
+  color: inherit;
+  text-decoration: none;
+}
+.practice-row-link .lc-title {
+  font-weight: 700;
+}
+.practice-create {
+  flex: none;
+  margin-inline-end: var(--sp-6);
+}
+
+/* ── the sheets: flagging, rewording, the fix sheet ── */
+.flag-form {
+  display: grid;
+  gap: var(--sp-4);
+}
+.flag-mine {
+  display: grid;
+  gap: var(--sp-4);
+}
+.flag-reasons {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+}
+.flag-note .a-input {
+  min-height: 72px;
+  background: var(--paper);
+}
+
+.fix-sheet .a-opts,
+.reword-sheet .a-field {
+  margin-top: var(--sp-2);
+}
+
+/* ── the playful look: practice gets the most delight (tokens.css) ──
+   The verdict is a big chip; a right answer pops and throws a little
+   confetti beside it (CSS only, played once, and not drawn at all under
+   prefers-reduced-motion); a wrong one just stands there, red, with its ✗
+   and words. */
+.pq-verdict {
+  position: relative;
+}
+.pq-verdict > .a-chip {
+  padding: var(--sp-3) var(--sp-7);
+  font-size: var(--text-btn);
+  font-weight: 800;
+}
+.pq-verdict > .a-chip.ok {
+  background: var(--ok);
+  color: var(--ok-ink);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--ok) 60%, #000);
+}
+.pq-verdict > .a-chip.bad {
+  box-shadow:
+    inset 0 0 0 var(--b) var(--bad),
+    0 3px 0 color-mix(in srgb, var(--bad-pop) 45%, transparent);
+}
+/* A right answer: a small burst of confetti in the verdict's row, in the
+   empty room past the chip's end. It starts 12 px beyond the chip, so it
+   stays clear of the focus ring the verdict gets (2 px offset + 3 px), and
+   it is 72 px wide, so it never reaches "רק לך" at 360; with a note in the
+   row there is no burst, only the pop. Played once, and only where motion
+   is welcome: under prefers-reduced-motion it is not drawn. */
+.pq-verdict > .a-chip.ok {
+  position: relative;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pq-verdict > .a-chip.ok {
+    animation: a-pop 0.45s var(--ease-bounce) backwards;
+  }
+  .pq-verdict:not(:has(.pq-note)) > .a-chip.ok::after {
+    content: "";
+    position: absolute;
+    inset-block: -4px;
+    inset-inline-start: calc(100% + 12px);
+    width: 72px;
+    background: var(--confetti);
+    pointer-events: none;
+    animation: a-burst-in 0.7s ease-out 0.05s 1 backwards;
+  }
+}
+/* A wrong pick stays red, outlined in its own colour, not the accent's. */
+.a-opt.wrong.picked {
+  border-color: var(--bad);
+  box-shadow:
+    0 0 0 1px var(--bad),
+    0 var(--press) 0 color-mix(in srgb, var(--bad) 45%, var(--edge));
+}
+/* The bet: three chunky tiles; the chosen one in the accent. */
+.pq-bet {
+  padding: var(--sp-7) var(--sp-8);
+}
+/* The end of a round: the score big, in the primary, on a confetti card. */
+.pq-end {
+  position: relative;
+  isolation: isolate;
+}
+.pq-score b {
+  color: var(--accent);
+  font-size: 2.8rem;
+  font-weight: 900;
+}
+/* The score is the round's hero: a big tile in my lane. Only a good round
+   (4 of 5 right or better: PracticeSession's data-good) gets a band of
+   confetti along its top (never under its words); a weak round keeps the
+   plain tile, so the bet's honesty is never cheered past. */
+.pq-end .pq-score {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: var(--sp-10) var(--sp-8);
+  border: var(--b) solid color-mix(in srgb, var(--me-pop) 40%, var(--line));
+  border-radius: var(--r-xl);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-soft);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pq-end[data-good] .pq-score {
+    padding-top: calc(var(--sp-16) + var(--sp-4));
+  }
+  .pq-end[data-good] .pq-score::before {
+    content: "";
+    position: absolute;
+    inset: var(--sp-3) var(--sp-6) auto;
+    height: 34px;
+    z-index: -1;
+    background: var(--confetti-lg);
+    pointer-events: none;
+    animation: a-burst-in 0.7s ease-out 0.1s 1 backwards;
+  }
+}
+
+/* The question is the hero of its screen: the display face, big and heavy,
+   with room around it (the options under it stay the body size). */
+.pq .pq-lead,
+.quiz-question-card > .a-q {
+  margin-block: var(--sp-6);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+/* After the answer: "לפסקה: <part>" is a quiet text action beside the
+   flag and "לשאלה הבאה", not a third cramped button. Its label is already
+   cut at a word (shortName) and keeps its two lines; no CSS ellipsis, which
+   would cut an English name from its start in a right-to-left line. */
+.ph-foot > .a-btn.pq-paragraph {
+  justify-content: flex-start;
+  padding-inline: var(--sp-4);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+  text-align: start;
+}
+.ph-foot > .a-btn.pq-paragraph:not(:disabled):active {
+  transform: none;
+  box-shadow: none;
+}
+@media (hover: hover) {
+  .ph-foot > .a-btn.pq-paragraph:not(:disabled):hover {
+    background: var(--surface-2);
+  }
+}
+.ph-foot > .a-btn.pq-paragraph .pq-label {
+  font-weight: 700;
+}
+/* The bet: the chosen tile is filled in the accent (the kit's a-seg). */
+.pq-bets > .a-btn {
+  min-height: 48px;
+}
+
+/* "1/5": the session's place in tabular display figures. */
+.pq-pos {
+  font-family: var(--font-display);
+  font-size: var(--text-btn);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}

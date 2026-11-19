@@ -1,0 +1,59 @@
+/* ── דופק הקבוצה (package U; progress-pulse.html screen 2) ──
+   The kit's pieces placed (styles/kit.css), tokens only. Buckets are words
+   on chips (חם · פושר · יושב טוב), never colour alone; the meter's bar
+   always has its words beside or above it; "מחר בפגישה" takes the group's
+   colours, as the mockup's callout does. Tap targets ≥ 44 px, no horizontal
+   scroll at 360 px. */
+
+.pulse-section {
+  gap: var(--sp-3);
+}
+.pulse-row {
+  align-items: center;
+}
+.pulse-row > .a-chip {
+  flex: none;
+}
+/* The topic is the row's link: the whole line is a 44-px target. */
+.pulse-topic {
+  display: inline-block;
+  min-height: var(--hit);
+  padding-block: var(--sp-4);
+  color: inherit;
+  text-decoration: none;
+}
+.pulse-row b {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--sp-3);
+}
+.pulse-brief {
+  border-color: var(--group-line);
+  background: var(--group-soft);
+}
+.pulse-state {
+  display: grid;
+  gap: var(--sp-3);
+}
+.pulse-state p {
+  margin: 0;
+}
+.pulse-meter .a-bar {
+  flex: 1;
+  min-width: 0;
+}
+.pulse-card-line {
+  min-width: 0;
+}
+.pulse-setting .a-stack {
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.pulse-spot {
+  cursor: default;
+}
+.wall-needed-acts {
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}

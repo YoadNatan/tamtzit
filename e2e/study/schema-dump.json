@@ -1,0 +1,4019 @@
+{
+ "functions": {
+  "study_add_card": [
+   {
+    "args": [
+     "p_lecture",
+     "p_card"
+    ],
+    "required": 2
+   }
+  ],
+  "study_aid_check_begin": [
+   {
+    "args": [
+     "p_aid",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_aid_check_done": [
+   {
+    "args": [
+     "p_aid",
+     "p_ok",
+     "p_note",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_aid_credit_answer": [
+   {
+    "args": [
+     "p_aid",
+     "p_ok"
+    ],
+    "required": 2
+   }
+  ],
+  "study_aid_credit_requests": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_aid_delete": [
+   {
+    "args": [
+     "p_aid"
+    ],
+    "required": 1
+   }
+  ],
+  "study_aid_drafts_begin": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_hash",
+     "p_key"
+    ],
+    "required": 4
+   }
+  ],
+  "study_aid_drafts_end": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_hash",
+     "p_key"
+    ],
+    "required": 4
+   }
+  ],
+  "study_aid_drafts_save": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_hash",
+     "p_fact",
+     "p_slides",
+     "p_drafts",
+     "p_model",
+     "p_key"
+    ],
+    "required": 8
+   }
+  ],
+  "study_aid_edit": [
+   {
+    "args": [
+     "p_aid",
+     "p_body",
+     "p_fact",
+     "p_slides"
+    ],
+    "required": 4
+   }
+  ],
+  "study_aid_flag": [
+   {
+    "args": [
+     "p_aid",
+     "p_flag"
+    ],
+    "required": 2
+   }
+  ],
+  "study_aid_for_cards": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_aid_group": [
+   {
+    "args": [
+     "a"
+    ],
+    "required": 1
+   }
+  ],
+  "study_aid_hint": [
+   {
+    "args": [
+     "p_card"
+    ],
+    "required": 1
+   }
+  ],
+  "study_aid_pin": [
+   {
+    "args": [
+     "p_aid",
+     "p_on"
+    ],
+    "required": 2
+   }
+  ],
+  "study_aid_post": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_quote",
+     "p_kind",
+     "p_body",
+     "p_fact",
+     "p_slides",
+     "p_drug",
+     "p_named",
+     "p_remix_of",
+     "p_draft",
+     "p_draft_no",
+     "p_photo",
+     "p_figure",
+     "p_credit"
+    ],
+    "required": 8
+   }
+  ],
+  "study_aid_vote": [
+   {
+    "args": [
+     "p_aid",
+     "p_kind",
+     "p_on"
+    ],
+    "required": 3
+   }
+  ],
+  "study_aid_wall": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture",
+     "p_drug"
+    ],
+    "required": 1
+   }
+  ],
+  "study_aid_week": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_answer_question": [
+   {
+    "args": [
+     "p_question",
+     "p_choice",
+     "p_mode",
+     "p_ms",
+     "p_confidence"
+    ],
+    "required": 2
+   }
+  ],
+  "study_answers_mistake_card": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_approve_edit": [
+   {
+    "args": [
+     "p_proposal",
+     "p_aloud"
+    ],
+    "required": 1
+   }
+  ],
+  "study_ask_to_group": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_quote",
+     "p_question",
+     "p_attempt",
+     "p_key"
+    ],
+    "required": 6
+   }
+  ],
+  "study_block_edit_problem": [
+   {
+    "args": [
+     "p_before",
+     "p_after"
+    ],
+    "required": 2
+   }
+  ],
+  "study_block_kind": [
+   {
+    "args": [
+     "t"
+    ],
+    "required": 1
+   }
+  ],
+  "study_block_positions": [
+   {
+    "args": [
+     "p_md",
+     "p_blk"
+    ],
+    "required": 2
+   }
+  ],
+  "study_boss_create": [
+   {
+    "args": [
+     "p_group",
+     "p_lectures",
+     "p_seconds",
+     "p_revenge"
+    ],
+    "required": 2
+   }
+  ],
+  "study_boss_loot": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_boss_loot_save": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_boss_open": [
+   {
+    "args": [
+     "p_group",
+     "p_lectures"
+    ],
+    "required": 1
+   }
+  ],
+  "study_can_use_topic": [
+   {
+    "args": [
+     "topic"
+    ],
+    "required": 1
+   }
+  ],
+  "study_card_adopt": [
+   {
+    "args": [
+     "p_lecture",
+     "p_parts",
+     "p_on"
+    ],
+    "required": 2
+   }
+  ],
+  "study_card_claim": [
+   {
+    "args": [
+     "p_batch",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_card_finish": [
+   {
+    "args": [
+     "p_batch",
+     "p_status",
+     "p_rejected",
+     "p_model",
+     "p_cost",
+     "p_error",
+     "p_key"
+    ],
+    "required": 6
+   }
+  ],
+  "study_card_group": [
+   {
+    "args": [
+     "c"
+    ],
+    "required": 1
+   }
+  ],
+  "study_card_hide": [
+   {
+    "args": [
+     "p_card",
+     "p_hide"
+    ],
+    "required": 2
+   }
+  ],
+  "study_card_problem": [
+   {
+    "args": [
+     "p_kind",
+     "p_front",
+     "p_back",
+     "p_extra",
+     "p_figure",
+     "p_slides",
+     "p_lecture"
+    ],
+    "required": 7
+   }
+  ],
+  "study_card_recall": [
+   {
+    "args": [
+     "p_stability",
+     "p_days"
+    ],
+    "required": 2
+   }
+  ],
+  "study_card_reset": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_card_review": [
+   {
+    "args": [
+     "p_review",
+     "p_card",
+     "p_rating",
+     "p_reviewed_at",
+     "p_ms",
+     "p_prev_reps",
+     "p_next"
+    ],
+    "required": 7
+   }
+  ],
+  "study_card_round": [
+   {
+    "args": [
+     "p_lecture",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_card_still_true": [
+   {
+    "args": [
+     "p_card"
+    ],
+    "required": 1
+   }
+  ],
+  "study_card_touch": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_card_undo": [
+   {
+    "args": [
+     "p_review"
+    ],
+    "required": 1
+   }
+  ],
+  "study_cards_unstale": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_claim": [
+   {
+    "args": [
+     "p_lecture",
+     "p_kind",
+     "p_idx",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_comment_lecture": [
+   {
+    "args": [
+     "c"
+    ],
+    "required": 1
+   }
+  ],
+  "study_comments_resolved_by": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_corrections_of": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part"
+    ],
+    "required": 2
+   }
+  ],
+  "study_create_group": [
+   {
+    "args": [
+     "p_group_name",
+     "p_member_name"
+    ],
+    "required": 2
+   }
+  ],
+  "study_day": [
+   {
+    "args": [
+     "p_at"
+    ],
+    "required": 1
+   }
+  ],
+  "study_day_end": [
+   {
+    "args": [
+     "p_at"
+    ],
+    "required": 1
+   }
+  ],
+  "study_delete_card": [
+   {
+    "args": [
+     "p_card",
+     "p_delete"
+    ],
+    "required": 2
+   }
+  ],
+  "study_delete_lecture": [
+   {
+    "args": [
+     "p_lecture",
+     "p_delete"
+    ],
+    "required": 1
+   }
+  ],
+  "study_dispute_back": [
+   {
+    "args": [
+     "p_dispute",
+     "p_side"
+    ],
+    "required": 2
+   }
+  ],
+  "study_dispute_claim": [
+   {
+    "args": [
+     "p_dispute",
+     "p_claim",
+     "p_slides"
+    ],
+    "required": 3
+   }
+  ],
+  "study_dispute_close": [
+   {
+    "args": [
+     "p_dispute"
+    ],
+    "required": 1
+   }
+  ],
+  "study_dispute_decide": [
+   {
+    "args": [
+     "p_dispute",
+     "p_decision",
+     "p_note"
+    ],
+    "required": 2
+   }
+  ],
+  "study_dispute_group": [
+   {
+    "args": [
+     "p_dispute"
+    ],
+    "required": 1
+   }
+  ],
+  "study_dispute_judge_begin": [
+   {
+    "args": [
+     "p_dispute",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_dispute_open": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_quote",
+     "p_claim",
+     "p_slides",
+     "p_proposal"
+    ],
+    "required": 6
+   }
+  ],
+  "study_dispute_state": [
+   {
+    "args": [
+     "p_dispute"
+    ],
+    "required": 1
+   }
+  ],
+  "study_dispute_verdict": [
+   {
+    "args": [
+     "p_dispute",
+     "p_verdict",
+     "p_model",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_draft_check": [
+   {
+    "args": [
+     "p_draft",
+     "p_choice",
+     "p_ambiguous",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_draft_keep": [
+   {
+    "args": [
+     "p_draft"
+    ],
+    "required": 1
+   }
+  ],
+  "study_draft_keep_all": [
+   {
+    "args": [
+     "p_request"
+    ],
+    "required": 1
+   }
+  ],
+  "study_draft_reject": [
+   {
+    "args": [
+     "p_draft",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_draft_release": [
+   {
+    "args": [
+     "p_draft",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_draft_remove": [
+   {
+    "args": [
+     "p_draft"
+    ],
+    "required": 1
+   }
+  ],
+  "study_draft_replace": [
+   {
+    "args": [
+     "p_draft",
+     "p_q",
+     "p_auto",
+     "p_key"
+    ],
+    "required": 2
+   }
+  ],
+  "study_draft_reword": [
+   {
+    "args": [
+     "p_draft",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_draft_save": [
+   {
+    "args": [
+     "p_batch",
+     "p_q",
+     "p_key"
+    ],
+    "required": 2
+   }
+  ],
+  "study_edit_block": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_before",
+     "p_after",
+     "p_base_rev",
+     "p_base_gen",
+     "p_occurrence",
+     "p_note",
+     "p_undo_of"
+    ],
+    "required": 7
+   }
+  ],
+  "study_edit_card": [
+   {
+    "args": [
+     "p_card",
+     "p_version",
+     "p_new"
+    ],
+    "required": 3
+   }
+  ],
+  "study_edit_proposal_checked": [
+   {
+    "args": [
+     "p_proposal",
+     "p_ok",
+     "p_note",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_edits_spread": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_exam_group": [
+   {
+    "args": [
+     "e"
+    ],
+    "required": 1
+   }
+  ],
+  "study_exam_items_for_explain": [
+   {
+    "args": [
+     "p_ids"
+    ],
+    "required": 1
+   }
+  ],
+  "study_exam_marks": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_feature_on": [
+   {
+    "args": [
+     "p_name"
+    ],
+    "required": 1
+   }
+  ],
+  "study_features": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_finish": [
+   {
+    "args": [
+     "p_lecture",
+     "p_kind",
+     "p_idx",
+     "p_lease",
+     "p_status",
+     "p_error",
+     "p_text",
+     "p_items",
+     "p_model",
+     "p_usage",
+     "p_cost",
+     "p_key",
+     "p_charge"
+    ],
+    "required": 6
+   }
+  ],
+  "study_group_code": [
+   {
+    "args": [
+     "g"
+    ],
+    "required": 1
+   }
+  ],
+  "study_group_plan_day": [
+   {
+    "args": [
+     "p_plan",
+     "p_day",
+     "p_version",
+     "p_title",
+     "p_starts_at",
+     "p_minutes",
+     "p_lectures",
+     "p_agenda"
+    ],
+    "required": 8
+   }
+  ],
+  "study_group_plan_meter": [
+   {
+    "args": [
+     "p_plan"
+    ],
+    "required": 1
+   }
+  ],
+  "study_group_plan_save": [
+   {
+    "args": [
+     "p_id",
+     "p_version",
+     "p_group",
+     "p_title",
+     "p_exam_date",
+     "p_lectures",
+     "p_shared_from",
+     "p_leave_from",
+     "p_shared_minutes",
+     "p_leave_minutes",
+     "p_rounds",
+     "p_day_start"
+    ],
+    "required": 6
+   }
+  ],
+  "study_group_plan_slip": [
+   {
+    "args": [
+     "p_plan",
+     "p_day",
+     "p_choice",
+     "p_until"
+    ],
+    "required": 3
+   }
+  ],
+  "study_is_member": [
+   {
+    "args": [
+     "g"
+    ],
+    "required": 1
+   }
+  ],
+  "study_is_member_path": [
+   {
+    "args": [
+     "object_name"
+    ],
+    "required": 1
+   }
+  ],
+  "study_join": [
+   {
+    "args": [
+     "p_code",
+     "p_member_name"
+    ],
+    "required": 2
+   }
+  ],
+  "study_lecture_group": [
+   {
+    "args": [
+     "l"
+    ],
+    "required": 1
+   }
+  ],
+  "study_lecture_log": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_loot_done": [
+   {
+    "args": [
+     "p_question"
+    ],
+    "required": 1
+   }
+  ],
+  "study_marathon__agenda_ok": [
+   {
+    "args": [
+     "p_agenda",
+     "p_lectures"
+    ],
+    "required": 2
+   }
+  ],
+  "study_marathon__over": [
+   {
+    "args": [
+     "m"
+    ],
+    "required": 1
+   }
+  ],
+  "study_marathon_answer": [
+   {
+    "args": [
+     "p_id",
+     "p_answer"
+    ],
+    "required": 2
+   }
+  ],
+  "study_marathon_cancel": [
+   {
+    "args": [
+     "p_id",
+     "p_cancel"
+    ],
+    "required": 2
+   }
+  ],
+  "study_marathon_group": [
+   {
+    "args": [
+     "m"
+    ],
+    "required": 1
+   }
+  ],
+  "study_marathon_save": [
+   {
+    "args": [
+     "p_id",
+     "p_version",
+     "p_group",
+     "p_title",
+     "p_starts_at",
+     "p_minutes",
+     "p_place",
+     "p_note",
+     "p_lectures",
+     "p_agenda"
+    ],
+    "required": 10
+   }
+  ],
+  "study_marathon_step": [
+   {
+    "args": [
+     "p_id",
+     "p_from",
+     "p_to"
+    ],
+    "required": 3
+   }
+  ],
+  "study_mark_parts": [
+   {
+    "args": [
+     "p_lecture",
+     "p_parts",
+     "p_done"
+    ],
+    "required": 3
+   }
+  ],
+  "study_meeting_agenda": [
+   {
+    "args": [
+     "p_meeting"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_band": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_cancel": [
+   {
+    "args": [
+     "p_meeting"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_catchup": [
+   {
+    "args": [
+     "p_meeting"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_catchup_done": [
+   {
+    "args": [
+     "p_meeting"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_group": [
+   {
+    "args": [
+     "p_meeting"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_guess": [
+   {
+    "args": [
+     "p_meeting",
+     "p_question",
+     "p_choice"
+    ],
+    "required": 3
+   }
+  ],
+  "study_meeting_guess_pick": [
+   {
+    "args": [
+     "p_meeting"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_guess_state": [
+   {
+    "args": [
+     "p_meeting"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_here": [
+   {
+    "args": [
+     "p_meeting"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_place": [
+   {
+    "args": [
+     "p_meeting",
+     "p_part",
+     "p_anchor"
+    ],
+    "required": 3
+   }
+  ],
+  "study_meeting_quiz": [
+   {
+    "args": [
+     "p_meeting",
+     "p_preset",
+     "p_mode",
+     "p_count",
+     "p_part"
+    ],
+    "required": 2
+   }
+  ],
+  "study_meeting_reader_view": [
+   {
+    "args": [
+     "p_meeting"
+    ],
+    "required": 1
+   }
+  ],
+  "study_meeting_reading": [
+   {
+    "args": [
+     "p_lecture",
+     "p_on",
+     "p_part",
+     "p_anchor"
+    ],
+    "required": 2
+   }
+  ],
+  "study_meeting_save": [
+   {
+    "args": [
+     "p_id",
+     "p_version",
+     "p_group",
+     "p_starts_at",
+     "p_lecture",
+     "p_part_from",
+     "p_part_to",
+     "p_title",
+     "p_reader"
+    ],
+    "required": 7
+   }
+  ],
+  "study_meeting_stop": [
+   {
+    "args": [
+     "p_meeting",
+     "p_kind",
+     "p_part",
+     "p_anchor",
+     "p_quote",
+     "p_comment"
+    ],
+    "required": 4
+   }
+  ],
+  "study_meeting_unclear": [
+   {
+    "args": [
+     "p_meeting",
+     "p_part",
+     "p_anchor",
+     "p_quote",
+     "p_on"
+    ],
+    "required": 3
+   }
+  ],
+  "study_member_saved": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_members_name_check": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_museum": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_museum_meter": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_museum_pick": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_museum_shown": [
+   {
+    "args": [
+     "p_trap"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_aspects": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_calibration": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_card_add": [
+   {
+    "args": [
+     "p_lecture",
+     "p_origin",
+     "p_part",
+     "p_anchor",
+     "p_front",
+     "p_back",
+     "p_slides",
+     "p_comment"
+    ],
+    "required": 6
+   }
+  ],
+  "study_my_card_counts": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_card_days": [
+   {
+    "args": [
+     "p_group",
+     "p_days"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_card_review": [
+   {
+    "args": [
+     "p_review",
+     "p_card",
+     "p_rating",
+     "p_reviewed_at",
+     "p_ms",
+     "p_prev_reps",
+     "p_next"
+    ],
+    "required": 7
+   }
+  ],
+  "study_my_card_set": [
+   {
+    "args": [
+     "p_card",
+     "p_action"
+    ],
+    "required": 2
+   }
+  ],
+  "study_my_card_topics": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_card_undo": [
+   {
+    "args": [
+     "p_review"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_confusions": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_daily": [
+   {
+    "args": [
+     "p_group",
+     "p_days"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_danger": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_danger_list": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_days": [
+   {
+    "args": [
+     "p_group",
+     "p_days",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_deck": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_flame": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_latest": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_lectures": [
+   {
+    "args": [
+     "p_group",
+     "p_asof"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_loot": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_missed": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_mistakes": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_progress_counts": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_pulse": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_quiz_returns": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_readiness": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_relearning": [
+   {
+    "args": [
+     "p_plan",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_rewordings": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_spent": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_topic_stats": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_unclear": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_updates": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_my_uses_today": [
+   {
+    "args": [
+     "p_group",
+     "p_kind",
+     "p_ref"
+    ],
+    "required": 2
+   }
+  ],
+  "study_my_weak_points": [
+   {
+    "args": [
+     "p_group",
+     "p_now"
+    ],
+    "required": 1
+   }
+  ],
+  "study_needs_me": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_needs_me_meter": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_new_code": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_note_reading": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_done",
+     "p_seconds"
+    ],
+    "required": 3
+   }
+  ],
+  "study_open_mistakes": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_outline_done": [
+   {
+    "args": [
+     "p_lecture",
+     "p_lease",
+     "p_parts",
+     "p_error",
+     "p_model",
+     "p_usage",
+     "p_cost",
+     "p_key",
+     "p_charge"
+    ],
+    "required": 3
+   }
+  ],
+  "study_paragraph_chips": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_paragraph_practice": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor"
+    ],
+    "required": 3
+   }
+  ],
+  "study_part_corrections": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part"
+    ],
+    "required": 2
+   }
+  ],
+  "study_pipe_cells": [
+   {
+    "args": [
+     "line"
+    ],
+    "required": 1
+   }
+  ],
+  "study_plan_end": [
+   {
+    "args": [
+     "p_plan"
+    ],
+    "required": 1
+   }
+  ],
+  "study_plan_replan": [
+   {
+    "args": [
+     "p_plan"
+    ],
+    "required": 1
+   }
+  ],
+  "study_plan_save": [
+   {
+    "args": [
+     "p_plan",
+     "p_group",
+     "p_title",
+     "p_exam_date",
+     "p_courses",
+     "p_add",
+     "p_drop",
+     "p_daily_minutes",
+     "p_days_off",
+     "p_final_review"
+    ],
+    "required": 9
+   }
+  ],
+  "study_points_ahead_claim": [
+   {
+    "args": [
+     "p_lecture",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_points_ahead_release": [
+   {
+    "args": [
+     "p_lecture",
+     "p_parts",
+     "p_key"
+    ],
+    "required": 2
+   }
+  ],
+  "study_points_claim": [
+   {
+    "args": [
+     "p_lecture",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_points_fail": [
+   {
+    "args": [
+     "p_lecture",
+     "p_parts",
+     "p_error",
+     "p_cost",
+     "p_key",
+     "p_refused"
+    ],
+    "required": 3
+   }
+  ],
+  "study_points_save": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_md5",
+     "p_points",
+     "p_model",
+     "p_cost",
+     "p_key"
+    ],
+    "required": 4
+   }
+  ],
+  "study_points_state": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_practice_overview": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_progress": [
+   {
+    "args": [
+     "p_lecture",
+     "p_idx",
+     "p_lease",
+     "p_text",
+     "p_key"
+    ],
+    "required": 4
+   }
+  ],
+  "study_propose_edit": [
+   {
+    "args": [
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_before",
+     "p_after",
+     "p_base_rev",
+     "p_base_gen",
+     "p_occurrence",
+     "p_note",
+     "p_source_kind",
+     "p_source_slides",
+     "p_source_at",
+     "p_source_note"
+    ],
+    "required": 13
+   }
+  ],
+  "study_pulse": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_pulse_brief": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_pulse_meter": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_pulse_needed": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_pulse_reader": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_pulse_ready": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_purge_lecture": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_question_claim": [
+   {
+    "args": [
+     "p_batch",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_question_feedback": [
+   {
+    "args": [
+     "p_ids"
+    ],
+    "required": 1
+   }
+  ],
+  "study_question_finish": [
+   {
+    "args": [
+     "p_batch",
+     "p_status",
+     "p_rejected",
+     "p_model",
+     "p_cost",
+     "p_error",
+     "p_key",
+     "p_solver_rejected"
+    ],
+    "required": 6
+   }
+  ],
+  "study_question_fix": [
+   {
+    "args": [
+     "p_question",
+     "p_verdict",
+     "p_slides",
+     "p_note"
+    ],
+    "required": 3
+   }
+  ],
+  "study_question_flags_hide": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_question_for_fix": [
+   {
+    "args": [
+     "p_question"
+    ],
+    "required": 1
+   }
+  ],
+  "study_question_group": [
+   {
+    "args": [
+     "q"
+    ],
+    "required": 1
+   }
+  ],
+  "study_question_round": [
+   {
+    "args": [
+     "p_lecture",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_question_still_true": [
+   {
+    "args": [
+     "p_question"
+    ],
+    "required": 1
+   }
+  ],
+  "study_question_whens": [
+   {
+    "args": [
+     "p_ids"
+    ],
+    "required": 1
+   }
+  ],
+  "study_queue": [
+   {
+    "args": [
+     "p_lecture",
+     "p_figures",
+     "p_until",
+     "p_retry_failed"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__after_reveal": [
+   {
+    "args": [
+     "p_quiz",
+     "p_idx"
+    ],
+    "required": 2
+   }
+  ],
+  "study_quiz__all_answered": [
+   {
+    "args": [
+     "p_quiz",
+     "p_idx"
+    ],
+    "required": 2
+   }
+  ],
+  "study_quiz__boss_state": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__counts": [
+   {
+    "args": [
+     "p_round",
+     "p_vote",
+     "p_n"
+    ],
+    "required": 3
+   }
+  ],
+  "study_quiz__due": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__finish": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__host_here": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__open": [
+   {
+    "args": [
+     "p_quiz",
+     "p_idx"
+    ],
+    "required": 2
+   }
+  ],
+  "study_quiz__open_vote2": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__pick": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__pick_boss": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__pick_preset": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__playing": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__points": [
+   {
+    "args": [
+     "p_choice",
+     "p_key",
+     "p_bet"
+    ],
+    "required": 3
+   }
+  ],
+  "study_quiz__record": [
+   {
+    "args": [
+     "p_group",
+     "p_before"
+    ],
+    "required": 2
+   }
+  ],
+  "study_quiz__reveal": [
+   {
+    "args": [
+     "p_quiz",
+     "p_idx"
+    ],
+    "required": 2
+   }
+  ],
+  "study_quiz__revealed": [
+   {
+    "args": [
+     "p_quiz",
+     "p_question"
+    ],
+    "required": 2
+   }
+  ],
+  "study_quiz__score": [
+   {
+    "args": [
+     "p_quiz",
+     "p_round",
+     "p_key",
+     "p_step",
+     "p_t"
+    ],
+    "required": 5
+   }
+  ],
+  "study_quiz__seconds": [
+   {
+    "args": [
+     "p_setting",
+     "p_chars"
+    ],
+    "required": 2
+   }
+  ],
+  "study_quiz__seen": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__signal": [
+   {
+    "args": [
+     "p_question"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz__trap_card": [
+   {
+    "args": [
+     "p_round"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_answer": [
+   {
+    "args": [
+     "p_quiz",
+     "p_idx",
+     "p_choice",
+     "p_bet",
+     "p_vote"
+    ],
+    "required": 3
+   }
+  ],
+  "study_quiz_create": [
+   {
+    "args": [
+     "p_group",
+     "p_mode",
+     "p_lectures",
+     "p_count",
+     "p_seconds",
+     "p_kinds",
+     "p_preset",
+     "p_meeting",
+     "p_part_from",
+     "p_part_to"
+    ],
+    "required": 5
+   }
+  ],
+  "study_quiz_end": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_join": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_leave": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_next": [
+   {
+    "args": [
+     "p_quiz",
+     "p_from"
+    ],
+    "required": 2
+   }
+  ],
+  "study_quiz_open": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_ping": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_pool": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_recent": [
+   {
+    "args": [
+     "p_group",
+     "p_limit"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_record": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_reveal": [
+   {
+    "args": [
+     "p_quiz",
+     "p_idx"
+    ],
+    "required": 2
+   }
+  ],
+  "study_quiz_state": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_take_host": [
+   {
+    "args": [
+     "p_quiz"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_void": [
+   {
+    "args": [
+     "p_quiz",
+     "p_idx"
+    ],
+    "required": 2
+   }
+  ],
+  "study_read_parts_forget": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_recordings_link": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_remove_member": [
+   {
+    "args": [
+     "p_group",
+     "p_user"
+    ],
+    "required": 2
+   }
+  ],
+  "study_request_create": [
+   {
+    "args": [
+     "p_lecture",
+     "p_request",
+     "p_batches",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_request_progress": [
+   {
+    "args": [
+     "p_request"
+    ],
+    "required": 1
+   }
+  ],
+  "study_reserve": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture",
+     "p_kind",
+     "p_ref",
+     "p_estimate",
+     "p_cap",
+     "p_share",
+     "p_member_share",
+     "p_daily",
+     "p_daily_ref",
+     "p_key"
+    ],
+    "required": 6
+   }
+  ],
+  "study_retire_question": [
+   {
+    "args": [
+     "p_question",
+     "p_retire",
+     "p_note"
+    ],
+    "required": 2
+   }
+  ],
+  "study_revert_card": [
+   {
+    "args": [
+     "p_edit"
+    ],
+    "required": 1
+   }
+  ],
+  "study_rotate_code": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_save_card": [
+   {
+    "args": [
+     "p_batch",
+     "p_card",
+     "p_key"
+    ],
+    "required": 2
+   }
+  ],
+  "study_save_question": [
+   {
+    "args": [
+     "p_batch",
+     "p_exam",
+     "p_q",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_schema": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_sections_versions": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_session_counts": [
+   {
+    "args": [
+     "p_lectures"
+    ],
+    "required": 1
+   }
+  ],
+  "study_set_exam_key": [
+   {
+    "args": [
+     "p_question",
+     "p_answer"
+    ],
+    "required": 2
+   }
+  ],
+  "study_set_explanations": [
+   {
+    "args": [
+     "p_question",
+     "p_explanations",
+     "p_takeaway",
+     "p_slides",
+     "p_lecture",
+     "p_key"
+    ],
+    "required": 5
+   }
+  ],
+  "study_set_needs_me": [
+   {
+    "args": [
+     "p_group",
+     "p_on"
+    ],
+    "required": 2
+   }
+  ],
+  "study_settle": [
+   {
+    "args": [
+     "p_id",
+     "p_model",
+     "p_usage",
+     "p_cost",
+     "p_key"
+    ],
+    "required": 4
+   }
+  ],
+  "study_slide_flag": [
+   {
+    "args": [
+     "p_lecture",
+     "p_slides",
+     "p_note"
+    ],
+    "required": 3
+   }
+  ],
+  "study_slide_flag_remove": [
+   {
+    "args": [
+     "p_flag",
+     "p_remove"
+    ],
+    "required": 1
+   }
+  ],
+  "study_slide_tables": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_spent": [
+   {
+    "args": [
+     "p_group",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_tidy": [
+   {
+    "args": [
+     "t"
+    ],
+    "required": 1
+   }
+  ],
+  "study_today": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_trap_cards": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_trap_checked": [
+   {
+    "args": [
+     "p_draft",
+     "p_ok",
+     "p_problem",
+     "p_whys",
+     "p_whens",
+     "p_takeaway",
+     "p_topic",
+     "p_aspect",
+     "p_key"
+    ],
+    "required": 8
+   }
+  ],
+  "study_trap_plaque": [
+   {
+    "args": [
+     "p_trap",
+     "p_claim",
+     "p_line",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_trap_plaque_begin": [
+   {
+    "args": [
+     "p_trap",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_trap_submit": [
+   {
+    "args": [
+     "p_draft",
+     "p_lecture",
+     "p_part",
+     "p_anchor",
+     "p_quote",
+     "p_vignette",
+     "p_question",
+     "p_options",
+     "p_answer",
+     "p_note",
+     "p_slides"
+    ],
+    "required": 11
+   }
+  ],
+  "study_unclear_done": [
+   {
+    "args": [
+     "p_tap"
+    ],
+    "required": 1
+   }
+  ],
+  "study_undo_edit": [
+   {
+    "args": [
+     "p_edit"
+    ],
+    "required": 1
+   }
+  ],
+  "study_update_seen": [
+   {
+    "args": [
+     "p_update"
+    ],
+    "required": 1
+   }
+  ],
+  "study_withdraw_edit": [
+   {
+    "args": [
+     "p_proposal"
+    ],
+    "required": 1
+   }
+  ],
+  "study_writing_input": [
+   {
+    "args": [
+     "p_lecture",
+     "p_with_transcript",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ]
+ },
+ "tables": {
+  "study_aid_authors": [
+   "aid_id",
+   "user_id"
+  ],
+  "study_aid_credits": [
+   "aid_id",
+   "user_id",
+   "state",
+   "asked_at",
+   "answered_at"
+  ],
+  "study_aid_drafts": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "src_hash",
+   "fact",
+   "slides",
+   "drafts",
+   "model",
+   "created_at"
+  ],
+  "study_aid_pins": [
+   "user_id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "aid_id",
+   "created_at"
+  ],
+  "study_aid_votes": [
+   "aid_id",
+   "user_id",
+   "kind",
+   "created_at"
+  ],
+  "study_aid_winners": [
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "aid_id",
+   "since"
+  ],
+  "study_aids": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "quote",
+   "drug",
+   "kind",
+   "body",
+   "fact",
+   "slides",
+   "photo",
+   "figure",
+   "remix_of",
+   "draft_id",
+   "draft_no",
+   "named_by",
+   "credit_id",
+   "funny_n",
+   "stuck_n",
+   "flag",
+   "flagged_by",
+   "check_state",
+   "checked_at",
+   "check_note",
+   "edited_at",
+   "created_at"
+  ],
+  "study_answers": [
+   "id",
+   "user_id",
+   "question_id",
+   "choice",
+   "correct",
+   "mode",
+   "ms",
+   "answered_at",
+   "confidence"
+  ],
+  "study_boss_battles": [
+   "id",
+   "quiz_id",
+   "group_id",
+   "name",
+   "lecture_ids",
+   "heads",
+   "rounds",
+   "planned",
+   "team_hp",
+   "log",
+   "outcome",
+   "revenge_of",
+   "created_at",
+   "ended_at"
+  ],
+  "study_card_adoptions": [
+   "user_id",
+   "lecture_id",
+   "part_idx",
+   "added_at"
+  ],
+  "study_card_batches": [
+   "id",
+   "lecture_id",
+   "round",
+   "part_idx",
+   "heading",
+   "slide_from",
+   "slide_to",
+   "wanted",
+   "status",
+   "made",
+   "rejected",
+   "model",
+   "cost_usd",
+   "error",
+   "created_by",
+   "created_at",
+   "updated_at",
+   "attempts",
+   "via",
+   "hold_until"
+  ],
+  "study_card_edits": [
+   "id",
+   "card_id",
+   "action",
+   "version",
+   "before",
+   "after",
+   "edited_by",
+   "edited_at"
+  ],
+  "study_card_reviews": [
+   "id",
+   "user_id",
+   "card_id",
+   "rating",
+   "reviewed_at",
+   "ms",
+   "elapsed_days",
+   "state_before",
+   "state_after",
+   "stability",
+   "difficulty",
+   "due",
+   "prev",
+   "created_at"
+  ],
+  "study_card_settings": [
+   "user_id",
+   "new_per_day",
+   "retention",
+   "updated_at",
+   "home"
+  ],
+  "study_card_states": [
+   "user_id",
+   "card_id",
+   "state",
+   "step",
+   "stability",
+   "difficulty",
+   "due",
+   "last_review",
+   "reps",
+   "lapses",
+   "suspended",
+   "updated_at"
+  ],
+  "study_cards": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "batch_id",
+   "source",
+   "part_idx",
+   "kind",
+   "front",
+   "back",
+   "extra",
+   "figure",
+   "slides",
+   "topic",
+   "aspect",
+   "model",
+   "version",
+   "created_by",
+   "created_at",
+   "updated_by",
+   "updated_at",
+   "deleted_at",
+   "deleted_by",
+   "anchor",
+   "quote",
+   "part_gen",
+   "trap_key",
+   "stale_at",
+   "stale_edit",
+   "checked_by",
+   "checked_at",
+   "opens_at"
+  ],
+  "study_comments": [
+   "id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "quote",
+   "kind",
+   "body",
+   "parent_id",
+   "resolved",
+   "author_id",
+   "created_at",
+   "ask_attempt",
+   "resolved_by",
+   "resolved_at"
+  ],
+  "study_dispute_backs": [
+   "dispute_id",
+   "user_id",
+   "side",
+   "created_at"
+  ],
+  "study_disputes": [
+   "id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "quote",
+   "proposal_id",
+   "claim_a",
+   "slides_a",
+   "author_a",
+   "claim_b",
+   "slides_b",
+   "author_b",
+   "state",
+   "verdict",
+   "verdict_model",
+   "judged_at",
+   "decided_by",
+   "decided_at",
+   "decision_note",
+   "trap_card",
+   "judging_until",
+   "var_asked_at",
+   "version",
+   "created_at",
+   "updated_at"
+  ],
+  "study_edit_proposals": [
+   "id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "gen",
+   "base_rev",
+   "occurrence",
+   "kind",
+   "before_text",
+   "after_text",
+   "note",
+   "source_kind",
+   "source_slides",
+   "source_at",
+   "source_note",
+   "state",
+   "proposed_by",
+   "approved_by",
+   "aloud",
+   "edit_id",
+   "created_at",
+   "decided_at",
+   "updated_at",
+   "check_ok",
+   "check_note",
+   "checked_at"
+  ],
+  "study_edits": [
+   "id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "gen",
+   "rev",
+   "kind",
+   "before_text",
+   "after_text",
+   "note",
+   "undo_of",
+   "author_id",
+   "created_at",
+   "proposal_id",
+   "source_kind",
+   "source_slides",
+   "source_at",
+   "source_note",
+   "approved_by",
+   "aloud",
+   "occurrence"
+  ],
+  "study_exams": [
+   "id",
+   "group_id",
+   "course",
+   "title",
+   "year",
+   "source_name",
+   "pages",
+   "key_source",
+   "status",
+   "error",
+   "created_by",
+   "created_at",
+   "updated_at"
+  ],
+  "study_group_plans": [
+   "id",
+   "group_id",
+   "title",
+   "exam_date",
+   "lecture_ids",
+   "shared_from",
+   "leave_from",
+   "shared_minutes",
+   "leave_minutes",
+   "rounds",
+   "day_start",
+   "slips",
+   "state",
+   "version",
+   "created_by",
+   "updated_by",
+   "created_at",
+   "updated_at"
+  ],
+  "study_groups": [
+   "id",
+   "name",
+   "join_code",
+   "created_by",
+   "created_at"
+  ],
+  "study_lectures": [
+   "id",
+   "group_id",
+   "course",
+   "title",
+   "lecturer",
+   "lecture_date",
+   "source_name",
+   "source_kind",
+   "slides",
+   "outline",
+   "status",
+   "error",
+   "created_by",
+   "created_at",
+   "updated_at",
+   "queued_at",
+   "lease_id",
+   "lease_until",
+   "attempts",
+   "deleted_at",
+   "deleted_by",
+   "retry_day",
+   "retries"
+  ],
+  "study_loot": [
+   "user_id",
+   "quiz_id",
+   "question_id",
+   "due_on",
+   "done_at"
+  ],
+  "study_marathon_people": [
+   "id",
+   "marathon_id",
+   "user_id",
+   "answer",
+   "updated_at"
+  ],
+  "study_marathons": [
+   "id",
+   "group_id",
+   "title",
+   "starts_at",
+   "minutes",
+   "place",
+   "note",
+   "lecture_ids",
+   "agenda",
+   "state",
+   "step",
+   "step_at",
+   "started_at",
+   "ended_at",
+   "version",
+   "created_by",
+   "updated_by",
+   "created_at",
+   "updated_at",
+   "plan_id",
+   "plan_day"
+  ],
+  "study_meeting_catchups": [
+   "meeting_id",
+   "user_id",
+   "done_at",
+   "marked_at"
+  ],
+  "study_meeting_events": [
+   "id",
+   "meeting_id",
+   "kind",
+   "part_idx",
+   "anchor",
+   "quote",
+   "comment_id",
+   "created_by",
+   "created_at"
+  ],
+  "study_meeting_guess_answers": [
+   "meeting_id",
+   "question_id",
+   "user_id",
+   "choice",
+   "answered_at"
+  ],
+  "study_meeting_live": [
+   "meeting_id",
+   "part_idx",
+   "anchor",
+   "max_part",
+   "max_anchor",
+   "place_at"
+  ],
+  "study_meeting_presence": [
+   "meeting_id",
+   "user_id",
+   "first_at",
+   "last_at"
+  ],
+  "study_meeting_taps": [
+   "id",
+   "meeting_id",
+   "user_id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "quote",
+   "created_at",
+   "done_at"
+  ],
+  "study_meetings": [
+   "id",
+   "group_id",
+   "day",
+   "starts_at",
+   "lecture_id",
+   "part_from",
+   "part_to",
+   "title",
+   "planned_reader",
+   "reader_id",
+   "reading",
+   "started_at",
+   "read_part",
+   "guess_ids",
+   "guess_released",
+   "cancelled_at",
+   "version",
+   "created_by",
+   "updated_by",
+   "created_at",
+   "updated_at"
+  ],
+  "study_member_prefs": [
+   "user_id",
+   "group_id",
+   "needs_me",
+   "updated_at"
+  ],
+  "study_members": [
+   "group_id",
+   "user_id",
+   "name",
+   "joined_at"
+  ],
+  "study_my_card_reviews": [
+   "id",
+   "user_id",
+   "card_id",
+   "rating",
+   "reviewed_at",
+   "ms",
+   "prev",
+   "created_at"
+  ],
+  "study_my_cards": [
+   "id",
+   "user_id",
+   "group_id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "origin",
+   "question_id",
+   "comment_id",
+   "front",
+   "back",
+   "extra",
+   "slides",
+   "state",
+   "step",
+   "stability",
+   "difficulty",
+   "due",
+   "last_review",
+   "reps",
+   "lapses",
+   "suspended",
+   "created_at",
+   "deleted_at"
+  ],
+  "study_plan_checks": [
+   "plan_id",
+   "day",
+   "task_key",
+   "user_id",
+   "checked_at"
+  ],
+  "study_plan_lectures": [
+   "plan_id",
+   "lecture_id",
+   "user_id",
+   "included"
+  ],
+  "study_plans": [
+   "id",
+   "user_id",
+   "group_id",
+   "title",
+   "exam_date",
+   "courses",
+   "daily_minutes",
+   "days_off",
+   "final_review",
+   "status",
+   "replanned_at",
+   "created_at",
+   "updated_at"
+  ],
+  "study_point_parts": [
+   "lecture_id",
+   "part_idx",
+   "src_md5",
+   "try_md5",
+   "status",
+   "attempts",
+   "lease_until",
+   "error",
+   "model",
+   "cost_usd",
+   "updated_at",
+   "ahead_at"
+  ],
+  "study_points": [
+   "id",
+   "lecture_id",
+   "part_idx",
+   "n",
+   "kind",
+   "subject",
+   "text",
+   "anchor",
+   "quote",
+   "slides",
+   "red_flag",
+   "weight",
+   "created_at",
+   "updated_at"
+  ],
+  "study_pulse_cards": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "card_id",
+   "cutoff"
+  ],
+  "study_pulse_optout": [
+   "group_id",
+   "user_id",
+   "created_at"
+  ],
+  "study_pulse_questions": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "question_id",
+   "signal",
+   "cutoff"
+  ],
+  "study_pulse_spots": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "cutoff"
+  ],
+  "study_pulse_topics": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "topic_key",
+   "topic",
+   "aspect",
+   "bucket",
+   "slides",
+   "closed_week",
+   "cutoff"
+  ],
+  "study_question_batches": [
+   "id",
+   "lecture_id",
+   "round",
+   "part_idx",
+   "heading",
+   "slide_from",
+   "slide_to",
+   "wanted",
+   "status",
+   "made",
+   "rejected",
+   "model",
+   "cost_usd",
+   "error",
+   "created_by",
+   "created_at",
+   "updated_at",
+   "attempts",
+   "via",
+   "hold_until",
+   "solver_rejected",
+   "request_id",
+   "seq",
+   "points",
+   "styles"
+  ],
+  "study_question_draft_keys": [
+   "draft_id",
+   "answer",
+   "explanations",
+   "takeaway",
+   "whens",
+   "solver_choice",
+   "solver_ambiguous"
+  ],
+  "study_question_drafts": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "request_id",
+   "batch_id",
+   "part_idx",
+   "style",
+   "points",
+   "kind",
+   "difficulty",
+   "vignette",
+   "question",
+   "options",
+   "slides",
+   "topic",
+   "aspect",
+   "anchor",
+   "quote",
+   "part_gen",
+   "teaser",
+   "figure",
+   "option_tags",
+   "status",
+   "check_state",
+   "rewrites",
+   "replaces",
+   "lease_until",
+   "question_id",
+   "model",
+   "created_by",
+   "decided_by",
+   "decided_at",
+   "created_at",
+   "updated_at"
+  ],
+  "study_question_flags": [
+   "id",
+   "question_id",
+   "user_id",
+   "reason",
+   "note",
+   "created_at"
+  ],
+  "study_question_keys": [
+   "question_id",
+   "answer",
+   "explanations",
+   "takeaway",
+   "key_by",
+   "key_at",
+   "held_until",
+   "whens"
+  ],
+  "study_question_requests": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "round",
+   "level",
+   "count",
+   "parts",
+   "styles",
+   "difficulty",
+   "style_note",
+   "style_example",
+   "focus",
+   "points",
+   "created_by",
+   "created_at"
+  ],
+  "study_questions": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "batch_id",
+   "exam_id",
+   "exam_no",
+   "ref_lecture",
+   "source",
+   "part_idx",
+   "kind",
+   "difficulty",
+   "vignette",
+   "question",
+   "options",
+   "slides",
+   "topic",
+   "aspect",
+   "has_key",
+   "model",
+   "created_by",
+   "created_at",
+   "retired_at",
+   "retired_by",
+   "retire_note",
+   "anchor",
+   "quote",
+   "part_gen",
+   "teaser",
+   "stale_at",
+   "stale_edit",
+   "checked_by",
+   "checked_at",
+   "figure",
+   "option_tags",
+   "hidden_at",
+   "fixed_by",
+   "fixed_at",
+   "fix_slides",
+   "fix_note",
+   "style",
+   "points",
+   "request_id",
+   "author_id",
+   "unmasked_at"
+  ],
+  "study_quiz_answers": [
+   "round_id",
+   "user_id",
+   "choice",
+   "ms",
+   "answered_at",
+   "correct",
+   "points",
+   "vote",
+   "bet"
+  ],
+  "study_quiz_players": [
+   "quiz_id",
+   "user_id",
+   "joined_at",
+   "joined_idx",
+   "seen_at",
+   "left_at",
+   "score",
+   "correct_n",
+   "answered_n",
+   "ms_total"
+  ],
+  "study_quiz_rounds": [
+   "id",
+   "quiz_id",
+   "idx",
+   "question_id",
+   "seconds",
+   "opens_at",
+   "closes_at",
+   "revealed_at",
+   "answer",
+   "voided_at",
+   "voided_by",
+   "vote",
+   "next_step",
+   "answered1",
+   "right1",
+   "counts1",
+   "trap",
+   "trap_card"
+  ],
+  "study_quizzes": [
+   "id",
+   "group_id",
+   "mode",
+   "title",
+   "lecture_ids",
+   "kinds",
+   "n_wanted",
+   "seconds",
+   "state",
+   "idx",
+   "n_total",
+   "opens_at",
+   "closes_at",
+   "answered_n",
+   "players_n",
+   "version",
+   "host_id",
+   "created_by",
+   "created_at",
+   "started_at",
+   "ended_at",
+   "updated_at",
+   "preset",
+   "meeting_id",
+   "part_from",
+   "part_to",
+   "vote",
+   "stage",
+   "argue_until"
+  ],
+  "study_read_parts": [
+   "user_id",
+   "lecture_id",
+   "part_idx",
+   "done_at",
+   "seconds"
+  ],
+  "study_read_places": [
+   "user_id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "updated_at"
+  ],
+  "study_reads": [
+   "id",
+   "lecture_id",
+   "user_id",
+   "read_at"
+  ],
+  "study_recording_notes": [
+   "id",
+   "lecture_id",
+   "part_idx",
+   "items",
+   "status",
+   "error",
+   "model",
+   "usage",
+   "lease_id",
+   "lease_until",
+   "attempts",
+   "retry_at",
+   "updated_at"
+  ],
+  "study_recordings": [
+   "id",
+   "lecture_id",
+   "source",
+   "engine",
+   "source_name",
+   "link_url",
+   "link_set_by",
+   "duration_s",
+   "done_s",
+   "has_times",
+   "status",
+   "error",
+   "chars",
+   "consented",
+   "created_by",
+   "created_at",
+   "updated_at"
+  ],
+  "study_sections": [
+   "lecture_id",
+   "idx",
+   "title",
+   "slide_from",
+   "slide_to",
+   "markdown",
+   "status",
+   "model",
+   "usage",
+   "error",
+   "updated_at",
+   "lease_id",
+   "lease_until",
+   "attempts",
+   "retry_at",
+   "writer",
+   "rev",
+   "gen"
+  ],
+  "study_slide_flags": [
+   "id",
+   "lecture_id",
+   "slides",
+   "note",
+   "created_by",
+   "created_at",
+   "removed_at",
+   "removed_by"
+  ],
+  "study_transcript_blocks": [
+   "lecture_id",
+   "idx",
+   "start_s",
+   "end_s",
+   "lines",
+   "segments"
+  ],
+  "study_trap_drafts": [
+   "id",
+   "user_id",
+   "group_id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "quote",
+   "vignette",
+   "question",
+   "options",
+   "answer",
+   "note",
+   "slides",
+   "state",
+   "problem",
+   "question_id",
+   "created_at",
+   "updated_at"
+  ],
+  "study_traps": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "question_id",
+   "option",
+   "source",
+   "exhibit_no",
+   "exhibit_at",
+   "card_id",
+   "state",
+   "falling",
+   "found_at",
+   "opens_at",
+   "opened_at",
+   "retired_at",
+   "shown_at",
+   "plaque",
+   "plaque_until"
+  ],
+  "study_updates": [
+   "id",
+   "user_id",
+   "edit_id",
+   "lecture_id",
+   "part_idx",
+   "anchor",
+   "reason",
+   "reason_at",
+   "created_at",
+   "seen_at"
+  ],
+  "study_usage": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "user_id",
+   "kind",
+   "ref",
+   "model",
+   "usage",
+   "cost_usd",
+   "created_at",
+   "settled_at"
+  ]
+ },
+ "member": {
+  "study_aid_authors": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_aid_credits": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_aid_drafts": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_aid_pins": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_aid_votes": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_aid_winners": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_aids": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_answers": {
+   "insert": [],
+   "update": [],
+   "delete": true
+  },
+  "study_boss_battles": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_card_adoptions": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_card_batches": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_card_edits": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_card_reviews": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_card_settings": {
+   "insert": [
+    "new_per_day",
+    "retention",
+    "home"
+   ],
+   "update": [
+    "new_per_day",
+    "retention",
+    "updated_at",
+    "home"
+   ],
+   "delete": false
+  },
+  "study_card_states": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_cards": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_comments": {
+   "insert": [
+    "lecture_id",
+    "part_idx",
+    "anchor",
+    "quote",
+    "kind",
+    "body",
+    "parent_id"
+   ],
+   "update": [
+    "resolved"
+   ],
+   "delete": true
+  },
+  "study_dispute_backs": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_disputes": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_edit_proposals": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_edits": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_exams": {
+   "insert": [
+    "id",
+    "group_id",
+    "course",
+    "title",
+    "year",
+    "source_name",
+    "pages",
+    "key_source"
+   ],
+   "update": [
+    "course",
+    "title",
+    "year",
+    "key_source",
+    "status",
+    "error",
+    "updated_at"
+   ],
+   "delete": true
+  },
+  "study_group_plans": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_groups": {
+   "insert": [],
+   "update": [
+    "name"
+   ],
+   "delete": false
+  },
+  "study_lectures": {
+   "insert": [
+    "id",
+    "group_id",
+    "course",
+    "title",
+    "lecturer",
+    "lecture_date",
+    "source_name",
+    "source_kind",
+    "slides"
+   ],
+   "update": [
+    "course",
+    "title",
+    "lecturer",
+    "lecture_date",
+    "updated_at"
+   ],
+   "delete": false
+  },
+  "study_loot": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_marathon_people": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_marathons": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_meeting_catchups": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_meeting_events": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_meeting_guess_answers": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_meeting_live": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_meeting_presence": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_meeting_taps": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_meetings": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_member_prefs": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_members": {
+   "insert": [],
+   "update": [
+    "name"
+   ],
+   "delete": true
+  },
+  "study_my_card_reviews": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_my_cards": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_plan_checks": {
+   "insert": [
+    "plan_id",
+    "day",
+    "task_key"
+   ],
+   "update": [],
+   "delete": true
+  },
+  "study_plan_lectures": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_plans": {
+   "insert": [],
+   "update": [],
+   "delete": true
+  },
+  "study_point_parts": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_points": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_pulse_cards": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_pulse_optout": {
+   "insert": [
+    "group_id"
+   ],
+   "update": [],
+   "delete": true
+  },
+  "study_pulse_questions": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_pulse_spots": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_pulse_topics": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_question_batches": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_question_draft_keys": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_question_drafts": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_question_flags": {
+   "insert": [
+    "question_id",
+    "reason",
+    "note"
+   ],
+   "update": [],
+   "delete": true
+  },
+  "study_question_keys": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_question_requests": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_questions": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_quiz_answers": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_quiz_players": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_quiz_rounds": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_quizzes": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_read_parts": {
+   "insert": [],
+   "update": [],
+   "delete": true
+  },
+  "study_read_places": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_reads": {
+   "insert": [
+    "lecture_id"
+   ],
+   "update": [],
+   "delete": true
+  },
+  "study_recording_notes": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_recordings": {
+   "insert": [
+    "lecture_id",
+    "source",
+    "engine",
+    "source_name",
+    "link_url",
+    "duration_s",
+    "done_s",
+    "has_times",
+    "status",
+    "chars",
+    "consented"
+   ],
+   "update": [
+    "engine",
+    "source_name",
+    "link_url",
+    "duration_s",
+    "done_s",
+    "has_times",
+    "status",
+    "error",
+    "chars",
+    "updated_at"
+   ],
+   "delete": true
+  },
+  "study_sections": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_slide_flags": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_transcript_blocks": {
+   "insert": [
+    "lecture_id",
+    "idx",
+    "start_s",
+    "end_s",
+    "lines",
+    "segments"
+   ],
+   "update": [
+    "start_s",
+    "end_s",
+    "lines",
+    "segments"
+   ],
+   "delete": true
+  },
+  "study_trap_drafts": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_traps": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_updates": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_usage": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  }
+ }
+}

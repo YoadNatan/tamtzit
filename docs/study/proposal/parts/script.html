@@ -1,0 +1,181 @@
+<script>
+/* Votes: one document per person at votes/<their id> holding
+   { choices: {featureId: "build"|"talk"|"skip"}, notes: {featureId: text}, at }.
+   Everyone who can open the page reads all votes; each person writes only
+   their own (rules declared at publish). Names come from the user
+   capability at render time and are never stored. */
+(function () {
+  var LABEL = { build: "לבנות", talk: "לדבר על זה", skip: "לא עכשיו" };
+  var boxes = Array.prototype.slice.call(document.querySelectorAll(".vote[data-feature]"));
+  var statusEl = document.getElementById("vote-status");
+  var summaryBody = document.getElementById("vote-summary-body");
+  var NAMES = {};
+  var me = null;
+  var user = null;
+  var ref = null;
+  var mine = { choices: {}, notes: {} };
+  var all = new Map();
+  var writing = Promise.resolve();
+  var readOnly = true;
+  var noteTimers = {};
+  var refused = false;
+  var lastSaved = { choices: {}, notes: {} };
+  function clone(d) { return { choices: Object.assign({}, d && d.choices), notes: Object.assign({}, d && d.notes) }; }
+
+  function setStatus(text, box) {
+    if (statusEl) statusEl.textContent = text;
+    (box ? [box] : boxes).forEach(function (b) { var m = b.querySelector(".vote-msg"); if (m) m.textContent = box || readOnly ? text : ""; });
+  }
+  function featureName(id) {
+    var h = document.querySelector('#f-' + id + ' h4');
+    return h ? h.textContent : id;
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function lockInputs(locked) {
+    readOnly = locked;
+    boxes.forEach(function (box) {
+      box.querySelectorAll("button[data-v]").forEach(function (b) { b.disabled = locked; });
+      var ta = box.querySelector("textarea");
+      if (ta) ta.disabled = locked;
+    });
+  }
+
+  async function resolveNames(ids) {
+    var missing = ids.filter(function (id) { return !(id in NAMES); });
+    if (!missing.length || !user) return;
+    try {
+      var ps = await user.profiles(missing);
+      missing.forEach(function (id) { NAMES[id] = (ps && ps[id] && ps[id].name) || "מישהו"; });
+    } catch (e) {
+      missing.forEach(function (id) { NAMES[id] = "מישהו"; });
+    }
+  }
+  function who(id) { return (NAMES[id] || "מישהו") + (id === me ? " (אני)" : ""); }
+
+  async function render() {
+    await resolveNames(Array.from(all.keys()));
+    var rows = [];
+    boxes.forEach(function (box) {
+      var f = box.dataset.feature;
+      var pick = mine.choices && mine.choices[f];
+      box.querySelectorAll("button[data-v]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.v === pick)); });
+      var ta = box.querySelector("textarea");
+      if (ta && document.activeElement !== ta) ta.value = (mine.notes && mine.notes[f]) || "";
+      var tally = { build: [], talk: [], skip: [] };
+      var notes = [];
+      all.forEach(function (d, id) {
+        var v = d && d.choices && d.choices[f];
+        if (tally[v]) tally[v].push(who(id));
+        var n = d && d.notes && d.notes[f];
+        if (n && id !== me) notes.push("<b>" + esc(NAMES[id] || "מישהו") + ":</b> " + esc(n));
+      });
+      var parts = ["build", "talk", "skip"].filter(function (k) { return tally[k].length; }).map(function (k) {
+        return "<span><b>" + LABEL[k] + ":</b> " + esc(tally[k].join(", ")) + "</span>";
+      });
+      var el = box.querySelector(".vote-tally");
+      if (el) el.innerHTML = parts.join("") + (notes.length ? '<span style="flex-basis:100%">' + notes.join(" · ") + "</span>" : "");
+      rows.push({ f: f, build: tally.build.length, talk: tally.talk.length, skip: tally.skip.length, notes: notes });
+    });
+    if (summaryBody) {
+      rows.sort(function (a, b) { return b.build - a.build || b.talk - a.talk; });
+      summaryBody.innerHTML = rows.map(function (r) {
+        return '<tr><td><a href="#f-' + r.f + '">' + esc(featureName(r.f)) + '</a>' + (r.notes.length ? '<div class="muted" style="font-size:.82rem">' + r.notes.join("<br>") + '</div>' : '') + '</td><td class="num">' + r.build + '</td><td class="num">' + r.talk + '</td><td class="num">' + r.skip + "</td></tr>";
+      }).join("");
+    }
+  }
+
+  function save(box) {
+    if (!ref || readOnly) return;
+    var body = { choices: Object.assign({}, mine.choices), notes: Object.assign({}, mine.notes), at: new Date().toISOString() };
+    writing = writing.then(function () { return ref.set(body); }).then(function () {
+      lastSaved = clone(body);
+      setStatus("נשמר. כל מי שפותח את העמוד רואה את הבחירות שלך.", box);
+    }).catch(function (e) {
+      mine = clone(lastSaved);
+      if (me) all.set(me, mine);
+      render();
+      if (e && (e.code === "invalid_argument" || e.code === "not_granted")) {
+        refused = true;
+        lockInputs(true);
+        setStatus("אפשר לקרוא את העמוד, אבל אין לך הרשאה להצביע בו. מי ששיתף אותו יכול לתת הרשאת Contributor.");
+      } else {
+        setStatus("השמירה לא הצליחה. כדאי לנסות שוב בעוד רגע.", box);
+      }
+    });
+  }
+
+  boxes.forEach(function (box) {
+    var f = box.dataset.feature;
+    box.querySelectorAll("button[data-v]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (readOnly) return;
+        var v = b.dataset.v;
+        mine.choices = Object.assign({}, mine.choices);
+        if (mine.choices[f] === v) delete mine.choices[f]; else mine.choices[f] = v;
+        if (me) all.set(me, mine);
+        render();
+        save(box);
+      });
+    });
+    var ta = box.querySelector("textarea");
+    if (ta) ta.addEventListener("input", function () {
+      if (readOnly) return;
+      mine.notes = Object.assign({}, mine.notes);
+      var t = ta.value.trim();
+      if (t) mine.notes[f] = t.slice(0, 600); else delete mine.notes[f];
+      clearTimeout(noteTimers[f]);
+      noteTimers[f] = setTimeout(function () {
+        /* Re-read the field: a snapshot from someone else's vote may have replaced `mine` meanwhile. */
+        mine.notes = Object.assign({}, mine.notes);
+        var t2 = ta.value.trim();
+        if (t2) mine.notes[f] = t2.slice(0, 600); else delete mine.notes[f];
+        if (me) all.set(me, mine); render(); save(box);
+      }, 900);
+    });
+  });
+
+  lockInputs(true);
+  var c = window.claude;
+  if (!c || typeof c.use !== "function") {
+    setStatus("ההצבעה פועלת כשפותחים את העמוד ב-claude.ai. אפשר לקרוא הכול גם כאן.");
+    return;
+  }
+  setStatus("טוען את ההצבעות…");
+  Promise.all([c.use("db"), c.use("user")]).then(async function (caps) {
+    var db = caps[0];
+    user = caps[1];
+    if (!db || !user) {
+      var off = "כדי להצביע צריך להתחבר ל-claude.ai ולפתוח את העמוד מהקישור ששותף. בינתיים אפשר לקרוא הכול.";
+      setStatus(off);
+      if (summaryBody) summaryBody.innerHTML = '<tr><td colspan="4" class="muted">' + esc(off) + "</td></tr>";
+      return;
+    }
+    me = await user.id();
+    if (!me) { setStatus("כדי להצביע צריך להתחבר ל-claude.ai."); return; }
+    var can = null;
+    try { can = await user.can("data.write"); } catch (e) { can = null; }
+    ref = db.doc("votes/" + me);
+    var loaded = false;
+    var timer = setTimeout(function () { if (!loaded) setStatus("ההצבעות עוד לא נטענו. אם זה נמשך, כדאי לרענן."); }, 10000);
+    db.collection("votes").onSnapshot(function (snap) {
+      var next = new Map();
+      snap.docs.forEach(function (d) { next.set(d.id, d.data() || {}); });
+      all = next;
+      if (all.has(me) && !snap.metadata.hasPendingWrites) { mine = clone(all.get(me)); lastSaved = clone(all.get(me)); }
+      if (!snap.metadata.fromCache) {
+        var first = !loaded;
+        loaded = true;
+        clearTimeout(timer);
+        if (can === false) { lockInputs(true); if (first) setStatus("אפשר לראות את ההצבעות, אבל אין לך הרשאה להצביע. מי ששיתף את העמוד יכול לתת הרשאת Contributor."); }
+        else if (refused) lockInputs(true);
+        else if (first) { lockInputs(false); setStatus(all.size ? "ההצבעות נטענו. הבחירה נשמרת מיד." : "עוד אין הצבעות. הבחירה הראשונה נשמרת מיד."); }
+      }
+      render();
+    }, function (err) {
+      clearTimeout(timer);
+      setStatus(err && err.code === "revoked" ? "הגישה לעמוד השתנתה." : "ההצבעות לא נטענו. אפשר לקרוא הכול.");
+    });
+  });
+})();
+</script>

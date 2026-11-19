@@ -1,0 +1,126 @@
+/* ── Disputes, VAR, the lecture's log, "עדכון" (package V; §12.4.V) ──
+   The approved screens (docs/study/proposal/mockups/corrections.html s2 and
+   s3) in the kit (styles/kit.css): this file only places the kit's pieces,
+   with tokens only. The verdict's card and the update card take the
+   mockup's own colours (the "הרחבה" blue and the accent's border). Tap
+   targets ≥ 44 px, no horizontal scroll at 360 px, state never by colour
+   alone (a word goes with every chip and bar). */
+
+.v-dispute,
+.v-log {
+  padding-bottom: calc(var(--sp-16) * 2);
+}
+
+/* The two sides: an initial, then the line. */
+.v-claim {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+.v-claim .a-avatar {
+  flex: none;
+}
+.v-claim .a-para {
+  min-width: 0;
+  margin: 0;
+}
+.v-claim-open {
+  justify-content: space-between;
+}
+.v-claim-form {
+  gap: var(--sp-4);
+}
+
+/* Backing: the head spans the rows; the back buttons wrap. */
+.v-backing .v-backing-h,
+.v-backing .v-backing-line,
+.v-backing .v-back-row {
+  grid-column: 1 / -1;
+}
+.v-back-row {
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.v-back-row .a-chip {
+  min-height: var(--hit);
+}
+
+/* "פסיקת VAR": the "הרחבה" blue, as the mockup draws it. */
+.v-verdict {
+  background: var(--extra-bg);
+  border-color: var(--extra-line);
+  gap: var(--sp-3);
+}
+.v-item {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Under a paragraph: the pinned box, the open card's chip. */
+.v-box {
+  display: grid;
+  gap: var(--sp-2);
+  margin-block: var(--sp-2);
+}
+.v-box-link,
+.v-open {
+  justify-self: start;
+  min-height: var(--hit);
+  display: inline-flex;
+  align-items: center;
+}
+.v-open {
+  margin-block: var(--sp-2);
+}
+
+/* "עדכון בסיכום": the accent's border (corrections.html s3). */
+.v-update {
+  border-color: var(--me-line);
+  gap: var(--sp-3);
+}
+.v-line {
+  flex-wrap: nowrap;
+  align-items: baseline;
+}
+.v-line .a-chip,
+.v-line .a-avatar {
+  flex: none;
+}
+.v-line > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The log: a row's links under its text. */
+.v-log-row > div,
+.v-log-link > div {
+  min-width: 0;
+}
+.v-log-link {
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.v-log-row.removed b {
+  color: var(--muted);
+}
+.v-log-acts {
+  gap: var(--sp-6);
+}
+.v-log-acts .a-link {
+  min-height: var(--hit);
+}
+.v-flag-form {
+  gap: var(--sp-4);
+}
+
+/* A number or a range in a line ("20-25%") stays on one line. */
+.v-num {
+  white-space: nowrap;
+}
+.v-override-box {
+  gap: var(--sp-2);
+}
+.v-override-box p {
+  margin: 0;
+}

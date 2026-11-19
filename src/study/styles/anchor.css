@@ -1,0 +1,77 @@
+/* ── The paragraph anchor's placement (package N; proposal/mockups/anchor.html) ──
+ * Only places the kit's pieces: the chip row is .a-wrap of .a-chip buttons,
+ * the private line an .a-card.flat, the sheet .a-sheet with .a-chip tabs and
+ * an .a-list. Sizes and colours are the kit's tokens. */
+
+/* Under a paragraph: the row sits close to its paragraph, at the summary's
+ * interface size (not the reading size), then the next paragraph. */
+.summary .n-anchor {
+  display: grid;
+  gap: var(--sp-3);
+  max-width: 68ch;
+  margin: calc(var(--sp-1) * -1) 0 var(--sp-5);
+  font-size: var(--text-small);
+  line-height: var(--leading);
+}
+.summary li.blk-extras .n-anchor {
+  margin-top: var(--sp-2);
+}
+/* The private line: the kit's flat card as a button (opens "תרגול"). */
+.n-mine.a-card {
+  min-height: var(--hit);
+  padding: var(--sp-4) var(--sp-6);
+  text-align: start;
+  font: inherit;
+  color: var(--ink);
+}
+.n-mine .a-row.between {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.n-mine .a-small {
+  min-width: 0;
+}
+.n-mine .a-chip {
+  flex: none;
+}
+
+/* While following a reader: one dot, in the accent, after the paragraph. */
+.summary .n-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin: 0 0 var(--sp-3);
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+
+/* The sheet's frame (head, tabs, panel) is K's and N's one frame:
+   components/ParagraphSheet.tsx, placed in styles/collab.css. */
+.n-tab-head {
+  flex-wrap: wrap;
+  row-gap: var(--sp-2);
+}
+.n-marks {
+  gap: var(--sp-3);
+}
+.n-items .n-item > div {
+  width: 100%;
+}
+.n-items .n-item .a-row.between {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.n-items .n-item .a-chip {
+  flex: none;
+}
+.n-items .n-item b {
+  overflow-wrap: anywhere;
+}
+.n-items .n-stale {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.n-empty {
+  text-align: center;
+}

@@ -1,0 +1,199 @@
+/* ── Corrections and "לשאול" (package K; §12.3.K) ──
+   The approved screens (docs/study/proposal/mockups/corrections.html, ask.html,
+   anchor.html s2's sheet) in the kit (styles/kit.css): this file only places
+   the kit's pieces, with tokens only. Tap targets ≥ 44 px, no horizontal
+   scroll at 360 px, state never by colour alone (a ✓/✗ or a word goes with
+   it). */
+
+/* ── A paragraph's sheet: "מה יושב על הפסקה" ── */
+/* One frame, shared by K and N (anchor.html s2): the head's title is the
+   mockup's bold body-size line, the tags and ✕ stay on one row. */
+.k-sheet-head {
+  align-items: center;
+}
+.k-sheet-head h2 {
+  padding-top: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  font-weight: 700;
+}
+.k-sheet-head .a-row {
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+}
+.k-sheet .sheet-quote {
+  padding-top: 0;
+}
+.k-tabs {
+  gap: var(--sp-3);
+}
+.k-tab {
+  cursor: pointer;
+}
+.k-panel {
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+/* Claude's attempt, folded under the question it came with (ask.html s2). */
+.k-attempt > summary {
+  min-height: var(--hit);
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+}
+.k-attempt > summary::-webkit-details-marker {
+  display: none;
+}
+.k-attempt > .a-callout {
+  margin-top: var(--sp-2);
+}
+.note-rich {
+  display: grid;
+  gap: var(--sp-2);
+}
+/* A private card, "רק לך" (ask.html s2): the member's own colour. */
+.k-mine {
+  border-color: var(--me-line);
+  background: var(--me-soft);
+}
+
+/* ── The "תיקון" tab (corrections.html s1) ── */
+.k-edit {
+  gap: var(--sp-5);
+}
+.k-diff {
+  overflow-wrap: anywhere;
+}
+.k-diff.whole s {
+  display: block;
+}
+.k-ins {
+  color: var(--ok-text);
+}
+.k-ok {
+  display: inline-flex;
+  color: var(--ok-text);
+}
+/* What follows the approval: up to three short lines (corrections.html s1's
+ * third, "׳עדכון׳ ב׳היום׳", with Today on), set tight so "לאשר" stays on
+ * screen at 390×844 under the sheet's quote (review V-APPROVE-BELOW-FOLD). */
+.k-after {
+  gap: var(--sp-1);
+  padding-block: var(--sp-4);
+  line-height: var(--leading-tight);
+}
+.k-source {
+  gap: var(--sp-3);
+}
+.k-quote bdi {
+  overflow-wrap: anywhere;
+}
+.k-proposal.conflict {
+  border-color: var(--bad);
+}
+.k-check.ok {
+  color: var(--ok-text);
+}
+.k-check.bad {
+  color: var(--bad);
+}
+.k-foot {
+  flex-wrap: wrap;
+}
+/* The primary shares the row with whatever comes first ("לא מסכימים: כרטיס
+ * צהוב" with VAR), as corrections.html s1: a 12rem basis wrapped "לאשר" below
+ * the fold at 390×844 (review V-APPROVE-BELOW-FOLD). */
+.k-foot .a-btn.wide {
+  flex: 1 1 0;
+  min-width: 7rem;
+}
+.k-history-head h3 {
+  font-size: var(--text-sec);
+}
+.k-row {
+  gap: var(--sp-3);
+}
+.k-row.undo {
+  background: var(--paper);
+}
+.k-source-set {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  gap: var(--sp-3);
+}
+.k-source-set legend {
+  padding: 0 0 var(--sp-2);
+}
+.k-cells {
+  margin: 0;
+  gap: var(--sp-3);
+}
+.k-cells legend {
+  padding: 0 var(--sp-2);
+  color: var(--muted);
+}
+.k-preview {
+  gap: var(--sp-2);
+}
+.k-preview .table-wrap,
+.k-para .table-wrap {
+  overflow-x: auto;
+}
+/* "אישור בקול" in the reader's bar while reading aloud: a line of its own. */
+.k-aloud {
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+/* ── The library's chip and "יחד" ── */
+.k-chip {
+  text-decoration: none;
+}
+.k-recent {
+  display: grid;
+  gap: var(--sp-4);
+}
+.k-recent-row .m {
+  overflow-wrap: anywhere;
+}
+
+/* ── "לשאול" (ask.html s1) ── */
+.k-ask {
+  gap: var(--sp-5);
+}
+.k-ask .a-bubble {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.k-answer {
+  gap: var(--sp-4);
+}
+.k-answer .summary.compact {
+  font-size: var(--text-para);
+}
+.k-to-para {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+.k-focus {
+  flex-wrap: wrap;
+}
+.k-composer {
+  width: 100%;
+  flex-wrap: nowrap;
+  gap: var(--sp-4);
+}
+.k-composer .a-input {
+  flex: 1;
+  min-width: 0;
+}
+.k-ask-screen .k-left {
+  padding-bottom: var(--sp-4);
+}
+.k-ask-sheet .k-composer .a-input {
+  background: var(--paper);
+}

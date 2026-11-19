@@ -1,0 +1,47 @@
+{
+ "title": "משתנים (Diuretics)",
+ "lecturer": "ד״ר בדיקה",
+ "course": "פרמקולוגיה לדוגמה",
+ "parts": [
+  {
+   "heading": "מבוא: הנפרון ועקרונות הפעולה של משתנים",
+   "from": 1,
+   "to": 3
+  },
+  {
+   "heading": "Carbonic anhydrase inhibitors",
+   "from": 4,
+   "to": 5
+  },
+  {
+   "heading": "Loop diuretics",
+   "from": 6,
+   "to": 8
+  },
+  {
+   "heading": "Thiazides",
+   "from": 9,
+   "to": 11
+  },
+  {
+   "heading": "משתנים חוסכי אשלגן (K⁺-sparing)",
+   "from": 12,
+   "to": 14
+  },
+  {
+   "heading": "Osmotic diuretics",
+   "from": 15,
+   "to": 16
+  },
+  {
+   "heading": "תופעות לוואי ואינטראקציות",
+   "from": 17,
+   "to": 18
+  },
+  {
+   "heading": "טבלאות השוואה",
+   "from": 19,
+   "to": 20
+  }
+ ]
+}

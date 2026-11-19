@@ -1,0 +1,7898 @@
+-- Behaviour test for study-schema.sql (and its patch to /board's trigger).
+-- On a throwaway local Postgres (never on the real project):
+--   createdb studytest
+--   psql -d studytest -f supabase/tests/stubs.sql
+--   psql -d studytest -f supabase/tests/board-schema.sql
+--   psql -d studytest -f supabase/study-schema.sql
+--   psql -d studytest -f supabase/tests/study.sql
+-- Every numbered line should read "ok" or the expected value; "FAIL" means a
+-- rule no longer holds.
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+insert into auth.users (id, email, raw_user_meta_data) values
+ ('aaaaaaaa-0000-4000-8000-000000000001', 'teacher@x', '{"full_name":"מורה"}'),
+ ('bbbbbbbb-0000-4000-8000-000000000002', null, '{"app":"study","full_name":"שוהם"}'),
+ ('cccccccc-0000-4000-8000-000000000003', null, '{"app":"study","full_name":"נועה"}'),
+ ('dddddddd-0000-4000-8000-000000000004', null, '{"app":"study","full_name":"זר"}');
+select '1. board_teachers rows = ' || count(*) || ' (expect 1: only the non-study user)' from public.board_teachers;
+
+set role authenticated;
+-- Shoham opens a group
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select id as gid, join_code as code from public.study_create_group('קבוצת שנה ג', 'שוהם') \gset
+select '2. group created, code length ' || length(:'code');
+insert into public.study_lectures (id, group_id, title, source_kind, slides)
+values ('eeeeeeee-0000-4000-8000-000000000005', :'gid', 'Anti parasite', 'pptx', '[]'::jsonb);
+select '3. Shoham added a lecture';
+
+-- Noa: wrong code, then the right one
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_join('XXXXXX', 'נועה'); raise notice '4. FAIL: wrong code accepted';
+exception when others then if sqlerrm = 'wrong code' then raise notice '4. ok: wrong code rejected'; else raise notice '4. FAIL: rejected for another reason: %', sqlerrm; end if; end $$;
+select '5. Noa joined: ' || name from public.study_join(:'code', 'נועה');
+do $$ begin perform public.study_create_group('קבוצה שנייה', 'נועה'); raise notice '5b. FAIL: a second group was opened';
+exception when others then if sqlerrm = 'groups closed' then raise notice '5b. ok: a second group is refused'; else raise notice '5b. FAIL: refused for another reason: %', sqlerrm; end if; end $$;
+select '6. Noa sees ' || count(*) || ' lecture(s) (expect 1)' from public.study_lectures;
+do $$ begin update public.study_members set group_id = gen_random_uuid() where user_id = auth.uid(); raise notice '7. FAIL: member moved own row to another group';
+exception when others then raise notice '7. ok: moving to another group refused (%)', sqlerrm; end $$;
+update public.study_members set name = 'נועה כהן' where user_id = auth.uid();
+select '8. Noa renamed herself: ' || name from public.study_members where user_id = auth.uid();
+do $$ begin update public.study_lectures set created_by = auth.uid(); raise notice '9. FAIL: author rewritten';
+exception when others then raise notice '9. ok: author cannot be rewritten (%)', sqlerrm; end $$;
+do $$ begin update public.study_lectures set status = 'ready' where id = 'eeeeeeee-0000-4000-8000-000000000005'; raise notice '10. FAIL: a member changed the writing state';
+exception when insufficient_privilege then raise notice '10. ok: the writing state changes only through the RPCs (W2)'; end $$;
+reset role;
+update public.study_lectures set status = 'ready' where id = 'eeeeeeee-0000-4000-8000-000000000005';
+set role authenticated;
+do $$ begin update public.study_groups set join_code = 'HACKED'; raise notice '11. FAIL: join code changed';
+exception when others then raise notice '11. ok: join code is read-only (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to) values ('eeeeeeee-0000-4000-8000-000000000005', 0, 'x', 1, 8); raise notice '12. FAIL: a member wrote a section';
+exception when insufficient_privilege then raise notice '12. ok: parts are written only through the RPCs (W2)'; end $$;
+reset role;
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to) values ('eeeeeeee-0000-4000-8000-000000000005', 0, 'חלק א', 1, 8);
+set role authenticated;
+insert into storage.objects (bucket_id, name) values ('study', :'gid' || '/eeeeeeee-0000-4000-8000-000000000005/s1-1.jpg');
+select '13. Noa uploaded a picture';
+delete from public.study_members where user_id = 'bbbbbbbb-0000-4000-8000-000000000002';
+select '14. Noa tried to remove Shoham; Shoham still a member: ' || count(*) from public.study_members where user_id = 'bbbbbbbb-0000-4000-8000-000000000002';
+
+-- A stranger with an account but no code
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select '15. stranger sees ' || count(*) || ' lectures, ' || (select count(*) from public.study_sections) || ' sections, ' || (select count(*) from public.study_members) || ' members, ' || (select count(*) from storage.objects) || ' files (expect all 0)' from public.study_lectures;
+select '16. stranger asks for the code: ' || coalesce(public.study_group_code(:'gid'), 'NULL (expect NULL)');
+do $$ begin insert into public.study_lectures (group_id, title, source_kind, slides) values ((select id from public.study_groups limit 1), 'x', 'pdf', '[]'); raise notice '17. stranger insert: no group visible, nothing inserted';
+exception when others then raise notice '17. ok: stranger cannot add a lecture (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_lectures (group_id, title, source_kind, slides) values ('ffffffff-0000-4000-8000-000000000000', 'x', 'pdf', '[]'); raise notice '18. FAIL: stranger added a lecture';
+exception when others then raise notice '18. ok: stranger cannot add a lecture to a group by id (%)', sqlerrm; end $$;
+do $$ begin insert into storage.objects (bucket_id, name) values ('study', 'not-a-uuid/x.jpg'); raise notice '19. FAIL: malformed path accepted';
+exception when others then raise notice '19. ok: malformed path refused without a crash (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to) values ('eeeeeeee-0000-4000-8000-000000000005', 1, 'x', 1, 2); raise notice '20. FAIL: stranger wrote a section';
+exception when others then raise notice '20. ok: stranger cannot write a section (%)', sqlerrm; end $$;
+update public.study_lectures set title = 'pwned';
+
+-- Studying together: who read what, and comments on paragraphs
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+insert into public.study_reads (lecture_id) values ('eeeeeeee-0000-4000-8000-000000000005');
+insert into public.study_comments (lecture_id, part_idx, anchor, quote, kind, body) values
+ ('eeeeeeee-0000-4000-8000-000000000005', 0, 3, 'Metronidazole היא', 'question', 'למה התרופה לא פועלת בתאים אירוביים?');
+-- The question's id comes from the database; later checks read it from a setting.
+select set_config('t.qid', (select id::text from public.study_comments where body like 'למה התרופה%'), false) is not null as have_qid \gset
+insert into public.study_lectures (id, group_id, title, source_kind, slides)
+ values ('eeeeeeee-0000-4000-8000-000000000006', :'gid', 'הרצאה שנייה', 'pdf', '[]');
+select 'G1. Shoham marked the lecture read and asked a question';
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'G2. Noa sees ' || count(*) || ' read mark(s) and ' || (select count(*) from public.study_comments) || ' comment(s) (expect 1 and 1)' from public.study_reads;
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id) values
+ ('eeeeeeee-0000-4000-8000-000000000005', 0, 3, 'comment', 'כי החמצן מחמצן את הרדיקל בחזרה', current_setting('t.qid')::uuid);
+select 'G3. Noa replied in the thread';
+update public.study_comments set resolved = true where id = current_setting('t.qid')::uuid;
+select 'G4. Noa marked the question answered: ' || resolved from public.study_comments where id = current_setting('t.qid')::uuid;
+do $$ begin update public.study_comments set body = 'נערך' where id = current_setting('t.qid')::uuid; raise notice 'G5. FAIL: Noa rewrote Shoham''s question';
+exception when others then raise notice 'G5. ok: nobody rewrites a comment (%)', sqlerrm; end $$;
+delete from public.study_comments where id = current_setting('t.qid')::uuid;
+select 'G6. Noa tried to delete Shoham''s question; still there: ' || count(*) || ' (expect 1)' from public.study_comments where id = current_setting('t.qid')::uuid;
+do $$ begin insert into public.study_reads (lecture_id, user_id) values ('eeeeeeee-0000-4000-8000-000000000006', 'bbbbbbbb-0000-4000-8000-000000000002'); raise notice 'G7. FAIL: Noa marked a lecture read for Shoham';
+exception when insufficient_privilege then raise notice 'G7. ok: a read mark is only for yourself (%)', sqlerrm;
+  when others then raise notice 'G7. FAIL: refused for another reason: %', sqlerrm; end $$;
+do $$ begin insert into public.study_comments (lecture_id, part_idx, anchor, body, created_at) values ('eeeeeeee-0000-4000-8000-000000000005', 0, 1, 'x', '2000-01-01'); raise notice 'G7b. FAIL: a comment was backdated';
+exception when insufficient_privilege then raise notice 'G7b. ok: ids, authors and dates are not the client''s to set (%)', sqlerrm;
+  when others then raise notice 'G7b. FAIL: refused for another reason: %', sqlerrm; end $$;
+do $$ begin insert into public.study_comments (lecture_id, part_idx, anchor, body, author_id) values ('eeeeeeee-0000-4000-8000-000000000005', 0, 1, 'x', 'bbbbbbbb-0000-4000-8000-000000000002'); raise notice 'G8. FAIL: Noa posted as Shoham';
+exception when others then raise notice 'G8. ok: you cannot post as someone else (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_comments (lecture_id, part_idx, anchor, body, parent_id) values ('eeeeeeee-0000-4000-8000-000000000006', 0, 0, 'x', current_setting('t.qid')::uuid); raise notice 'G9. FAIL: a reply crossed into another lecture';
+exception when others then raise notice 'G9. ok: a reply stays in its parent''s lecture (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_comments (lecture_id, part_idx, anchor, body) values ('eeeeeeee-0000-4000-8000-000000000005', 0, 1, '   '); raise notice 'G10. FAIL: an empty comment was saved';
+exception when others then raise notice 'G10. ok: an empty comment is refused (%)', sqlerrm; end $$;
+-- The private reading channel: members of the lecture's group only
+reset role;
+insert into realtime.messages (topic, extension, payload) values ('study-read-eeeeeeee-0000-4000-8000-000000000005', 'presence', '{}');
+set role authenticated;
+set realtime.topic = 'study-read-eeeeeeee-0000-4000-8000-000000000005';
+select 'R1. Noa hears ' || count(*) || ' presence message(s) on the reading channel (expect 1)' from realtime.messages;
+insert into realtime.messages (topic, extension, payload) values ('study-read-eeeeeeee-0000-4000-8000-000000000005', 'presence', '{}');
+select 'R2. Noa can send presence on it';
+set realtime.topic = 'study-read-not-a-uuid';
+select 'R3. a malformed channel name gives ' || count(*) || ' (expect 0, and no error)' from realtime.messages;
+set realtime.topic = 'study-read-eeeeeeee-0000-4000-8000-000000000005';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'R4. stranger hears ' || count(*) || ' on the reading channel (expect 0)' from realtime.messages;
+do $$ begin insert into realtime.messages (topic, extension, payload) values ('study-read-eeeeeeee-0000-4000-8000-000000000005', 'presence', '{}'); raise notice 'R5. FAIL: stranger sent presence on the reading channel';
+exception when insufficient_privilege then raise notice 'R5. ok: stranger cannot send on it (%)', sqlerrm; end $$;
+reset realtime.topic;
+select 'G11. stranger sees ' || count(*) || ' read marks and ' || (select count(*) from public.study_comments) || ' comments (expect 0 and 0)' from public.study_reads;
+do $$ begin insert into public.study_comments (lecture_id, part_idx, anchor, body) values ('eeeeeeee-0000-4000-8000-000000000005', 0, 0, 'x'); raise notice 'G12. FAIL: stranger commented';
+exception when others then raise notice 'G12. ok: stranger cannot comment (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_reads (lecture_id) values ('eeeeeeee-0000-4000-8000-000000000005'); raise notice 'G13. FAIL: stranger marked a lecture read';
+exception when others then raise notice 'G13. ok: stranger cannot mark a lecture read (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+delete from public.study_comments where id = current_setting('t.qid')::uuid;
+select 'G14. Shoham deleted her question; thread left: ' || count(*) || ' (expect 0: replies go with it)' from public.study_comments;
+
+-- Not signed in at all
+reset role;
+set role anon;
+reset request.jwt.claim.sub;
+do $$ declare n int; begin select count(*) into n from public.study_lectures; raise notice '22. anon sees % lectures (expect 0)', n;
+exception when insufficient_privilege then raise notice '22. ok: anon has no access at all (%)', sqlerrm; end $$;
+do $$ declare n int; begin select count(*) into n from public.study_comments; raise notice 'G15. anon sees % comments (expect 0)', n;
+exception when insufficient_privilege then raise notice 'G15. ok: anon cannot read comments (%)', sqlerrm; end $$;
+do $$ declare n int; begin select count(*) into n from public.study_reads; raise notice 'G16. anon sees % read marks (expect 0)', n;
+exception when insufficient_privilege then raise notice 'G16. ok: anon cannot read read marks (%)', sqlerrm; end $$;
+reset role;
+select '23. title after all that: ' || title from public.study_lectures;
+
+-- ════ BEGIN SECTION F · foundation (package F) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION F checks (package F). Runs in the same psql session right after the
+--  existing checks of supabase/tests/study.sql: Shoham (bbbb…), Noa (cccc…),
+--  the stranger (dddd…), the group :gid and lecture eeee…0005 exist.
+--  Every F line reads "ok" or the expected value.
+-- ════════════════════════════════════════════════════════════════════════
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+select id as gid from public.study_groups limit 1 \gset
+select set_config('t.gid', :'gid', false) is not null as have_gid \gset
+select set_config('t.key', 'k-0123456789abcdef0123456789abcdef', false) is not null as have_key \gset
+
+-- F1: the columns the client reads exist and start empty
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'F1. Noa reads the new part columns on ' || count(*) || ' part(s): lease ' || bool_and(lease_until is null) || ', attempts ' || sum(attempts)
+       || ', retry ' || bool_and(retry_at is null) || ', writer ' || bool_and(writer is null) || ', rev ' || sum(rev) || ', gen ' || sum(gen)
+       || ' (expect 1 part(s): true, 0, true, true, 0, 0)'
+  from public.study_sections;
+select 'F1b. and the lectures'' queued_at: ' || bool_and(queued_at is null) || ' (expect true)' from public.study_lectures;
+
+-- F2-F10: the ledger
+reset role;
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+\set key 'k-0123456789abcdef0123456789abcdef'
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_spent(:'gid') as f_before \gset
+select 'F2. spent this month before any charge: $' || :'f_before' || ' (expect 0)';
+do $$ begin perform count(*) from public.study_usage; raise notice 'F3. FAIL: a member reads the ledger rows';
+exception when insufficient_privilege then raise notice 'F3. ok: ledger rows are not readable (who practised how much stays private)'; end $$;
+do $$ begin insert into public.study_usage (group_id, kind, cost_usd) values ((select id from public.study_groups limit 1), 'part', 0); raise notice 'F4. FAIL: a member wrote the ledger directly';
+exception when insufficient_privilege then raise notice 'F4. ok: no direct writes to the ledger'; end $$;
+-- B1 (S1): a member's token alone cannot spend: no key, or a wrong key, is refused
+do $$ begin perform public.study_reserve((select id from public.study_groups limit 1), null, 'part', null, 99.99, 1000); raise notice 'F4b. FAIL: a member reserved without the server key';
+exception when others then raise notice 'F4b. %: a member alone cannot write the ledger (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_reserve((select id from public.study_groups limit 1), null, 'part', null, 99.99, 1000, 1, null, null, null, 'k-wrong-0123456789abcdef0123456789abcdef'); raise notice 'F4c. FAIL: a wrong key reserved';
+exception when others then raise notice 'F4c. %: a wrong key is refused (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_settle(1, 'x', '{}', 0); raise notice 'F4d. FAIL: a member settled without the server key';
+exception when others then raise notice 'F4d. %: settling needs the server key (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- The server, acting for Shoham (her token and the key): reserve, then settle
+select public.study_reserve(:'gid', 'eeeeeeee-0000-4000-8000-000000000005', 'practice', 'set-1', 0.05, 33, 0.8, 0.4, null, null, :'key') as r1 \gset
+select 'F5. a reservation of $0.05 counts at once: +' || (public.study_spent(:'gid') - :f_before) || ' (expect 0.05000)';
+select public.study_settle(:r1, 'claude-opus-5-5', '{"output_tokens":1000}', 0.03, :'key') as f_s1 \gset
+select public.study_settle(:r1, 'x', '{}', 9, :'key') as f_s2 \gset
+select 'F5b. settled at $0.03: ' || :'f_s1' || ', spend +' || (public.study_spent(:'gid') - :f_before)
+       || ', settled again: ' || :'f_s2' || ' (expect t, 0.03000, f)';
+do $$ begin perform public.study_reserve((select id from public.study_groups limit 1), gen_random_uuid(), 'practice', null, 0.01, 33, 1, null, null, null, current_setting('t.key')); raise notice 'F6. FAIL: charged to a lecture outside the group';
+exception when others then raise notice 'F6. %: a lecture outside the group is refused (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_reserve((select id from public.study_groups limit 1), null, 'Bad Kind!', null, 0.01, 33, 1, null, null, null, current_setting('t.key')); raise notice 'F6b. FAIL: a malformed kind was charged';
+exception when check_violation then raise notice 'F6b. ok: kinds are lower-case words'; end $$;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_spent(current_setting('t.gid')::uuid); raise notice 'F7. FAIL: the stranger read the spend';
+exception when others then raise notice 'F7. %: the stranger gets nothing (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_reserve(current_setting('t.gid')::uuid, null, 'ask', null, 0.01, 33, 1, null, null, null, current_setting('t.key')); raise notice 'F7b. FAIL: the stranger charged the group';
+exception when others then raise notice 'F7b. %: the stranger cannot spend the group''s budget, even through the server (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+insert into public.study_usage (group_id, kind, cost_usd, created_at) values (:'gid', 'part', 5, date_trunc('month', now()) - interval '1 day');
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'F8. last month''s row is not counted: ' || ((public.study_spent(:'gid') - :f_before) < 5) || ' (expect true)';
+reset role;
+select 'F9. the charge names its member: ' || bool_and(user_id = 'bbbbbbbb-0000-4000-8000-000000000002') || ', settled: ' || bool_and(settled_at is not null) || ' (expect true, true)' from public.study_usage where ref = 'set-1';
+-- A purged lecture keeps its spend (lecture_id → null).
+insert into public.study_lectures (id, group_id, title, source_kind, slides, created_by)
+values ('f0000000-0000-4000-8000-0000000000f0', :'gid', 'נמחקת', 'pdf', '[]', 'bbbbbbbb-0000-4000-8000-000000000002');
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_reserve(:'gid', 'f0000000-0000-4000-8000-0000000000f0', 'cards', 'f-del', 0.02, 33, 0.8, null, null, null, :'key') as r2 \gset
+select public.study_settle(:r2, 'claude-opus-5-5', '{}', 0.02, :'key') as f_settled \gset
+reset role;
+delete from public.study_lectures where id = 'f0000000-0000-4000-8000-0000000000f0';   -- what study_purge_lecture does after 30 days
+select 'F10. a purged lecture keeps its spend: ' || count(*) || ' row(s), lecture now null: ' || bool_and(lecture_id is null) || ' (expect 1, true)'
+  from public.study_usage where ref = 'f-del';
+-- The one-time seed: a part's stored usage becomes one ledger row, once (the statement of section F2, run twice).
+update public.study_sections set usage = '{"input_tokens":3000,"output_tokens":5000,"cache_read_input_tokens":15000}', model = 'claude-opus-5-5'
+ where lecture_id = 'eeeeeeee-0000-4000-8000-000000000005' and idx = 0;
+insert into public.study_usage (group_id, lecture_id, kind, ref, model, usage, cost_usd, created_at, settled_at)
+select l.group_id, s.lecture_id, 'part', s.idx::text, s.model, s.usage,
+       round((coalesce((s.usage ->> 'input_tokens')::numeric, 0) * 4
+            + coalesce((s.usage ->> 'output_tokens')::numeric, 0) * 20
+            + coalesce((s.usage ->> 'cache_creation_input_tokens')::numeric, 0) * 5
+            + coalesce((s.usage ->> 'cache_read_input_tokens')::numeric, 0) * 0.2) / 1000000, 5),
+       s.updated_at, s.updated_at
+  from public.study_sections s join public.study_lectures l on l.id = s.lecture_id
+ where s.usage is not null
+   and not exists (select 1 from public.study_usage u where u.lecture_id = s.lecture_id and u.kind = 'part' and u.ref = s.idx::text);
+insert into public.study_usage (group_id, lecture_id, kind, ref, model, usage, cost_usd, created_at, settled_at)
+select l.group_id, s.lecture_id, 'part', s.idx::text, s.model, s.usage,
+       round((coalesce((s.usage ->> 'input_tokens')::numeric, 0) * 4
+            + coalesce((s.usage ->> 'output_tokens')::numeric, 0) * 20
+            + coalesce((s.usage ->> 'cache_creation_input_tokens')::numeric, 0) * 5
+            + coalesce((s.usage ->> 'cache_read_input_tokens')::numeric, 0) * 0.2) / 1000000, 5),
+       s.updated_at, s.updated_at
+  from public.study_sections s join public.study_lectures l on l.id = s.lecture_id
+ where s.usage is not null
+   and not exists (select 1 from public.study_usage u where u.lecture_id = s.lecture_id and u.kind = 'part' and u.ref = s.idx::text);
+select 'F10b. the seed after two runs: ' || count(*) || ' row of $' || max(cost_usd) || ' (expect 1 row of $0.11500)'
+  from public.study_usage where lecture_id = 'eeeeeeee-0000-4000-8000-000000000005' and kind = 'part';
+-- F10c (review of F0, SEC-5): a part the old server code writes after the SQL
+-- ran (usage on the row only) reaches the ledger when the file runs again, and
+-- the part counted before is not counted twice.
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, usage, model)
+values ('eeeeeeee-0000-4000-8000-000000000005', 1, 'חלק ב', 9, 10, 'ready', '{"input_tokens":1000,"output_tokens":2000}', 'claude-opus-5-5');
+insert into public.study_usage (group_id, lecture_id, kind, ref, model, usage, cost_usd, created_at, settled_at)
+select l.group_id, s.lecture_id, 'part', s.idx::text, s.model, s.usage,
+       round((coalesce((s.usage ->> 'input_tokens')::numeric, 0) * 4
+            + coalesce((s.usage ->> 'output_tokens')::numeric, 0) * 20
+            + coalesce((s.usage ->> 'cache_creation_input_tokens')::numeric, 0) * 5
+            + coalesce((s.usage ->> 'cache_read_input_tokens')::numeric, 0) * 0.2) / 1000000, 5),
+       s.updated_at, s.updated_at
+  from public.study_sections s join public.study_lectures l on l.id = s.lecture_id
+ where s.usage is not null
+   and not exists (select 1 from public.study_usage u where u.lecture_id = s.lecture_id and u.kind = 'part' and u.ref = s.idx::text);
+select 'F10c. ' || case when count(*) = 2 and sum(cost_usd) = 0.159 then 'ok' else 'FAIL' end
+       || ': the next run adds the part written in between: ' || count(*) || ' rows, $' || sum(cost_usd) || ' (expect 2, $0.15900)'
+  from public.study_usage where lecture_id = 'eeeeeeee-0000-4000-8000-000000000005' and kind = 'part';
+delete from public.study_usage where lecture_id = 'eeeeeeee-0000-4000-8000-000000000005' and kind = 'part' and ref = '1';
+delete from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000005' and idx = 1;   -- as before, for the checks that follow
+
+-- F11-F13: the group channel, the hook, anon
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'F11. Noa may join study-group-<her group>: ' || public.study_can_use_topic('study-group-' || :'gid')
+       || '; a malformed name: ' || public.study_can_use_topic('study-group-xyz')
+       || '; her reading room still: ' || public.study_can_use_topic('study-read-eeeeeeee-0000-4000-8000-000000000005') || ' (expect true; false; true)';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'F12. the stranger may join it: ' || public.study_can_use_topic('study-group-' || :'gid') || ' (expect false)';
+do $$ begin perform public.study_corrections_of(gen_random_uuid(), 0); raise notice 'F13. FAIL: members call the corrections hook';
+exception when insufficient_privilege then raise notice 'F13. ok: the corrections hook is internal (%)', sqlerrm; end $$;
+do $$ begin perform public.study_part_corrections('eeeeeeee-0000-4000-8000-000000000005', 0); raise notice 'F16. FAIL: the stranger read a part''s corrections';
+exception when others then raise notice 'F16. %: the stranger is refused the writer''s corrections (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'F15. Noa reads a part''s corrections for the device writer: ' || public.study_part_corrections('eeeeeeee-0000-4000-8000-000000000005', 0)::text || ' (expect [])';
+reset role;
+set role anon;
+reset request.jwt.claim.sub;
+do $$ begin perform public.study_spent(current_setting('t.gid')::uuid); raise notice 'F14. FAIL: anon read the spend';
+exception when others then raise notice 'F14. %: anon without the worker key gets nothing (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+
+-- F17-F22: the limits are checked under the lock, before the call (review M6)
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_spent(:'gid') as f_now \gset
+select set_config('t.cap', (:f_now + 0.10)::text, false) is not null as have_cap \gset
+do $$ begin perform public.study_reserve(current_setting('t.gid')::uuid, null, 'part', '0', 0.11, current_setting('t.cap')::numeric, 1, null, null, null, current_setting('t.key')); raise notice 'F17. FAIL: a call over the cap was reserved';
+exception when others then raise notice 'F17. %: the cap stops a call before it starts (%)', case when sqlerrm = 'budget' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_reserve(current_setting('t.gid')::uuid, null, 'practice', 'x', 0.09, current_setting('t.cap')::numeric, 0.8, null, null, null, current_setting('t.key')); raise notice 'F18. FAIL: an optional call went past the 80%% line';
+exception when others then raise notice 'F18. %: optional features stop at 80%% of the cap, summaries keep the rest (%)', case when sqlerrm = 'reserve' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'F18b. a summary part still fits: ' || (public.study_reserve(:'gid', null, 'part', '0', 0.09, current_setting('t.cap')::numeric, 1, null, null, null, :'key') > 0) || ' (expect true)';
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_reserve(:'gid', null, 'cards', 'n1', 1.20, 33, 0.8, 0.04, null, null, :'key') as r3 \gset
+do $$ begin perform public.study_reserve(current_setting('t.gid')::uuid, null, 'practice', 'n2', 0.20, 33, 0.8, 0.04, null, null, current_setting('t.key')); raise notice 'F19. FAIL: one member spent past her share';
+exception when others then raise notice 'F19. %: one member''s optional spend stops at her share of the month (%)', case when sqlerrm = 'member_share' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'F19b. Noa sees her own share: $' || public.study_my_spent(:'gid') || ' (expect 1.20000)';
+select public.study_reserve(:'gid', null, 'ask', 'answer', 0.01, 33, 0.8, null, 2, 'answer', :'key') as a1 \gset
+select public.study_reserve(:'gid', null, 'ask', 'route', 0.01, 33, 0.8, null, 2, 'answer', :'key') as a2 \gset
+select public.study_reserve(:'gid', null, 'ask', 'answer', 0.01, 33, 0.8, null, 2, 'answer', :'key') as a3 \gset
+do $$ begin perform public.study_reserve(current_setting('t.gid')::uuid, null, 'ask', 'answer', 0.01, 33, 0.8, null, 2, 'answer', current_setting('t.key')); raise notice 'F20. FAIL: a third answer on a limit of 2';
+exception when others then raise notice 'F20. %: the daily limit counts answers, not routes, and holds under the lock (%)', case when sqlerrm = 'daily_limit' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- M10: the server-side switches. Section F adds exams and recordings; section B
+-- adds bank and section U pulse, so the expectation names those once they are loaded.
+select 'F21. switches: ' || public.study_features()::text || ' (expect '
+  || concat_ws(', ', case when public.study_schema() ? 'B' then 'bank' end, 'exams', case when public.study_schema() ? 'U' then 'pulse' end)
+  || ' and recordings false)';
+do $$ begin perform public.study_reserve(current_setting('t.gid')::uuid, null, 'exam', 'e1', 0.10, 33, 0.8, null, null, null, current_setting('t.key')); raise notice 'F21b. FAIL: an exam call while exams are switched off';
+exception when others then raise notice 'F21b. %: a switched-off flow reaches no model, whatever the app''s flags (%)', case when sqlerrm = 'off' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update study_private.features set enabled = true where name = 'exams';
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'F21c. with exams on: ' || (public.study_reserve(:'gid', null, 'exam', 'e1', 0.10, 33, 0.8, null, null, null, :'key') > 0) || ' (expect true)';
+reset role;
+update study_private.features set enabled = false where name = 'exams';
+select 'F22. an unsettled reservation keeps its estimate: ' || count(*) filter (where settled_at is null and cost_usd > 0) || ' open, '
+       || bool_and((usage ->> 'estimated')::boolean) filter (where settled_at is null) || ' (expect 6, true)'
+  from public.study_usage where group_id = :'gid' and created_at >= date_trunc('month', now());
+delete from public.study_usage where group_id = :'gid' and settled_at is null and created_at >= date_trunc('month', now());   -- leave later sections' arithmetic alone
+select 'F22b. the registry: ' || (public.study_schema() ->> 'F') || ' (expect 1)';
+
+-- F23-F26: soft delete (M2) and the group's members (M4)
+reset role;
+insert into public.study_lectures (id, group_id, title, source_kind, slides, created_by)
+values ('f0000000-0000-4000-8000-0000000000f1', :'gid', 'נמחקת בטעות', 'pdf', '[]', 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to) values ('f0000000-0000-4000-8000-0000000000f1', 0, 'א', 1, 1);
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin delete from public.study_lectures where id = 'f0000000-0000-4000-8000-0000000000f1'; raise notice 'F23. FAIL: a member deleted a lecture row';
+exception when insufficient_privilege then raise notice 'F23. ok: no member deletes a lecture row (study_delete_lecture hides it)'; end $$;
+select public.study_delete_lecture('f0000000-0000-4000-8000-0000000000f1') is not null as f_hid \gset
+select 'F23b. Noa deletes it: hidden ' || :'f_hid'
+       || ', by Noa ' || (select deleted_by = 'cccccccc-0000-4000-8000-000000000003' from public.study_lectures where id = 'f0000000-0000-4000-8000-0000000000f1')
+       || ', purge now: ' || public.study_purge_lecture('f0000000-0000-4000-8000-0000000000f1') || ' (expect t, true, false)';
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'F23c. Shoham restores it: ' || coalesce(public.study_delete_lecture('f0000000-0000-4000-8000-0000000000f1', false)::text, 'restored')
+       || ', its part still there: ' || (select count(*) from public.study_sections where lecture_id = 'f0000000-0000-4000-8000-0000000000f1') || ' (expect restored, 1)';
+select public.study_delete_lecture('f0000000-0000-4000-8000-0000000000f1') as f_del \gset
+reset role;
+update public.study_lectures set deleted_at = now() - interval '31 days' where id = 'f0000000-0000-4000-8000-0000000000f1';
+set role authenticated;
+do $$ begin perform public.study_delete_lecture('f0000000-0000-4000-8000-0000000000f1', false); raise notice 'F23d. FAIL: restored after 30 days';
+exception when others then raise notice 'F23d. %: after 30 days it cannot come back (%)', case when sqlerrm = 'too old' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_purge_lecture('f0000000-0000-4000-8000-0000000000f1') as f_purged \gset
+select 'F23e. purge after 30 days: ' || :'f_purged' || ', parts left: ' || (select count(*) from public.study_sections where lecture_id = 'f0000000-0000-4000-8000-0000000000f1') || ' (expect t, 0)';
+reset role;
+insert into auth.users (id, raw_user_meta_data, is_anonymous) values ('f2222222-0000-4000-8000-000000000022', '{"app":"study","full_name":"ריטה"}', true);
+select join_code as old_code from public.study_groups limit 1 \gset
+select set_config('t.old_code', :'old_code', false) is not null as have_code \gset
+set role authenticated;
+set request.jwt.claim.sub = 'f2222222-0000-4000-8000-000000000022';
+do $$ begin perform public.study_join(current_setting('t.old_code'), ' שוהם '); raise notice 'F24. FAIL: a second "שוהם" joined';
+exception when others then raise notice 'F24. %: a name already in the group is refused (%)', case when sqlerrm = 'name taken' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'F24b. Rita joins with her own name: ' || (select count(*) from public.study_join(:'old_code', 'ריטה')) || ' group (expect 1)';
+do $$ begin update public.study_members set name = 'שוהם' where user_id = auth.uid(); raise notice 'F24c. FAIL: renamed to another member''s name';
+exception when others then raise notice 'F24c. %: renaming to a taken name is refused (%)', case when sqlerrm = 'name taken' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_rotate_code(current_setting('t.gid')::uuid); raise notice 'F25. FAIL: a member who did not create the group replaced the code';
+exception when others then raise notice 'F25. %: only the group''s creator replaces the code (%)', case when sqlerrm = 'not the creator' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'F25b. Shoham replaces the code: new ' || (public.study_rotate_code(:'gid') <> :'old_code') || ' (expect true)';
+select 'F26. Rita is saved: ' || coalesce((select saved::text from public.study_member_saved(:'gid') where user_id = 'f2222222-0000-4000-8000-000000000022'), 'missing') || ' (expect false: anonymous)';
+select public.study_remove_member(:'gid', 'f2222222-0000-4000-8000-000000000022');
+select 'F26b. Shoham removed Rita: members named ריטה ' || (select count(*) from public.study_members where name = 'ריטה') || ' (expect 0)';
+set request.jwt.claim.sub = 'f2222222-0000-4000-8000-000000000022';
+do $$ begin perform public.study_join(current_setting('t.old_code'), 'ריטה'); raise notice 'F26c. FAIL: the old code still works';
+exception when others then raise notice 'F26c. %: the old code no longer opens the group (%)', case when sqlerrm = 'wrong code' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update public.study_groups set join_code = :'old_code';   -- later sections' checks join with study.sql's code
+
+-- F27 (review m5): what a signed-out visitor (anon) may call. The stubs grant
+-- EXECUTE to anon by default, as an existing project does, so a function that
+-- forgot "revoke … from anon" appears here. Every one listed is safe for anon:
+-- the server key's RPCs refuse without the key, the rest answer nothing secret.
+select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, ', ' order by p.proname), 'ok: anon may call only the allow-list')
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and p.proname like 'study\_%' and has_function_privilege('anon', p.oid, 'execute')
+   and p.proname not in ('study_claim', 'study_progress', 'study_finish', 'study_outline_done', 'study_writing_input',
+                         'study_reserve', 'study_settle', 'study_spent', 'study_feature_on', 'study_features', 'study_schema', 'study_email_allowed',
+                         'study_is_member', 'study_lecture_group', 'study_is_member_path',
+                         -- section B (decision 2 of 17 Nov 2026: the points read ahead; no bank is written ahead):
+                         -- the worker's claim and release, and the two of section Q it saves and fails through,
+                         -- each refusing without the key
+                         'study_points_ahead_claim', 'study_points_ahead_release', 'study_points_save', 'study_points_fail');
+
+-- F28 (review of F0, SEC-1): the slide pictures stay with their lecture. The
+-- app of before F0 deletes a lecture's files first and then its row, which
+-- F23 now refuses: its file delete must remove nothing, or the lecture would
+-- stay without its pictures.
+reset role;
+insert into public.study_lectures (id, group_id, title, source_kind, slides, created_by, deleted_at, deleted_by) values
+ ('f0000000-0000-4000-8000-0000000000f2', :'gid', 'מוסתרת היום', 'pdf', '[]', 'bbbbbbbb-0000-4000-8000-000000000002', now(), 'bbbbbbbb-0000-4000-8000-000000000002'),
+ ('f0000000-0000-4000-8000-0000000000f3', :'gid', 'מוסתרת מזמן', 'pdf', '[]', 'bbbbbbbb-0000-4000-8000-000000000002', now() - interval '31 days', 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into storage.objects (bucket_id, name) values
+ ('study', :'gid' || '/eeeeeeee-0000-4000-8000-000000000005/s2-0.jpg'),
+ ('study', :'gid' || '/eeeeeeee-0000-4000-8000-000000000005/audio.m4a'),
+ ('study', :'gid' || '/f0000000-0000-4000-8000-0000000000f2/s1-1.jpg'),
+ ('study', :'gid' || '/f0000000-0000-4000-8000-0000000000f3/s1-1.jpg'),
+ ('study', :'gid' || '/f0000000-0000-4000-8000-0000000000f4/s1-1.jpg');   -- an upload whose lecture row was never saved
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+with d as (delete from storage.objects where bucket_id = 'study' and name like :'gid' || '/eeeeeeee-0000-4000-8000-000000000005/s%' returning 1)
+select count(*) as f_removed from d \gset
+select count(*) as f_kept from storage.objects where name like '%/eeeeeeee-0000-4000-8000-000000000005/s%' \gset
+select 'F28. ' || case when :f_removed = 0 and :f_kept = 2 then 'ok' else 'FAIL' end
+       || ': the old app deletes a live lecture''s pictures: ' || :f_removed || ' removed, ' || :f_kept || ' kept (expect 0, 2)';
+with d as (delete from storage.objects where bucket_id = 'study' and name like '%/f0000000-0000-4000-8000-0000000000f2/%' returning 1)
+select count(*) as f_hidden from d \gset
+select 'F28b. ' || case when :f_hidden = 0 then 'ok' else 'FAIL' end
+       || ': a lecture hidden today keeps its pictures, it can still come back: ' || :f_hidden || ' removed (expect 0)';
+with d as (delete from storage.objects where bucket_id = 'study' and name like '%/f0000000-0000-4000-8000-0000000000f3/%' returning 1)
+select count(*) as f_old from d \gset
+select public.study_purge_lecture('f0000000-0000-4000-8000-0000000000f3') as f_purged_old \gset
+select 'F28c. ' || case when :f_old = 1 and :'f_purged_old' = 't' then 'ok' else 'FAIL' end
+       || ': hidden 31 days ago, its pictures go, then the lecture: ' || :f_old || ' removed, purged ' || :'f_purged_old' || ' (expect 1, t)';
+with d as (delete from storage.objects where bucket_id = 'study' and name like '%/f0000000-0000-4000-8000-0000000000f4/%' returning 1)
+select count(*) as f_orphan from d \gset
+select 'F28d. ' || case when :f_orphan = 1 then 'ok' else 'FAIL' end || ': a folder of no lecture can be cleared: ' || :f_orphan || ' removed (expect 1)';
+with d as (delete from storage.objects where bucket_id = 'study' and name like '%/eeeeeeee-0000-4000-8000-000000000005/audio.m4a' returning 1)
+select count(*) as f_audio from d \gset
+select 'F28e. ' || case when :f_audio = 1 then 'ok' else 'FAIL' end
+       || ': a live lecture''s other file (a recording''s audio) can be removed: ' || :f_audio || ' removed (expect 1)';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+with d as (delete from storage.objects where bucket_id = 'study' returning 1)
+select count(*) as f_stranger from d \gset
+select 'F28f. ' || case when :f_stranger = 0 then 'ok' else 'FAIL' end || ': the stranger removes nothing: ' || :f_stranger || ' (expect 0)';
+reset role;
+delete from storage.objects where name like '%/eeeeeeee-0000-4000-8000-000000000005/s2-0.jpg' or name like '%/f0000000-0000-4000-8000-0000000000f2/%';
+delete from public.study_lectures where id = 'f0000000-0000-4000-8000-0000000000f2';   -- later sections' checks find what they found before
+
+-- F29 (F1Δ, spec §12.2.6, review SEC-14): section F's end. A wall photo
+-- (<group>/wall/<uuid>.jpg) is removed only by whoever uploaded it
+-- (storage.objects.owner_id, set by the Storage API); every other file keeps
+-- F28's rule; the bucket takes 25 MB and the types the app uploads.
+insert into storage.objects (bucket_id, name, owner_id) values
+ ('study', :'gid' || '/wall/0f0f0f0f-0000-4000-8000-000000000001.jpg', 'cccccccc-0000-4000-8000-000000000003'),
+ ('study', :'gid' || '/wall/0f0f0f0f-0000-4000-8000-000000000002.jpg', null);
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+with d as (delete from storage.objects where name like '%/wall/0f0f0f0f-%' returning 1)
+select count(*) as f_wall_other from d \gset
+select 'F29. ' || case when :f_wall_other = 0 then 'ok' else 'FAIL' end
+       || ': a member removes nobody''s wall photo, not even one with no uploader: ' || :f_wall_other || ' removed (expect 0)';
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+with d as (delete from storage.objects where name like '%/wall/0f0f0f0f-%' returning 1)
+select count(*) as f_wall_own from d \gset
+select 'F29b. ' || case when :f_wall_own = 1 then 'ok' else 'FAIL' end
+       || ': the uploader removes her own wall photo, only it: ' || :f_wall_own || ' removed (expect 1)';
+reset role;
+select 'F29c. ' || case when file_size_limit = 26214400 and allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] then 'ok' else 'FAIL' end
+       || ': the bucket''s limits: ' || coalesce(file_size_limit::text, 'none') || ' bytes, ' || coalesce(array_to_string(allowed_mime_types, ', '), 'any type')
+       || ' (expect 26214400; image/jpeg, image/png, image/webp, application/pdf)'
+  from storage.buckets where id = 'study';
+delete from storage.objects where name like '%/wall/0f0f0f0f-%';
+-- ════ END SECTION F ════
+
+-- ════ BEGIN SECTION W · writing on the server, recordings (package W) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION W checks · writing on the server, recordings   (package W)
+-- ════════════════════════════════════════════════════════════════════════
+-- design-platform: checks to append to supabase/tests/study.sql.
+-- Runs after study.sql (its group, Shoham, Noa and the stranger exist).
+-- Each line should read "ok" or the expected value.
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+\set key 'k-0123456789abcdef0123456789abcdef'
+select set_config('t.key', 'k-0123456789abcdef0123456789abcdef', false) is not null as have_key \gset
+select id as gid from public.study_groups limit 1 \gset
+\set L1 'f1000000-0000-4000-8000-000000000001'
+\set L2 'f2000000-0000-4000-8000-000000000002'
+
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_spent((select id from public.study_groups limit 1)) as w_before \gset
+reset role;
+insert into vault.decrypted_secrets (name, decrypted_secret) values
+  ('study_worker_key', 'k-0123456789abcdef0123456789abcdef'),
+  ('study_site_url', 'https://tamtzit.vercel.app')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+delete from net.calls;
+select 'P0. cron jobs: ' || string_agg(jobname || ' [' || schedule || ']', ', ' order by jobname) || ' (expect 2, once each after two runs)' from cron.job;
+select 'P0b. ledger seeded from study_sections.usage: ' || count(*) || ' row(s) (expect 0: no usage yet)' from public.study_usage where lecture_id in (:'L1', :'L2');
+
+-- ── Server writing ──
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select id as gid from public.study_groups limit 1 \gset
+insert into public.study_lectures (id, group_id, title, source_kind, slides) values
+  (:'L1', :'gid', 'מלריה', 'pptx', '[{"n":1,"title":"a","lines":["x"],"tables":[],"notes":"","figures":[{"k":1,"path":"g/l/s1-1.jpg","w":800,"h":600}]}]');
+select 'P1. Shoham queues the lecture; server writing on: ' || public.study_queue(:'L1', '{"g/l/s1-1.jpg":"https://x.supabase.co/storage/v1/object/sign/study/g/l/s1-1.jpg?token=t"}', now() + interval '48 hours');
+reset role;
+select 'P2. kicks: ' || count(*) || ' (expect 1), url ' || max(url) || ', bearer key: ' || bool_and(headers ->> 'Authorization' = 'Bearer k-0123456789abcdef0123456789abcdef')
+       || ', body: ' || max(body::text) from net.calls;
+select 'P2b. lecture queued_at set: ' || (queued_at is not null) from public.study_lectures where id = :'L1';
+
+-- The worker: anon with its key
+set role anon;
+reset request.jwt.claim.sub;
+do $$ begin perform public.study_claim('f1000000-0000-4000-8000-000000000001', null, null, 'k-wrong-0123456789abcdef0123456789abcdef'); raise notice 'P3. FAIL: a wrong key claimed';
+exception when others then if sqlerrm = 'forbidden' then raise notice 'P3. ok: a wrong key is refused'; else raise notice 'P3. FAIL: %', sqlerrm; end if; end $$;
+do $$ begin perform public.study_claim('f1000000-0000-4000-8000-000000000001'); raise notice 'P3b. FAIL: anon without a key claimed';
+exception when others then if sqlerrm = 'forbidden' then raise notice 'P3b. ok: anon without the key is refused'; else raise notice 'P3b. FAIL: %', sqlerrm; end if; end $$;
+select kind as k_outline, lease as lease_o, effort as e_outline from public.study_claim(:'L1', null, null, :'key') \gset
+select 'P4. worker claims: ' || :'k_outline' || ' at effort ' || :'e_outline';
+select 'P5. a second claim while the outline is leased: ' || count(*) || ' (expect 0)' from public.study_claim(:'L1', null, null, :'key');
+select 'P6. outline done: ' || public.study_outline_done(:'L1', :'lease_o',
+  '[{"heading":"מחזור החיים","from":1,"to":1},{"heading":"טיפול","from":2,"to":2},{"heading":"מניעה","from":3,"to":3}]',
+  null, 'claude-opus-5-5', '{"input_tokens":12000,"output_tokens":800}', 0.064, :'key');
+select 'P7. again with the same lease: ' || public.study_outline_done(:'L1', :'lease_o', '[{"heading":"x","from":1,"to":3}]', null, null, null, 0, :'key') || ' (expect false)';
+reset role;
+select 'P8. parts: ' || string_agg(idx || ':' || title || ':' || status, ', ' order by idx) || '; lecture ' || (select status from public.study_lectures where id = :'L1') from public.study_sections where lecture_id = :'L1';
+select 'P9. kicks so far: ' || count(*) || ' (expect 2: outline, then part 0 alone)' from net.calls;
+
+set role anon;
+select kind as k0, idx as i0, lease as lease0, effort as e0 from public.study_claim(:'L1', null, null, :'key') \gset
+select 'P10. worker claims ' || :'k0' || ' ' || :'i0' || ' at effort ' || :'e0';
+select 'P11. part 0 is written alone (it fills the prompt cache): ' || count(*) || ' more (expect 0)' from public.study_claim(:'L1', null, null, :'key');
+select 'P12. progress with a wrong lease: ' || public.study_progress(:'L1', 0, gen_random_uuid(), 'x', :'key') || ' (expect false)';
+select 'P13. progress with the lease: ' || public.study_progress(:'L1', 0, :'lease0', '## מחזור החיים' || chr(10) || chr(10) || 'טקסט חלקי', :'key');
+reset role;
+select 'P14. the group sees the text so far: ' || (markdown like '%טקסט חלקי%') || ', status ' || status from public.study_sections where lecture_id = :'L1' and idx = 0;
+set role anon;
+select 'P15. finish part 0: ' || public.study_finish(:'L1', 'part', 0, :'lease0', 'ready', null, '## מחזור החיים' || chr(10) || chr(10) || 'טקסט מלא. [ש'' 1]', null,
+  'claude-opus-5-5', '{"input_tokens":3000,"output_tokens":6000,"cache_creation_input_tokens":15000}', 0.207, :'key');
+reset role;
+select 'P16. kicks after part 0: ' || count(*) || ' (expect 4: two parts now)' from net.calls;
+set role anon;
+select idx as i1, lease as lease1 from public.study_claim(:'L1', null, null, :'key') \gset
+select idx as i2, lease as lease2 from public.study_claim(:'L1', null, null, :'key') \gset
+select 'P17. two writers now: parts ' || :'i1' || ' and ' || :'i2' || '; a third claim gets ' || (select count(*) from public.study_claim(:'L1', null, null, :'key')) || ' (expect 0)';
+
+-- A member's phone (the device path) asks for a part a writer holds: busy
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'P18. Noa''s phone (section.ts: her token and the key) asks for part 1 while the server writes it: ' || count(*) || ' (expect 0: section.ts answers 409 busy)' from public.study_claim(:'L1', 'part', 1, :'key');
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_claim('f1000000-0000-4000-8000-000000000001', 'part', 1); raise notice 'P19. FAIL: the stranger claimed';
+exception when others then if sqlerrm = 'forbidden' then raise notice 'P19. ok: a stranger is refused'; else raise notice 'P19. FAIL: %', sqlerrm; end if; end $$;
+
+-- Retries
+set role anon;
+reset request.jwt.claim.sub;
+select 'P20. part 1 fails (rate limited): ' || public.study_finish(:'L1', 'part', 1, :'lease1', 'failed', 'rate_limited', '', null,
+  'claude-opus-5-5', '{"input_tokens":3000}', 0.012, :'key');
+reset role;
+select 'P21. retry in ' || round(extract(epoch from (retry_at - now())) / 60) || ' min (expect 2), attempts ' || attempts from public.study_sections where lecture_id = :'L1' and idx = 1;
+set role anon;
+select 'P22. the worker cannot take it before then: ' || count(*) || ' (expect 0)' from public.study_claim(:'L1', null, null, :'key');
+reset role;
+update public.study_sections set retry_at = now() - interval '1 second' where lecture_id = :'L1' and idx = 1;
+set role anon;
+select idx as i1b, lease as lease1b from public.study_claim(:'L1', null, null, :'key') \gset
+select 'P23. after the delay the worker takes part ' || :'i1b';
+-- the lease on part 2 expires (the function was killed); another writer takes it
+reset role;
+update public.study_sections set lease_until = now() - interval '1 second' where lecture_id = :'L1' and idx = 2;
+set role anon;
+select idx as i2b, lease as lease2b from public.study_claim(:'L1', null, null, :'key') \gset
+select 'P24. an expired lease is taken again: part ' || :'i2b' || ', new lease: ' || (:'lease2b' <> :'lease2');
+select 'P25. the old writer finishes late: ' || public.study_finish(:'L1', 'part', 2, :'lease2', 'ready', null, 'old text', null,
+  'claude-opus-5-5', '{"output_tokens":5000}', 0.1, :'key') || ' (expect false)';
+reset role;
+select 'P26. its text was not saved: ' || (markdown = '') || '; its cost was: ' || exists (select 1 from public.study_usage where lecture_id = :'L1' and ref = '2' and cost_usd = 0.1) from public.study_sections where lecture_id = :'L1' and idx = 2;
+-- a refusal is not retried by the server; "המשך כתיבה" starts it over
+set role anon;
+select 'P27. part 2 refused: ' || public.study_finish(:'L1', 'part', 2, :'lease2b', 'failed', 'refusal', '', null, 'claude-opus-5-5', '{}', 0.02, :'key');
+reset role;
+select 'P28. refusal: retry_at ' || coalesce(retry_at::text, 'null') || ' (expect null)' from public.study_sections where lecture_id = :'L1' and idx = 2;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'P29. Noa taps "המשך כתיבה": ' || public.study_queue(:'L1', '{}', null, true);
+reset role;
+select 'P30. part 2 starts over: attempts ' || attempts || ', due ' || (retry_at <= now()) from public.study_sections where lecture_id = :'L1' and idx = 2;
+-- the attempt cap
+update public.study_sections set attempts = 4, status = 'failed', error = 'rate_limited', retry_at = now() - interval '1 minute', lease_id = null where lecture_id = :'L1' and idx = 1;
+update public.study_sections set status = 'ready', lease_id = null where lecture_id = :'L1' and idx = 2;
+set role anon;
+select 'P31. after 4 attempts part 1 is never taken by the server: ' || count(*) || ' (expect 0)' from public.study_claim(:'L1', null, null, :'key');
+reset role;
+-- the sweeper: caps and the 2-minute pause
+update public.study_sections set attempts = 0, retry_at = now() - interval '1 minute' where lecture_id = :'L1' and idx = 1;
+update study_private.jobs set last_kick_at = now() where lecture_id = :'L1';
+delete from net.calls;
+select 'P32. sweeper within 2 minutes of a kick: ' || study_private.dispatch() || ' kick(s) (expect 0)';
+update study_private.jobs set last_kick_at = now() - interval '3 minutes' where lecture_id = :'L1';
+select 'P33. sweeper after the pause: ' || study_private.dispatch() || ' kick(s) (expect 1: one part due)';
+select 'P34. and right after: ' || study_private.dispatch() || ' (expect 0)';
+update study_private.jobs set last_kick_at = now() - interval '3 minutes', kicks_since_claim = 15 where lecture_id = :'L1';
+select 'P35. 15 kicks nobody claimed: ' || study_private.dispatch() || ' (expect 0 until someone queues again)';
+
+-- ── The ledger ──
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'L1. spent by these checks: $' || (public.study_spent(:'gid') - :w_before) || ' (expect 0.40300 = outline 0.064 + parts 0.207 + 0.012 + 0.1 (the late writer) + 0.02)';
+reset role;
+insert into public.study_usage (group_id, kind, cost_usd, created_at) values (:'gid', 'part', 5, date_trunc('month', now()) - interval '1 day');
+select 'L6. last month''s row is not counted: ' || (public.study_spent(:'gid', :'key') < 5);
+
+-- ── Writing input ──
+set role anon;
+select 'I1. the worker reads the lecture: ' || (public.study_writing_input(:'L1', false, :'key') -> 'lecture' ->> 'title') || ', figures ' || jsonb_typeof(public.study_writing_input(:'L1', false, :'key') -> 'figures');
+set role authenticated;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_writing_input('f1000000-0000-4000-8000-000000000001'); raise notice 'I2. FAIL: the stranger read the input';
+exception when others then if sqlerrm = 'forbidden' then raise notice 'I2. ok: the stranger is refused'; else raise notice 'I2. FAIL: %', sqlerrm; end if; end $$;
+do $$ begin perform count(*) from study_private.jobs; raise notice 'I3. FAIL: a member reads the job queue';
+exception when insufficient_privilege then raise notice 'I3. ok: the job queue is out of reach (%)', sqlerrm; end $$;
+
+-- ── Recordings (the server switch on: review M10) ──
+reset role;
+update study_private.features set enabled = true, changed_at = now() where name = 'recordings';
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin insert into public.study_recordings (lecture_id, source, engine, consented) values ('f1000000-0000-4000-8000-000000000001', 'file', 'vtt', false); raise notice 'R1. FAIL: saved without consent';
+exception when check_violation then raise notice 'R1. ok: the uploader must confirm the group may use it'; end $$;
+insert into public.study_recordings (lecture_id, source, engine, source_name, duration_s, has_times, chars, consented)
+values (:'L1', 'file', 'vtt', 'zoom.vtt', 6700, true, 120000, true);
+insert into public.study_transcript_blocks (lecture_id, idx, start_s, end_s, lines, segments) values
+  (:'L1', 0, 0, 300, '[00:01] שלום לכולם' || chr(10) || '[00:31] היום נדבר על Plasmodium', '[{"s":1,"e":5,"t":"שלום לכולם"}]'),
+  (:'L1', 1, 300, 600, '[05:00] זה יופיע במבחן', '[]');
+select 'R2. Noa added a transcript: ' || count(*) || ' block(s), created_by Noa: ' || bool_and(r.created_by = 'cccccccc-0000-4000-8000-000000000003')
+  from public.study_transcript_blocks b join public.study_recordings r using (lecture_id) where b.lecture_id = :'L1';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'R3. stranger sees ' || (select count(*) from public.study_recordings) || ' recordings, ' || (select count(*) from public.study_transcript_blocks) || ' blocks (expect 0, 0)';
+do $$ begin insert into public.study_transcript_blocks (lecture_id, idx, lines) values ('f1000000-0000-4000-8000-000000000001', 9, 'x'); raise notice 'R4. FAIL: the stranger added a block';
+exception when others then raise notice 'R4. ok: the stranger cannot add a block (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+update public.study_recordings set status = 'ready', done_s = 6700, updated_at = now() where lecture_id = :'L1';
+select 'R5. ready; notes wait for the parts: ' || count(*) || ' (expect 0)' from public.study_claim(:'L1', 'notes', null, :'key');
+reset role;
+update public.study_sections set status = 'ready', attempts = 1, lease_id = null where lecture_id = :'L1';
+update public.study_lectures set status = 'ready' where id = :'L1';
+set role anon;
+select kind as kn, idx as n0, lease as leasen0, effort as en from public.study_claim(:'L1', null, null, :'key') \gset
+select 'R6. every part written: the worker takes ' || :'kn' || ' of part ' || :'n0' || ' at effort ' || :'en';
+select 'R7. notes of part 0 alone first: ' || count(*) || ' more (expect 0)' from public.study_claim(:'L1', null, null, :'key');
+select 'R8. notes saved: ' || public.study_finish(:'L1', 'notes', 0, :'leasen0', 'ready', null, null,
+  '[{"anchor":1,"quote":"טקסט מלא","at_s":300,"text":"בהרצאה נאמר שזה יופיע במבחן."}]', 'claude-opus-5-5', '{"output_tokens":900}', 0.31, :'key');
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'R9. Shoham reads the note: ' || (items -> 0 ->> 'text') from public.study_recording_notes where lecture_id = :'L1' and part_idx = 0;
+do $$ begin update public.study_recording_notes set items = '[]' where part_idx = 0; raise notice 'R10. FAIL: a member rewrote notes';
+exception when insufficient_privilege then raise notice 'R10. ok: notes change only through study_finish'; end $$;
+delete from public.study_recordings where lecture_id = :'L1';
+select 'R10b. Shoham cannot delete Noa''s recording: ' || count(*) || ' left (expect 1)' from public.study_recordings where lecture_id = :'L1';
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+delete from public.study_recordings where lecture_id = :'L1';
+reset role;
+select 'R11. Noa deletes her recording, which takes its blocks and notes: ' || (select count(*) from public.study_transcript_blocks where lecture_id = :'L1') || ', ' || (select count(*) from public.study_recording_notes where lecture_id = :'L1') || ' (expect 0, 0)';
+
+-- ── The job ends when nothing is left to write ──
+reset role;
+select 'P36. the sweeper runs: ' || study_private.dispatch() || ' kick(s) (expect 0)';
+select 'P36b. a lecture with nothing left to write leaves the queue: ' || (not exists (select 1 from study_private.jobs where lecture_id = :'L1'));
+
+-- ── Off switch, and deleting a lecture ──
+reset role;
+alter function net.http_post(text, jsonb, jsonb, jsonb, int) rename to http_post_off;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+insert into public.study_lectures (id, group_id, title, source_kind, slides) values (:'L2', :'gid', 'בלי שרת', 'pdf', '[]');
+select 'O1. without pg_net study_queue answers: ' || public.study_queue(:'L2', '{}') || ' (expect false: the phone writes)';
+reset role;
+alter function net.http_post_off(text, jsonb, jsonb, jsonb, int) rename to http_post;
+select 'O2. no job was made: ' || count(*) || ' (expect 0)' from study_private.jobs where lecture_id = :'L2';
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'O3. the device path works without the server: ' || kind from public.study_claim(:'L2', null, null, :'key');
+select 'O3b. Shoham deletes the lecture (hidden): ' || (public.study_delete_lecture(:'L1') is not null);
+reset role;
+select 'O4. lecture hidden; its spend stays: ' || count(*) || ' row(s), job gone: ' || (not exists (select 1 from study_private.jobs where lecture_id = :'L1'))
+  || ', the worker is offered: ' || (select count(*) from study_private.plan(:'L1', true)) || ' (expect 5 row(s), true, 0)'
+  from public.study_usage where lecture_id = :'L1' and kind in ('outline', 'part');
+delete from public.study_lectures where id = :'L1';   -- the purge, 30 days later
+
+-- ════ Review checks: B1, FE-1, FE-4, M6, M7, M9, M10, M2, FE-13 ════
+reset role;
+\set L3 'f3000000-0000-4000-8000-000000000003'
+insert into public.study_lectures (id, group_id, title, source_kind, slides, status) values
+  (:'L3', :'gid', 'סקירה', 'pptx', '[{"n":1,"title":"a","lines":["x"],"tables":[],"notes":"","figures":[{"k":1,"path":"g/l3/s1-1.jpg","w":800,"h":600}]}]', 'writing');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+  (:'L3', 0, 'א', 1, 1, 'ready', '## א'), (:'L3', 1, 'ב', 1, 1, 'pending', '');
+insert into study_private.jobs (lecture_id) values (:'L3');
+-- B1: a member's token alone writes nothing
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_claim('f3000000-0000-4000-8000-000000000003', 'part', 1); raise notice 'B1a. FAIL: a member claimed a part with her token alone';
+exception when others then raise notice 'B1a. %: a member''s token alone cannot claim (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set role anon;
+reset request.jwt.claim.sub;
+select idx as w3, lease as lease3 from public.study_claim(:'L3', null, null, :'key') \gset
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.seen', lease_id::text, false) is not null as seen from public.study_sections where lecture_id = :'L3' and idx = 1 \gset
+do $$ begin perform public.study_finish('f3000000-0000-4000-8000-000000000003', 'part', 1, current_setting('t.seen')::uuid, 'ready', null, 'טקסט מזויף', null, 'claude-opus-5-5', '{}', 0); raise notice 'B1b. FAIL: a member finished a part with a lease she read';
+exception when others then raise notice 'B1b. %: a lease read from the table opens nothing without the key (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_progress('f3000000-0000-4000-8000-000000000003', 1, current_setting('t.seen')::uuid, 'x'); raise notice 'B1c. FAIL: a member wrote progress';
+exception when others then raise notice 'B1c. %: progress needs the key too (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_outline_done('f3000000-0000-4000-8000-000000000003', gen_random_uuid(), '[]', null, null, null, 99); raise notice 'B1d. FAIL: a member charged through the outline';
+exception when others then raise notice 'B1d. %: the outline''s cost cannot be written by a member (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- FE-1: a writer that dies after every claim
+reset role;
+update public.study_sections set lease_until = now() - interval '1 second' where lecture_id = :'L3' and idx = 1;
+set role anon;
+select count(*) as c2 from public.study_claim(:'L3', null, null, :'key') \gset
+reset role;
+update public.study_sections set lease_until = now() - interval '1 second' where lecture_id = :'L3' and idx = 1;
+set role anon;
+select count(*) as c3 from public.study_claim(:'L3', null, null, :'key') \gset
+reset role;
+update public.study_sections set lease_until = now() - interval '1 second' where lecture_id = :'L3' and idx = 1;
+set role anon;
+select count(*) as c4 from public.study_claim(:'L3', null, null, :'key') \gset
+reset role;
+update public.study_sections set lease_until = now() - interval '1 second' where lecture_id = :'L3' and idx = 1;
+set role anon;
+select 'FE1. claims 2-4 took it (' || :c2 || :c3 || :c4 || '); after the 4th dies a 5th claim gets ' || count(*) || ' (expect 111; 0)' from public.study_claim(:'L3', null, null, :'key');
+reset role;
+select 'FE1b. the unit gave up: ' || status || ' ' || error || ', attempts ' || attempts || ', retry_at ' || coalesce(retry_at::text, 'null') || ' (expect failed lost, 4, null)'
+  from public.study_sections where lecture_id = :'L3' and idx = 1;
+select study_private.dispatch(:'L3') as fe1_kicks \gset
+select 'FE1c. the sweeper stops: kicks ' || :'fe1_kicks' || ', job left: ' || exists (select 1 from study_private.jobs where lecture_id = :'L3') || ' (expect 0, false)';
+-- FE-4: server off, a person's tap restarts it and the phone writes it; M6: 3 taps a day
+alter function net.http_post(text, jsonb, jsonb, jsonb, int) rename to http_post_off;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'FE4. server off, "המשך כתיבה" answers ' || public.study_queue(:'L3', '{}', null, true) || ' (expect false: the phone writes)';
+reset role;
+select 'FE4b. and the part starts over: attempts ' || attempts || ', due ' || (retry_at <= now()) || ' (expect 0, true)' from public.study_sections where lecture_id = :'L3' and idx = 1;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'FE4c. Shoham''s phone writes it: part ' || idx || ' (expect 1)' from public.study_claim(:'L3', 'part', 1, :'key');
+-- W2: a tap counts only when it finds something to start over. Part 1 is
+-- being written now: a tap restarts nothing and spends none of the three.
+select 'M6r. a tap with nothing failed: ' || public.study_queue(:'L3', '{}', null, true) || ', restarts today ' || (select retries from public.study_lectures where id = :'L3') || ' (expect false, 1)';
+-- Part 1 fails again twice, and each tap starts it over: three restarts.
+reset role;
+update public.study_sections set status = 'failed', error = 'refusal', attempts = 1, retry_at = null, lease_id = null, lease_until = null where lecture_id = :'L3' and idx = 1;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_queue(:'L3', '{}', null, true) as q2 \gset
+reset role;
+update public.study_sections set status = 'failed', error = 'refusal', attempts = 1, retry_at = null where lecture_id = :'L3' and idx = 1;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_queue(:'L3', '{}', null, true) as q3 \gset
+select 'M6s. restarts today after three taps that each restarted a part: ' || retries || ' (expect 3)' from public.study_lectures where id = :'L3';
+reset role;
+update public.study_sections set status = 'failed', error = 'refusal', attempts = 1, retry_at = null where lecture_id = :'L3' and idx = 1;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_queue('f3000000-0000-4000-8000-000000000003', '{}', null, true); raise notice 'M6a. FAIL: a fourth restart in a day';
+exception when others then raise notice 'M6a. %: three restarts a day per lecture (%)', case when sqlerrm = 'retry limit' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+alter function net.http_post_off(text, jsonb, jsonb, jsonb, int) rename to http_post;
+-- M7 (S3): picture links are this lecture's own, signed by Storage
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_queue('f3000000-0000-4000-8000-000000000003', '{"g/l3/s1-1.jpg":"https://attacker.example/prompt.png"}'); raise notice 'M7a. FAIL: an outside picture was queued';
+exception when others then raise notice 'M7a. %: an outside URL is refused (%)', case when sqlerrm = 'bad figures' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_queue('f3000000-0000-4000-8000-000000000003', '{"g/other/x.jpg":"https://x.supabase.co/storage/v1/object/sign/study/g/other/x.jpg?token=t"}'); raise notice 'M7b. FAIL: another lecture''s picture was queued';
+exception when others then raise notice 'M7b. %: a path that is not this lecture''s figure is refused (%)', case when sqlerrm = 'bad figures' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_queue('f3000000-0000-4000-8000-000000000003', '{"g/l3/s1-1.jpg":"https://x.supabase.co/storage/v1/object/sign/study/g/other/x.jpg?token=t"}'); raise notice 'M7c. FAIL: a link signed for another path was queued';
+exception when others then raise notice 'M7c. %: the link must be signed for the same path (%)', case when sqlerrm = 'bad figures' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'M7d. its own picture, signed for it: ' || public.study_queue(:'L3', '{"g/l3/s1-1.jpg":"https://x.supabase.co/storage/v1/object/sign/study/g/l3/s1-1.jpg?token=t.u-v"}') || ' (expect true)';
+-- M10, M9, M2, FE-13: recordings
+reset role;
+update study_private.features set enabled = false where name = 'recordings';
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin insert into public.study_recordings (lecture_id, source, engine, consented) values ('f3000000-0000-4000-8000-000000000003', 'file', 'vtt', true); raise notice 'M10a. FAIL: a recording came in while the switch is off';
+exception when insufficient_privilege then raise notice 'M10a. ok: with the server switch off no recording comes in'; end $$;
+reset role;
+update study_private.features set enabled = true where name = 'recordings';
+set role authenticated;
+insert into public.study_recordings (lecture_id, source, engine, consented, link_url) values (:'L3', 'file', 'vtt', true, 'https://moodle.bgu.ac.il/rec/1');
+select 'M9a. a link to the university: set by Noa ' || (link_set_by = 'cccccccc-0000-4000-8000-000000000003') || ', own key ' || (id is not null and id <> lecture_id) || ' (expect true, true)'
+  from public.study_recordings where lecture_id = :'L3';
+do $$ begin update public.study_recordings set link_url = 'https://bgu.ac.il.evil.example/login' where lecture_id = 'f3000000-0000-4000-8000-000000000003'; raise notice 'M9b. FAIL: a look-alike host was saved';
+exception when others then raise notice 'M9b. %: a host outside the list is refused (%)', case when sqlerrm = 'link host' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin update public.study_recordings set link_url = 'https://evil.example/bgu.ac.il/' where lecture_id = 'f3000000-0000-4000-8000-000000000003'; raise notice 'M9c. FAIL: a path that names the university was saved';
+exception when others then raise notice 'M9c. %: only the host counts (%)', case when sqlerrm = 'link host' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+delete from public.study_recordings where lecture_id = :'L3';
+select 'M2a. Shoham cannot delete Noa''s recording: ' || count(*) || ' left (expect 1)' from public.study_recordings where lecture_id = :'L3';
+reset role;
+update public.study_recordings set status = 'ready' where lecture_id = :'L3';
+update public.study_sections set status = 'ready', lease_id = null, markdown = '## ב' where lecture_id = :'L3';
+update public.study_lectures set status = 'ready' where id = :'L3';
+update study_private.features set enabled = false where name = 'recordings';
+set role anon;
+select 'M10b. switched off, the worker is offered notes: ' || count(*) || ' (expect 0)' from public.study_claim(:'L3', null, null, :'key');
+reset role;
+update study_private.features set enabled = true where name = 'recordings';
+set role anon;
+select kind as kn3, idx as n3, lease as leasen3 from public.study_claim(:'L3', null, null, :'key') \gset
+select 'M10c. switched on: the worker takes ' || :'kn3' || ' of part ' || :'n3';
+-- M6: the call's reservation is settled by study_finish
+select public.study_reserve(:'gid', :'L3', 'notes', :'n3', 0.5, 33, 0.8, null, null, null, :'key') as rn \gset
+select 'M6b. notes finished: ' || public.study_finish(:'L3', 'notes', :n3, :'leasen3', 'ready', null, null, '[]', 'claude-opus-5-5', '{"output_tokens":10}', 0.07, :'key', :rn) || ' (expect true)';
+reset role;
+select 'M6c. the reservation now holds the real cost: $' || cost_usd || ', settled ' || (settled_at is not null) || ', rows for it ' || (select count(*) from public.study_usage where lecture_id = :'L3' and kind = 'notes') || ' (expect 0.07000, true, 1)'
+  from public.study_usage where id = :rn;
+select 'W-reg. the registry: ' || (public.study_schema() ->> 'W') || ' (expect 2: W2''s hardening is loaded)';
+delete from public.study_lectures where id = :'L3';
+
+-- ════════════════════════════════════════════════════════════════════════
+--  W2 checks (package W, with the hardening loaded). Run after study.sql
+--  (W2 turns its checks 10 and 12 into refusals: tests/study-w3.sql) and the F
+--  and W checks.
+-- ════════════════════════════════════════════════════════════════════════
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin update public.study_sections set markdown = 'x'; raise notice 'H1. FAIL: a member wrote a part directly';
+exception when insufficient_privilege then raise notice 'H1. ok: parts change only through study_progress/study_finish'; end $$;
+do $$ begin insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to) values ('eeeeeeee-0000-4000-8000-000000000005', 7, 'x', 1, 2); raise notice 'H1b. FAIL: a member added a part';
+exception when insufficient_privilege then raise notice 'H1b. ok: parts are added only by study_outline_done'; end $$;
+do $$ begin delete from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000005'; raise notice 'H1c. FAIL: a member deleted a part';
+exception when insufficient_privilege then raise notice 'H1c. ok: no member deletes a part (a correction''s history stays)'; end $$;
+do $$ begin update public.study_lectures set status = 'ready', outline = '[]'; raise notice 'H1d. FAIL: a member changed the writing state';
+exception when insufficient_privilege then raise notice 'H1d. ok: a lecture''s writing state changes only through the RPCs'; end $$;
+update public.study_lectures set title = 'Anti parasite' where id = 'eeeeeeee-0000-4000-8000-000000000005';
+select 'H1e. a member still renames a lecture: ' || title from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-000000000005';
+do $$ begin
+  insert into public.study_lectures (id, group_id, title, source_kind, slides, retries, retry_day, status)
+  select 'eeeeeeee-0000-4000-8000-0000000000f1', m.group_id, 'forged', 'pptx', '[]'::jsonb, -1000000,
+         ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date, 'failed'
+    from public.study_members m where m.user_id = auth.uid() limit 1;
+  raise notice 'H1f. FAIL: a member inserted a lecture with a restart count and a status of her own';
+exception when insufficient_privilege then raise notice 'H1f. ok: a new lecture''s writing state takes its defaults (retries, status refused)'; end $$;
+insert into public.study_lectures (id, group_id, title, lecturer, course, lecture_date, source_name, source_kind, slides)
+select 'eeeeeeee-0000-4000-8000-0000000000f2', m.group_id, 'העלאה', '', '', null, 'deck.pptx', 'pptx', '[]'::jsonb
+  from public.study_members m where m.user_id = auth.uid() limit 1;
+select 'H1f. the upload''s own insert passes: ' || status || ', retries ' || retries || ', retry_day ' || coalesce(retry_day::text, 'none')
+       || ', her own ' || (created_by = auth.uid()) || ' (expect new, retries 0, retry_day none, her own true)'
+  from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-0000000000f2';
+reset role;
+delete from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-0000000000f2';
+-- H3 (W2, double dispatch): two phones tap "המשך כתיבה" on the same failed
+-- part, one right after the other (the second before any writer claimed it):
+-- the part starts over once, and one of the day's three restarts is spent.
+\set LH 'f3000000-0000-4000-8000-0000000000a3'
+insert into public.study_lectures (id, group_id, title, source_kind, slides, status) values
+  (:'LH', :'gid', 'שתי לחיצות', 'pptx', '[{"n":1,"title":"a","lines":["x"],"tables":[],"notes":"","figures":[]}]', 'writing');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, error, attempts, markdown) values
+  (:'LH', 0, 'א', 1, 1, 'ready', null, 1, '## א'), (:'LH', 1, 'ב', 1, 1, 'failed', 'refusal', 1, '');
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_queue(:'LH', '{}', null, true) as h3a \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_queue(:'LH', '{}', null, true) as h3b \gset
+reset role;
+select 'H3. two taps on one failed part: restarts ' || retries || ', part 1 ' || s.status || ' attempts ' || s.attempts || ' due ' || (s.retry_at <= now())
+       || ' (expect restarts 1, part 1 failed attempts 0 due true)'
+  from public.study_lectures l join public.study_sections s on s.lecture_id = l.id and s.idx = 1 where l.id = :'LH';
+-- H3b: the same with an outline that failed: the first tap sets it back to
+-- 'new', the second finds nothing failed.
+update public.study_lectures set status = 'failed', error = 'budget', retries = 0, retry_day = null where id = :'LH';
+delete from public.study_sections where lecture_id = :'LH';
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_queue(:'LH', '{}', null, true) as h3c \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_queue(:'LH', '{}', null, true) as h3d \gset
+reset role;
+select 'H3b. two taps on a failed outline: restarts ' || retries || ', status ' || status || ' (expect 1, new)' from public.study_lectures where id = :'LH';
+-- H4 (W2, cancel): a deleted lecture is written by nobody: no unit is
+-- planned or claimed, and "המשך כתיבה" answers "lecture not found".
+update public.study_lectures set status = 'writing', error = null where id = :'LH';
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values (:'LH', 0, 'א', 1, 1, 'pending', '');
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'H4. deleted while waiting: ' || (public.study_delete_lecture(:'LH', true) is not null);
+reset role;
+select 'H4a. units planned for the deleted lecture: ' || count(*) || ' (expect 0)' from study_private.plan(:'LH', true);
+set role anon;
+reset request.jwt.claim.sub;
+select 'H4b. claimed with the key: ' || count(*) || ' (expect 0)' from public.study_claim(:'LH', null, null, :'key');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_queue('f3000000-0000-4000-8000-0000000000a3', '{}', null, true); raise notice 'H4c. FAIL: a deleted lecture was queued';
+exception when others then raise notice 'H4c. %: "המשך כתיבה" on a deleted lecture (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+delete from public.study_lectures where id = :'LH';
+select 'H2. the registry: W ' || (public.study_schema() ->> 'W') || ' (expect 2)';
+-- ════ END SECTION W ════
+
+-- ════ BEGIN SECTION Q · practice questions, past exams (package Q) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Q checks · practice questions and past exams   (package Q)
+-- ════════════════════════════════════════════════════════════════════════
+-- PROPOSAL: behaviour test for questions.sql, in the style of supabase/tests/study.sql.
+-- Runs in the SAME psql session right after supabase/tests/study.sql (it reuses
+-- that file's users, group and :gid). Throwaway local Postgres only.
+-- Load order: stubs.sql, board-schema.sql, study-schema.sql (x2), ledger.sql,
+-- questions.sql (x2), then study.sql + this file in one psql run.
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+-- The server key (the ops pass it with the member's token) and the exams switch (review B1, M10).
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+\set key 'k-0123456789abcdef0123456789abcdef'
+select set_config('t.key', 'k-0123456789abcdef0123456789abcdef', false) is not null as have_key \gset
+update study_private.features set enabled = true where name = 'exams';
+set role authenticated;
+
+-- Shoham adds a 12-slide lecture with a three-part outline.
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides)
+select 'eeeeeeee-0000-4000-8000-000000000007', :'gid', 'פתוגן מאכסן', 'Antimalarials', 'pptx',
+       (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', '[]'::jsonb, 'tables', '[]'::jsonb, 'notes', '', 'figures', '[]'::jsonb))
+          from generate_series(1, 12) n);
+reset role;   -- fixture parts are written by the owner (after W2 no member writes a part)
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to) values
+ ('eeeeeeee-0000-4000-8000-000000000007', 0, 'מלריה: מחזור החיים', 1, 4),
+ ('eeeeeeee-0000-4000-8000-000000000007', 1, 'מלריה: תרופות לפי שלב', 5, 8),
+ ('eeeeeeee-0000-4000-8000-000000000007', 2, 'Primaquine ו-G6PD', 9, 12);
+set role authenticated;
+
+-- Q1-Q2: planning a round
+select 'Q1. round ' || round || ', ' || batches || ' parts, fresh ' || fresh || ' (expect 1, 3, true)'
+  from public.study_question_round('eeeeeeee-0000-4000-8000-000000000007');
+select 'Q1b. wanted per part: ' || string_agg(part_idx || ':' || slide_from || '-' || slide_to || '=' || wanted, ' ' order by part_idx) || ' (expect 0:1-4=2 1:5-8=2 2:9-12=2)'
+  from public.study_question_batches where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+-- Q1c: the real antiparasitics outline (38 slides, 8 parts) gets 15 questions.
+insert into public.study_lectures (id, group_id, title, source_kind, slides)
+select 'eeeeeeee-0000-4000-8000-000000000008', :'gid', 'Anti parasite (outline check)', 'pptx',
+       (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 38) n);
+reset role;
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to)
+select 'eeeeeeee-0000-4000-8000-000000000008', i - 1, 'part ' || i, f, t
+from (values (1, 1, 4), (2, 5, 7), (3, 8, 12), (4, 13, 18), (5, 19, 23), (6, 24, 28), (7, 29, 33), (8, 34, 38)) v(i, f, t);
+set role authenticated;
+select round as r8 from public.study_question_round('eeeeeeee-0000-4000-8000-000000000008') \gset
+select 'Q1c. 38 slides in 8 parts: ' || string_agg(wanted::text, '-' order by part_idx) || ' = ' || sum(wanted) || ' (expect 2-1-2-2-2-2-2-2 = 15)'
+  from public.study_question_batches
+ where lecture_id = 'eeeeeeee-0000-4000-8000-000000000008' and round = :r8;
+reset role;
+delete from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-000000000008';   -- a fixture: the owner purges it
+set role authenticated;
+select set_config('t.b0', (select id::text from public.study_question_batches where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and part_idx = 0), false) is not null as b0 \gset
+select set_config('t.b2', (select id::text from public.study_question_batches where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and part_idx = 2), false) is not null as b2 \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'Q2. Noa taps too: round ' || round || ', fresh ' || fresh || ' (expect 1, false: same round)'
+  from public.study_question_round('eeeeeeee-0000-4000-8000-000000000007');
+
+-- Q3: claiming a part
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'Q3. Shoham claims part ' || part_idx || ': wants ' || wanted || ' at ' || effort || ' (expect 0, 2, high)'
+  from public.study_question_claim(current_setting('t.b0')::uuid, current_setting('t.key'));
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_question_claim(current_setting('t.b0')::uuid, current_setting('t.key')); raise notice 'Q3b. FAIL: a part was claimed twice';
+exception when others then raise notice 'Q3b. %: a part being written is busy (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- Q4: saving questions (the database's own checks)
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.q1', public.study_save_question(current_setting('t.b0')::uuid, null, '{
+  "kind": "case", "difficulty": 3, "topic": "Primaquine", "aspect": "contra", "model": "claude-opus-5-5",
+  "vignette": "גבר בן 24 חזר מתאילנד ...", "question": "איזו בדיקה יש לבצע לפני מתן Primaquine?",
+  "options": ["רמת G6PD", "ECG", "בדיקת היריון", "תפקודי כבד", "בדיקת שמיעה"],
+  "answer": 0, "explanations": ["נכון ... [ש'' 3]", "לא ... [ש'' 2]", "לא ...", "לא ...", "לא ..."],
+  "takeaway": "לפני Primaquine בודקים G6PD. [ש'' 3]", "slides": [3, 2]
+}'::jsonb, current_setting('t.key'))::text, false) is not null as q1 \gset
+select 'Q4. saved: ' || kind || ', ' || cardinality(options) || ' options, key hidden in its own table: ' ||
+       (select count(*) from public.study_question_batches where id = current_setting('t.b0')::uuid and made = 1) || ' part made 1'
+  from public.study_questions where id = current_setting('t.q1')::uuid;
+do $$ begin perform public.study_save_question(current_setting('t.b0')::uuid, null,
+  '{"kind":"mcq","question":"שאלה?","options":["a","b","c","d","e"],"answer":5,"explanations":["1","2","3","4","5"],"slides":[1]}', current_setting('t.key'));
+  raise notice 'Q4b. FAIL: answer out of range saved';
+exception when others then raise notice 'Q4b. %: the answer must be one of the options (%)', case when sqlerrm = 'bad answer' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_save_question(current_setting('t.b0')::uuid, null,
+  '{"kind":"mcq","question":"שאלה?","options":["a","b","c","d","e"],"answer":1,"explanations":["1","2","3","4"],"slides":[1]}', current_setting('t.key'));
+  raise notice 'Q4c. FAIL: four explanations for five options saved';
+exception when others then raise notice 'Q4c. %: one explanation per option (%)', case when sqlerrm like 'explanations%' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_save_question(current_setting('t.b0')::uuid, null,
+  '{"kind":"mcq","question":"שאלה?","options":["a","b","c","d","e"],"answer":1,"explanations":["1","2","3","4","5"],"slides":[99]}', current_setting('t.key'));
+  raise notice 'Q4d. FAIL: a slide the lecture does not have';
+exception when others then raise notice 'Q4d. %: slide numbers must exist (%)', case when sqlerrm = 'unknown slide' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_save_question(current_setting('t.b0')::uuid, null,
+  '{"kind":"mcq","question":"שאלה?","options":["a","b","c","d","e"],"answer":1,"explanations":["1","2","3","4","5"],"slides":[10]}', current_setting('t.key'));
+  raise notice 'Q4e. FAIL: a question about another part';
+exception when others then raise notice 'Q4e. %: at least one slide in the part (%)', case when sqlerrm = 'outside the part' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_save_question(current_setting('t.b2')::uuid, null,
+  '{"kind":"mcq","question":"שאלה?","options":["a","b","c","d","e"],"answer":1,"explanations":["1","2","3","4","5"],"slides":[10]}', current_setting('t.key'));
+  raise notice 'Q4f. FAIL: saved into a part nobody claimed';
+exception when others then raise notice 'Q4f. %: only a claimed part takes questions (%)', case when sqlerrm = 'batch not writing' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_save_question(current_setting('t.b0')::uuid, null,
+  '{"kind":"mcq","question":"שאלה?","options":["a","b","c","d","e"],"answer":1,"explanations":["1","2","3","4","5"],"slides":[1],"aspect":"vibes"}', current_setting('t.key'));
+  raise notice 'Q4g. FAIL: an aspect outside the list';
+exception when others then raise notice 'Q4g. ok: aspects come from the fixed list (%)', sqlerrm; end $$;
+
+-- Q5: what Noa can and cannot touch
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'Q5. Noa sees ' || count(*) || ' question(s) with ' || max(cardinality(options)) || ' options (expect 1, 5)' from public.study_questions;
+do $$ begin perform count(*) from public.study_question_keys; raise notice 'Q5b. FAIL: the key table is readable';
+exception when insufficient_privilege then raise notice 'Q5b. ok: nobody reads the keys (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_questions (group_id, lecture_id, kind, question, options) values
+  ((select group_id from public.study_questions limit 1), 'eeeeeeee-0000-4000-8000-000000000007', 'mcq', 'שאלה?', '{a,b}');
+  raise notice 'Q5c. FAIL: a question was inserted around the checks';
+exception when insufficient_privilege then raise notice 'Q5c. ok: questions are saved only through study_save_question (%)', sqlerrm; end $$;
+do $$ begin update public.study_questions set question = 'נערך?'; raise notice 'Q5d. FAIL: a question was rewritten';
+exception when insufficient_privilege then raise notice 'Q5d. ok: questions are not edited in place (%)', sqlerrm; end $$;
+do $$ begin update public.study_question_batches set status = 'ready'; raise notice 'Q5e. FAIL: a part''s state was changed directly';
+exception when insufficient_privilege then raise notice 'Q5e. ok: parts change state only through the functions (%)', sqlerrm; end $$;
+
+-- Q6: a stranger
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'Q6. stranger sees ' || count(*) || ' questions, ' || (select count(*) from public.study_question_batches) || ' parts (expect 0, 0)' from public.study_questions;
+do $$ begin perform public.study_answer_question(current_setting('t.q1')::uuid, 0); raise notice 'Q6b. FAIL: stranger answered';
+exception when others then raise notice 'Q6b. %: stranger cannot answer (%)', case when sqlerrm = 'question not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_question_round('eeeeeeee-0000-4000-8000-000000000007'); raise notice 'Q6c. FAIL: stranger planned a round';
+exception when others then raise notice 'Q6c. %: stranger cannot spend the group''s budget (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- Q6d: since Q's end no member calls study_retire_question (finding Q2, SEC-13), a stranger neither.
+do $$ begin perform public.study_retire_question(current_setting('t.q1')::uuid, true); raise notice 'Q6d. FAIL: stranger retired a question';
+exception when insufficient_privilege then raise notice 'Q6d. ok: stranger cannot retire (%)', sqlerrm;
+  when others then raise notice 'Q6d. FAIL: refused for another reason: %', sqlerrm; end $$;
+
+-- Q7: Noa answers
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'Q7. right answer: correct ' || correct || ', key ' || answer || ', ' || cardinality(explanations) || ' explanations (expect true, 0, 5)'
+  from public.study_answer_question(current_setting('t.q1')::uuid, 0, 'lecture', 5400);
+select 'Q7b. wrong answer: correct ' || correct || ' (expect false)' from public.study_answer_question(current_setting('t.q1')::uuid, 3, 'lecture', 8000);
+select 'Q7c. "לא יודעים": correct ' || correct || ' (expect false)' from public.study_answer_question(current_setting('t.q1')::uuid, null, 'mistakes', null);
+do $$ begin perform public.study_answer_question(current_setting('t.q1')::uuid, 7); raise notice 'Q7d. FAIL: option 8 of 5 accepted';
+exception when others then raise notice 'Q7d. %: the choice must be an option (%)', case when sqlerrm = 'bad choice' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- Q8: answers are private
+select 'Q8. Noa sees ' || count(*) || ' answers of her own (expect 3)' from public.study_answers;
+do $$ begin insert into public.study_answers (question_id, correct) values (current_setting('t.q1')::uuid, true); raise notice 'Q8b. FAIL: an answer was written around the key';
+exception when insufficient_privilege then raise notice 'Q8b. ok: answers are recorded only by study_answer_question (%)', sqlerrm; end $$;
+do $$ begin update public.study_answers set correct = true; raise notice 'Q8c. FAIL: a score was changed';
+exception when insufficient_privilege then raise notice 'Q8c. ok: answers cannot be changed (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'Q8d. Shoham sees ' || count(*) || ' of Noa''s answers (expect 0)' from public.study_answers;
+delete from public.study_answers;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'Q8e. after Shoham''s delete, Noa still has ' || count(*) || ' (expect 3)' from public.study_answers;
+
+-- Q9: review only what you answered
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'Q9. Shoham (no answer yet) gets ' || count(*) || ' feedback rows (expect 0)' from public.study_question_feedback(array[current_setting('t.q1')::uuid]);
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'Q9b. Noa gets ' || count(*) || ' (expect 1)' from public.study_question_feedback(array[current_setting('t.q1')::uuid]);
+
+-- Q10-Q11: mistakes and topic stats (latest answer counts)
+select 'Q10. Noa''s mistakes: ' || count(*) || ' (expect 1: her last answer was "לא יודעים")' from public.study_my_mistakes(:'gid');
+select 'Q10b. correct again' from public.study_answer_question(current_setting('t.q1')::uuid, 0, 'mistakes', 3000) where correct;
+select 'Q10c. mistakes now ' || count(*) || ' (expect 1: a right answer on the same study day does not clear it, review UX-2)' from public.study_my_mistakes(:'gid');
+select 'Q11. Noa: ' || topic || '/' || aspect || ' answered ' || answered || ', right now ' || correct_now || ' (expect Primaquine/contra 1, 1)'
+  from public.study_my_topic_stats(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+select 'Q11b. Noa answered ' || sum(answered) || ' today (expect 4)' from public.study_my_daily(:'gid', 7);
+select 'Q11d. Noa''s latest: correct ' || correct || ' after ' || times || ' answers (expect true, 4)' from public.study_my_latest(:'gid');
+select 'Q11e. Noa''s hub row: ' || questions || ' question(s), answered ' || answered || ', wrong now ' || wrong_now || ' (expect 1, 1, 1: the same rule as "הטעויות שלי")'
+  from public.study_practice_overview(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'Q11c. Shoham: answered ' || coalesce(sum(answered), 0) || ' (expect 0: stats are per person)' from public.study_my_topic_stats(:'gid');
+select 'Q11f. Shoham''s hub row: ' || questions || ' question(s), answered ' || answered || ' (expect 1, 0: the count is shared, the answers are not)'
+  from public.study_practice_overview(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+
+-- Q12: flags
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+insert into public.study_question_flags (question_id, reason, note) values (current_setting('t.q1')::uuid, 'two_answers', 'גם ECG נראה נכון לפי שקף 2');
+do $$ begin insert into public.study_question_flags (question_id, reason) values (current_setting('t.q1')::uuid, 'unclear'); raise notice 'Q12. FAIL: two flags from one member';
+exception when unique_violation then raise notice 'Q12. ok: one flag per member per question (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_question_flags (question_id, reason, user_id) values (current_setting('t.q1')::uuid, 'other', 'bbbbbbbb-0000-4000-8000-000000000002'); raise notice 'Q12b. FAIL: flagged as Shoham';
+exception when insufficient_privilege then raise notice 'Q12b. ok: a flag is always your own (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'Q12c. Shoham sees the flag: ' || reason || ' (expect two_answers)' from public.study_question_flags;
+delete from public.study_question_flags;
+select 'Q12d. after Shoham''s delete: ' || count(*) || ' flag(s) left (expect 1: only Noa removes hers)' from public.study_question_flags;
+
+-- Q13: retiring. Since Q's end (spec §12.3.Q, SEC-13; finding Q2 of package Q's
+-- review) no member retires a question for everyone, or puts one back, with one
+-- call: a question leaves practice for everyone only through the fix of a
+-- hidden question (study_question_fix 'retire', the end checks QS5-QS6 and
+-- SR2). The owner retires it here, as such a fix would, for Q13b-Q13c.
+do $$ begin perform public.study_retire_question(current_setting('t.q1')::uuid, true, 'שתי תשובות נכונות'); raise notice 'Q13. FAIL: Shoham retired a question for everyone with one call';
+exception when insufficient_privilege then raise notice 'Q13. ok: no member retires a question for everyone with one call (%)', sqlerrm;
+  when others then raise notice 'Q13. FAIL: refused for another reason: %', sqlerrm; end $$;
+reset role;
+update public.study_questions set retired_at = now(), retired_by = 'bbbbbbbb-0000-4000-8000-000000000002', retire_note = 'שתי תשובות נכונות'
+ where id = current_setting('t.q1')::uuid;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_answer_question(current_setting('t.q1')::uuid, 0); raise notice 'Q13b. FAIL: answered a retired question';
+exception when others then raise notice 'Q13b. %: a retired question is out of practice (%)', case when sqlerrm = 'retired' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'Q13c. Noa''s stats skip it: ' || count(*) || ' rows (expect 0)' from public.study_my_topic_stats(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+do $$ begin perform public.study_retire_question(current_setting('t.q1')::uuid, false); raise notice 'Q13d. FAIL: Noa put a question back for everyone with one call';
+exception when insufficient_privilege then raise notice 'Q13d. ok: nor puts one back (%)', sqlerrm;
+  when others then raise notice 'Q13d. FAIL: refused for another reason: %', sqlerrm; end $$;
+reset role;
+update public.study_questions set retired_at = null, retired_by = null, retire_note = '' where id = current_setting('t.q1')::uuid;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+
+-- Q14-Q15: finishing parts, and the next round
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_question_finish(current_setting('t.b0')::uuid, 'ready', 1, 'claude-opus-5-5', 0.061, null, current_setting('t.key')) is null as fin \gset
+do $$ begin perform public.study_question_finish(current_setting('t.b0')::uuid, 'ready', 0, null, 0, null, current_setting('t.key')); raise notice 'Q14. FAIL: finished twice';
+exception when others then raise notice 'Q14. %: a part finishes once (%)', case when sqlerrm = 'batch not writing' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'Q14b. part 0: ' || status || ', made ' || made || ', rejected ' || rejected || ', $' || cost_usd || ' (expect ready, 1, 1, 0.0610)' from public.study_question_batches where id = current_setting('t.b0')::uuid;
+select 'Q15. while parts 1-2 wait, a new tap gives round ' || round || ', fresh ' || fresh || ' (expect 1, false)' from public.study_question_round('eeeeeeee-0000-4000-8000-000000000007');
+-- Part 2 times out on a phone that slept; Noa picks it up later.
+select 'Q15b. claimed part ' || part_idx from public.study_question_claim(current_setting('t.b2')::uuid, current_setting('t.key'));
+select public.study_question_finish(current_setting('t.b2')::uuid, 'failed', 0, null, 0.02, 'timeout', current_setting('t.key')) is null as f2 \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'Q15c. retry after a timeout runs at ' || effort || ' (expect medium)' from public.study_question_claim(current_setting('t.b2')::uuid, current_setting('t.key'));
+reset role;
+update public.study_question_batches set updated_at = now() - interval '7 minutes' where id = current_setting('t.b2')::uuid;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'Q15d. a part silent for 7 minutes can be taken over: part ' || part_idx || ' (expect 2)' from public.study_question_claim(current_setting('t.b2')::uuid, current_setting('t.key'));
+select public.study_question_finish(current_setting('t.b2')::uuid, 'ready', 0, null, 0, null, current_setting('t.key')) is null as f2b \gset
+select public.study_question_finish(b.id, 'ready', 0, null, 0, null, current_setting('t.key')) is null as f1 from public.study_question_batches b
+ cross join lateral public.study_question_claim(b.id, current_setting('t.key')) c
+ where b.lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and b.part_idx = 1 \gset
+select 'Q15e. all parts done, next tap: round ' || round || ', fresh ' || fresh || ' (expect 2, true)' from public.study_question_round('eeeeeeee-0000-4000-8000-000000000007');
+
+-- Q16: a ceiling per lecture (80 active questions), so a loop cannot burn the budget,
+-- and a part takes no more questions than it asked for
+select set_config('t.b3', (select id::text from public.study_question_batches where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and round = 2 and part_idx = 0), false) is not null as b3 \gset
+select 'Q16. claimed round 2 part ' || part_idx || ', wants ' || wanted from public.study_question_claim(current_setting('t.b3')::uuid, current_setting('t.key'));
+select 'Q16a. saved ' || count(*) from (select public.study_save_question(current_setting('t.b3')::uuid, null,
+  jsonb_build_object('kind','mcq','question','שאלה ' || i || '?','options',jsonb_build_array('a','b','c','d','e'),
+                     'answer', i % 5, 'explanations', jsonb_build_array('1','2','3','4','5'), 'slides', jsonb_build_array(1)), current_setting('t.key'))
+  from generate_series(1, 2) i) x;
+do $$ begin perform public.study_save_question(current_setting('t.b3')::uuid, null,
+  '{"kind":"mcq","question":"שלישית?","options":["a","b","c","d","e"],"answer":1,"explanations":["1","2","3","4","5"],"slides":[1]}', current_setting('t.key'));
+  raise notice 'Q16b. FAIL: a part took more questions than it wanted';
+exception when others then raise notice 'Q16b. %: a part takes what it asked for (%)', case when sqlerrm = 'part full' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- Fill the lecture to 79 active questions directly (as the database owner), then try two more.
+reset role;
+insert into public.study_questions (group_id, lecture_id, kind, question, options, slides)
+select g.id, 'eeeeeeee-0000-4000-8000-000000000007', 'mcq', 'מילוי ' || i || '?', '{a,b,c,d,e}', '{1}'
+from public.study_groups g, generate_series(1, 76) i;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.b4', (select id::text from public.study_question_batches where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and round = 2 and part_idx = 1), false) is not null as b4 \gset
+select 'Q16c. active now ' || (select count(*) from public.study_questions where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and retired_at is null)
+       || ', claimed part ' || part_idx || ' (expect 79, 1)' from public.study_question_claim(current_setting('t.b4')::uuid, current_setting('t.key'));
+select 'Q16d. the 80th is saved: ' || (public.study_save_question(current_setting('t.b4')::uuid, null,
+  '{"kind":"mcq","question":"השמונים?","options":["a","b","c","d","e"],"answer":1,"explanations":["1","2","3","4","5"],"slides":[5]}', current_setting('t.key')) is not null);
+do $$ begin perform public.study_save_question(current_setting('t.b4')::uuid, null,
+  '{"kind":"mcq","question":"ה-81?","options":["a","b","c","d","e"],"answer":1,"explanations":["1","2","3","4","5"],"slides":[5]}', current_setting('t.key'));
+  raise notice 'Q16e. FAIL: an 81st active question was saved';
+exception when others then raise notice 'Q16e. %: at most 80 active questions a lecture (%)', case when sqlerrm = 'enough questions' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'Q16f. finished ' || count(public.study_question_finish(b.id, 'ready', 0, null, 0, null, current_setting('t.key'))) || ' writing part(s)'
+  from public.study_question_batches b where b.lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and b.status = 'writing';
+select 'Q16g. finished ' || count(public.study_question_finish(b.id, 'ready', 0, null, 0, null, current_setting('t.key'))) || ' pending part(s)'
+  from public.study_question_batches b cross join lateral public.study_question_claim(b.id, current_setting('t.key')) c
+ where b.lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and b.status = 'pending';
+do $$ begin perform public.study_question_round('eeeeeeee-0000-4000-8000-000000000007'); raise notice 'Q16h. FAIL: a third round was planned on a full lecture';
+exception when others then raise notice 'Q16h. %: no new round on a full lecture (%)', case when sqlerrm = 'enough questions' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- Q17: a past exam: an item without a key, keyed by the group, then explained
+insert into public.study_exams (id, group_id, course, title, year, source_name, key_source)
+values ('aaaaaaaa-1111-4000-8000-000000000001', :'gid', 'פתוגן מאכסן', 'מבחן 2024 מועד א', 2024, 'exam-2024a.pdf', 'none');
+select set_config('t.x1', public.study_save_question(null, 'aaaaaaaa-1111-4000-8000-000000000001',
+  '{"kind":"mcq","exam_no":12,"question":"מהו מנגנון הפעולה של Atovaquone?","options":["מעכבת cyt bc1","מעכבת DHFR","נקשרת ל-ergosterol","מעכבת את ה-30S"],"topic":"Atovaquone","aspect":"mechanism"}', current_setting('t.key'))::text, false) is not null as x1 \gset
+select 'Q17. exam item saved without a key: has_key ' || has_key || ', ' || cardinality(options) || ' options (expect false, 4)' from public.study_questions where id = current_setting('t.x1')::uuid;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_answer_question(current_setting('t.x1')::uuid, 0); raise notice 'Q17b. FAIL: answered an item with no key';
+exception when others then raise notice 'Q17b. %: an item without a key is not practised (%)', case when sqlerrm = 'no key' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_set_exam_key(current_setting('t.x1')::uuid, 0) is null as keyed \gset
+select 'Q17c. Noa keyed it: has_key ' || has_key || ' (expect true)' from public.study_questions where id = current_setting('t.x1')::uuid;
+do $$ begin perform public.study_set_explanations(current_setting('t.x1')::uuid, array['1','2'], 'x', array[5], null, current_setting('t.key')); raise notice 'Q17d. FAIL: two explanations for four options';
+exception when others then raise notice 'Q17d. %: one explanation per option (%)', case when sqlerrm like 'explanations%' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_set_explanations(current_setting('t.x1')::uuid, array['נכון [ש'' 6]','לא','לא','לא'], 'Atovaquone מעכבת cyt bc1. [ש'' 6]', array[6], 'eeeeeeee-0000-4000-8000-000000000007', current_setting('t.key')) is null as expl \gset
+select 'Q17e. answered: correct ' || correct || ', ' || cardinality(explanations) || ' explanations (expect true, 4)' from public.study_answer_question(current_setting('t.x1')::uuid, 0, 'exam', 9000);
+select 'Q17h. for explaining: ' || count(*) || ' item(s), key ' || max(answer) || ' (expect 1, 0: the exam item only, never a generated question''s key)'
+  from public.study_exam_items_for_explain(array[current_setting('t.x1')::uuid, current_setting('t.q1')::uuid]);
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'Q17f. stranger sees ' || count(*) || ' exams, ' || (select count(*) from public.study_exam_items_for_explain(array[current_setting('t.x1')::uuid])) || ' items to explain (expect 0, 0)' from public.study_exams;
+do $$ begin perform public.study_set_exam_key(current_setting('t.x1')::uuid, 1); raise notice 'Q17g. FAIL: stranger changed a key';
+exception when others then raise notice 'Q17g. %: stranger cannot key (%)', case when sqlerrm = 'question not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- Q18: the shared ledger (design-platform.md §3.5) takes the questions' spend as kind 'practice'
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_reserve(:'gid', 'eeeeeeee-0000-4000-8000-000000000007', 'practice', current_setting('t.b0'), 0.30, 33, 0.8, 0.4, null, null, :'key') as q_res \gset
+select public.study_settle(:q_res, 'claude-opus-5-5', '{"output_tokens": 2300}'::jsonb, 0.061, :'key') as charged \gset
+select 'Q18. spent this month: $' || public.study_spent(:'gid') || ' (expect at least 0.061)';
+
+-- Q19: Realtime carries questions, parts, flags and exams; never keys or answers
+reset role;
+select 'Q19. published: ' || string_agg(tablename, ', ' order by tablename) || ' (expect study_exams, study_question_batches, study_question_flags, study_questions)'
+  from pg_publication_tables where pubname = 'supabase_realtime' and tablename in
+  ('study_exams', 'study_question_batches', 'study_question_flags', 'study_questions', 'study_question_keys', 'study_answers');
+
+-- Q20: not signed in
+set role anon;
+reset request.jwt.claim.sub;
+do $$ declare n int; begin select count(*) into n from public.study_questions; raise notice 'Q20. anon sees % questions (expect 0)', n;
+exception when insufficient_privilege then raise notice 'Q20. ok: anon cannot read questions (%)', sqlerrm; end $$;
+do $$ begin perform public.study_answer_question(current_setting('t.q1')::uuid, 0); raise notice 'Q20b. FAIL: anon answered';
+exception when insufficient_privilege then raise notice 'Q20b. ok: anon cannot call the functions (%)', sqlerrm; end $$;
+
+-- Q21: deleting the lecture takes its questions, keys, answers, flags and parts; the spend stays
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_delete_lecture('eeeeeeee-0000-4000-8000-000000000007') is not null as q_hidden \gset
+reset role;
+select 'Q21a. hidden, not gone: ' || count(*) || ' question(s) still there for 30 days (expect 1 or more)' from public.study_questions where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' having count(*) > 0;
+delete from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-000000000007';   -- the purge, 30 days later
+select 'Q21. left for the lecture: ' || (select count(*) from public.study_questions where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007')
+  || ' questions, ' || (select count(*) from public.study_question_batches where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007')
+  || ' parts, ' || (select count(*) from public.study_question_keys k where not exists (select 1 from public.study_questions q where q.id = k.question_id))
+  || ' orphan keys, ' || (select count(*) from public.study_answers a where a.question_id = current_setting('t.q1')::uuid)
+  || ' answers; ledger rows kept: ' || (select count(*) from public.study_usage where kind = 'practice' and lecture_id is null) || ' (expect 0, 0, 0, 0; 1)';
+select 'Q21b. the exam item it explained survives, unlinked: ' || count(*) || ' (expect 1)' from public.study_questions where id = current_setting('t.x1')::uuid and ref_lecture is null;
+
+-- ════ Review checks: B1 (S2), M6, UX-2, M10, M2 ════
+reset role;
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, created_by)
+select 'eeeeeeee-0000-4000-8000-0000000000a7', :'gid', 'פתוגן מאכסן', 'Review', 'pptx',
+       (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', '[]'::jsonb, 'tables', '[]'::jsonb, 'notes', '', 'figures', '[]'::jsonb))
+          from generate_series(1, 6) n), 'bbbbbbbb-0000-4000-8000-000000000002';
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to) values ('eeeeeeee-0000-4000-8000-0000000000a7', 0, 'א', 1, 6);
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select round as ra from public.study_question_round('eeeeeeee-0000-4000-8000-0000000000a7') \gset
+select set_config('t.ba', (select id::text from public.study_question_batches where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000a7' and round = 1), false) is not null as have_ba \gset
+do $$ begin perform public.study_question_claim(current_setting('t.ba')::uuid); raise notice 'QR1. FAIL: a member claimed a batch with her token alone';
+exception when others then raise notice 'QR1. %: a member''s token alone cannot claim a batch (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_save_question(current_setting('t.ba')::uuid, null, '{"kind":"mcq","question":"מה נכון?","options":["א","ב"],"answer":0,"explanations":["x","y"],"slides":[1]}'); raise notice 'QR1b. FAIL: a member saved a question with a key she chose';
+exception when others then raise notice 'QR1b. %: only the server saves a question and its key (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- M6: three paid tries of a batch
+select count(*) as t1 from public.study_question_claim(current_setting('t.ba')::uuid, current_setting('t.key')) \gset
+reset role;
+update public.study_question_batches set updated_at = now() - interval '7 minutes' where id = current_setting('t.ba')::uuid;
+set role authenticated;
+select count(*) as t2 from public.study_question_claim(current_setting('t.ba')::uuid, current_setting('t.key')) \gset
+reset role;
+update public.study_question_batches set updated_at = now() - interval '7 minutes' where id = current_setting('t.ba')::uuid;
+set role authenticated;
+select count(*) as t3 from public.study_question_claim(current_setting('t.ba')::uuid, current_setting('t.key')) \gset
+reset role;
+update public.study_question_batches set updated_at = now() - interval '7 minutes' where id = current_setting('t.ba')::uuid;
+set role authenticated;
+do $$ begin perform public.study_question_claim(current_setting('t.ba')::uuid, current_setting('t.key')); raise notice 'QR2. FAIL: a fourth paid try of one batch';
+exception when others then raise notice 'QR2. %: a batch gets three paid tries (%)', case when sqlerrm = 'gave up' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'QR2b. tries ' || :t1 || :t2 || :t3 || '; the dead batch no longer holds its round: a new round ' || round || ', fresh ' || fresh || ' (expect 111; 2, true)'
+  from public.study_question_round('eeeeeeee-0000-4000-8000-0000000000a7');
+-- UX-2: a mistake clears only on a later study day
+select set_config('t.bb', (select id::text from public.study_question_batches where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000a7' and round = 2), false) is not null as have_bb \gset
+select part_idx as pb from public.study_question_claim(current_setting('t.bb')::uuid, current_setting('t.key')) \gset
+select set_config('t.qm', public.study_save_question(current_setting('t.bb')::uuid, null,
+  '{"kind":"mcq","question":"מהי התרופה?","options":["Chloroquine","Primaquine","Atovaquone","Quinine","Artesunate"],"answer":0,"explanations":["נכון [ש'' 1]","לא","לא","לא","לא"],"takeaway":"x","slides":[1],"topic":"t","aspect":"uses","model":"claude-opus-5-5"}',
+  current_setting('t.key'))::text, false) is not null as have_qm \gset
+select correct as w1 from public.study_answer_question(current_setting('t.qm')::uuid, 1) \gset
+select correct as r1 from public.study_answer_question(current_setting('t.qm')::uuid, 0) \gset
+select 'UX2a. wrong, then right minutes later: still a mistake ' || count(*) || ' (expect 1)'
+  from public.study_my_mistakes(:'gid', 'eeeeeeee-0000-4000-8000-0000000000a7');
+reset role;
+update public.study_answers set answered_at = answered_at - interval '2 days' where question_id = current_setting('t.qm')::uuid;
+set role authenticated;
+select correct as r2 from public.study_answer_question(current_setting('t.qm')::uuid, 0) \gset
+select 'UX2b. right again on a later day: mistakes ' || count(*) || ' (expect 0)'
+  from public.study_my_mistakes(:'gid', 'eeeeeeee-0000-4000-8000-0000000000a7');
+select 'UX2c. the practice hub counts the same: wrong_now ' || wrong_now || ' (expect 0)'
+  from public.study_practice_overview(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000a7';
+select correct as w2 from public.study_answer_question(current_setting('t.qm')::uuid, 2) \gset
+select 'UX2d. wrong again: back on the list ' || count(*) || ' (expect 1)'
+  from public.study_my_mistakes(:'gid', 'eeeeeeee-0000-4000-8000-0000000000a7');
+-- M10: the exams switch
+reset role;
+update study_private.features set enabled = false where name = 'exams';
+set role authenticated;
+do $$ begin insert into public.study_exams (id, group_id, title) values ('aaaaaaaa-1111-4000-8000-0000000000e2', (select id from public.study_groups limit 1), 'x'); raise notice 'QR3. FAIL: an exam came in while the switch is off';
+exception when insufficient_privilege then raise notice 'QR3. ok: with exams switched off no exam comes in'; end $$;
+reset role;
+update study_private.features set enabled = true where name = 'exams';
+set role authenticated;
+-- M2: only its uploader deletes an exam, on its first day
+insert into public.study_exams (id, group_id, title) values ('aaaaaaaa-1111-4000-8000-0000000000e3', :'gid', 'מבחן שהועלה בטעות');
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+delete from public.study_exams where id = 'aaaaaaaa-1111-4000-8000-0000000000e3';
+select 'QR4. Shoham cannot delete Noa''s exam: ' || count(*) || ' left (expect 1)' from public.study_exams where id = 'aaaaaaaa-1111-4000-8000-0000000000e3';
+reset role;
+update public.study_exams set created_at = now() - interval '2 days' where id = 'aaaaaaaa-1111-4000-8000-0000000000e3';
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+delete from public.study_exams where id = 'aaaaaaaa-1111-4000-8000-0000000000e3';
+select 'QR4b. Noa cannot delete it after its first day: ' || count(*) || ' left (expect 1)' from public.study_exams where id = 'aaaaaaaa-1111-4000-8000-0000000000e3';
+reset role;
+update public.study_exams set created_at = now() where id = 'aaaaaaaa-1111-4000-8000-0000000000e3';
+set role authenticated;
+delete from public.study_exams where id = 'aaaaaaaa-1111-4000-8000-0000000000e3';
+select 'QR4c. on its first day Noa deletes it: ' || count(*) || ' left (expect 0)' from public.study_exams where id = 'aaaaaaaa-1111-4000-8000-0000000000e3';
+do $$ begin insert into public.study_exams (group_id, title, pages) values ((select id from public.study_groups limit 1), 'ארוך', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 61) n)); raise notice 'QR5. FAIL: an exam of 61 pages';
+exception when check_violation then raise notice 'QR5. ok: at most 60 pages an exam'; end $$;
+select 'Q-reg. the registry: ' || (public.study_schema() ->> 'Q') || ' (expect 2: Q''s end, spec §12.9)';
+reset role;
+delete from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-0000000000a7';
+update study_private.features set enabled = false where name = 'exams';
+
+-- Clean-up for the sections after this one (they count the group's answers):
+-- the past exam goes, and its items, keys and answers with it.
+reset role;
+delete from public.study_exams where group_id = :'gid';
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Q's end checks · the paragraph, the teaser, the bet, "מתי כן",
+--  two flags hide and the fix, another wording, confusions, the diagram,
+--  the worker path, and the review's attacks on them (spec §12.3.Q: QA1-QA4
+--  and QA-reg of the meeting design, QS1-QS14 and QS-reg of the server
+--  design, the review's SR2a-SR2g, SR7, FR6a and FR6g). The addendum's
+--  checks with fixtures of their own in this group: four more members and a
+--  lecture of three written parts, removed at the end, so the sections after
+--  Q find what they found before. A card on a question's paragraph needs
+--  C's end (study_cards.anchor): QS7 expects the card where C's end is
+--  loaded and the question itself where it is not. FR6b-FR6f need sections
+--  Z, M and N: they run with the review's checks once those are loaded.
+--  Time is moved into the past as the owner, never slept.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+insert into auth.users (id, raw_user_meta_data) values
+ ('5a000000-0000-4000-8000-000000000001', '{"app":"study","full_name":"מאיה"}'),
+ ('5a000000-0000-4000-8000-000000000002', '{"app":"study","full_name":"איתי"}'),
+ ('5a000000-0000-4000-8000-000000000003', '{"app":"study","full_name":"דניאל"}'),
+ ('5a000000-0000-4000-8000-000000000004', '{"app":"study","full_name":"רוני"}');
+insert into public.study_members (group_id, user_id, name) values
+ (:'gid', '5a000000-0000-4000-8000-000000000001', 'מאיה'),
+ (:'gid', '5a000000-0000-4000-8000-000000000002', 'איתי'),
+ (:'gid', '5a000000-0000-4000-8000-000000000003', 'דניאל'),
+ (:'gid', '5a000000-0000-4000-8000-000000000004', 'רוני');
+-- L1: 40 slides in three written parts; slide 5 has a picture (fig:5-1).
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ ('5a100000-0000-4000-8000-000000000001', :'gid', 'פתוגן מאכסן', 'Anti parasite (Q end)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array(repeat('מלריה ותרופות ', 20)),
+                                       'tables', '[]'::jsonb, 'notes', '',
+                                       'figures', case when n = 5 then '[{"k":1,"path":"g/l1/5-1.png","w":800,"h":600}]'::jsonb else '[]'::jsonb end)
+            order by n) from generate_series(1, 40) n),
+  'ready', 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ ('5a100000-0000-4000-8000-000000000001', 0, 'מחזור החיים', 1, 12, 'ready',
+  E'## מחזור החיים\n\nאף תרופה לא הורגת את ה-Sporozoite. [ש'' 3]\n\nה-Hypnozoite ישן בכבד. [ש'' 5]\n\nלפני Primaquine בודקים G6PD. [ש'' 7]'),
+ ('5a100000-0000-4000-8000-000000000001', 1, 'מנגנונים', 13, 24, 'ready',
+  E'## מנגנונים\n\nChloroquine מצטברת בוואקואולה. [ש'' 15]\n\nMefloquine ניתנת פעם בשבוע. [ש'' 20]'),
+ ('5a100000-0000-4000-8000-000000000001', 2, 'שילובים', 25, 40, 'ready',
+  E'## שילובים\n\nArtemisinins לעולם לא לבד. [ש'' 30]\n\nQuinine עם Doxycycline, לא בהיריון. [ש'' 33]');
+-- Questions placed on paragraphs: Q01-Q05 on part 0 (Q01 and Q02 share
+-- paragraph 2), Q06 on part 1, Q07 on part 2 with option tags; Q08 and Q09
+-- on part 2 for the review's checks. Key = the index the last digit gives.
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, anchor, quote, kind, question, options, slides, topic, aspect)
+select ('5a200000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, :'gid', '5a100000-0000-4000-8000-000000000001', 'ai',
+       case when i <= 5 then 0 when i = 6 then 1 else 2 end,
+       case i when 1 then 2 when 2 then 2 when 3 then 1 when 4 then 3 when 5 then 1 when 6 then 1 when 7 then 1 when 8 then 2 else 1 end,
+       'פסקה', 'mcq', 'שאלה ' || i || '?',
+       array['Sporozoite', 'Hypnozoite', 'Schizont', 'Gametocyte', 'Merozoite'],
+       array[case when i <= 5 then 3 when i = 6 then 15 else 30 end],
+       case when i <= 5 then 'Primaquine' when i = 6 then 'Chloroquine' else 'Artemisinin' end,
+       case when i in (4, 9) then 'contra' when i in (6, 7, 8) then 'uses' else 'mechanism' end
+  from generate_series(1, 9) i;
+update public.study_questions set option_tags = array['Sporozoite', 'Hypnozoite', 'Schizont', 'Gametocyte', 'Merozoite']
+ where id = '5a200000-0000-4000-8000-000000000007';
+insert into public.study_question_keys (question_id, answer, explanations, takeaway, whens)
+select q.id, case right(q.id::text, 1) when '1' then 1 when '2' then 0 when '3' then 2 when '4' then 3 when '5' then 0 when '6' then 1 when '7' then 2 else 0 end,
+       array['למה א [ש'' 3]', 'למה ב [ש'' 5]', 'למה ג [ש'' 7]', 'למה ד [ש'' 7]', 'למה ה [ש'' 3]'], 'מה לזכור [ש'' 3]',
+       array['מתי כן: בשאלה על הכבד', '', 'מתי כן: falciparum', 'מתי כן: מניעה', 'מתי כן: שלב הדם']
+  from public.study_questions q where q.id::text like '5a200000-%';
+-- Cards on two of the paragraphs, where C's end places cards (study_cards.anchor).
+do $$ begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'study_cards' and column_name = 'anchor') then
+    execute $i$insert into public.study_cards (id, group_id, lecture_id, source, part_idx, anchor, kind, front, back, slides) values
+      ('5a500000-0000-4000-8000-000000000002', current_setting('t.gid')::uuid, '5a100000-0000-4000-8000-000000000001', 'ai', 0, 3, 'qa', 'מה בודקים לפני Primaquine?', 'G6PD', array[7]),
+      ('5a500000-0000-4000-8000-000000000003', current_setting('t.gid')::uuid, '5a100000-0000-4000-8000-000000000001', 'ai', 1, 1, 'qa', 'איפה Chloroquine מצטברת?', 'בוואקואולה', array[15])$i$;
+  end if;
+end $$;
+select set_config('t.cards_placed', (exists (select 1 from information_schema.columns
+  where table_schema = 'public' and table_name = 'study_cards' and column_name = 'anchor'))::text, false) is not null as cp \gset
+
+-- ═════════ QA · the paragraph, the teaser, "עדיין נכון", the bet's range (meeting design §3.1) ═════════
+insert into public.study_question_batches (id, lecture_id, round, part_idx, heading, slide_from, slide_to, wanted, status)
+values ('5a400000-0000-4000-8000-000000000001', '5a100000-0000-4000-8000-000000000001', 1, 0, 'מחזור החיים', 1, 12, 5, 'writing');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.qa1', public.study_save_question('5a400000-0000-4000-8000-000000000001', null,
+  jsonb_build_object('kind', 'mcq', 'question', 'שאלה חדשה על hypnozoites?', 'options', jsonb_build_array('a','b','c','d','e'),
+                     'answer', 1, 'explanations', jsonb_build_array('1','2','3','4','5'), 'slides', jsonb_build_array(5),
+                     'para', 2, 'quote', 'ה-Hypnozoite ישן בכבד', 'teaser', repeat('ט', 130)), :'key')::text, false) is not null as q \gset
+select 'QA1. saved on its paragraph: anchor ' || anchor || ', quote "' || quote || '", part gen ' || part_gen || ', teaser cut to ' || char_length(teaser)
+       || ' (expect 2, "ה-Hypnozoite ישן בכבד", 0, 120)'
+  from public.study_questions where id = current_setting('t.qa1')::uuid;
+select set_config('t.qa2', public.study_save_question('5a400000-0000-4000-8000-000000000001', null,
+  jsonb_build_object('kind', 'mcq', 'question', 'שאלה בלי פסקה?', 'options', jsonb_build_array('a','b','c','d','e'),
+                     'answer', 0, 'explanations', jsonb_build_array('1','2','3','4','5'), 'slides', jsonb_build_array(5),
+                     'para', '2'), :'key')::text, false) is not null as q \gset
+select 'QA2. a paragraph number sent as text is not placed: anchor ' || coalesce(anchor::text, 'null') || ', quote "' || quote || '", teaser "' || teaser || '"'
+       || ' (expect null, "", "")'
+  from public.study_questions where id = current_setting('t.qa2')::uuid;
+do $$ begin perform public.study_save_question('5a400000-0000-4000-8000-000000000001', null,
+  '{"kind":"mcq","question":"בלי מפתח השרת?","options":["a","b"],"answer":0,"explanations":["1","2"],"slides":[5],"para":1}'::jsonb);
+  raise notice 'QA2b. FAIL: saved without the server key';
+exception when others then raise notice 'QA2b. %: still only the server saves (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_question_still_true('5a200000-0000-4000-8000-000000000001');
+  raise notice 'QA3. FAIL: a stranger checked a question';
+exception when others then raise notice 'QA3. %: a stranger cannot (%)', case when sqlerrm = 'question not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update public.study_questions set stale_at = now(), stale_edit = gen_random_uuid() where id = '5a200000-0000-4000-8000-000000000006';
+set role authenticated;
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000001';
+select public.study_question_still_true('5a200000-0000-4000-8000-000000000006') is null as s \gset
+select 'QA3b. "עדיין נכון": stale ' || (stale_at is not null) || ', checked by Maya ' || (checked_by = '5a000000-0000-4000-8000-000000000001')
+       || ' (expect false, true)'
+  from public.study_questions where id = '5a200000-0000-4000-8000-000000000006';
+reset role;
+do $$ begin insert into public.study_answers (user_id, question_id, choice, correct, confidence)
+  values ('cccccccc-0000-4000-8000-000000000003', '5a200000-0000-4000-8000-000000000001', 0, true, 4);
+  raise notice 'QA4. FAIL: a bet of 4';
+exception when check_violation then raise notice 'QA4. ok: the bet is 1-3 (ניחוש · נראה לי · על בטוח)'; end $$;
+select 'QA-reg. the registry: ' || (public.study_schema() ->> 'Q') || ' (expect 2)';
+delete from public.study_questions where id in (current_setting('t.qa1')::uuid, current_setting('t.qa2')::uuid);
+delete from public.study_question_batches where id = '5a400000-0000-4000-8000-000000000001';
+
+-- ═════════ QS · the bet, "מתי כן", two flags hide, the fix (server design §3.1) ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';   -- נועה
+select 'QS1. ' || correct || ', whens: ' || array_length(whens, 1) || ', first: ' || whens[1] || ' (expect false, 5, מתי כן: בשאלה על הכבד)'
+  from public.study_answer_question('5a200000-0000-4000-8000-000000000001', 2, 'lecture', 9000, 3);
+select 'QS1b. stored bet: ' || confidence || ' (expect 3)' from public.study_answers
+ where question_id = '5a200000-0000-4000-8000-000000000001' and user_id = auth.uid();
+do $$ begin perform public.study_answer_question('5a200000-0000-4000-8000-000000000002', 0, 'lecture', null, 4); raise notice 'QS1c. FAIL: a bet of 4';
+exception when others then raise notice 'QS1c. %: a bet outside 1-3 is refused (%)', case when sqlerrm = 'bad bet' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'QS1d. without a bet: ' || correct || ', bet ' || coalesce((select confidence::text from public.study_answers where question_id = '5a200000-0000-4000-8000-000000000003' and user_id = auth.uid()), 'none') || ' (expect true, none)'
+  from public.study_answer_question('5a200000-0000-4000-8000-000000000003', 2, 'lecture', null, null);
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000001';   -- מאיה
+select 'QS2. Maya sees ' || count(*) || ' of Noa''s answers (expect 0)' from public.study_answers where user_id = 'cccccccc-0000-4000-8000-000000000003';
+select 'QS2b. whens for an unanswered question: ' || count(*) || ' row(s) (expect 0)'
+  from public.study_question_whens(array['5a200000-0000-4000-8000-000000000001'::uuid]);
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'QS2c. whens for her answered one: ' || whens[3] || ' (expect מתי כן: falciparum)'
+  from public.study_question_whens(array['5a200000-0000-4000-8000-000000000001'::uuid]);
+-- One flag hides nothing; "duplicate" never counts; two members' flags hide the question for everyone until it is fixed.
+insert into public.study_question_flags (question_id, reason, note) values ('5a200000-0000-4000-8000-000000000005', 'wrong_key', 'המפתח שגוי');
+select 'QS3. one flag: hidden ' || (hidden_at is not null) || ' (expect false)' from public.study_questions where id = '5a200000-0000-4000-8000-000000000005';
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000001';
+insert into public.study_question_flags (question_id, reason) values ('5a200000-0000-4000-8000-000000000005', 'duplicate');
+select 'QS3b. a flag of kind duplicate: hidden ' || (hidden_at is not null) || ' (expect false)' from public.study_questions where id = '5a200000-0000-4000-8000-000000000005';
+delete from public.study_question_flags where user_id = auth.uid() and question_id = '5a200000-0000-4000-8000-000000000005';
+insert into public.study_question_flags (question_id, reason) values ('5a200000-0000-4000-8000-000000000005', 'not_in_slides');
+select 'QS4. two members'' flags: hidden ' || (hidden_at is not null) || ' (expect true)' from public.study_questions where id = '5a200000-0000-4000-8000-000000000005';
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000002';   -- איתי
+select 'QS4a. the fix sheet: key ' || answer || ', hidden ' || hidden || ', flags ' || jsonb_array_length(flags) || ' (expect 0, true, 2)'
+  from public.study_question_for_fix('5a200000-0000-4000-8000-000000000005');
+do $$ begin perform public.study_question_for_fix('5a200000-0000-4000-8000-000000000006'); raise notice 'QS4c. FAIL: the key of a question nobody flagged';
+exception when others then raise notice 'QS4c. %: only a hidden question (%)', case when sqlerrm = 'not flagged' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_answer_question('5a200000-0000-4000-8000-000000000005', 0, 'lecture', null, 2); raise notice 'QS4b. FAIL: a hidden question was answered';
+exception when others then raise notice 'QS4b. %: a hidden question is out of practice (%)', case when sqlerrm = 'hidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_question_fix('5a200000-0000-4000-8000-000000000005', 'keep', '{}', 'בדקתי'); raise notice 'QS5. FAIL: kept without a slide';
+exception when others then raise notice 'QS5. %: keeping needs a slide citation (%)', case when sqlerrm = 'bad source' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_question_fix('5a200000-0000-4000-8000-000000000005', 'keep', array[99], ''); raise notice 'QS5b. FAIL: a slide not in the lecture';
+exception when others then raise notice 'QS5b. %: the slide must be the lecture''s (%)', case when sqlerrm = 'bad source' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_question_fix('5a200000-0000-4000-8000-000000000005', 'keep', array[3], 'המפתח נכון לפי ש׳ 3') is null as fixed \gset
+select 'QS5c. fixed: hidden ' || (hidden_at is not null) || ', by Itai ' || (fixed_by = auth.uid()) || ', slides ' || fix_slides::text || ' (expect false, true, {3})'
+  from public.study_questions where id = '5a200000-0000-4000-8000-000000000005';
+reset role;
+update public.study_question_flags set created_at = now() - interval '1 hour' where question_id = '5a200000-0000-4000-8000-000000000005';
+update public.study_questions set fixed_at = now() - interval '30 minutes' where id = '5a200000-0000-4000-8000-000000000005';
+set role authenticated;
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000003';   -- דניאל
+insert into public.study_question_flags (question_id, reason) values ('5a200000-0000-4000-8000-000000000005', 'unclear');
+select 'QS6. one new flag after the fix: hidden ' || (hidden_at is not null) || ' (expect false: the old flags stopped counting)'
+  from public.study_questions where id = '5a200000-0000-4000-8000-000000000005';
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000004';   -- רוני
+insert into public.study_question_flags (question_id, reason) values ('5a200000-0000-4000-8000-000000000005', 'two_answers');
+select 'QS6b. a second new flag: hidden ' || (hidden_at is not null) || ' (expect true)' from public.study_questions where id = '5a200000-0000-4000-8000-000000000005';
+delete from public.study_question_flags where user_id = auth.uid() and question_id = '5a200000-0000-4000-8000-000000000005';
+select 'QS6c. a flag taken back: hidden ' || (hidden_at is not null) || ' (expect false)' from public.study_questions where id = '5a200000-0000-4000-8000-000000000005';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';   -- the stranger
+do $$ begin perform public.study_question_fix('5a200000-0000-4000-8000-000000000005', 'retire', '{}', ''); raise notice 'QS6d. FAIL: a stranger fixed a question';
+exception when others then raise notice 'QS6d. %: strangers cannot fix (%)', case when sqlerrm = 'question not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ QS · another wording and confusions ═════════
+-- Noa's miss on Q01 (two days ago) is asked again as Q02, which sits on the
+-- same paragraph; a right answer to Q02 on a later day clears Q01. Q04's and
+-- Q06's paragraphs hold a card each where C's end places cards, else nothing.
+reset role;
+update public.study_answers set answered_at = now() - interval '2 days'
+ where user_id = 'cccccccc-0000-4000-8000-000000000003' and question_id in ('5a200000-0000-4000-8000-000000000001', '5a200000-0000-4000-8000-000000000003');
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values
+ ('cccccccc-0000-4000-8000-000000000003', '5a200000-0000-4000-8000-000000000006', 0, false, 'lecture', now() - interval '2 days'),
+ ('cccccccc-0000-4000-8000-000000000003', '5a200000-0000-4000-8000-000000000004', 0, false, 'lecture', now() - interval '2 days');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'QS7. rewordings: ' || string_agg(right(question_id::text, 2) || '→' || ask_kind || ':' || coalesce(right(ask_question::text, 2), right(ask_card::text, 2)), ' ' order by right(question_id::text, 2))
+       || case when current_setting('t.cards_placed')::boolean
+               then ' (expect 01→question:02 04→card:02 06→card:03: a sibling question first, else a card on the paragraph)'
+               else ' (expect 01→question:02 04→same:04 06→same:06: a sibling question first; without C''s end no card sits on a paragraph)' end
+  from public.study_my_rewordings(:'gid');
+select 'QS8. open mistakes: ' || string_agg(right(question_id::text, 2), ' ' order by question_id) || ' (expect 01 04 06)' from public.study_open_mistakes(:'gid');
+select correct as qs8_answer from public.study_answer_question('5a200000-0000-4000-8000-000000000002', 0, 'mistakes', null, 2) \gset
+select 'QS8b. after a right answer to its sibling today: ' || string_agg(right(question_id::text, 2), ' ' order by question_id) || ' (expect 04 06)'
+  from public.study_open_mistakes(:'gid');
+-- The pairs she confuses (option tags): Q07's key is Schizont; she chose Merozoite twice.
+reset role;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values
+ ('cccccccc-0000-4000-8000-000000000003', '5a200000-0000-4000-8000-000000000007', 4, false, 'lecture', now() - interval '3 days'),
+ ('cccccccc-0000-4000-8000-000000000003', '5a200000-0000-4000-8000-000000000007', 4, false, 'quiz', now() - interval '1 day');
+set role authenticated;
+select 'QS10. confusions: ' || right_tag || ' ↔ ' || chosen_tag || ' ×' || times || ' (expect Schizont ↔ Merozoite ×2)' from public.study_my_confusions(:'gid');
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000001';
+select 'QS10b. Maya''s confusions: ' || count(*) || ' (expect 0: only her own answers)' from public.study_my_confusions(:'gid');
+
+-- ═════════ QS · the worker path: planned and saved with the key alone, a held part busy for a tap ═════════
+reset role;
+select 'QS11. anon may call study_save_question: ' || has_function_privilege('anon', 'public.study_save_question(uuid, uuid, jsonb, text)', 'execute')
+       || ', study_question_round: ' || has_function_privilege('anon', 'public.study_question_round(uuid, text)', 'execute')
+       || ' (expect false, false: the worker reaches them only through section B)';
+create schema if not exists stest;
+-- As the worker would (inside section B's definer functions): no member token, the key.
+create or replace function stest.worker_round(p_lecture uuid, p_key text) returns int language plpgsql security definer as $$
+declare r int; b record;
+begin
+  perform set_config('request.jwt.claim.sub', '', true);
+  select x.round into r from public.study_question_round(p_lecture, p_key) x;
+  for b in select id from public.study_question_batches where lecture_id = p_lecture and round = r loop
+    perform public.study_question_claim(b.id, p_key);
+  end loop;
+  return r;
+end $$;
+create or replace function stest.worker_save(p_batch uuid, p_q jsonb, p_key text) returns uuid language plpgsql security definer as $$
+begin
+  perform set_config('request.jwt.claim.sub', '', true);
+  return public.study_save_question(p_batch, null, p_q, p_key);
+end $$;
+create or replace function stest.worker_finish(p_batch uuid, p_key text) returns void language plpgsql security definer as $$
+begin
+  perform set_config('request.jwt.claim.sub', '', true);
+  perform public.study_question_finish(p_batch, 'ready', 1, 'claude-opus-5-5', 0.02, null, p_key, 2);
+end $$;
+select stest.worker_round('5a100000-0000-4000-8000-000000000001', :'key') as wr \gset
+select 'QS11b. the worker planned round ' || :'wr' || ' with ' || count(*) || ' parts writing (expect 1, 3)'
+  from public.study_question_batches where lecture_id = '5a100000-0000-4000-8000-000000000001' and status = 'writing';
+do $$ begin perform stest.worker_round('5a100000-0000-4000-8000-000000000001', 'not-the-key-0123456789abcdef0123'); raise notice 'QS11c. FAIL: planned without the key';
+exception when others then raise notice 'QS11c. %: no key, no plan (%)', case when sqlerrm in ('not signed in', 'forbidden') then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.qb', (select id::text from public.study_question_batches where lecture_id = '5a100000-0000-4000-8000-000000000001' and part_idx = 0), false) is not null as qb \gset
+select stest.worker_save(current_setting('t.qb')::uuid, '{"kind":"case","difficulty":2,"vignette":"מטייל חזר מתאילנד.","question":"מה לפני השחרור?",
+  "options":["Artesunate","G6PD ו-Primaquine","Mefloquine","Doxycycline","לשחרר"],"answer":1,
+  "explanations":["א [ש'' 3]","ב [ש'' 5]","ג [ש'' 7]","ד [ש'' 7]","ה [ש'' 3]"],
+  "whens":["מתי כן: מלריה קשה","","מתי כן: שלב הדם","מתי כן: מניעה","מתי לא: אף פעם"],
+  "option_tags":["Artesunate","Primaquine","Mefloquine","Doxycycline",""],
+  "takeaway":"לפני Primaquine: G6PD [ש'' 7]","slides":[5,7],"topic":"Primaquine","aspect":"contra","para":2,"quote":"ה-Hypnozoite ישן",
+  "teaser":"vivax אחרי תאילנד","figure":"fig:5-1","model":"claude-opus-5-5"}'::jsonb, :'key') as q8 \gset
+select 'QS12. saved by the worker: figure ' || q.figure || ', tags ' || cardinality(q.option_tags) || ', anchor ' || q.anchor
+       || ', whens ' || cardinality(k.whens) || ', created_by ' || coalesce(q.created_by::text, 'none') || ' (expect fig:5-1, 5, 2, 5, none)'
+  from public.study_questions q join public.study_question_keys k on k.question_id = q.id where q.id = :'q8';
+select stest.worker_save(current_setting('t.qb')::uuid, '{"kind":"mcq","question":"מה עוד?","options":["א","ב","ג","ד","ה"],"answer":0,
+  "explanations":["1","2","3","4","5"],"slides":[3],"topic":"X","aspect":"other","figure":"fig:9-9"}'::jsonb, :'key') as q9 \gset
+select 'QS12b. an unknown picture is dropped, the question kept: ' || coalesce(nullif(figure, ''), '(none)') || ' (expect (none))'
+  from public.study_questions where id = :'q9';
+do $$ begin perform stest.worker_save(current_setting('t.qb')::uuid, '{}'::jsonb, current_setting('t.key')); raise notice 'QS12c. FAIL: an empty item was saved';
+exception when others then raise notice 'QS12c. ok: a malformed item is refused (%)', sqlerrm; end $$;
+do $$ begin perform stest.worker_save((select id from public.study_question_batches where lecture_id = '5a100000-0000-4000-8000-000000000001' and part_idx = 1),
+  '{"kind":"mcq","question":"מה?","options":["א","ב","ג","ד","ה"],"answer":0,"explanations":["1","2","3","4","5"],"whens":["x"],"slides":[15]}'::jsonb,
+  current_setting('t.key')); raise notice 'QS12d. FAIL: whens of the wrong length';
+exception when others then raise notice 'QS12d. %: whens must match the options (%)', case when sqlerrm = 'whens do not match options' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+update public.study_question_batches set hold_until = now() + interval '3 hours', status = 'pending' where lecture_id = '5a100000-0000-4000-8000-000000000001' and part_idx = 2;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_question_claim((select id from public.study_question_batches where lecture_id = '5a100000-0000-4000-8000-000000000001' and part_idx = 2),
+  current_setting('t.key')); raise notice 'QS13. FAIL: a member took a part the Batch API holds';
+exception when others then raise notice 'QS13. %: a held part is busy for a tap (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update public.study_question_batches set hold_until = now() - interval '1 minute' where lecture_id = '5a100000-0000-4000-8000-000000000001' and part_idx = 2;
+set role authenticated;
+select 'QS13b. after the hold, a tap claims it: ' || (wanted > 0) || ' (expect true)'
+  from public.study_question_claim((select id from public.study_question_batches where lecture_id = '5a100000-0000-4000-8000-000000000001' and part_idx = 2), :'key');
+reset role;
+select stest.worker_finish(current_setting('t.qb')::uuid, :'key') is null as wf \gset
+select 'QS14. finished by the worker: ' || status || ', rejected ' || rejected || ', solver ' || solver_rejected || ', hold ' || coalesce(hold_until::text, 'none')
+       || ' (expect ready, 1, 2, none)' from public.study_question_batches where id = current_setting('t.qb')::uuid;
+select 'QS-reg. Q = ' || (public.study_schema() ->> 'Q') || ' (expect 2)';
+
+-- ═════════ SR2 · SEC-2, SEC-13: the fix sheet only for a hidden question, never in a quiz ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+insert into public.study_question_flags (question_id, reason, note) values ('5a200000-0000-4000-8000-000000000008', 'other', '');
+do $$ begin perform public.study_question_for_fix('5a200000-0000-4000-8000-000000000008'); raise notice 'SR2a. FAIL: one''s own flag opened the key';
+exception when others then raise notice 'SR2a. %: one''s own flag of any reason opens nothing (%)', case when sqlerrm = 'not flagged' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+delete from public.study_question_flags where question_id = '5a200000-0000-4000-8000-000000000008' and user_id = auth.uid();
+insert into public.study_question_flags (question_id, reason, note) values ('5a200000-0000-4000-8000-000000000008', 'wrong_key', '');
+do $$ begin perform public.study_question_for_fix('5a200000-0000-4000-8000-000000000008'); raise notice 'SR2b. FAIL: one member''s counting flag opened the key';
+exception when others then raise notice 'SR2b. %: one member''s flag is not enough (%)', case when sqlerrm = 'not flagged' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000001';
+insert into public.study_question_flags (question_id, reason, note) values ('5a200000-0000-4000-8000-000000000008', 'unclear', '');
+select 'SR2c. two members'' flags open the fix sheet: hidden ' || hidden || ', key ' || answer || ' (expect true, 0)'
+  from public.study_question_for_fix('5a200000-0000-4000-8000-000000000008');
+reset role;
+update public.study_question_keys set held_until = now() + interval '10 minutes' where question_id = '5a200000-0000-4000-8000-000000000008';
+set role authenticated;
+do $$ begin perform public.study_question_for_fix('5a200000-0000-4000-8000-000000000008'); raise notice 'SR2d. FAIL: the key while a live quiz holds it';
+exception when others then raise notice 'SR2d. %: never while a live quiz holds the key (%)', case when sqlerrm = 'in quiz' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_question_fix('5a200000-0000-4000-8000-000000000008', 'retire', null, ''); raise notice 'SR2e. FAIL: fixed while a live quiz holds the key';
+exception when others then raise notice 'SR2e. %: nor fixed then (%)', case when sqlerrm = 'in quiz' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update public.study_question_keys set held_until = null where question_id = '5a200000-0000-4000-8000-000000000008';
+set role authenticated;
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000003';
+insert into public.study_question_flags (question_id, reason, note) values ('5a200000-0000-4000-8000-000000000009', 'duplicate', '');
+do $$ begin perform public.study_question_fix('5a200000-0000-4000-8000-000000000009', 'retire', null, ''); raise notice 'SR2f. FAIL: one member''s flag of a kind that never counts retired a question';
+exception when others then raise notice 'SR2f. %: one flag retires nothing (%)', case when sqlerrm = 'not flagged' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'SR2g. Q09 retired ' || (retired_at is not null) || ' (expect false)' from public.study_questions where id = '5a200000-0000-4000-8000-000000000009';
+-- Q08 stays hidden for FR6g.
+
+-- ═════════ SR7 · SEC-7: a member never writes a "quiz" answer ═════════
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000002';
+do $$ begin perform public.study_answer_question('5a200000-0000-4000-8000-000000000001', 1, 'quiz'); raise notice 'SR7. FAIL: a member wrote a quiz answer';
+exception when others then raise notice 'SR7. %: a member''s answer in mode quiz is refused (%)', case when sqlerrm = 'bad mode' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ FR6 · F-6: a hidden question is out of every picker ═════════
+reset role;
+select 'FR6a. pickers that read questions without hidden_at: ' || coalesce((select string_agg(n.nspname || '.' || p.proname, ', ' order by p.proname)
+                                     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                                    where n.nspname in ('public', 'study_private')
+                                      and p.prosrc ~ 'study_questions' and p.prosrc ~ '(has_key|retired_at is null)'
+                                      and p.proname ~ '(pick|guess|catchup|today|danger|returns|quiz__|boss|paragraph_practice|rewording|relearning|key_questions|museum|pulse)'
+                                      and p.prosrc !~ 'hidden_at'), 'none') || ' (expect none)';
+set role authenticated;
+set request.jwt.claim.sub = '5a000000-0000-4000-8000-000000000002';
+do $$ begin perform public.study_answer_question('5a200000-0000-4000-8000-000000000008', 0, 'lecture'); raise notice 'FR6g. FAIL: a hidden question was answered in practice';
+exception when others then raise notice 'FR6g. %: a hidden question is refused in practice (%)', case when sqlerrm = 'hidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- Clean-up for the sections after this one: the lecture takes its parts,
+-- questions, keys, answers and flags; then the members and the helpers.
+reset role;
+delete from public.study_lectures where id = '5a100000-0000-4000-8000-000000000001';
+delete from public.study_members where user_id::text like '5a000000-%';
+delete from auth.users where id::text like '5a000000-%';
+drop schema stest cascade;
+select 'Q-end. fixtures removed: ' || (select count(*) from public.study_questions where id::text like '5a200000-%') || ' questions, '
+       || (select count(*) from public.study_answers a join public.study_questions q on q.id = a.question_id where q.lecture_id = '5a100000-0000-4000-8000-000000000001') || ' answers, '
+       || (select count(*) from public.study_members where user_id::text like '5a000000-%') || ' members left (expect 0, 0, 0)';
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Q, practice 2.0 checks · points to know, requests, drafts reviewed
+--  before the bank, the solver's verdict, the session builder's counts
+--  (docs/study/practice-2-api.md). Every line says ok or FAIL by itself.
+--  Fixtures of their own (a lecture of three parts, two written), removed
+--  at the end. Time is moved as the owner, never slept.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+\set p2l '5b100000-0000-4000-8000-000000000001'
+\set p2e '5b100000-0000-4000-8000-000000000002'
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'p2l', :'gid', 'פתוגן מאכסן', 'Practice 2.0', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array('עובדה ' || n),
+                                       'tables', case when n = 20 then '[[["תרופה","שלב"],["Mockaquine","כבד"]]]'::jsonb else '[]'::jsonb end,
+                                       'notes', '', 'figures', '[]'::jsonb) order by n) from generate_series(1, 30) n),
+  'ready', 'bbbbbbbb-0000-4000-8000-000000000002'),
+ (:'p2e', :'gid', 'פתוגן מאכסן', 'No summary yet', 'pptx', '[{"n":1,"title":"a","lines":["x"],"tables":[],"notes":"","figures":[]}]', 'new', 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ (:'p2l', 0, 'מחזור החיים', 1, 12, 'ready', E'## מחזור החיים\n\nרק Mockaquine פועלת על ה-dormozoite. [ש'' 5]\n\nלפני Mockaquine בודקים FXR. [ש'' 7]'),
+ (:'p2l', 1, 'מנגנונים', 13, 24, 'ready', E'## מנגנונים\n\nTestoquine מצטברת בוואקואולה. [ש'' 15]'),
+ (:'p2l', 2, 'שילובים', 25, 30, 'writing', '');
+select set_config('t.p2l', :'p2l', false) is not null as p2l_set \gset
+
+-- ═════════ P2-1 · points to know ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_points_claim(current_setting('t.p2l')::uuid, current_setting('t.key')); raise notice 'P2-1a. FAIL: a stranger claimed the points';
+exception when others then raise notice 'P2-1a. %: a stranger cannot read the group''s points (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_points_claim(current_setting('t.p2l')::uuid); raise notice 'P2-1b. FAIL: claimed without the server key';
+exception when others then raise notice 'P2-1b. %: only the op claims, with the key (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_points_claim('5b100000-0000-4000-8000-000000000002', current_setting('t.key')); raise notice 'P2-1c. FAIL: points of a lecture without a summary';
+exception when others then raise notice 'P2-1c. %: no summary, no points (%)', case when sqlerrm = 'no summary' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'P2-1d. Noa claims the written parts: ' || case when string_agg(part_idx || ':' || (md5 = (select md5(s.markdown) from public.study_sections s where s.lecture_id = current_setting('t.p2l')::uuid and s.idx = c.part_idx)), ',' order by part_idx) = '0:true,1:true'
+       then 'ok' else 'FAIL ' || coalesce(string_agg(part_idx::text, ','), 'none') end || ' (parts 0 and 1, each with its text''s md5; part 2 is still being written)'
+  from public.study_points_claim(:'p2l', :'key') c;
+do $$ begin perform public.study_points_claim(current_setting('t.p2l')::uuid, current_setting('t.key')); raise notice 'P2-1e. FAIL: a second reader while the first holds the lease';
+exception when others then raise notice 'P2-1e. %: one reader at a time (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.md0', md5(markdown), false) is not null as md0 from public.study_sections where lecture_id = :'p2l' and idx = 0 \gset
+select 'P2-1f. part 0 saved: ' || case when public.study_points_save(:'p2l', 0, current_setting('t.md0'),
+  '[{"kind":"indication","subject":"Mockaquine","text":"רק Mockaquine פועלת על ה-dormozoite.","anchor":1,"quote":"רק Mockaquine","slides":[5],"red_flag":false,"weight":3},
+    {"kind":"contra","subject":"Mockaquine","text":"לפני Mockaquine בודקים FXR.","anchor":2,"quote":"לפני Mockaquine","slides":[7],"red_flag":true,"weight":3},
+    {"kind":"drug","subject":"Mockaquine","text":"Mockaquine שייכת לקבוצה לדוגמה.","anchor":null,"quote":"x","slides":[5],"red_flag":false,"weight":1}]',
+  'claude-opus-5-5', 0.04, :'key') = 3 then 'ok' else 'FAIL' end;
+do $$ begin perform public.study_points_save(current_setting('t.p2l')::uuid, 1, repeat('0', 32), '[]', null, 0, current_setting('t.key')); raise notice 'P2-1g. FAIL: saved with another text''s md5';
+exception when others then raise notice 'P2-1g. %: the md5 must be the claim''s (%)', case when sqlerrm = 'bad points' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_points_save(current_setting('t.p2l')::uuid, 0, current_setting('t.md0'), '[]', null, 0, current_setting('t.key')); raise notice 'P2-1h. FAIL: a part saved twice';
+exception when others then raise notice 'P2-1h. %: a part not claimed is not saved (%)', case when sqlerrm = 'part not writing' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.md1', md5(markdown), false) is not null as md1 from public.study_sections where lecture_id = :'p2l' and idx = 1 \gset
+do $$ begin perform public.study_points_save(current_setting('t.p2l')::uuid, 1, current_setting('t.md1'), '[{"kind":"mechanism","text":"שקף שאין","slides":[99]}]', null, 0, current_setting('t.key')); raise notice 'P2-1i. FAIL: a point on a slide the lecture does not have';
+exception when others then raise notice 'P2-1i. %: a point''s slides are the lecture''s (%)', case when sqlerrm = 'bad points' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_points_save(current_setting('t.p2l')::uuid, 1, current_setting('t.md1'), '[{"kind":"trivia","text":"סוג לא מוכר","slides":[15]}]', null, 0, current_setting('t.key')); raise notice 'P2-1j. FAIL: a point of an unknown kind';
+exception when others then raise notice 'P2-1j. %: six kinds only (%)', case when sqlerrm = 'bad points' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_points_fail(:'p2l', array[1], 'refusal', 0.01, :'key') is null as f1 \gset
+select 'P2-1k. the setup screen: ' || case when string_agg(part_idx || ':' || points || '/' || red_flags || '/' || current || '/' || status || '/' || busy, ' ' order by part_idx)
+       = '0:3/1/true/ready/false 1:0/0/false/failed/false 2:0/0/false/pending/false' then 'ok' else 'FAIL ' || string_agg(part_idx || ':' || points || '/' || red_flags || '/' || current || '/' || status || '/' || busy, ' ' order by part_idx) end
+  from public.study_points_state(:'p2l');
+select 'P2-1l. the anchor''s quote is kept only with an anchor: ' || case when count(*) filter (where anchor is null and quote = '') = 1 and count(*) filter (where anchor = 1 and quote = 'רק Mockaquine') = 1 then 'ok' else 'FAIL' end
+  from public.study_points where lecture_id = :'p2l';
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'P2-1m. Shoham reads the group''s points: ' || case when count(*) = 3 then 'ok' else 'FAIL ' || count(*) end from public.study_points where lecture_id = :'p2l';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'P2-1n. the stranger reads none: ' || case when (select count(*) from public.study_points) + (select count(*) from public.study_point_parts) = 0 then 'ok' else 'FAIL' end;
+do $$ begin perform public.study_points_state(current_setting('t.p2l')::uuid); raise notice 'P2-1o. FAIL: a stranger read the setup numbers';
+exception when others then raise notice 'P2-1o. %: the setup numbers are the group''s (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin insert into public.study_points (lecture_id, part_idx, n, kind, text, slides) values (current_setting('t.p2l')::uuid, 0, 9, 'drug', 'נקודה מבחוץ', '{5}'); raise notice 'P2-1p. FAIL: a member wrote a point directly';
+exception when insufficient_privilege then raise notice 'P2-1p. ok: points are written only through the op (%)', sqlerrm; end $$;
+-- A correction to part 0 makes its points stale; read again, the points that stayed keep their ids.
+select set_config('t.pt1', (select id::text from public.study_points where lecture_id = :'p2l' and n = 1), false) is not null as pt1,
+       set_config('t.pt2', (select id::text from public.study_points where lecture_id = :'p2l' and n = 2), false) is not null as pt2,
+       set_config('t.pt3', (select id::text from public.study_points where lecture_id = :'p2l' and n = 3), false) is not null as pt3 \gset
+reset role;
+update public.study_sections set markdown = markdown || E'\n\nMockaquine אסורה בהיריון. [ש'' 8]' where lecture_id = :'p2l' and idx = 0;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'P2-1q. after a correction part 0 is stale: ' || case when not current then 'ok' else 'FAIL' end from public.study_points_state(:'p2l') where part_idx = 0;
+select 'P2-1r. the next claim takes the stale parts: ' || case when string_agg(part_idx::text, ',' order by part_idx) = '0,1' then 'ok' else 'FAIL ' || string_agg(part_idx::text, ',') end
+  from public.study_points_claim(:'p2l', :'key');
+select set_config('t.md0', md5(markdown), false) is not null as md0b from public.study_sections where lecture_id = :'p2l' and idx = 0 \gset
+select public.study_points_save(:'p2l', 0, current_setting('t.md0'),
+  jsonb_build_array(
+    jsonb_build_object('id', current_setting('t.pt2'), 'kind', 'contra', 'subject', 'Mockaquine', 'text', 'לפני Mockaquine בודקים FXR.', 'anchor', 2, 'quote', 'לפני', 'slides', jsonb_build_array(7), 'red_flag', true, 'weight', 3),
+    jsonb_build_object('id', current_setting('t.pt1'), 'kind', 'indication', 'subject', 'Mockaquine', 'text', 'רק Mockaquine פועלת על ה-dormozoite בכבד.', 'anchor', 1, 'quote', 'רק', 'slides', jsonb_build_array(5), 'red_flag', false, 'weight', 3),
+    jsonb_build_object('kind', 'contra', 'subject', 'Mockaquine', 'text', 'Mockaquine אסורה בהיריון.', 'anchor', 3, 'quote', 'Mockaquine אסורה', 'slides', jsonb_build_array(8), 'red_flag', true, 'weight', 3)),
+  null, 0.02, :'key') as saved0 \gset
+select 'P2-1s. read again: the points that stayed keep their ids, in the new order; the one that went is gone: ' ||
+       case when (select string_agg(id::text, ',' order by n) from public.study_points where lecture_id = :'p2l' and part_idx = 0 and n <= 2) = current_setting('t.pt2') || ',' || current_setting('t.pt1')
+             and not exists (select 1 from public.study_points where id = current_setting('t.pt3')::uuid)
+             and (select count(*) from public.study_points where lecture_id = :'p2l' and part_idx = 0) = 3 then 'ok' else 'FAIL' end;
+select public.study_points_save(:'p2l', 1, current_setting('t.md1'),
+  '[{"kind":"mechanism","subject":"Testoquine","text":"Testoquine מצטברת בוואקואולה.","anchor":1,"quote":"Testoquine","slides":[15],"red_flag":false,"weight":3},
+    {"kind":"contra","subject":"Fictemisinins","text":"Fictemisinins לעולם לא ניתנות לבד.","anchor":null,"quote":"","slides":[20],"red_flag":true,"weight":3}]',
+  null, 0.02, :'key') as saved1 \gset
+select 'P2-1t. both written parts current: ' || case when bool_and(current) filter (where summary = 'ready') then 'ok' else 'FAIL' end from public.study_points_state(:'p2l');
+select 'P2-1u. nothing stale: an empty claim (nothing to spend): ' || case when count(*) = 0 then 'ok' else 'FAIL' end from public.study_points_claim(:'p2l', :'key');
+-- Three refused reservations (nothing asked of the model) are not tries:
+-- another member's claim still takes the part (SEC2-1).
+reset role;
+update public.study_sections set markdown = markdown || E'\n\nTestoquine נבלעת היטב. [ש'' 17]' where lecture_id = :'p2l' and idx = 1;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select count(*) as r1 from public.study_points_claim(:'p2l', :'key') \gset
+select public.study_points_fail(:'p2l', array[1], 'member_share', 0, :'key', true) is null as rf1 \gset
+select count(*) as r2 from public.study_points_claim(:'p2l', :'key') \gset
+select public.study_points_fail(:'p2l', array[1], 'daily_limit', 0, :'key', true) is null as rf2 \gset
+select count(*) as r3 from public.study_points_claim(:'p2l', :'key') \gset
+select public.study_points_fail(:'p2l', array[1], 'reserve', 0, :'key', true) is null as rf3 \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'P2-1u2. three refusals cost no try: Shoham''s claim still takes part 1: ' ||
+       case when :r1 = 1 and :r2 = 1 and :r3 = 1 and string_agg(part_idx::text, ',') = '1' then 'ok' else 'FAIL ' || coalesce(string_agg(part_idx::text, ','), 'none') end
+  from public.study_points_claim(:'p2l', :'key');
+reset role;
+select 'P2-1u3. a refused try is given back: ' || case when attempts = 1 and status = 'writing' then 'ok' else 'FAIL ' || attempts || ' ' || status end
+  from public.study_point_parts where lecture_id = :'p2l' and part_idx = 1;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_points_fail(:'p2l', array[1], 'timeout', 0, :'key') is null as rf4 \gset
+reset role;
+select 'P2-1u4. a paid try still counts: ' || case when attempts = 1 and status = 'failed' and error = 'timeout' then 'ok' else 'FAIL ' || attempts || ' ' || status end
+  from public.study_point_parts where lecture_id = :'p2l' and part_idx = 1;
+-- Three failed reads of the same text: the part waits for a new text.
+reset role;
+update public.study_sections set markdown = markdown || E'\n\nTestoquine ניתנת בפה. [ש'' 16]' where lecture_id = :'p2l' and idx = 1;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select count(*) as c1 from public.study_points_claim(:'p2l', :'key') \gset
+select public.study_points_fail(:'p2l', array[1], 'timeout', 0, :'key') is null as g1 \gset
+select count(*) as c2 from public.study_points_claim(:'p2l', :'key') \gset
+select public.study_points_fail(:'p2l', array[1], 'timeout', 0, :'key') is null as g2 \gset
+select count(*) as c3 from public.study_points_claim(:'p2l', :'key') \gset
+select public.study_points_fail(:'p2l', array[1], 'timeout', 0, :'key') is null as g3 \gset
+do $$ begin perform public.study_points_claim(current_setting('t.p2l')::uuid, current_setting('t.key')); raise notice 'P2-1v. FAIL: a fourth paid try on the same text';
+exception when others then raise notice 'P2-1v. %: three tries a text (%)', case when sqlerrm = 'gave up' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'P2-1w. three claims took part 1 each time: ' || case when :c1 = 1 and :c2 = 1 and :c3 = 1 then 'ok' else 'FAIL' end;
+reset role;
+update public.study_point_parts set src_md5 = (select md5(markdown) from public.study_sections where lecture_id = :'p2l' and idx = 1), status = 'ready', attempts = 0
+ where lecture_id = :'p2l' and part_idx = 1;
+update public.study_sections set status = 'writing' where lecture_id = :'p2l';
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_points_claim(current_setting('t.p2l')::uuid, current_setting('t.key')); raise notice 'P2-1x. FAIL: points read from a summary being written';
+exception when others then raise notice 'P2-1x. %: the summary first (%)', case when sqlerrm = 'summary not ready' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update public.study_sections set status = 'ready' where lecture_id = :'p2l' and idx in (0, 1);
+select set_config('t.pa', (select id::text from public.study_points where lecture_id = :'p2l' and part_idx = 0 and n = 1), false) is not null as pa,
+       set_config('t.pb', (select id::text from public.study_points where lecture_id = :'p2l' and part_idx = 0 and n = 2), false) is not null as pb,
+       set_config('t.pc', (select id::text from public.study_points where lecture_id = :'p2l' and part_idx = 0 and n = 3), false) is not null as pc,
+       set_config('t.pd', (select id::text from public.study_points where lecture_id = :'p2l' and part_idx = 1 and n = 1), false) is not null as pd \gset
+
+-- ═════════ P2-2 · a request and its batches ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_request_create(current_setting('t.p2l')::uuid, '{}', '[]'); raise notice 'P2-2a. FAIL: a request without the key';
+exception when others then raise notice 'P2-2a. %: only the op makes requests (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_request_create(current_setting('t.p2l')::uuid,
+  '{"level":"everything","count":1,"parts":[0],"styles":["case"],"difficulty":"exam"}',
+  jsonb_build_array(jsonb_build_object('part_idx', 0, 'seq', 0, 'wanted', 1, 'points', '[]'::jsonb, 'styles', jsonb_build_array('case'))), current_setting('t.key'));
+  raise notice 'P2-2b. FAIL: an unknown level';
+exception when others then raise notice 'P2-2b. %: four levels (%)', case when sqlerrm = 'bad request' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_request_create(current_setting('t.p2l')::uuid,
+  '{"level":"full","count":2,"parts":[0],"styles":["case"],"difficulty":"exam"}',
+  jsonb_build_array(jsonb_build_object('part_idx', 0, 'seq', 0, 'wanted', 1, 'points', '[]'::jsonb, 'styles', jsonb_build_array('case'))), current_setting('t.key'));
+  raise notice 'P2-2c. FAIL: batches that do not add up to the count';
+exception when others then raise notice 'P2-2c. %: the batches add up to the count (%)', case when sqlerrm = 'bad request' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_request_create(current_setting('t.p2l')::uuid,
+  '{"level":"full","count":1,"parts":[0],"styles":["case"],"difficulty":"exam"}',
+  jsonb_build_array(jsonb_build_object('part_idx', 0, 'seq', 0, 'wanted', 1, 'points', jsonb_build_array(current_setting('t.pd')), 'styles', jsonb_build_array('case'))), current_setting('t.key'));
+  raise notice 'P2-2d. FAIL: a batch with another part''s point';
+exception when others then raise notice 'P2-2d. %: a batch covers its own part''s points (%)', case when sqlerrm = 'bad request' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_request_create(current_setting('t.p2l')::uuid,
+  '{"level":"full","count":1,"parts":[7],"styles":["case"],"difficulty":"exam"}',
+  jsonb_build_array(jsonb_build_object('part_idx', 7, 'seq', 0, 'wanted', 1, 'points', '[]'::jsonb, 'styles', jsonb_build_array('case'))), current_setting('t.key'));
+  raise notice 'P2-2e. FAIL: a part the summary does not have';
+exception when others then raise notice 'P2-2e. %: the summary''s parts only (%)', case when sqlerrm = 'bad parts' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_request_create(current_setting('t.p2l')::uuid,
+  '{"level":"full","count":1,"parts":[0],"styles":["case"],"difficulty":"exam"}',
+  jsonb_build_array(jsonb_build_object('part_idx', 0, 'seq', 0, 'wanted', 1, 'points', '[]'::jsonb, 'styles', jsonb_build_array('compare'))), current_setting('t.key'));
+  raise notice 'P2-2f. FAIL: a batch style the request did not choose';
+exception when others then raise notice 'P2-2f. %: a batch''s styles are the request''s (%)', case when sqlerrm = 'bad request' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.req', (array_agg(request_id))[1]::text, false) is not null as req_set,
+       set_config('t.ba', (array_agg(batch_id order by part_idx, seq))[1]::text, false) is not null as ba_set,
+       set_config('t.bb', (array_agg(batch_id order by part_idx, seq))[2]::text, false) is not null as bb_set,
+       set_config('t.bc', (array_agg(batch_id order by part_idx, seq))[3]::text, false) is not null as bc_set,
+       count(*) as nb, max(round) as rnd
+  from public.study_request_create(:'p2l',
+    '{"level":"custom","count":5,"parts":[0,1],"styles":["case","mechanism","not_true"],"difficulty":"hard","style_note":"מקרה קצר","style_example":"אישה בת 28. מה הצעד הבא?","focus":" FXR "}',
+    jsonb_build_array(
+      jsonb_build_object('part_idx', 0, 'seq', 0, 'wanted', 2, 'points', jsonb_build_array(current_setting('t.pa'), current_setting('t.pb')), 'styles', jsonb_build_array('case', 'mechanism')),
+      jsonb_build_object('part_idx', 0, 'seq', 1, 'wanted', 1, 'points', jsonb_build_array(current_setting('t.pc')), 'styles', jsonb_build_array('not_true')),
+      jsonb_build_object('part_idx', 1, 'seq', 0, 'wanted', 2, 'points', jsonb_build_array(current_setting('t.pd')), 'styles', jsonb_build_array('case', 'case'))),
+    :'key') \gset
+select 'P2-2g. Noa''s request: ' || case when :nb = 3 and :rnd = 1 then 'ok' else 'FAIL' end || ' (three batches, two of part 0 in one round)';
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'P2-2h. Shoham sees the request with its options and points: ' ||
+       case when level = 'custom' and count = 5 and parts = '{0,1}' and difficulty = 'hard' and focus = 'FXR' and cardinality(points) = 4
+                 and created_by = 'cccccccc-0000-4000-8000-000000000003' then 'ok' else 'FAIL' end
+  from public.study_question_requests where id = current_setting('t.req')::uuid;
+select 'P2-2i. its batches carry the request, their seq, points and styles: ' ||
+       case when string_agg(part_idx || '.' || seq || ':' || wanted || ':' || cardinality(points) || ':' || array_to_string(styles, '+'), ' ' order by part_idx, seq)
+                 = '0.0:2:2:case+mechanism 0.1:1:1:not_true 1.0:2:1:case+case' then 'ok' else 'FAIL ' || string_agg(part_idx || '.' || seq, ' ') end
+  from public.study_question_batches where request_id = current_setting('t.req')::uuid;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'P2-2j. the stranger sees no request and no batch: ' || case when (select count(*) from public.study_question_requests) + (select count(*) from public.study_question_batches where request_id is not null) = 0 then 'ok' else 'FAIL' end;
+do $$ begin perform public.study_request_create(current_setting('t.p2l')::uuid, '{}', '[]', current_setting('t.key')); raise notice 'P2-2k. FAIL: a stranger made a request with the key';
+exception when others then raise notice 'P2-2k. %: the key is not membership (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ P2-3 · drafts, the solver's verdict, keep, reword, remove ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_draft_save(current_setting('t.ba')::uuid, '{}', current_setting('t.key')); raise notice 'P2-3a. FAIL: a draft saved on a batch nobody claimed';
+exception when others then raise notice 'P2-3a. %: a batch is claimed first (%)', case when sqlerrm = 'batch not writing' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'P2-3b. Noa claims batch a: wants ' || case when wanted = 2 then 'ok' else 'FAIL' end from public.study_question_claim(current_setting('t.ba')::uuid, :'key');
+do $$ begin perform public.study_draft_save(current_setting('t.ba')::uuid, '{"kind":"mcq","question":"שאלה?","options":["a","b"],"answer":0,"explanations":["1","2"],"slides":[5],"style":"case"}'); raise notice 'P2-3c. FAIL: a draft without the key';
+exception when others then raise notice 'P2-3c. %: only the server saves drafts (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_save_question(current_setting('t.ba')::uuid, null, '{"kind":"mcq","question":"שאלה?","options":["a","b"],"answer":0,"explanations":["1","2"],"slides":[5]}', current_setting('t.key'));
+  raise notice 'P2-3d. FAIL: a request''s question went straight into the bank';
+exception when others then raise notice 'P2-3d. %: a request''s batch writes drafts only (%)', case when sqlerrm = 'bad batch' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_draft_save(current_setting('t.ba')::uuid,
+  '{"kind":"mcq","question":"שאלה בסגנון שלא נבחר?","options":["a","b","c","d","e"],"answer":0,"explanations":["1","2","3","4","5"],"slides":[5],"style":"compare"}', current_setting('t.key'));
+  raise notice 'P2-3e. FAIL: a draft in a style the request did not choose';
+exception when others then raise notice 'P2-3e. %: the request''s styles only (%)', case when sqlerrm = 'bad style' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_draft_save(current_setting('t.ba')::uuid,
+  jsonb_build_object('kind','mcq','question','שאלה על נקודה של חלק אחר?','options',jsonb_build_array('a','b','c','d','e'),'answer',0,'explanations',jsonb_build_array('1','2','3','4','5'),'slides',jsonb_build_array(5),'style','case','points',jsonb_build_array(current_setting('t.pd'))), current_setting('t.key'));
+  raise notice 'P2-3f. FAIL: a draft covering another batch''s point';
+exception when others then raise notice 'P2-3f. %: a draft covers its batch''s points (%)', case when sqlerrm = 'bad points' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.d1', public.study_draft_save(current_setting('t.ba')::uuid, jsonb_build_object('kind','case','difficulty',3,'vignette','אישה בת 30 חוזרת מאי דמיוני עם חום, ובמשטח נמצא Exemplaria.','question','מה בודקים לפני Mockaquine?',
+  'options',jsonb_build_array('FXR','ECG','CBC','LFT','TSH'),'answer',0,'explanations',jsonb_build_array('נכון [ש'' 7]','לא [ש'' 7]','לא [ש'' 7]','לא [ש'' 7]','לא [ש'' 7]'),
+  'whens',jsonb_build_array('','מתי כן: בשאלה על הלב','','',''),'option_tags',jsonb_build_array('FXR','ECG','','',''),'takeaway','לפני Mockaquine בודקים FXR. [ש'' 7]',
+  'slides',jsonb_build_array(7),'topic','Mockaquine','aspect','contra','para',2,'quote','לפני Mockaquine','teaser','Mockaquine ובדיקה אחת','style','case',
+  'points',jsonb_build_array(current_setting('t.pb')),'model','claude-opus-5-5'), :'key')::text, false) is not null as d1_set \gset
+select set_config('t.d2', public.study_draft_save(current_setting('t.ba')::uuid, jsonb_build_object('kind','mcq','question','על מה פועלת Mockaquine?',
+  'options',jsonb_build_array('dormozoite','gametocyte','merozoite','sporozoite','trophozoite'),'answer',0,'explanations',jsonb_build_array('1 [ש'' 5]','2','3','4','5'),
+  'slides',jsonb_build_array(5),'topic','Mockaquine','aspect','mechanism','style','mechanism','points',jsonb_build_array(current_setting('t.pa'))), :'key')::text, false) is not null as d2_set \gset
+do $$ begin perform public.study_draft_save(current_setting('t.ba')::uuid,
+  '{"kind":"mcq","question":"שלישית?","options":["a","b","c","d","e"],"answer":0,"explanations":["1","2","3","4","5"],"slides":[5],"style":"case"}', current_setting('t.key'));
+  raise notice 'P2-3g. FAIL: a batch took more drafts than it wanted';
+exception when others then raise notice 'P2-3g. %: a batch takes what it wanted (%)', case when sqlerrm = 'part full' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_question_finish(current_setting('t.ba')::uuid, 'ready', 0, 'claude-opus-5-5', 0.1, null, :'key', 0) is null as fin_a \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'P2-3h. Shoham sees Noa''s drafts with their public fields, waiting and being checked: ' ||
+       case when count(*) = 2 and bool_and(status = 'pending' and check_state = 'checking') and max(anchor) = 2 and max(teaser) = 'Mockaquine ובדיקה אחת'
+                 and bool_or(option_tags = '{FXR,ECG,"","",""}') and bool_and(created_by = 'cccccccc-0000-4000-8000-000000000003') then 'ok' else 'FAIL' end
+  from public.study_question_drafts where request_id = current_setting('t.req')::uuid;
+do $$ begin perform 1 from public.study_question_draft_keys limit 1; raise notice 'P2-3i. FAIL: a member read a draft''s key';
+exception when insufficient_privilege then raise notice 'P2-3i. ok: a draft''s key is hidden (%)', sqlerrm; end $$;
+do $$ begin perform public.study_draft_keep(current_setting('t.d1')::uuid); raise notice 'P2-3j. FAIL: a draft kept before the solver answered';
+exception when others then raise notice 'P2-3j. %: the solver first (%)', case when sqlerrm = 'not checked' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_draft_check(current_setting('t.d1')::uuid, 0, false); raise notice 'P2-3k. FAIL: a verdict without the key';
+exception when others then raise notice 'P2-3k. %: only the server stores the verdict (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'P2-3l. the solver chose the key: ' || case when public.study_draft_check(current_setting('t.d1')::uuid, 0, false, :'key') = 'ok' then 'ok' else 'FAIL' end
+       || '; it chose another option: ' || case when public.study_draft_check(current_setting('t.d2')::uuid, 3, false, :'key') = 'failed' then 'ok' else 'FAIL' end;
+select 'P2-3m. the key, but another option defensible, fails too: ' || case when public.study_draft_check(current_setting('t.d2')::uuid, 0, true, :'key') = 'failed' then 'ok' else 'FAIL' end;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_draft_keep(current_setting('t.d2')::uuid); raise notice 'P2-3n. FAIL: a draft the solver got wrong was kept';
+exception when others then raise notice 'P2-3n. %: one the solver got wrong is reworded or removed (%)', case when sqlerrm = 'not checked' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.q1', public.study_draft_keep(current_setting('t.d1')::uuid)::text, false) is not null as kept1 \gset
+select 'P2-3o. Shoham keeps Noa''s draft: it is a question of the bank with its style, points, paragraph and request: ' ||
+       case when q.style = 'case' and q.points = array[current_setting('t.pb')::uuid] and q.anchor = 2 and q.quote = 'לפני Mockaquine' and q.request_id = current_setting('t.req')::uuid
+                 and q.part_idx = 0 and q.has_key and q.retired_at is null and q.created_by = 'cccccccc-0000-4000-8000-000000000003' and q.option_tags = '{FXR,ECG,"","",""}'
+            then 'ok' else 'FAIL' end
+  from public.study_questions q where q.id = current_setting('t.q1')::uuid;
+select 'P2-3p. the draft says kept, by whom, and which question: ' ||
+       case when status = 'kept' and question_id = current_setting('t.q1')::uuid and decided_by = 'bbbbbbbb-0000-4000-8000-000000000002' then 'ok' else 'FAIL' end
+  from public.study_question_drafts where id = current_setting('t.d1')::uuid;
+do $$ begin perform public.study_draft_keep(current_setting('t.d1')::uuid); raise notice 'P2-3q. FAIL: a draft kept twice';
+exception when others then raise notice 'P2-3q. %: kept once (%)', case when sqlerrm = 'not pending' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'P2-3r. Noa answers the kept question with a bet: right ' || case when correct and cardinality(whens) = 5 and whens[2] = 'מתי כן: בשאלה על הלב' then 'ok' else 'FAIL' end
+  from public.study_answer_question(current_setting('t.q1')::uuid, 0, 'lecture', 4000, 3);
+reset role;
+select 'P2-3s. its key moved with it: ' || case when k.answer = 0 and k.takeaway = 'לפני Mockaquine בודקים FXR. [ש'' 7]' and cardinality(k.explanations) = 5 then 'ok' else 'FAIL' end
+  from public.study_question_keys k where k.question_id = current_setting('t.q1')::uuid;
+set role authenticated;
+-- The server rewrites the one the solver got wrong (automatic, once), and a member asks for another wording.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.d2b', public.study_draft_replace(current_setting('t.d2')::uuid, jsonb_build_object('kind','mcq','question','על איזה שלב פועלת Mockaquine?',
+  'options',jsonb_build_array('dormozoite','gametocyte','merozoite','sporozoite','trophozoite'),'answer',0,'explanations',jsonb_build_array('1 [ש'' 5]','2','3','4','5'),
+  'slides',jsonb_build_array(5),'style','compare','points',jsonb_build_array(current_setting('t.pa'))), true, :'key')::text, false) is not null as d2b_set \gset
+select 'P2-3t. the rewrite replaces it, keeps its style and counts a version: ' ||
+       case when (select status from public.study_question_drafts where id = current_setting('t.d2')::uuid) = 'replaced'
+             and n.replaces = current_setting('t.d2')::uuid and n.rewrites = 1 and n.style = 'mechanism' and n.check_state = 'checking' and n.status = 'pending'
+            then 'ok' else 'FAIL' end
+  from public.study_question_drafts n where n.id = current_setting('t.d2b')::uuid;
+do $$ begin perform public.study_draft_replace(current_setting('t.d2b')::uuid, '{}', true, current_setting('t.key')); raise notice 'P2-3u. FAIL: an automatic rewrite of a draft the solver did not fail';
+exception when others then raise notice 'P2-3u. %: the server rewrites only the solver''s failures (%)', case when sqlerrm = 'rewrite limit' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'P2-3v. a member''s reword claims the draft and the op reads its key: ' || case when answer = 0 and rewrites = 1 then 'ok' else 'FAIL' end
+  from public.study_draft_reword(current_setting('t.d2b')::uuid, :'key');
+select 'P2-3v2. the reword holds the draft for the op''s whole lifetime (300 s and a margin): ' ||
+       case when lease_until > now() + interval '300 seconds' then 'ok' else 'FAIL ' || coalesce((lease_until - now())::text, 'null') end
+  from public.study_question_drafts where id = current_setting('t.d2b')::uuid;
+do $$ begin perform public.study_draft_reword(current_setting('t.d2b')::uuid, current_setting('t.key')); raise notice 'P2-3w. FAIL: two rewords at once';
+exception when others then raise notice 'P2-3w. %: one reword at a time (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_draft_remove(current_setting('t.d2b')::uuid); raise notice 'P2-3x. FAIL: removed while being reworded';
+exception when others then raise notice 'P2-3x. %: not while it is reworded (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_draft_release(current_setting('t.d2b')::uuid, :'key') is null as released \gset
+select 'P2-3y. a reword that wrote nothing frees it: ' || case when lease_until is null then 'ok' else 'FAIL' end from public.study_question_drafts where id = current_setting('t.d2b')::uuid;
+-- The rewrite still wrong: rejected; the batch's count goes back down and says it was the solver's.
+select public.study_draft_check(current_setting('t.d2b')::uuid, 2, false, :'key') as st2b \gset
+select public.study_draft_reject(current_setting('t.d2b')::uuid, :'key') is null as rej \gset
+select 'P2-3z. rejected after the rewrite failed: ' ||
+       case when d.status = 'rejected' and b.made = 1 and b.solver_rejected = 1 then 'ok' else 'FAIL ' || d.status || ' ' || b.made || ' ' || b.solver_rejected end
+  from public.study_question_drafts d join public.study_question_batches b on b.id = d.batch_id where d.id = current_setting('t.d2b')::uuid;
+do $$ begin perform public.study_draft_reject(current_setting('t.d1')::uuid, current_setting('t.key')); raise notice 'P2-3za. FAIL: a kept draft rejected';
+exception when others then raise notice 'P2-3za. %: only a pending failure is rejected (%)', case when sqlerrm = 'not pending' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- Batch b (part 0, one question) and batch c (part 1, two): drafts the solver passed, could not check, and one never checked.
+select 'P2-3zb. batch b claimed: ' || case when part_idx = 0 then 'ok' else 'FAIL' end from public.study_question_claim(current_setting('t.bb')::uuid, :'key');
+select set_config('t.d3', public.study_draft_save(current_setting('t.bb')::uuid, jsonb_build_object('kind','mcq','question','איזו מהבאות **אינה** נכונה לגבי Mockaquine?',
+  'options',jsonb_build_array('a1','b1','c1','d1','e1'),'answer',1,'explanations',jsonb_build_array('1','2','3','4','5'),'slides',jsonb_build_array(8),'style','not_true','points',jsonb_build_array(current_setting('t.pc'))), :'key')::text, false) is not null as d3_set \gset
+select public.study_question_finish(current_setting('t.bb')::uuid, 'ready', 0, 'claude-opus-5-5', 0.05, null, :'key', 0) is null as fin_b \gset
+select 'P2-3zc. batch c claimed: ' || case when part_idx = 1 then 'ok' else 'FAIL' end from public.study_question_claim(current_setting('t.bc')::uuid, :'key');
+select set_config('t.d4', public.study_draft_save(current_setting('t.bc')::uuid, jsonb_build_object('kind','mcq','question','איפה מצטברת Testoquine?',
+  'options',jsonb_build_array('בוואקואולה','בכבד','בדם','בכליה','במוח'),'answer',0,'explanations',jsonb_build_array('1 [ש'' 15]','2','3','4','5'),'slides',jsonb_build_array(15),'style','case','points',jsonb_build_array(current_setting('t.pd'))), :'key')::text, false) is not null as d4_set \gset
+select set_config('t.d5', public.study_draft_save(current_setting('t.bc')::uuid, jsonb_build_object('kind','mcq','question','מה עוד נכון לגבי Testoquine?',
+  'options',jsonb_build_array('x1','x2','x3','x4','x5'),'answer',4,'explanations',jsonb_build_array('1','2','3','4','5'),'slides',jsonb_build_array(16),'style','case','points','[]'::jsonb), :'key')::text, false) is not null as d5_set \gset
+select public.study_draft_check(current_setting('t.d3')::uuid, 1, false, :'key') as s3, public.study_draft_check(current_setting('t.d4')::uuid, null, null, :'key') as s4 \gset
+select 'P2-3zd. the verdicts: ' || case when :'s3' = 'ok' and :'s4' = 'unchecked' then 'ok' else 'FAIL ' || :'s3' || ' ' || :'s4' end || ' (passed; the solver could not run)';
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'P2-3ze. "הבנק נבנה" per part: ' ||
+       case when string_agg(part_idx || ':' || points || '/' || covered || '/' || wanted || '/' || made || '/' || kept || '/' || pending || '/' || checking || '/' || failed || '/' || open, ' ' order by part_idx)
+                 = '0:3/2/3/2/1/1/0/0/false 1:1/1/2/2/0/2/1/0/true' then 'ok'
+            else 'FAIL ' || string_agg(part_idx || ':' || points || '/' || covered || '/' || wanted || '/' || made || '/' || kept || '/' || pending || '/' || checking || '/' || failed || '/' || open, ' ' order by part_idx) end
+       || ' (part 0: its 3 points, 2 covered: the kept one and the one waiting; the rejected one covers nothing)'
+  from public.study_request_progress(current_setting('t.req')::uuid);
+select 'P2-3zf. "להוסיף הכול" keeps the passed and the unchecked, never one still being checked: ' ||
+       case when string_agg(draft_id::text, ',' order by draft_id::text) = (select string_agg(x, ',' order by x) from unnest(array[current_setting('t.d3'), current_setting('t.d4')]) x) then 'ok' else 'FAIL' end
+  from public.study_draft_keep_all(current_setting('t.req')::uuid);
+select 'P2-3zg. the bank now holds the three kept, and the draft still being checked waits: ' ||
+       case when (select count(*) from public.study_questions where request_id = current_setting('t.req')::uuid) = 3
+             and (select status from public.study_question_drafts where id = current_setting('t.d5')::uuid) = 'pending' then 'ok' else 'FAIL' end;
+select 'P2-3zh. a second "להוסיף הכול" finds nothing more: ' || case when count(*) = 0 then 'ok' else 'FAIL' end from public.study_draft_keep_all(current_setting('t.req')::uuid);
+select public.study_draft_remove(current_setting('t.d5')::uuid) is null as removed5 \gset
+select 'P2-3zi. Shoham removes the last one: ' || case when status = 'removed' and decided_by = 'bbbbbbbb-0000-4000-8000-000000000002' then 'ok' else 'FAIL' end
+  from public.study_question_drafts where id = current_setting('t.d5')::uuid;
+do $$ begin perform public.study_draft_remove(current_setting('t.d5')::uuid); raise notice 'P2-3zj. FAIL: removed twice';
+exception when others then raise notice 'P2-3zj. %: once (%)', case when sqlerrm = 'not pending' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'P2-3zk. the stranger sees no draft: ' || case when count(*) = 0 then 'ok' else 'FAIL' end from public.study_question_drafts;
+do $$ begin perform public.study_draft_keep(current_setting('t.d5')::uuid); raise notice 'P2-3zl. FAIL: a stranger kept a draft';
+exception when others then raise notice 'P2-3zl. %: the group''s drafts (%)', case when sqlerrm = 'draft not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_draft_keep_all(current_setting('t.req')::uuid); raise notice 'P2-3zm. FAIL: a stranger kept a request';
+exception when others then raise notice 'P2-3zm. %: the group''s requests (%)', case when sqlerrm = 'request not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_request_progress(current_setting('t.req')::uuid); raise notice 'P2-3zn. FAIL: a stranger read a request''s progress';
+exception when others then raise notice 'P2-3zn. %: the group''s requests (%)', case when sqlerrm = 'request not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin update public.study_question_drafts set status = 'kept'; raise notice 'P2-3zo. FAIL: a draft''s state changed directly';
+exception when insufficient_privilege then raise notice 'P2-3zo. ok: drafts change only through the functions (%)', sqlerrm; end $$;
+select 'P2-3zp. drafts never count in practice: the hub counts the bank''s three: ' ||
+       case when questions = 3 then 'ok' else 'FAIL ' || questions end from public.study_practice_overview(:'gid') where lecture_id = :'p2l';
+
+-- ═════════ P2-4 · "סבב חדש": the session builder's counts, private ═════════
+-- Noa answered q1 right (P2-3r); now she gets d4's question wrong and flags d3's.
+select set_config('t.q3', (select question_id::text from public.study_question_drafts where id = current_setting('t.d3')::uuid), false) is not null as q3,
+       set_config('t.q4', (select question_id::text from public.study_question_drafts where id = current_setting('t.d4')::uuid), false) is not null as q4 \gset
+select 'P2-4a. Noa misses q4: ' || case when not correct then 'ok' else 'FAIL' end from public.study_answer_question(current_setting('t.q4')::uuid, 3, 'lecture', 3000, 1);
+insert into public.study_question_flags (question_id, reason, note) values (current_setting('t.q3')::uuid, 'unclear', 'לא ברור');
+select 'P2-4b. Noa''s counts: ' ||
+       case when string_agg(part_idx || ':' || style || ':' || state || ':' || flagged || '=' || n, ' ' order by part_idx, style, state)
+                 = '0:case:right:false=1 0:not_true:new:true=1 1:case:wrong:false=1' then 'ok'
+            else 'FAIL ' || string_agg(part_idx || ':' || style || ':' || state || ':' || flagged || '=' || n, ' ' order by part_idx, style, state) end
+  from public.study_session_counts(array[:'p2l']::uuid[]);
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'P2-4c. Shoham''s own: all three new, none flagged by him: ' ||
+       case when sum(n) = 3 and bool_and(state = 'new') and not bool_or(flagged) then 'ok' else 'FAIL' end
+  from public.study_session_counts(array[:'p2l']::uuid[]);
+-- Shoham flags q3 too: two members' counting flags hide it from everyone, and from every count.
+insert into public.study_question_flags (question_id, reason) values (current_setting('t.q3')::uuid, 'wrong_key');
+select 'P2-4d. hidden by two flags, q3 leaves the counts: ' || case when sum(n) = 2 then 'ok' else 'FAIL ' || sum(n) end
+  from public.study_session_counts(array[:'p2l']::uuid[]);
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'P2-4e. the stranger counts nothing: ' || case when count(*) = 0 then 'ok' else 'FAIL' end from public.study_session_counts(array[:'p2l']::uuid[]);
+select 'P2-reg. the registry: ' || case when public.study_schema() ->> 'Q' = '2' then 'ok' else 'FAIL ' || (public.study_schema() ->> 'Q') end || ' (Q at 2: Q''s end and practice 2.0)';
+
+-- Clean-up: the lectures take their parts, points, requests, batches, drafts, questions, answers and flags.
+reset role;
+delete from public.study_lectures where id in (:'p2l', :'p2e');
+select 'P2-end. fixtures removed: ' ||
+       case when (select count(*) from public.study_points where lecture_id = :'p2l') + (select count(*) from public.study_question_drafts where lecture_id = :'p2l')
+                 + (select count(*) from public.study_question_requests where lecture_id = :'p2l') + (select count(*) from public.study_questions where lecture_id = :'p2l') = 0
+            then 'ok' else 'FAIL' end;
+
+-- ════ END SECTION Q ════
+
+-- ════ BEGIN SECTION Z · the live quiz (package Z) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Z checks · the live group quiz   (package Z)
+-- ════════════════════════════════════════════════════════════════════════
+-- PROPOSAL: behaviour test for quiz.sql (and questions-hold.sql), in the
+-- style of supabase/tests/study.sql. Runs in the SAME psql session right
+-- after supabase/tests/study.sql (it reuses that file's users, :gid and
+-- :code). Throwaway local Postgres only. Time is simulated by moving a
+-- round's times into the past (as the table owner), never by sleeping.
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+\set key 'k-0123456789abcdef0123456789abcdef'
+select set_config('t.key', 'k-0123456789abcdef0123456789abcdef', false) is not null as have_key \gset
+reset role;
+
+-- ── Fixtures (as the owner): two more members, a lecture with six keyed
+--  questions (one flagged as wrong), a second lecture with two.
+insert into auth.users (id, raw_user_meta_data) values
+ ('ffffffff-0000-4000-8000-000000000006', '{"app":"study","full_name":"יעל"}'),
+ ('abababab-0000-4000-8000-000000000007', '{"app":"study","full_name":"דנה"}');
+insert into public.study_members (group_id, user_id, name) values
+ (:'gid', 'ffffffff-0000-4000-8000-000000000006', 'יעל'),
+ (:'gid', 'abababab-0000-4000-8000-000000000007', 'דנה');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, created_by) values
+ ('eeeeeeee-0000-4000-8000-000000000009', :'gid', 'פתוגן מאכסן', 'Antimalarials', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 12) n), 'bbbbbbbb-0000-4000-8000-000000000002'),
+ ('eeeeeeee-0000-4000-8000-00000000000a', :'gid', 'פתוגן מאכסן', 'Anthelmintics', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 6) n), 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, kind, vignette, question, options, slides, topic, aspect)
+select ('99999999-0000-4000-8000-00000000000' || i)::uuid, :'gid', 'eeeeeeee-0000-4000-8000-000000000009', 'ai', (i - 1) / 3,
+       case when i in (2, 5) then 'case' else 'mcq' end,
+       case when i in (2, 5) then repeat('אישה בת 30 חזרה מאפריקה עם חום. ', 40) else '' end,
+       'שאלה מספר ' || i || '?', array['א' || i, 'ב' || i, 'ג' || i, 'ד' || i, 'ה' || i], array[i], 'Primaquine', 'contra'
+  from generate_series(1, 6) i;
+insert into public.study_question_keys (question_id, answer, explanations, takeaway)
+select ('99999999-0000-4000-8000-00000000000' || i)::uuid, (i % 5)::smallint,
+       array['הסבר 1 [ש'' 1]', 'הסבר 2', 'הסבר 3', 'הסבר 4', 'הסבר 5'], 'מה לזכור ' || i
+  from generate_series(1, 6) i;
+insert into public.study_question_flags (question_id, user_id, reason)
+values ('99999999-0000-4000-8000-000000000006', 'cccccccc-0000-4000-8000-000000000003', 'wrong_key');
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, kind, question, options, slides)
+select ('88888888-0000-4000-8000-00000000000' || i)::uuid, :'gid', 'eeeeeeee-0000-4000-8000-00000000000a', 'ai', 0, 'mcq',
+       'שאלה על תולעים ' || i || '?', array['a', 'b', 'c', 'd'], array[1]
+  from generate_series(1, 2) i;
+insert into public.study_question_keys (question_id, answer, explanations)
+select ('88888888-0000-4000-8000-00000000000' || i)::uuid, 1, array['1', '2', '3', '4'] from generate_series(1, 2) i;
+
+-- Moves the open round (and the quiz row's copy of its times) p_secs into the past.
+create or replace function pg_temp.shift(p_quiz uuid, p_secs numeric) returns void language sql as $$
+  update public.study_quiz_rounds set opens_at = opens_at - make_interval(secs => p_secs::double precision),
+                                      closes_at = closes_at - make_interval(secs => p_secs::double precision)
+   where quiz_id = p_quiz and opens_at is not null and revealed_at is null;
+  update public.study_quizzes set opens_at = opens_at - make_interval(secs => p_secs::double precision),
+                                  closes_at = closes_at - make_interval(secs => p_secs::double precision)
+   where id = p_quiz;
+$$;
+-- The key of the round on screen (the test's oracle; no member can call this).
+create or replace function pg_temp.key_now(p_quiz uuid) returns int language sql as $$
+  select k.answer::int from public.study_quizzes z
+    join public.study_quiz_rounds r on r.quiz_id = z.id and r.idx = z.idx
+    join public.study_question_keys k on k.question_id = r.question_id
+   where z.id = p_quiz $$;
+create or replace function pg_temp.q_now(p_quiz uuid) returns uuid language sql as $$
+  select r.question_id from public.study_quizzes z join public.study_quiz_rounds r on r.quiz_id = z.id and r.idx = z.idx
+   where z.id = p_quiz $$;
+-- Moves the open round so that its deadline was p_extra seconds ago.
+create or replace function pg_temp.expire(p_quiz uuid, p_extra numeric) returns void language sql as $$
+  select pg_temp.shift(p_quiz, (select extract(epoch from (z.closes_at - clock_timestamp()))::numeric + p_extra
+                                  from public.study_quizzes z where z.id = p_quiz));
+$$;
+select set_config('t.gid', :'gid', false) is not null as g \gset
+set role authenticated;
+
+-- ═════════ 1. Creating ═════════
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.qz', public.study_quiz_create(:'gid', 'coop', array['eeeeeeee-0000-4000-8000-000000000009']::uuid[], 5, 30)::text, false) is not null as qz \gset
+select 'QZ1. ' || title || ' · ' || mode || ' · ' || state || ' · players ' || players_n || ' · host is Shoham: ' || (host_id = auth.uid())
+       || ' (expect Antimalarials · coop · lobby · players 1 · true)'
+  from public.study_quizzes where id = current_setting('t.qz')::uuid;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_quiz_create(current_setting('t.gid')::uuid, 'race', array['eeeeeeee-0000-4000-8000-000000000009']::uuid[], 5, 30);
+  raise notice 'QZ1b. FAIL: a second open quiz in one group';
+exception when others then raise notice 'QZ1b. %: one open quiz per group (%)', case when sqlerrm = 'quiz open' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_quiz_create(current_setting('t.gid')::uuid, 'party', array['eeeeeeee-0000-4000-8000-000000000009']::uuid[], 5, 30);
+  raise notice 'QZ1c. FAIL: unknown mode';
+exception when others then raise notice 'QZ1c. %: modes are coop and race (%)', case when sqlerrm = 'bad mode' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_quiz_create(current_setting('t.gid')::uuid, 'race', array['eeeeeeee-0000-4000-8000-000000000009']::uuid[], 2, 30);
+  raise notice 'QZ1c. FAIL: two questions';
+exception when others then raise notice 'QZ1c. %: 3 to 30 questions (%)', case when sqlerrm = 'bad count' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_quiz_create(current_setting('t.gid')::uuid, 'race', array['eeeeeeee-0000-4000-8000-000000000009']::uuid[], 5, 5);
+  raise notice 'QZ1c. FAIL: five seconds';
+exception when others then raise notice 'QZ1c. %: 15 to 120 seconds (%)', case when sqlerrm = 'bad seconds' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_quiz_create(current_setting('t.gid')::uuid, 'race', array['eeeeeeee-0000-4000-8000-0000000000ff']::uuid[], 5, 30);
+  raise notice 'QZ1c. FAIL: a lecture that is not the group''s';
+exception when others then raise notice 'QZ1c. %: lectures of the group only (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_quiz_create(current_setting('t.gid')::uuid, 'race', array['eeeeeeee-0000-4000-8000-000000000009']::uuid[], 5, 30);
+  raise notice 'QZ1d. FAIL: a stranger opened a quiz';
+exception when others then raise notice 'QZ1d. %: a stranger cannot open a quiz (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'QZ1e. stranger sees ' || count(*) || ' quizzes (expect 0)' from public.study_quizzes;
+do $$ begin perform public.study_quiz_state(current_setting('t.qz')::uuid); raise notice 'QZ1e. FAIL: stranger read the state';
+exception when others then raise notice 'QZ1e. %: stranger cannot read the state (%)', case when sqlerrm = 'quiz not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_quiz_join(current_setting('t.qz')::uuid); raise notice 'QZ1e. FAIL: stranger joined';
+exception when others then raise notice 'QZ1e. %: stranger cannot join (%)', case when sqlerrm = 'quiz not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ 2. Joining, and what members cannot touch ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_join(current_setting('t.qz')::uuid) is null as j \gset
+select public.study_quiz_join(current_setting('t.qz')::uuid) is null as j \gset
+select 'QZ2. Noa joined (twice): players ' || players_n || ', version ' || version || ' (expect 2, 2)'
+  from public.study_quizzes where id = current_setting('t.qz')::uuid;
+do $$ begin perform public.study_quiz_next(current_setting('t.qz')::uuid, -1); raise notice 'QZ2b. FAIL: Noa started Shoham''s quiz';
+exception when others then raise notice 'QZ2b. %: only the host starts (%)', case when sqlerrm = 'not host' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform count(*) from public.study_quiz_rounds; raise notice 'QZ2c. FAIL: rounds are readable';
+exception when insufficient_privilege then raise notice 'QZ2c. ok: rounds are not readable (%)', sqlerrm; end $$;
+do $$ begin perform count(*) from public.study_quiz_answers; raise notice 'QZ2c. FAIL: answers are readable';
+exception when insufficient_privilege then raise notice 'QZ2c. ok: answers are not readable (%)', sqlerrm; end $$;
+do $$ begin perform count(*) from public.study_quiz_players; raise notice 'QZ2c. FAIL: players are readable';
+exception when insufficient_privilege then raise notice 'QZ2c. ok: players are not readable directly (%)', sqlerrm; end $$;
+do $$ begin update public.study_quizzes set host_id = auth.uid(); raise notice 'QZ2d. FAIL: Noa made herself host';
+exception when insufficient_privilege then raise notice 'QZ2d. ok: the quiz row changes only through the functions (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_quiz_answers (round_id, user_id, choice, ms, answered_at) values (gen_random_uuid(), auth.uid(), 0, 0, now());
+  raise notice 'QZ2d. FAIL: an answer was written directly';
+exception when insufficient_privilege then raise notice 'QZ2d. ok: answers go through study_quiz_answer (%)', sqlerrm; end $$;
+
+-- ═════════ 3. Starting: questions chosen, first round held ═════════
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.qz')::uuid, -1) is null as n \gset
+select 'QZ3. started: ' || state || ', round ' || idx || ' of ' || n_total || ', opens in ' ||
+       round(extract(epoch from (opens_at - clock_timestamp())))::int || ' s, version ' || version
+       || ' (expect question, round 0 of 5, opens in 3 s, version 3)'
+  from public.study_quizzes where id = current_setting('t.qz')::uuid;
+reset role;
+select 'QZ3b. the flagged question was left out: ' || (not exists (select 1 from public.study_quiz_rounds
+         where quiz_id = current_setting('t.qz')::uuid and question_id = '99999999-0000-4000-8000-000000000006'))
+       || '; long cases get more time: ' || string_agg(distinct r.seconds::text, ',' order by r.seconds::text)
+       || ' (expect true; 30,97)'
+  from public.study_quiz_rounds r where r.quiz_id = current_setting('t.qz')::uuid;
+select 'QZ3c. a group quiz keeps the lecture''s order: parts ' || string_agg(q.part_idx::text, ',' order by r.idx) || ' (expect 0,0,0,1,1)'
+  from public.study_quiz_rounds r join public.study_questions q on q.id = r.question_id where r.quiz_id = current_setting('t.qz')::uuid;
+select set_config('t.q0', pg_temp.q_now(current_setting('t.qz')::uuid)::text, false) is not null as q0 \gset
+select set_config('t.k0', pg_temp.key_now(current_setting('t.qz')::uuid)::text, false) is not null as k0 \gset
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at)
+values ('cccccccc-0000-4000-8000-000000000003', current_setting('t.q0')::uuid, 0, false, 'lecture', now() - interval '7 days');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'QZ3d. Noa''s screen: round ' || (s -> 'round' ->> 'idx') || ', ' || jsonb_array_length(s -> 'round' -> 'q' -> 'options') || ' options; key sent: '
+       || ((s -> 'round') ? 'answer') || ', explanations sent: ' || ((s -> 'round') ? 'explanations') || ' (expect 0, 5; false, false)'
+  from (select public.study_quiz_state(current_setting('t.qz')::uuid) as s) x;
+do $$ begin perform public.study_answer_question(current_setting('t.q0')::uuid, 0); raise notice 'QZ3e. FAIL: practice gave the key of an open quiz round';
+exception when others then raise notice 'QZ3e. %: practice refuses a question in an open round (%)', case when sqlerrm = 'in quiz' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'QZ3f. feedback for it while open: ' || count(*) || ' rows (expect 0, although Noa answered it last week)'
+  from public.study_question_feedback(array[current_setting('t.q0')::uuid]);
+
+-- ═════════ 4. Answering ═════════
+do $$ begin perform public.study_quiz_answer(current_setting('t.qz')::uuid, 0, 1); raise notice 'QZ4. FAIL: answered during the countdown';
+exception when others then raise notice 'QZ4. %: no answer before the round opens (%)', case when sqlerrm = 'not open' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select pg_temp.shift(current_setting('t.qz')::uuid, 5) is null as s \gset
+set role authenticated;
+-- Noa answers wrong on purpose: the key plus one.
+select 'QZ4b. Noa answered option ' || choice || '; time taken 1.9-2.6 s: ' || (ms between 1900 and 2600)
+       || '; the reply says nothing about right or wrong: ' || (answered_at is not null) || ' (expect key+1; true; true)'
+  from public.study_quiz_answer(current_setting('t.qz')::uuid, 0, (current_setting('t.k0')::int + 1) % 5);
+select 'QZ4c. a second tap keeps the first: option ' || choice || ' (expect the same option)'
+  from public.study_quiz_answer(current_setting('t.qz')::uuid, 0, current_setting('t.k0')::int);
+select 'QZ4d. the row now: answered ' || answered_n || ', version ' || version || ' (expect 1, 3: an answer is not a new step)'
+  from public.study_quizzes where id = current_setting('t.qz')::uuid;
+select 'QZ4e. Noa''s screen keeps her choice: ' || (public.study_quiz_state(current_setting('t.qz')::uuid) -> 'round' -> 'mine' ->> 'choice')
+       || ' (expect key+1)';
+do $$ begin perform public.study_quiz_reveal(current_setting('t.qz')::uuid, 0); raise notice 'QZ4f. FAIL: a player revealed before the time';
+exception when others then raise notice 'QZ4f. %: a player cannot reveal early (%)', case when sqlerrm = 'too early' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+do $$ begin perform public.study_quiz_answer(current_setting('t.qz')::uuid, 0, 0); raise notice 'QZ4g. FAIL: a member who did not join answered';
+exception when others then raise notice 'QZ4g. %: only players answer (%)', case when sqlerrm = 'not playing' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_quiz_answer(current_setting('t.qz')::uuid, 0, 9); raise notice 'QZ4h. FAIL: option 9 of 5';
+exception when others then raise notice 'QZ4h. %: the choice must be an option (%)', case when sqlerrm = 'bad choice' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ 5. The reveal ═════════
+-- Shoham (host) answers right; both players have answered, so the round is revealed at once.
+select 'QZ5. Shoham answered ' || choice || ' (expect the key)' from public.study_quiz_answer(current_setting('t.qz')::uuid, 0, current_setting('t.k0')::int);
+select 'QZ5b. after the last answer: ' || state || ', answered ' || answered_n || ', version ' || version || ' (expect reveal, 2, 4)'
+  from public.study_quizzes where id = current_setting('t.qz')::uuid;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'QZ5c. Noa sees: key ' || (r ->> 'answer') || ', ' || jsonb_array_length(r -> 'explanations') || ' explanations, counts ' || coalesce(r ->> 'counts', 'none')
+       || ', right ' || coalesce(r ->> 'right', 'none') || ' of ' || (r ->> 'answered') || ', hers right: ' || (r ->> 'correct') || ', points ' || (r ->> 'points')
+       || ' (expect the key, 5, counts none, right none of 2: two answers show only how many answered, spec §12 review SEC-6; false, 0)'
+  from (select public.study_quiz_state(current_setting('t.qz')::uuid) -> 'round' as r) x;
+select 'QZ5d. hold released: feedback now gives ' || count(*) || ' row (expect 1)'
+  from public.study_question_feedback(array[current_setting('t.q0')::uuid]);
+select 'QZ5e. Noa''s private record has her quiz answer: ' || count(*) || ' (expect 1, mode quiz, wrong)'
+  from public.study_answers where question_id = current_setting('t.q0')::uuid and mode = 'quiz' and not correct;
+select 'QZ5f. ...and none of Shoham''s: ' || count(*) || ' visible to Noa (expect 0)'
+  from public.study_answers where user_id = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'QZ5g. a re-sent answer after the reveal changes nothing: ' || choice || ' (expect key+1, her first)'
+  from public.study_quiz_answer(current_setting('t.qz')::uuid, 0, current_setting('t.k0')::int);
+select 'QZ5h. a group quiz shows no one''s score: ' || coalesce(string_agg(p ->> 'score', ','), 'none') || ' (expect none)'
+  from jsonb_array_elements(public.study_quiz_state(current_setting('t.qz')::uuid) -> 'players') p;
+
+-- ═════════ 6. A late joiner, and the next round ═════════
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+select public.study_quiz_join(current_setting('t.qz')::uuid) is null as j \gset
+select 'QZ6. Yael joined during round ' || (s -> 'me' ->> 'joined_idx') || '; players ' || (s -> 'quiz' ->> 'players_n') || ' (expect 0; 3)'
+  from (select public.study_quiz_state(current_setting('t.qz')::uuid) as s) x;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.qz')::uuid, 0) is null as n \gset
+select public.study_quiz_next(current_setting('t.qz')::uuid, 0) is null as n \gset
+select 'QZ6b. a second tap on "next" did nothing: round ' || idx || ', state ' || state || ' (expect 1, question)'
+  from public.study_quizzes where id = current_setting('t.qz')::uuid;
+reset role;
+select set_config('t.k1', pg_temp.key_now(current_setting('t.qz')::uuid)::text, false) is not null as k1 \gset
+select set_config('t.q1', pg_temp.q_now(current_setting('t.qz')::uuid)::text, false) is not null as q1 \gset
+select pg_temp.shift(current_setting('t.qz')::uuid, 5) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+select 'QZ6c. Yael answers round 1: ' || choice || ' (expect the key)' from public.study_quiz_answer(current_setting('t.qz')::uuid, 1, current_setting('t.k1')::int);
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'QZ6d. Noa answers "לא יודעים": ' || coalesce(choice::text, 'null') || ' (expect null)' from public.study_quiz_answer(current_setting('t.qz')::uuid, 1, null);
+select 'QZ6e. Shoham has not answered: ' || state || ', answered ' || answered_n || ' (expect question, 2)'
+  from public.study_quizzes where id = current_setting('t.qz')::uuid;
+
+-- ═════════ 7. The host's phone locks ═════════
+reset role;
+update public.study_quiz_players set seen_at = clock_timestamp() - interval '60 seconds'
+ where quiz_id = current_setting('t.qz')::uuid and user_id = 'bbbbbbbb-0000-4000-8000-000000000002';
+select pg_temp.expire(current_setting('t.qz')::uuid, 2) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'QZ7. host here: ' || (public.study_quiz_state(current_setting('t.qz')::uuid) ->> 'host_here') || ' (expect false)';
+select public.study_quiz_reveal(current_setting('t.qz')::uuid, 1) is null as r \gset
+select 'QZ7b. after the deadline Noa revealed it: ' || state || ' (expect reveal)' from public.study_quizzes where id = current_setting('t.qz')::uuid;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_quiz_answer(current_setting('t.qz')::uuid, 1, 0); raise notice 'QZ7b2. FAIL: an answer after the reveal';
+exception when others then raise notice 'QZ7b2. %: no answers after the reveal (%)', case when sqlerrm = 'closed' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_quiz_next(current_setting('t.qz')::uuid, 1); raise notice 'QZ7c. FAIL: Noa moved on without being host';
+exception when others then raise notice 'QZ7c. %: only the host moves on (%)', case when sqlerrm = 'not host' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_quiz_take_host(current_setting('t.qz')::uuid) is null as t \gset
+select 'QZ7d. Noa took over: host is Noa ' || (host_id = auth.uid()) || ' (expect true)' from public.study_quizzes where id = current_setting('t.qz')::uuid;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_quiz_take_host(current_setting('t.qz')::uuid); raise notice 'QZ7e. FAIL: Shoham took it back while Noa is here';
+exception when others then raise notice 'QZ7e. %: no take-over while the host is here (%)', case when sqlerrm = 'host here' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- Noa voids round 1 (the question was wrong): its answers leave everyone's private record.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_void(current_setting('t.qz')::uuid, 1) is null as v \gset
+select 'QZ7f. voided: ' || (public.study_quiz_state(current_setting('t.qz')::uuid) -> 'round' ->> 'voided')
+       || '; Noa''s quiz answers to it left in her record: ' || (select count(*) from public.study_answers where question_id = current_setting('t.q1')::uuid)
+       || ' (expect true; 0)';
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+select 'QZ7g. ...and Yael''s: ' || count(*) || ' (expect 0)' from public.study_answers where question_id = current_setting('t.q1')::uuid;
+
+-- ═════════ 8. Every phone asleep at the deadline ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_next(current_setting('t.qz')::uuid, 1) is null as n \gset
+reset role;
+select pg_temp.expire(current_setting('t.qz')::uuid, 6) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+select 'QZ8. nobody revealed round 2; Yael''s next look reveals it: ' || (public.study_quiz_state(current_setting('t.qz')::uuid) -> 'quiz' ->> 'state')
+       || ' (expect reveal)';
+select 'QZ8b. her ping also answers with the clock and the version: ' || (server_now is not null) || ', ' || state || ', ' || version
+       || ' (expect true, reveal, the same version as the row)'
+  from public.study_quiz_ping(current_setting('t.qz')::uuid);
+
+-- ═════════ 9. The end ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_end(current_setting('t.qz')::uuid) is null as e \gset
+select 'QZ9. ended: ' || state || ', rounds revealed ' || (select count(*) from jsonb_array_elements(public.study_quiz_state(current_setting('t.qz')::uuid) -> 'summary'))
+       || ' (expect ended, 3)'
+  from public.study_quizzes where id = current_setting('t.qz')::uuid;
+select 'QZ9b. Noa''s summary: hers ' || string_agg(coalesce(s -> 'mine' ->> 'correct', '-'), ',' order by (s ->> 'idx')::int)
+       || ', voided ' || string_agg(s ->> 'voided', ',' order by (s ->> 'idx')::int) || ' (expect false,false,-; false,true,false)'
+  from jsonb_array_elements(public.study_quiz_state(current_setting('t.qz')::uuid) -> 'summary') s;
+set request.jwt.claim.sub = 'abababab-0000-4000-8000-000000000007';
+select 'QZ9c. Dana (a member who did not play) gets no summary: ' || coalesce(public.study_quiz_state(current_setting('t.qz')::uuid) ->> 'summary', 'null') || ' (expect null)';
+select 'QZ9d. the banner after the end: ' || count(*) || ' open quiz (expect 0)' from public.study_quiz_open(:'gid');
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'QZ9e. recent: ' || mode || ', ' || rounds || ' rounds, group right ' || right_pct || '%, mine ' || my_correct || '/' || my_answered
+       || ', rank ' || coalesce(my_rank::text, '-') || ' (expect coop, 2 rounds, 50%, 0/1, -)'
+  from public.study_quiz_recent(:'gid');
+reset role;
+select 'QZ9f. no key is held any more: ' || count(*) || ' (expect 0)' from public.study_question_keys where held_until > now();
+set role authenticated;
+
+-- ═════════ 10. A race ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.rc', public.study_quiz_create(:'gid', 'race', array['eeeeeeee-0000-4000-8000-000000000009', 'eeeeeeee-0000-4000-8000-00000000000a']::uuid[], 3, 20, 'mcq')::text, false) is not null as rc \gset
+select 'QZ10. title of a two-lecture race: ' || title || ' (expect פתוגן מאכסן · 2 הרצאות)' from public.study_quizzes where id = current_setting('t.rc')::uuid;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_join(current_setting('t.rc')::uuid) is null as j \gset
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+select public.study_quiz_join(current_setting('t.rc')::uuid) is null as j \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_next(current_setting('t.rc')::uuid, -1) is null as n \gset
+reset role;
+select 'QZ10b. only multiple-choice questions: ' || bool_and(q.kind = 'mcq') || ' (expect true)'
+  from public.study_quiz_rounds r join public.study_questions q on q.id = r.question_id where r.quiz_id = current_setting('t.rc')::uuid;
+select set_config('t.rk0', pg_temp.key_now(current_setting('t.rc')::uuid)::text, false) is not null as k \gset
+select pg_temp.shift(current_setting('t.rc')::uuid, 5) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.ms_sh', (select ms::text from public.study_quiz_answer(current_setting('t.rc')::uuid, 0, current_setting('t.rk0')::int)), false) is not null as a \gset
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+do $$ begin perform public.study_quiz_answer(current_setting('t.rc')::uuid, 0, null); raise notice 'QZ10c. FAIL: "לא יודעים" in a race';
+exception when others then raise notice 'QZ10c. %: a race has no "לא יודעים" (%)', case when sqlerrm = 'bad choice' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_quiz_reveal(current_setting('t.rc')::uuid, 0); raise notice 'QZ10d. FAIL: the race host revealed early';
+exception when others then raise notice 'QZ10d. %: in a race even the host waits for the clock (%)', case when sqlerrm = 'too early' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select pg_temp.shift(current_setting('t.rc')::uuid, 8) is null as s \gset
+set role authenticated;
+select set_config('t.ms_noa', (select ms::text from public.study_quiz_answer(current_setting('t.rc')::uuid, 0, current_setting('t.rk0')::int)), false) is not null as a \gset
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+select choice is not null as a from public.study_quiz_answer(current_setting('t.rc')::uuid, 0, (current_setting('t.rk0')::int + 1) % 4) \gset
+select 'QZ10e. all three answered: ' || state || ' (expect reveal)' from public.study_quizzes where id = current_setting('t.rc')::uuid;
+select 'QZ10f. the table: ' || string_agg((p ->> 'name') || ' ' || (p ->> 'score') || ' (+' || coalesce(p ->> 'last_points', '0') || ')', ', ' order by (p ->> 'score')::int desc, (p ->> 'ms')::int)
+       || '; Shoham''s is her bet on a right answer (none sent: ניחוש, +1) and her time is the tie-break: ' ||
+       bool_or((p ->> 'name') = 'שוהם' and (p ->> 'score')::int = 1 and (p ->> 'ms')::int = current_setting('t.ms_sh')::int)
+       || ' (expect שוהם 1 (+1), נועה כהן 1 (+1), יעל 0 (+0); true: decision 2, section Z''s end)'
+  from jsonb_array_elements(public.study_quiz_state(current_setting('t.rc')::uuid) -> 'players') p;
+set request.jwt.claim.sub = 'abababab-0000-4000-8000-000000000007';
+select 'QZ10g. Dana, watching, sees no scores: ' || coalesce(string_agg(p ->> 'score', ','), 'none') || ' (expect none)'
+  from jsonb_array_elements(public.study_quiz_state(current_setting('t.rc')::uuid) -> 'players') p;
+-- Next round: a right answer must not move the table before the reveal.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_next(current_setting('t.rc')::uuid, 0) is null as n \gset
+do $$ begin perform public.study_quiz_void(current_setting('t.rc')::uuid, 0); raise notice 'QZR1. FAIL: the race host voided a round after the next one opened';
+exception when others then raise notice 'QZR1. %: in a race a round is voided only while it is current (%)', case when sqlerrm = 'too late' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select set_config('t.rk1', pg_temp.key_now(current_setting('t.rc')::uuid)::text, false) is not null as k \gset
+select pg_temp.shift(current_setting('t.rc')::uuid, 4) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+select choice is not null as a from public.study_quiz_answer(current_setting('t.rc')::uuid, 1, current_setting('t.rk1')::int) \gset
+select 'QZ10h. Yael answered right, her score before the reveal: ' || (p ->> 'score') || ' (expect 0)'
+  from jsonb_array_elements(public.study_quiz_state(current_setting('t.rc')::uuid) -> 'players') p where p ->> 'name' = 'יעל';
+
+-- ═════════ 11. Leaving ═════════
+-- The host (Noa) leaves mid-round: the most recently seen player becomes host;
+-- Shoham answers; everyone still playing has answered, so the round is revealed.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_leave(current_setting('t.rc')::uuid) is null as l \gset
+reset role;
+select 'QZ11. host after Noa left: ' || m.name || ', players ' || z.players_n || ' (expect יעל, 2)'
+  from public.study_quizzes z join public.study_members m on m.user_id = z.host_id and m.group_id = z.group_id
+ where z.id = current_setting('t.rc')::uuid;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select choice is not null as a from public.study_quiz_answer(current_setting('t.rc')::uuid, 1, (current_setting('t.rk1')::int + 2) % 4) \gset
+select 'QZ11b. revealed once the two who stayed answered: ' || state || '; Yael''s score now ' ||
+       (select (p ->> 'score') from jsonb_array_elements(public.study_quiz_state(current_setting('t.rc')::uuid) -> 'players') p where p ->> 'name' = 'יעל')
+       || ' (expect reveal; 1: wrong 0, then right +1, decision 2)'
+  from public.study_quizzes where id = current_setting('t.rc')::uuid;
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+select public.study_quiz_leave(current_setting('t.rc')::uuid) is null as l \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_leave(current_setting('t.rc')::uuid) is null as l \gset
+select 'QZ11c. the last one out ends it: ' || state || ' (expect ended)' from public.study_quizzes where id = current_setting('t.rc')::uuid;
+
+-- ═════════ 12. Forgotten quizzes ═════════
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.old', public.study_quiz_create(:'gid', 'coop', array['eeeeeeee-0000-4000-8000-00000000000a']::uuid[], 3, 30)::text, false) is not null as o \gset
+reset role;
+update public.study_quizzes set updated_at = now() - interval '25 minutes' where id = current_setting('t.old')::uuid;
+update public.study_quiz_players set seen_at = now() - interval '25 minutes' where quiz_id = current_setting('t.old')::uuid;
+set role authenticated;
+select 'QZ12. the banner hides a lobby untouched for 25 minutes: ' || count(*) || ' (expect 0)' from public.study_quiz_open(:'gid');
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.new', public.study_quiz_create(:'gid', 'coop', array['eeeeeeee-0000-4000-8000-00000000000a']::uuid[], 3, 30)::text, false) is not null as n \gset
+select 'QZ12b. a new quiz closes it: old ' || (select state from public.study_quizzes where id = current_setting('t.old')::uuid)
+       || ', new ' || state || '; banner ' || (select count(*) || ' quiz, in it: ' || string_agg(array_to_string(names, ', '), '') from public.study_quiz_open(:'gid'))
+       || ' (expect cancelled, lobby; 1 quiz, in it: נועה כהן)'
+  from public.study_quizzes where id = current_setting('t.new')::uuid;
+
+-- ═════════ 13. A lecture deleted mid-quiz ═════════
+select public.study_quiz_next(current_setting('t.new')::uuid, -1) is null as n \gset
+reset role;
+select pg_temp.shift(current_setting('t.new')::uuid, 5) is null as s \gset
+reset role;
+delete from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-00000000000a';   -- purged (a member's delete only hides it for 30 days)
+set role authenticated;
+select 'QZ13. the open round lost its question: ' || coalesce(public.study_quiz_state(current_setting('t.new')::uuid) -> 'round' ->> 'q', 'null') || ' (expect null)';
+select public.study_quiz_reveal(current_setting('t.new')::uuid, 0) is null as r \gset
+select 'QZ13b. its reveal voids it: ' || (public.study_quiz_state(current_setting('t.new')::uuid) -> 'round' ->> 'voided') || ' (expect true)';
+select public.study_quiz_next(current_setting('t.new')::uuid, 0) is null as n \gset
+select 'QZ13c. no rounds with a question left, so it ends: ' || state || ' (expect ended)' from public.study_quizzes where id = current_setting('t.new')::uuid;
+
+-- ═════════ 14. The hold on past-exam keys (questions-hold.sql) ═════════
+reset role;
+insert into public.study_exams (id, group_id, course, title) values ('77777777-0000-4000-8000-000000000001', :'gid', 'פתוגן מאכסן', 'מבחן 2024 מועד א');
+insert into public.study_questions (id, group_id, exam_id, exam_no, source, kind, question, options, ref_lecture)
+values ('77777777-0000-4000-8000-000000000002', :'gid', '77777777-0000-4000-8000-000000000001', 3, 'exam', 'mcq', 'שאלה ממבחן?', array['a', 'b', 'c', 'd'], 'eeeeeeee-0000-4000-8000-000000000009');
+insert into public.study_question_keys (question_id, answer, explanations, held_until)
+values ('77777777-0000-4000-8000-000000000002', 2, array['1', '2', '3', '4'], now() + interval '5 minutes');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'QZ14. a held exam item is not handed out for explaining: ' || count(*) || ' (expect 0)'
+  from public.study_exam_items_for_explain(array['77777777-0000-4000-8000-000000000002']::uuid[]);
+do $$ begin perform public.study_set_exam_key('77777777-0000-4000-8000-000000000002', 0); raise notice 'QZ14b. FAIL: re-keyed during its round';
+exception when others then raise notice 'QZ14b. %: no re-keying during its round (%)', case when sqlerrm = 'in quiz' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_set_explanations('77777777-0000-4000-8000-000000000002', array['1','2','3','4'], '', array[1], null, current_setting('t.key')); raise notice 'QZ14c. FAIL';
+exception when others then raise notice 'QZ14c. %: no new explanations during its round (%)', case when sqlerrm = 'in quiz' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update public.study_question_keys set held_until = now() - interval '1 second' where question_id = '77777777-0000-4000-8000-000000000002';
+set role authenticated;
+select 'QZ14d. an expired hold lets go by itself: ' || count(*) || ' (expect 1)'
+  from public.study_exam_items_for_explain(array['77777777-0000-4000-8000-000000000002']::uuid[]);
+
+-- ═════════ 15. Realtime, anon ═════════
+reset role;
+select 'QZ15. published quiz tables: ' || string_agg(tablename, ', ' order by tablename) || ' (expect study_quizzes)'
+  from pg_publication_tables where pubname = 'supabase_realtime' and tablename like 'study\_quiz%';
+set role anon;
+reset request.jwt.claim.sub;
+do $$ begin perform count(*) from public.study_quizzes; raise notice 'QZ15b. FAIL: anon read quizzes';
+exception when insufficient_privilege then raise notice 'QZ15b. ok: anon cannot read quizzes (%)', sqlerrm; end $$;
+do $$ begin perform public.study_quiz_state(gen_random_uuid()); raise notice 'QZ15c. FAIL: anon called the state';
+exception when insufficient_privilege then raise notice 'QZ15c. ok: anon cannot call the functions (%)', sqlerrm; end $$;
+reset role;
+-- Clean-up for the sections after this one (they count the group's answers):
+-- the quizzes and the two fixture lectures go, with their questions and answers.
+reset role;
+delete from public.study_quizzes where group_id = :'gid';
+delete from public.study_lectures where id in ('eeeeeeee-0000-4000-8000-000000000009', 'eeeeeeee-0000-4000-8000-00000000000a');
+
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION Z's end checks · ZA (spec §12.3.Z, ZA-1: ZA0-ZA13) and ZS (the
+--  review's SR5b, SR6a-SR6h, FR6c and FR15, ZA-2)   (package Z)
+--  The addendum's shared checks (docs/study/spec/addendum/tests/shared/
+--  95-extensions-test.sql, its Z part) and review checks (tests/review/
+--  10-sec-test.sql, 20-feas-test.sql), ported to this file's session: one
+--  group, section Q at version 1, and none of sections M, U, H, E or C's
+--  end. What changes from them, and why:
+--   - the fixture's questions carry no part_gen (a column of Q's end that
+--     Z does not read) and the lectures no cards (C's end's columns);
+--   - ZA7 and ZS6e-ZS6g: a trap card needs three players' choice (ZA7 has
+--     two: none) and section C's end, which makes it (ZS6e-ZS6g play the
+--     addendum's SR6e-SR6g: made once, closed until the next study day);
+--   - ZS5b, ZS6a-ZS6h and ZS6-hidden play SR5b, SR6a-SR6h and FR6c in this
+--     group with ZA's members and lectures (the review's own database made
+--     a second group); FR15's closing came from M's study_meeting_quiz, so
+--     ZS15 asks study_quiz_create for a second 'end' the same study day;
+--   - SR5a (the opening's picker) and FR6d-FR6g are M's, N's and Q's end's.
+--  Time is simulated by moving times into the past as the owner, never by
+--  sleeping. Every fixture goes at the end. Throwaway local Postgres only.
+-- ════════════════════════════════════════════════════════════════════════
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+select set_config('t.gid', :'gid', false) is not null as g \gset
+update public.study_quizzes set state = 'ended', ended_at = now() where state in ('lobby', 'question', 'reveal');
+
+-- ── Fixtures ──
+-- Members: שוהם (b…2), נועה כהן (c…3), יעל (f…6), דנה (ab…7) from the
+-- earlier checks, and מאיה, איתי, דניאל, רוני. A stranger: d…4.
+insert into auth.users (id, raw_user_meta_data) values
+ ('3c000000-0000-4000-8000-000000000001', '{"app":"study","full_name":"מאיה"}'),
+ ('3c000000-0000-4000-8000-000000000002', '{"app":"study","full_name":"איתי"}'),
+ ('3c000000-0000-4000-8000-000000000003', '{"app":"study","full_name":"דניאל"}'),
+ ('3c000000-0000-4000-8000-000000000004', '{"app":"study","full_name":"רוני"}');
+insert into public.study_members (group_id, user_id, name) values
+ (:'gid', '3c000000-0000-4000-8000-000000000001', 'מאיה'),
+ (:'gid', '3c000000-0000-4000-8000-000000000002', 'איתי'),
+ (:'gid', '3c000000-0000-4000-8000-000000000003', 'דניאל'),
+ (:'gid', '3c000000-0000-4000-8000-000000000004', 'רוני');
+-- L1 today's lecture (40 slides, three parts), L2 yesterday's, L3 an older one.
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, created_by) values
+ ('3c100000-0000-4000-8000-000000000001', :'gid', 'פתוגן מאכסן', 'מלריה (פגישה)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 40) n), 'bbbbbbbb-0000-4000-8000-000000000002'),
+ ('3c100000-0000-4000-8000-000000000002', :'gid', 'פתוגן מאכסן', 'לישמניה (פגישה)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 20) n), 'bbbbbbbb-0000-4000-8000-000000000002'),
+ ('3c100000-0000-4000-8000-000000000003', :'gid', 'פתוגן מאכסן', 'אמבות (פגישה)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 10) n), 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ ('3c100000-0000-4000-8000-000000000001', 0, 'מחזור החיים', 1, 12, 'ready',
+  E'## מחזור החיים\n\nאף תרופה לא הורגת את ה-Sporozoite. [ש'' 3]\n\nה-Hypnozoite ישן בכבד. [ש'' 5]\n\nלפני Primaquine בודקים G6PD. [ש'' 7]'),
+ ('3c100000-0000-4000-8000-000000000001', 1, 'מנגנונים', 13, 24, 'ready',
+  E'## מנגנונים\n\nChloroquine מצטברת בוואקואולה. [ש'' 15]\n\nMefloquine ניתנת פעם בשבוע. [ש'' 20]'),
+ ('3c100000-0000-4000-8000-000000000001', 2, 'שילובים', 25, 40, 'ready',
+  E'## שילובים\n\nArtemisinins לעולם לא לבד. [ש'' 30]\n\nQuinine עם Doxycycline, לא בהיריון. [ש'' 33]'),
+ ('3c100000-0000-4000-8000-000000000002', 0, 'טיפול', 1, 10, 'ready', E'## טיפול\n\nMiltefosine טרטוגנית. [ש'' 6]\n\nPentostam דורשת ECG. [ש'' 8]'),
+ ('3c100000-0000-4000-8000-000000000002', 1, 'מנגנון', 11, 20, 'ready', E'## מנגנון\n\nSb(V) הופך ל-Sb(III). [ש'' 15]'),
+ ('3c100000-0000-4000-8000-000000000003', 0, 'אמבות', 1, 10, 'ready', E'## אמבות\n\nMetronidazole ובירה. [ש'' 7]');
+-- Questions placed on paragraphs (key = the option index given).
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, anchor, quote, kind, question, options, slides, topic, aspect, teaser)
+values
+ ('3c2a0000-0000-4000-8000-000000000001', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 0, 1, 'אף תרופה לא הורגת', 'mcq', 'איזה שלב אף תרופה לא הורגת?', array['Sporozoite','Hypnozoite','Schizont','Gametocyte','Merozoite'], array[3], 'Sporozoite', 'lifecycle', 'ה-Sporozoite נכנס בלי כרטיס'),
+ ('3c2a0000-0000-4000-8000-000000000002', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 0, 2, 'ה-Hypnozoite ישן', 'mcq', 'מה גורם להישנות ב-vivax?', array['א','ב','ג','ד','ה'], array[5], 'Primaquine', 'lifecycle', ''),
+ ('3c2a0000-0000-4000-8000-000000000003', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 0, 2, 'ה-Hypnozoite ישן', 'mcq', 'מה מסלק hypnozoites?', array['א','ב','ג','ד','ה'], array[5], 'Primaquine', 'uses', ''),
+ ('3c2a0000-0000-4000-8000-000000000004', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 0, 3, 'לפני Primaquine', 'mcq', 'מה בודקים לפני Primaquine?', array['א','ב','ג','ד','ה'], array[7], 'Primaquine', 'contra', ''),
+ ('3c2a0000-0000-4000-8000-000000000005', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 1, 1, 'Chloroquine מצטברת', 'mcq', 'איפה מצטברת Chloroquine?', array['א','ב','ג','ד','ה'], array[15], 'Chloroquine', 'mechanism', ''),
+ ('3c2a0000-0000-4000-8000-000000000006', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 1, 2, 'Mefloquine ניתנת', 'mcq', 'כל כמה זמן Mefloquine?', array['א','ב','ג','ד','ה'], array[20], 'Mefloquine', 'dosing', ''),
+ ('3c2a0000-0000-4000-8000-000000000007', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 2, 1, 'Artemisinins לעולם', 'mcq', 'למה Artemisinins לא לבד?', array['א','ב','ג','ד','ה'], array[30], 'Artemisinin', 'uses', ''),
+ ('3c2a0000-0000-4000-8000-000000000008', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 2, 2, 'Quinine עם Doxycycline', 'mcq', 'מה מצרפים ל-Quinine בהיריון?', array['א','ב','ג','ד','ה'], array[33], 'Quinine', 'contra', ''),
+ ('3c2b0000-0000-4000-8000-000000000001', :'gid', '3c100000-0000-4000-8000-000000000002', 'ai', 0, 1, 'Miltefosine טרטוגנית', 'mcq', 'מה Miltefosine מחייבת?', array['א','ב','ג','ד','ה'], array[6], 'Miltefosine', 'contra', 'Miltefosine סיימה קורס, אבל עוד לא עזבה'),
+ ('3c2b0000-0000-4000-8000-000000000002', :'gid', '3c100000-0000-4000-8000-000000000002', 'ai', 0, 2, 'Pentostam דורשת', 'mcq', 'למה Pentostam דורשת ECG?', array['א','ב','ג','ד','ה'], array[8], 'Pentostam', 'adverse', ''),
+ ('3c2b0000-0000-4000-8000-000000000003', :'gid', '3c100000-0000-4000-8000-000000000002', 'ai', 0, 2, 'Pentostam דורשת', 'mcq', 'מה מנטרים ב-Pentostam?', array['א','ב','ג','ד','ה'], array[8], 'Pentostam', 'adverse', ''),
+ ('3c2b0000-0000-4000-8000-000000000004', :'gid', '3c100000-0000-4000-8000-000000000002', 'ai', 1, 1, 'Sb(V) הופך', 'mcq', 'איך Pentostam מופעלת?', array['א','ב','ג','ד','ה'], array[15], 'Pentostam', 'mechanism', ''),
+ ('3c2c0000-0000-4000-8000-000000000001', :'gid', '3c100000-0000-4000-8000-000000000003', 'ai', 0, 1, 'Metronidazole ובירה', 'mcq', 'מה קורה עם Metronidazole ובירה?', array['א','ב','ג','ד','ה'], array[7], 'Metronidazole', 'interactions', 'Metronidazole נתפסה עם בירה');
+insert into public.study_question_keys (question_id, answer, explanations, takeaway)
+select q.id, (case right(q.id::text, 1) when '1' then 0 when '2' then 1 when '3' then 2 when '4' then 3 when '5' then 0 when '6' then 1 when '7' then 2 else 3 end)::smallint,
+       array['הסבר א [ש'' 3]', 'הסבר ב: לא כאן [ש'' 5]', 'הסבר ג [ש'' 7]', 'הסבר ד', 'הסבר ה'], 'מה לזכור'
+  from public.study_questions q where q.id::text like '3c2%';
+
+-- Test helpers (the owner calls them; no member can).
+create schema if not exists mtest;
+create or replace function mtest.shift(p_quiz uuid, p_secs numeric) returns void language sql as $$
+  update public.study_quiz_rounds set opens_at = opens_at - make_interval(secs => p_secs::double precision),
+                                      closes_at = closes_at - make_interval(secs => p_secs::double precision)
+   where quiz_id = p_quiz and opens_at is not null and revealed_at is null;
+  update public.study_quizzes set opens_at = opens_at - make_interval(secs => p_secs::double precision),
+                                  closes_at = closes_at - make_interval(secs => p_secs::double precision)
+   where id = p_quiz;
+$$;
+create or replace function mtest.key_now(p_quiz uuid) returns int language sql as $$
+  select k.answer::int from public.study_quizzes z
+    join public.study_quiz_rounds r on r.quiz_id = z.id and r.idx = z.idx
+    join public.study_question_keys k on k.question_id = r.question_id where z.id = p_quiz $$;
+create or replace function mtest.q_now(p_quiz uuid) returns uuid language sql as $$
+  select r.question_id from public.study_quizzes z join public.study_quiz_rounds r on r.quiz_id = z.id and r.idx = z.idx
+   where z.id = p_quiz $$;
+revoke all on schema mtest from public;
+grant usage on schema mtest to authenticated, anon;
+
+-- ═════════ Section Z's end: part range, the bet, Mazur's rule, the trap, the record ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$
+declare c record; n int := 0;
+begin
+  for c in select * from (values
+      ('bad preset', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 5, 'party', null::uuid, null::int, null::int, 'bad preset'),
+      ('opening without a meeting', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 3, 'coffee', null::uuid, null::int, null::int, 'meeting not found'),
+      ('opening as a race', 'race', array['3c100000-0000-4000-8000-000000000001']::uuid[], 3, 'coffee', null::uuid, null::int, null::int, 'bad mode'),
+      ('stop of three', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 3, 'stop', null::uuid, 1, 1, 'bad count'),
+      ('parts of two lectures', 'coop', array['3c100000-0000-4000-8000-000000000001', '3c100000-0000-4000-8000-000000000002']::uuid[], 5, 'free', null::uuid, 0, 1, 'bad parts'),
+      ('a part that is not there', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 5, 'end', null::uuid, 0, 9, 'bad parts'),
+      ('half a range', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 5, 'end', null::uuid, 0, null::int, 'bad parts'),
+      ('a meeting that is not there', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 5, 'end', gen_random_uuid(), null::int, null::int, 'meeting not found')
+    ) as t(label, mode, lecs, cnt, preset, meeting, pf, pt, want) loop
+    begin
+      perform public.study_quiz_create(current_setting('t.gid')::uuid, c.mode, c.lecs, c.cnt, 60, 'all', c.preset, c.meeting, c.pf, c.pt);
+      raise notice 'ZA0. FAIL: % was accepted', c.label;
+    exception when others then if sqlerrm = c.want then n := n + 1; else raise notice 'ZA0. FAIL: % → %', c.label, sqlerrm; end if; end;
+  end loop;
+  raise notice 'ZA0. ok: % of 8 bad quizzes refused with their reason', n;
+end $$;
+-- "סוף הקריאה" on part 0 of L1: three questions, one of them marked stale by a correction.
+select set_config('t.zq', public.study_quiz_create(:'gid', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 3, 60, 'all', 'end', null, 0, 0)::text, false) is not null as z \gset
+reset role;
+update public.study_questions set stale_at = now() where id = '3c2a0000-0000-4000-8000-000000000004';
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_join(current_setting('t.zq')::uuid) is null as j \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_quiz_join(current_setting('t.zq')::uuid) is null as j \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select public.study_quiz_join(current_setting('t.zq')::uuid) is null as j \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.zq')::uuid, -1) is null as n \gset
+reset role;
+select 'ZA1. on part 0 only, never the stale question, in reading order: '
+       || string_agg(right(r.question_id::text, 1), ',' order by r.idx) || '; preset ' || max(z.preset) || ', parts ' || max(z.part_from) || '-' || max(z.part_to)
+       || ' (expect 1 first, then 2 and 3; end, 0-0)'
+  from public.study_quiz_rounds r join public.study_quizzes z on z.id = r.quiz_id where r.quiz_id = current_setting('t.zq')::uuid;
+select set_config('t.zk0', mtest.key_now(current_setting('t.zq')::uuid)::text, false) is not null as k \gset
+select mtest.shift(current_setting('t.zq')::uuid, 5) is null as s \gset
+set role authenticated;
+-- Round 0: Shoham right on "על בטוח", Itai right on "ניחוש", Noa and Maya on the same wrong option.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_quiz_answer(current_setting('t.zq')::uuid, 0, 1, 5);
+  raise notice 'ZA2. FAIL: a bet of 5';
+exception when others then raise notice 'ZA2. %: a bet is 1-3 (%)', case when sqlerrm = 'bad bet' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'ZA2b. Noa''s answer keeps her bet: vote ' || vote || ', bet ' || bet || ' (expect 1, 3)'
+  from public.study_quiz_answer(current_setting('t.zq')::uuid, 0, (current_setting('t.zk0')::int + 1) % 5, 3);
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 0, (current_setting('t.zk0')::int + 1) % 5, 2) \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 0, current_setting('t.zk0')::int, 1) \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 0, current_setting('t.zk0')::int, 3) \gset
+select 'ZA3. 2 of 4 right (50%): state ' || (s -> 'quiz' ->> 'state') || ', stage ' || (s -> 'quiz' ->> 'stage')
+       || ', argue for ' || round(extract(epoch from ((s -> 'quiz' ->> 'argue_until')::timestamptz - now())))::int || ' s'
+       || ', key sent: ' || ((s -> 'round') ? 'answer') || ', vote 1''s counts ' || (s -> 'round' -> 'counts1')::text
+       || ' (expect reveal, argue, 90 s, false, two on the key and two on the trap)'
+  from (select public.study_quiz_state(current_setting('t.zq')::uuid) as s) x;
+reset role;
+select 'ZA3b. nothing is scored or copied while they argue: private copies ' ||
+       (select count(*) from public.study_answers where question_id = '3c2a0000-0000-4000-8000-000000000001' and mode = 'quiz')
+       || ', key still held ' || (select held_until > now() + interval '90 seconds' from public.study_question_keys where question_id = '3c2a0000-0000-4000-8000-000000000001')
+       || ' (expect 0, true)';
+set role authenticated;
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+do $$ begin perform public.study_answer_question('3c2a0000-0000-4000-8000-000000000001', 0);
+  raise notice 'ZA3c. FAIL: practice gave the key while the group argues';
+exception when others then raise notice 'ZA3c. %: practice waits for the vote (%)', case when sqlerrm = 'in quiz' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_quiz_next(current_setting('t.zq')::uuid, 0);
+  raise notice 'ZA4. FAIL: Noa opened the second vote';
+exception when others then raise notice 'ZA4. %: the host opens vote 2 (%)', case when sqlerrm = 'not host' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.zq')::uuid, 0) is null as n \gset
+select 'ZA4b. "לסבב 2": state ' || state || ', vote ' || vote || ', closes in ' || round(extract(epoch from (closes_at - now())))::int || ' s'
+       || ' (expect question, 2, 33 s)' from public.study_quizzes where id = current_setting('t.zq')::uuid;
+reset role;
+select mtest.shift(current_setting('t.zq')::uuid, 5) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'ZA4c. Noa''s second vote is kept apart: vote ' || vote || ', bet ' || coalesce(bet::text, 'none') || ' (expect 2, none)'
+  from public.study_quiz_answer(current_setting('t.zq')::uuid, 0, current_setting('t.zk0')::int, 3, 2);
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select vote is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 0, current_setting('t.zk0')::int) \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select vote is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 0, current_setting('t.zk0')::int) \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select vote is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 0, current_setting('t.zk0')::int) \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'ZA5. after the revote: ' || (r ->> 'next_step') || ', right ' || (r ->> 'right') || ' of ' || (r ->> 'answered') || ', before '
+       || (r ->> 'right1') || ' of ' || (r ->> 'answered1') || ', the trap is option ' || (r ->> 'trap')
+       || '; Noa (private): ' || (r ->> 'points') || ' for her first vote, right then ' || (r ->> 'correct') || ', right after the discussion ' || (r ->> 'correct2')
+       || ' (expect explain, 4 of 4, 2 of 4, key+1; -6, false, true)'
+  from (select public.study_quiz_state(current_setting('t.zq')::uuid) -> 'round' as r) x;
+reset role;
+select 'ZA5b. the trap option is key+1: ' || (trap = (current_setting('t.zk0')::int + 1) % 5) || ' (expect true)'
+  from public.study_quiz_rounds where quiz_id = current_setting('t.zq')::uuid and idx = 0;
+select 'ZA6. first votes only reach the private record, with the bet: ' || count(*) || ' rows, Noa''s: choice '
+       || max(choice) filter (where user_id = 'cccccccc-0000-4000-8000-000000000003') || ', bet '
+       || max(confidence) filter (where user_id = 'cccccccc-0000-4000-8000-000000000003') || ', right '
+       || bool_or(correct) filter (where user_id = 'cccccccc-0000-4000-8000-000000000003')
+       || ' (expect 4 rows; key+1, 3, false)'
+  from public.study_answers where question_id = '3c2a0000-0000-4000-8000-000000000001' and mode = 'quiz';
+select 'ZA6b. points: ' || string_agg(m.name || ' ' || a.points, ', ' order by m.name) || ' (expect each bet: right +3/+1, wrong −6/−2)'
+  from public.study_quiz_answers a join public.study_quiz_rounds r on r.id = a.round_id and r.quiz_id = current_setting('t.zq')::uuid and r.idx = 0
+  join public.study_members m on m.user_id = a.user_id where a.vote = 1;
+select 'ZA7. two players chose the round''s trap: card ' || coalesce(trap_card::text, 'none')
+       || ' (expect none: a trap card needs 3 players'' choice, review SEC-6; ZS6e makes one)'
+  from public.study_quiz_rounds where quiz_id = current_setting('t.zq')::uuid and idx = 0;
+-- Round 1: 3 of 4 right (75%) → explained at once.
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.zq')::uuid, 0) is null as n \gset
+reset role;
+select set_config('t.zk1', mtest.key_now(current_setting('t.zq')::uuid)::text, false) is not null as k \gset
+select mtest.shift(current_setting('t.zq')::uuid, 5) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 1, current_setting('t.zk1')::int, 2) \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 1, current_setting('t.zk1')::int, 2) \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 1, current_setting('t.zk1')::int, 1) \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 1, (current_setting('t.zk1')::int + 2) % 5, 1) \gset
+select 'ZA8. 3 of 4 right (75%): ' || (s -> 'quiz' ->> 'stage') || ', ' || (s -> 'round' ->> 'next_step') || ', key sent '
+       || ((s -> 'round') ? 'answer') || ', trap ' || coalesce(s -> 'round' ->> 'trap', 'none') || ' (expect final, explain, true, none: one wrong vote)'
+  from (select public.study_quiz_state(current_setting('t.zq')::uuid) as s) x;
+-- Round 2: 1 of 4 right (25%) → every phone opens the paragraph.
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.zq')::uuid, 1) is null as n \gset
+reset role;
+select set_config('t.zk2', mtest.key_now(current_setting('t.zq')::uuid)::text, false) is not null as k \gset
+select set_config('t.zq2', mtest.q_now(current_setting('t.zq')::uuid)::text, false) is not null as k \gset
+select mtest.shift(current_setting('t.zq')::uuid, 5) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 2, current_setting('t.zk2')::int, 3) \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 2, (current_setting('t.zk2')::int + 3) % 5, 3) \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 2, (current_setting('t.zk2')::int + 3) % 5, 2) \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zq')::uuid, 2, (current_setting('t.zk2')::int + 3) % 5, 1) \gset
+select 'ZA9. 1 of 4 right (25%): ' || (r ->> 'next_step') || ', jump to part ' || (r -> 'jump' ->> 'part') || ' paragraph ' || (r -> 'jump' ->> 'anchor')
+       || ', trap is the option three chose: ' || ((r ->> 'trap')::int = (current_setting('t.zk2')::int + 3) % 5)
+       || ' (expect source, 0, 2, true)'
+  from (select public.study_quiz_state(current_setting('t.zq')::uuid) -> 'round' as r) x;
+-- The end: the team's result counts final votes; three rounds set no record.
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.zq')::uuid, 2) is null as n \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'ZA10. the end: ' || (s -> 'quiz' ->> 'state') || ', team ' || (s -> 'team' ->> 'right_pct') || '%, passed ' || (s -> 'team' ->> 'passed')
+       || ', new record ' || (s -> 'team' ->> 'new_record') || '; round 0 before and after: ' || (s -> 'summary' -> 0 ->> 'right1') || ' → ' || (s -> 'summary' -> 0 ->> 'right')
+       || '; Noa''s private total ' || (s -> 'me' ->> 'score') || ', her first votes right ' || (s -> 'me' ->> 'correct_n') || ' of ' || (s -> 'me' ->> 'answered_n')
+       || ' (expect ended, 67%, false, false; 2 → 4; -10, 1 of 3)'
+  from (select public.study_quiz_state(current_setting('t.zq')::uuid) as s) x;
+select 'ZA10b. "יחד": ' || r.mode || ', ' || r.rounds || ' rounds, the group right ' || r.right_pct || '% (final votes), Noa ' || r.my_correct || '/' || r.my_answered
+       || ' (expect coop, 3 rounds, 67%, 1/3)'
+  from public.study_quiz_recent(:'gid') r where r.id = current_setting('t.zq')::uuid;
+-- A race scores the bet (decision 2): right +2 twice, wrong −6; speed breaks the tie.
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.zr', public.study_quiz_create(:'gid', 'race', array['3c100000-0000-4000-8000-000000000002']::uuid[], 3, 30)::text, false) is not null as z \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_join(current_setting('t.zr')::uuid) is null as j \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_quiz_join(current_setting('t.zr')::uuid) is null as j \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.zr')::uuid, -1) is null as n \gset
+reset role;
+select set_config('t.zrk', mtest.key_now(current_setting('t.zr')::uuid)::text, false) is not null as k \gset
+select mtest.shift(current_setting('t.zr')::uuid, 5) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zr')::uuid, 0, current_setting('t.zrk')::int, 2) \gset
+reset role;
+select mtest.shift(current_setting('t.zr')::uuid, 4) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zr')::uuid, 0, current_setting('t.zrk')::int, 2) \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.zr')::uuid, 0, (current_setting('t.zrk')::int + 1) % 5, 3) \gset
+select 'ZA11. a race: ' || (s -> 'round' ->> 'next_step') || '; the table ' ||
+       (select string_agg((p ->> 'name') || ' ' || (p ->> 'score'), ', ' order by (p ->> 'score')::int desc, (p ->> 'ms')::int)
+          from jsonb_array_elements(s -> 'players') p)
+       || ' (expect explain: no revote in a race; שוהם 2, נועה כהן 2, מאיה -6)'
+  from (select public.study_quiz_state(current_setting('t.zr')::uuid) as s) x;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_end(current_setting('t.zr')::uuid) is null as e \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'ZA11b. Noa''s place after the race: ' || my_rank || ' (expect 2: tied with Shoham, who was faster)' from public.study_quiz_recent(:'gid') where id = current_setting('t.zr')::uuid;
+-- The record: the best co-op score of at least 5 rounds and 3 players.
+reset role;
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, state, idx, n_total, preset, created_at, ended_at)
+values ('3c5a0000-0000-4000-8000-000000000001', :'gid', 'coop', 'שיא', array['3c100000-0000-4000-8000-000000000001']::uuid[], 5, 60, 'ended', 4, 5, 'end',
+        now() - interval '2 days', now() - interval '2 days');
+insert into public.study_quiz_players (quiz_id, user_id)
+select '3c5a0000-0000-4000-8000-000000000001', u from unnest(array['bbbbbbbb-0000-4000-8000-000000000002', 'cccccccc-0000-4000-8000-000000000003',
+                                                                   '3c000000-0000-4000-8000-000000000001']::uuid[]) u;
+insert into public.study_quiz_rounds (id, quiz_id, idx, question_id, seconds, revealed_at, answer)
+select ('3c5b0000-0000-4000-8000-00000000000' || i)::uuid, '3c5a0000-0000-4000-8000-000000000001', i, ('3c2a0000-0000-4000-8000-00000000000' || (i + 1))::uuid,
+       60, now() - interval '2 days', 0
+  from generate_series(0, 4) i;
+insert into public.study_quiz_answers (round_id, user_id, choice, ms, answered_at, correct, vote)
+select ('3c5b0000-0000-4000-8000-00000000000' || i)::uuid, u, 0, 1000, now() - interval '2 days', not (i = 0 and u = '3c000000-0000-4000-8000-000000000001'), 1
+  from generate_series(0, 4) i, unnest(array['bbbbbbbb-0000-4000-8000-000000000002', 'cccccccc-0000-4000-8000-000000000003',
+                                              '3c000000-0000-4000-8000-000000000001']::uuid[]) u;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'ZA12. the group''s record (the lobby''s "השיא"): ' || public.study_quiz_record(:'gid') || '% (expect 93: 14 of 15; the 3-round quiz does not count)';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_quiz_record(current_setting('t.gid')::uuid); raise notice 'ZA12b. FAIL: a stranger read the record';
+exception when others then raise notice 'ZA12b. %: members only (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select 'ZA13. the hold is gone after the end: ' || count(*) || ' keys held (expect 0); the registry: ' || (public.study_schema() ->> 'Z') || ' (expect 2)'
+  from public.study_question_keys where held_until > now();
+update public.study_questions set stale_at = null where id = '3c2a0000-0000-4000-8000-000000000004';
+
+-- ═════════ ZS · the review's findings on the quiz (SEC-5, SEC-6, F-6, F-15), in this group ═════════
+-- ZS5b (SR5b, SEC-5): with two players the pick never reads the other's answers.
+-- Maya answered L1's q1, q3, q4, q6 and q7 in practice, never q2, q5 or q8.
+reset role;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at)
+select '3c000000-0000-4000-8000-000000000001', q.id, 0, true, 'lecture', now() - interval '2 days'
+  from public.study_questions q
+ where q.lecture_id = '3c100000-0000-4000-8000-000000000001'
+   and right(q.id::text, 1) in ('1', '3', '4', '6', '7');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.fq', public.study_quiz_create(:'gid', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 3, 30)::text, false) is not null as c \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_quiz_join(current_setting('t.fq')::uuid) is null as j \gset
+reset role;
+do $$
+declare i int; hits int := 0; got uuid[];
+begin
+  for i in 1 .. 20 loop
+    perform public.study_quiz__pick(current_setting('t.fq')::uuid);
+    select array_agg(question_id order by question_id) into got from public.study_quiz_rounds where quiz_id = current_setting('t.fq')::uuid;
+    if got = array['3c2a0000-0000-4000-8000-000000000002', '3c2a0000-0000-4000-8000-000000000005',
+                   '3c2a0000-0000-4000-8000-000000000008']::uuid[] then hits := hits + 1; end if;
+  end loop;
+  raise notice 'ZS5b. %: a quiz of two asked exactly what Maya never answered in % of 20 runs (expect about chance: 1 in 16; the designs'' pick: 20 of 20)',
+    case when hits < 10 then 'ok' else 'FAIL' end, hits;
+end $$;
+delete from public.study_quizzes where id = current_setting('t.fq')::uuid;
+-- ZS6a-ZS6c (SR6a-SR6c, SEC-6): two answers show no counts, to the players or to a member who watches; a quiz of two publishes no share.
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.q2', public.study_quiz_create(:'gid', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 3, 30)::text, false) is not null as c \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_quiz_join(current_setting('t.q2')::uuid) is null as j \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_next(current_setting('t.q2')::uuid, -1) is null as n \gset
+reset role;
+select mtest.shift(current_setting('t.q2')::uuid, 5) is null as s \gset
+set role authenticated;
+select (public.study_quiz_answer(current_setting('t.q2')::uuid, 0, 0, 2)).bet is not null as a \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select (public.study_quiz_answer(current_setting('t.q2')::uuid, 0, 1, 2)).bet is not null as a \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'ZS6a. two players: ' || (s -> 'quiz' ->> 'state') || ', answered ' || (s -> 'round' ->> 'answered') || ', counts ' || coalesce(s -> 'round' ->> 'counts', 'none')
+       || ', right ' || coalesce(s -> 'round' ->> 'right', 'none') || ' (expect reveal, answered 2, counts none, right none)'
+  from (select public.study_quiz_state(current_setting('t.q2')::uuid) as s) x;
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000003';
+select 'ZS6b. Daniel, watching: counts ' || coalesce(s -> 'round' ->> 'counts', 'none') || ', right ' || coalesce(s -> 'round' ->> 'right', 'none') || ', correct '
+       || coalesce(s -> 'round' ->> 'correct', 'none') || ', answered ' || (s -> 'round' ->> 'answered') || ' (expect none, none, none, answered 2)'
+  from (select public.study_quiz_state(current_setting('t.q2')::uuid) as s) x;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_end(current_setting('t.q2')::uuid) is null as e \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select 'ZS6c. a quiz of two on "יחד": players ' || players_n || ', share ' || coalesce(right_pct::text, 'none') || ' (expect players 2, share none)'
+  from public.study_quiz_recent(:'gid') where id = current_setting('t.q2')::uuid;
+-- ZS6d-ZS6e (SR6d, SEC-6): four players, three on the same wrong option: the trap is named to the players; no card without section C's end.
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select set_config('t.q4', public.study_quiz_create(:'gid', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 3, 30)::text, false) is not null as c \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_quiz_join(current_setting('t.q4')::uuid) is null as j \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000003';
+select public.study_quiz_join(current_setting('t.q4')::uuid) is null as j \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000004';
+select public.study_quiz_join(current_setting('t.q4')::uuid) is null as j \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.q4')::uuid, -1) is null as n \gset
+reset role;
+select mtest.shift(current_setting('t.q4')::uuid, 5) is null as s \gset
+select set_config('t.k4', mtest.key_now(current_setting('t.q4')::uuid)::text, false) is not null as k \gset
+set role authenticated;
+select (public.study_quiz_answer(current_setting('t.q4')::uuid, 0, (current_setting('t.k4')::int + 2) % 5, 3)).bet is not null as a \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select (public.study_quiz_answer(current_setting('t.q4')::uuid, 0, (current_setting('t.k4')::int + 2) % 5, 3)).bet is not null as a \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000003';
+select (public.study_quiz_answer(current_setting('t.q4')::uuid, 0, (current_setting('t.k4')::int + 2) % 5, 2)).bet is not null as a \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000004';
+select (public.study_quiz_answer(current_setting('t.q4')::uuid, 0, current_setting('t.k4')::int, 1)).bet is not null as a \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select 'ZS6d. three on one wrong option: the trap is that option ' || ((s -> 'round' ->> 'trap')::int = (current_setting('t.k4')::int + 2) % 5)
+       || ', counts ' || (s -> 'round' ->> 'counts') || ' with 3 on it and 1 on the key: '
+       || ((s -> 'round' -> 'counts' ->> ((current_setting('t.k4')::int + 2) % 5))::int = 3 and (s -> 'round' -> 'counts' ->> current_setting('t.k4')::int)::int = 1)
+       || ', next step ' || (s -> 'round' ->> 'next_step') || ' (expect true, true, source: 1 of 4 right)'
+  from (select public.study_quiz_state(current_setting('t.q4')::uuid) as s) x;
+reset role;
+select 'ZS6e. the round''s trap became a group card (section C''s end): card made ' || (r.trap_card is not null) || ', the hook finds the card maker: '
+       || (to_regprocedure('study_private.trap_card(uuid,integer,integer,text,text,text,text,integer[],text,timestamp with time zone)') is not null)
+       || ', source ' || c.source || ', key q:<question>:<the trap> ' || (c.trap_key = 'q:' || r.question_id || ':' || r.trap)
+       || ', opens at the next study day''s start ' || (c.opens_at = ((((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date + 1) + time '04:00') at time zone 'Asia/Jerusalem')
+       || ' (expect true, true, trap, true, true: SR6f)'
+  from public.study_quiz_rounds r join public.study_cards c on c.id = r.trap_card
+ where r.quiz_id = current_setting('t.q4')::uuid and r.idx = 0;
+select set_config('t.zt', (select trap_card::text from public.study_quiz_rounds where quiz_id = current_setting('t.q4')::uuid and idx = 0), false) is not null as zt \gset
+set role authenticated;
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select 'ZS6f. a player sees the trap card before it opens: ' || count(*) || ' (expect 0: SR6e, nobody can tell who chose the trap tonight)'
+  from public.study_cards where id = current_setting('t.zt')::uuid;
+reset role;
+update public.study_cards set opens_at = now() - interval '1 minute' where id = current_setting('t.zt')::uuid;
+set role authenticated;
+select 'ZS6g. once it opens: ' || count(*) || ' (expect 1: SR6g)' from public.study_cards where id = current_setting('t.zt')::uuid;
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select public.study_quiz_end(current_setting('t.q4')::uuid) is null as e \gset
+-- ZS6h (SR6h, SEC-6): a quiz of one publishes no share of right answers.
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000004';
+select set_config('t.q1', public.study_quiz_create(:'gid', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 3, 30)::text, false) is not null as c \gset
+select public.study_quiz_next(current_setting('t.q1')::uuid, -1) is null as n \gset
+reset role;
+select mtest.shift(current_setting('t.q1')::uuid, 5) is null as s \gset
+set role authenticated;
+select (public.study_quiz_answer(current_setting('t.q1')::uuid, 0, 1, 1)).bet is not null as a \gset
+select public.study_quiz_end(current_setting('t.q1')::uuid) is null as e \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'ZS6h. a solo quiz on "יחד": players ' || players_n || ', share ' || coalesce(right_pct::text, 'none') || ' (expect players 1, share none)'
+  from public.study_quiz_recent(:'gid') where id = current_setting('t.q1')::uuid;
+-- ZS6-hidden (FR6c, F-6): a question two members' flags hid is never picked.
+reset role;
+update public.study_questions set hidden_at = now() where id = '3c2a0000-0000-4000-8000-000000000006';
+set role authenticated;
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select set_config('t.hq', public.study_quiz_create(:'gid', 'coop', array['3c100000-0000-4000-8000-000000000001']::uuid[], 8, 30)::text, false) is not null as c \gset
+reset role;
+do $$
+declare i int; seen int := 0; n int;
+begin
+  for i in 1 .. 10 loop
+    n := public.study_quiz__pick(current_setting('t.hq')::uuid);
+    if exists (select 1 from public.study_quiz_rounds where quiz_id = current_setting('t.hq')::uuid
+                and question_id = '3c2a0000-0000-4000-8000-000000000006') then seen := seen + 1; end if;
+  end loop;
+  raise notice 'ZS6-hidden. %: rounds %, the hidden question among them in % of 10 picks (expect 7: 8 less the hidden one; 0)',
+    case when seen = 0 and n = 7 then 'ok' else 'FAIL' end, n, seen;
+end $$;
+delete from public.study_quizzes where id = current_setting('t.hq')::uuid;
+update public.study_questions set hidden_at = null where id = '3c2a0000-0000-4000-8000-000000000006';
+-- ZS15 (FR15, F-15): one closing ('end') a study day for the group, whatever the meeting; a free quiz is not limited.
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_quiz_create(current_setting('t.gid')::uuid, 'coop', array['3c100000-0000-4000-8000-000000000002']::uuid[], 3, 30, 'all', 'end', null, 0, 1);
+  raise notice 'ZS15. FAIL: a second closing quiz the same study day';
+exception when others then raise notice 'ZS15. %: one closing a study day (%)', case when sqlerrm = 'already' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.fr', public.study_quiz_create(:'gid', 'coop', array['3c100000-0000-4000-8000-000000000002']::uuid[], 3, 30, 'all', 'free', null, 0, 1)::text, false) is not null as c \gset
+select 'ZS15b. a free quiz on L2''s first two parts the same day: ' || preset || ', parts ' || part_from || '-' || part_to || ', ' || state
+       || ' (expect free, parts 0-1, lobby)' from public.study_quizzes where id = current_setting('t.fr')::uuid;
+select public.study_quiz_end(current_setting('t.fr')::uuid) is null as e \gset
+
+-- Clean-up for the sections after this one: the quizzes, ZA's lectures (with
+-- their questions, keys and answers), its members and the test helpers.
+reset role;
+delete from public.study_quizzes where group_id = :'gid';
+delete from public.study_lectures where id::text like '3c10%';
+delete from public.study_members where user_id::text like '3c00%';
+delete from auth.users where id::text like '3c00%';
+drop function mtest.shift(uuid, numeric), mtest.key_now(uuid), mtest.q_now(uuid);
+drop schema mtest;
+-- ════ END SECTION Z ════
+
+-- ════ BEGIN SECTION C · flashcards (package C) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION C checks · flashcards   (package C)
+-- ════════════════════════════════════════════════════════════════════════
+-- PROPOSAL: behaviour test for the flashcards SQL (design-cards.md §6.1).
+-- Appended to supabase/tests/study.sql: it runs in the same psql session,
+-- after the existing checks, and reuses their users (Shoham bbbb…, Noa cccc…,
+-- a stranger dddd…) and :gid. Every C line should read "ok" or the expected
+-- value; "FAIL" means a rule no longer holds.
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+\set key 'k-0123456789abcdef0123456789abcdef'
+select set_config('t.key', 'k-0123456789abcdef0123456789abcdef', false) is not null as have_key \gset
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+-- A lecture of 12 slides with text, a picture on slide 3, and no outline yet.
+insert into public.study_lectures (id, group_id, title, course, source_kind, slides)
+select 'eeeeeeee-0000-4000-8000-0000000000c1', :'gid', 'Antiparasitics', 'פתוגן מאכסן', 'pptx',
+       jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array(repeat('Metronidazole PFOR ', 30)),
+                                    'tables', '[]'::jsonb, 'notes', '',
+                                    'figures', case when n = 3 then '[{"k":1,"path":"x/y/s3-1.jpg","w":800,"h":600}]'::jsonb else '[]'::jsonb end)
+                 order by n)
+from generate_series(1, 12) n;
+select 'C1. Shoham plans: round ' || round || ', ' || batches || ' parts, ' || wanted || ' cards, fresh ' || fresh || ' (expect 1, 2, 16, true)'
+  from public.study_card_round('eeeeeeee-0000-4000-8000-0000000000c1');
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'C2. Noa taps too: round ' || round || ', fresh ' || fresh || ' (expect 1, false: the same round)'
+  from public.study_card_round('eeeeeeee-0000-4000-8000-0000000000c1');
+select set_config('t.b0', (select id::text from public.study_card_batches where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1' and part_idx = 0), false) is not null as b0 \gset
+select set_config('t.b1', (select id::text from public.study_card_batches where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1' and part_idx = 1), false) is not null as b1 \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'C3. Shoham claims part 0: slides ' || slide_from || '-' || slide_to || ', ' || wanted || ' wanted, effort ' || effort || ' (expect 1-6, 8, medium)'
+  from public.study_card_claim(current_setting('t.b0')::uuid, current_setting('t.key'));
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_card_claim(current_setting('t.b0')::uuid, current_setting('t.key')); raise notice 'C3b. FAIL: two phones write one part';
+exception when others then raise notice 'C3b. %: Noa cannot take the same part (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.ca', public.study_save_card(current_setting('t.b0')::uuid,
+  '{"kind":"qa","front":"איך Metronidazole הופכת לפעילה בתא אנאירובי?","back":"PFOR מחזר אותה לתוצרים רעילים.","extra":"","figure":"","slides":[2],"topic":"Metronidazole","aspect":"mechanism","model":"claude-opus-5-5"}', current_setting('t.key'))::text, false) is not null as ca \gset
+select set_config('t.cb', public.study_save_card(current_setting('t.b0')::uuid,
+  '{"kind":"cloze","front":"בזמן טיפול ב-Metronidazole ועד {{48 שעות}} אחריו אין לשתות אלכוהול.","back":"","extra":"","figure":"fig:3-1","slides":[3],"topic":"Metronidazole","aspect":"interactions"}', current_setting('t.key'))::text, false) is not null as cb \gset
+select 'C4. two cards saved: ' || count(*) || ' cards, part made ' || (select made from public.study_card_batches where id = current_setting('t.b0')::uuid) || ' (expect 2, 2)'
+  from public.study_cards where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1';
+do $$
+declare cases text[][] := array[
+  array['{"kind":"qa","front":"שאלה על שקף שאינו קיים?","back":"x","slides":[40]}', 'unknown slide'],
+  array['{"kind":"qa","front":"שאלה מחוץ לחלק?","back":"x","slides":[9]}', 'outside the part'],
+  array['{"kind":"cloze","front":"שתי {{השלמות}} באותו {{משפט}}.","back":"","slides":[2]}', 'bad cloze'],
+  array['{"kind":"cloze","front":"השלמה {{עם}} תשובה נפרדת.","back":"עם","slides":[2]}', 'bad cloze'],
+  array['{"kind":"qa","front":"שאלה בלי תשובה?","back":"   ","slides":[2]}', 'bad answer'],
+  array['{"kind":"qa","front":"תמונה שלא קיימת?","back":"x","figure":"fig:4-1","slides":[4]}', 'unknown figure'],
+  array['{"kind":"qa","front":"בלי שקפים?","back":"x","slides":[]}', 'no slides']];
+  i int;
+begin
+  for i in 1 .. array_length(cases, 1) loop
+    begin
+      perform public.study_save_card(current_setting('t.b0')::uuid, cases[i][1]::jsonb, current_setting('t.key'));
+      raise notice 'C5.% FAIL: accepted (%)', i, cases[i][2];
+    exception when others then
+      raise notice 'C5.% %: refused, % (expect %)', i, case when sqlerrm = cases[i][2] then 'ok' else 'FAIL' end, sqlerrm, cases[i][2];
+    end;
+  end loop;
+end $$;
+do $$ begin perform public.study_save_card(current_setting('t.b0')::uuid, '{"kind":"qa","front":"היבט לא מוכר?","back":"x","slides":[2],"aspect":"toxicity"}', current_setting('t.key'));
+  raise notice 'C5.8 FAIL: an unknown aspect was saved';
+exception when check_violation then raise notice 'C5.8 ok: an unknown aspect is refused by the table (%)', sqlerrm; end $$;
+do $$ declare i int; begin
+  for i in 1 .. 6 loop
+    perform public.study_save_card(current_setting('t.b0')::uuid, jsonb_build_object('kind', 'qa', 'front', 'שאלה מספר ' || i || '?', 'back', 'תשובה ' || i, 'slides', jsonb_build_array(i)), current_setting('t.key'));
+  end loop;
+end $$;
+do $$ begin
+  perform public.study_save_card(current_setting('t.b0')::uuid, '{"kind":"qa","front":"תשיעית?","back":"x","slides":[1]}', current_setting('t.key'));
+  raise notice 'C6. FAIL: a part took more than it asked for';
+exception when others then raise notice 'C6. %: the 9th card of an 8-card part is refused (%)', case when sqlerrm = 'part full' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_card_finish(current_setting('t.b0')::uuid, 'ready', 1, 'claude-opus-5-5', 0.031, null, current_setting('t.key'));
+select 'C7. part 0 finished: ' || status || ', made ' || made || ', rejected ' || rejected || ', cost ' || cost_usd || ' (expect ready, 8, 1, 0.0310)'
+  from public.study_card_batches where id = current_setting('t.b0')::uuid;
+do $$ begin perform public.study_card_claim(current_setting('t.b0')::uuid, current_setting('t.key')); raise notice 'C7b. FAIL: a finished part was claimed';
+exception when others then raise notice 'C7b. %: a finished part cannot be claimed again (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- The group reads and fixes the deck
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'C8. Noa sees ' || count(*) || ' cards and ' || (select count(*) from public.study_card_batches where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1') || ' parts (expect 8, 2)'
+  from public.study_cards where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1';
+do $$ begin update public.study_cards set front = 'x' where id = current_setting('t.ca')::uuid; raise notice 'C9. FAIL: a card was changed directly';
+exception when insufficient_privilege then raise notice 'C9. ok: no direct update (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_cards (group_id, lecture_id, kind, front, back) values ((select id from public.study_groups limit 1), 'eeeeeeee-0000-4000-8000-0000000000c1', 'qa', 'xxx', 'y'); raise notice 'C9b. FAIL: a card was inserted directly';
+exception when insufficient_privilege then raise notice 'C9b. ok: no direct insert (%)', sqlerrm; end $$;
+do $$ begin delete from public.study_cards where id = current_setting('t.ca')::uuid; raise notice 'C9c. FAIL: a card was deleted directly';
+exception when insufficient_privilege then raise notice 'C9c. ok: no direct delete (%)', sqlerrm; end $$;
+select set_config('t.u0', (select updated_at::text from public.study_cards where id = current_setting('t.ca')::uuid), false) is not null as u0 \gset
+select 'C10. Noa fixes the card: version ' || public.study_edit_card(current_setting('t.ca')::uuid, 1,
+  '{"back":"PFOR מעביר אלקטרונים ל-ferredoxin, שמחזר את קבוצת ה-NO₂ שלה לתוצרים רעילים."}') || ' (expect 2)';
+select 'C10b. edited by Noa: ' || (updated_by = 'cccccccc-0000-4000-8000-000000000003') || ', updated_at raised: ' || (updated_at > current_setting('t.u0')::timestamptz)
+  || ', history: ' || (select string_agg(action || ' v' || version || ' by ' || left(edited_by::text, 4) || ' before "' || left(before ->> 'back', 10) || '"', '; ') from public.study_card_edits where card_id = current_setting('t.ca')::uuid)
+  || ' (expect true, true, edit v2 by cccc before "PFOR מחזר ")'
+  from public.study_cards where id = current_setting('t.ca')::uuid;
+do $$ begin perform public.study_edit_card(current_setting('t.ca')::uuid, 1, '{"back":"גרסה ישנה"}'); raise notice 'C11. FAIL: an edit of an old version went through';
+exception when others then raise notice 'C11. %: editing a version someone already changed is a conflict (%)', case when sqlerrm = 'conflict' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_edit_card(current_setting('t.ca')::uuid, 2, '{}'); raise notice 'C11b. FAIL: an empty edit made a version';
+exception when others then raise notice 'C11b. %: saving without a change does nothing (%)', case when sqlerrm = 'no change' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_edit_card(current_setting('t.ca')::uuid, 2, '{"kind":"cloze","front":"אין כאן השלמה."}'); raise notice 'C11c. FAIL: a cloze without braces was saved';
+exception when others then raise notice 'C11c. %: an edit keeps the card rules (%)', case when sqlerrm = 'bad cloze' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_revert_card((select id from public.study_card_edits where card_id = current_setting('t.ca')::uuid and action = 'edit')) as v12 \gset
+select 'C12. Shoham undoes the fix: version ' || :'v12' || ', back "' || back || '", history ' || (select string_agg(action, ',' order by edited_at) from public.study_card_edits where card_id = current_setting('t.ca')::uuid)
+  || ' (expect 3, "PFOR מחזר אותה לתוצרים רעילים.", edit,revert)' from public.study_cards where id = current_setting('t.ca')::uuid;
+select set_config('t.u1', (select updated_at::text from public.study_cards where id = current_setting('t.cb')::uuid), false) is not null as u1 \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_delete_card(current_setting('t.cb')::uuid, true);
+select public.study_delete_card(current_setting('t.cb')::uuid, true);
+select 'C13. Noa deletes the cloze (twice): deleted ' || (deleted_at is not null) || ' by Noa ' || (deleted_by = 'cccccccc-0000-4000-8000-000000000003')
+  || ', updated_at raised ' || (updated_at > current_setting('t.u1')::timestamptz) || ', version ' || version || ' (expect true, true, true, 1)'
+  from public.study_cards where id = current_setting('t.cb')::uuid;
+do $$ begin perform public.study_edit_card(current_setting('t.cb')::uuid, 1, '{"front":"בזמן טיפול ועד {{48 שעות}} אחריו."}'); raise notice 'C13b. FAIL: a deleted card was edited';
+exception when others then raise notice 'C13b. %: a deleted card is not edited (%)', case when sqlerrm = 'card deleted' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_delete_card(current_setting('t.cb')::uuid, false);
+select 'C13c. Shoham restores it: deleted ' || (deleted_at is not null) || '; history ' || (select string_agg(action, ',' order by edited_at) from public.study_card_edits where card_id = current_setting('t.cb')::uuid)
+  || ' (expect false; delete,restore)' from public.study_cards where id = current_setting('t.cb')::uuid;
+
+-- A stranger
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'C14. stranger sees ' || count(*) || ' cards, ' || (select count(*) from public.study_card_edits) || ' history rows, ' || (select count(*) from public.study_card_batches) || ' parts (expect 0, 0, 0)' from public.study_cards;
+do $$ begin perform public.study_edit_card(current_setting('t.ca')::uuid, 3, '{"back":"x"}'); raise notice 'C14b. FAIL: stranger edited';
+exception when others then raise notice 'C14b. %: stranger cannot edit (%)', case when sqlerrm = 'card not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_delete_card(current_setting('t.ca')::uuid, true); raise notice 'C14c. FAIL: stranger deleted';
+exception when others then raise notice 'C14c. %: stranger cannot delete (%)', case when sqlerrm = 'card not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_card_round('eeeeeeee-0000-4000-8000-0000000000c1'); raise notice 'C14d. FAIL: stranger planned a round';
+exception when others then raise notice 'C14d. %: stranger cannot generate (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- Reviewing: private, idempotent, checked, undoable
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'C15. Shoham answers טוב on a new card: ' || public.study_card_review('aaaa0001-0000-4000-8000-000000000001', current_setting('t.ca')::uuid, 3, now(), 4200, 0,
+  jsonb_build_object('state', 1, 'step', 1, 'stability', 2.3065, 'difficulty', 2.11810397, 'due', now() + interval '10 minutes', 'lapses', 0)) || ' (expect ok)';
+select 'C15b. the same answer sent again: ' || public.study_card_review('aaaa0001-0000-4000-8000-000000000001', current_setting('t.ca')::uuid, 3, now(), 4200, 0,
+  jsonb_build_object('state', 1, 'step', 1, 'stability', 2.3065, 'difficulty', 2.11810397, 'due', now() + interval '10 minutes', 'lapses', 0))
+  || '; reviews ' || (select count(*) from public.study_card_reviews) || ', reps ' || (select reps from public.study_card_states where card_id = current_setting('t.ca')::uuid) || ' (expect dup; 1, 1)';
+do $$
+declare cases text[][] := array[
+  array['0', '3', '{"state":1,"step":1,"stability":2.3,"difficulty":2.1,"lapses":0}', 'stale'],
+  array['1', '5', '{"state":2,"step":0,"stability":3,"difficulty":2,"lapses":0}', 'bad rating'],
+  array['1', '3', '{"state":2,"step":0,"stability":0,"difficulty":2,"lapses":0}', 'bad state'],
+  array['1', '3', '{"state":2,"step":0,"stability":3,"difficulty":11,"lapses":0}', 'bad state'],
+  array['1', '3', '{"state":2,"step":0,"stability":3,"difficulty":2,"lapses":1}', 'bad state'],
+  array['1', '3', '{"state":0,"step":0,"stability":3,"difficulty":2,"lapses":0}', 'bad state']];
+  i int;
+begin
+  for i in 1 .. array_length(cases, 1) loop
+    begin
+      perform public.study_card_review(gen_random_uuid(), current_setting('t.ca')::uuid, cases[i][2]::int, now(), 1000, cases[i][1]::int,
+                                       cases[i][3]::jsonb || jsonb_build_object('due', now() + interval '2 days'));
+      raise notice 'C16.% FAIL: accepted (%)', i, cases[i][4];
+    exception when others then
+      raise notice 'C16.% %: refused, % (expect %)', i, case when sqlerrm = cases[i][4] then 'ok' else 'FAIL' end, sqlerrm, cases[i][4];
+    end;
+  end loop;
+  begin
+    perform public.study_card_review(gen_random_uuid(), current_setting('t.ca')::uuid, 3, now() + interval '1 day', 1000, 1,
+      jsonb_build_object('state', 2, 'step', 0, 'stability', 3, 'difficulty', 2, 'lapses', 0, 'due', now() + interval '3 days'));
+    raise notice 'C16.7 FAIL: an answer from tomorrow was accepted';
+  exception when others then raise notice 'C16.7 %: refused, % (expect bad time)', case when sqlerrm = 'bad time' then 'ok' else 'FAIL' end, sqlerrm;
+  end;
+  begin
+    perform public.study_card_review(gen_random_uuid(), current_setting('t.ca')::uuid, 3, now(), 1000, 1,
+      jsonb_build_object('state', 2, 'step', 0, 'stability', 3, 'difficulty', 2, 'lapses', 0, 'due', now() - interval '1 day'));
+    raise notice 'C16.8 FAIL: a due time before the answer was accepted';
+  exception when others then raise notice 'C16.8 %: refused, % (expect bad state)', case when sqlerrm = 'bad state' then 'ok' else 'FAIL' end, sqlerrm;
+  end;
+end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'C17. Noa sees ' || count(*) || ' states and ' || (select count(*) from public.study_card_reviews) || ' reviews (expect 0, 0: Shoham''s are hers)' from public.study_card_states;
+do $$ begin insert into public.study_card_states (user_id, card_id, state) values ('bbbbbbbb-0000-4000-8000-000000000002', current_setting('t.ca')::uuid, 0); raise notice 'C17b. FAIL: a state was written directly';
+exception when insufficient_privilege then raise notice 'C17b. ok: states are written only by the functions (%)', sqlerrm; end $$;
+do $$ begin perform public.study_card_undo('aaaa0001-0000-4000-8000-000000000001'); raise notice 'C17c. FAIL: Noa undid Shoham''s answer';
+exception when others then raise notice 'C17c. %: nobody undoes someone else''s answer (%)', case when sqlerrm = 'review not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_card_review('aaaa0002-0000-4000-8000-000000000002', current_setting('t.ca')::uuid, 3, now(), 3000, 1,
+  jsonb_build_object('state', 2, 'step', 0, 'stability', 2.3065, 'difficulty', 2.11121424, 'due', now() + interval '2 days', 'lapses', 0));
+do $$ begin perform public.study_card_undo('aaaa0001-0000-4000-8000-000000000001'); raise notice 'C18. FAIL: an older answer was undone first';
+exception when others then raise notice 'C18. %: only the latest answer can be undone (%)', case when sqlerrm = 'not the latest' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_card_undo('aaaa0002-0000-4000-8000-000000000002');
+select 'C18b. undo the latest: state ' || state || ', step ' || step || ', reps ' || reps || ' (expect 1, 1, 1)' from public.study_card_states where card_id = current_setting('t.ca')::uuid;
+select public.study_card_undo('aaaa0001-0000-4000-8000-000000000001');
+select 'C18c. undo the first: ' || count(*) || ' state rows, ' || (select count(*) from public.study_card_reviews) || ' reviews (expect 0, 0: the card is new again)'
+  from public.study_card_states where card_id = current_setting('t.ca')::uuid;
+
+-- Hiding, counts, the study day
+select public.study_card_hide(current_setting('t.cb')::uuid, true);
+-- One card in review due earlier today, one learning card due in 5 minutes.
+select public.study_card_review(gen_random_uuid(), current_setting('t.ca')::uuid, 4, now() - interval '9 days', 2000, 0,
+  jsonb_build_object('state', 2, 'step', 0, 'stability', 8.2956, 'difficulty', 1, 'due', now() - interval '1 day', 'lapses', 0));
+select public.study_card_review(gen_random_uuid(), (select id from public.study_cards where front = 'שאלה מספר 1?'), 1, now(), 2000, 0,
+  jsonb_build_object('state', 1, 'step', 0, 'stability', 0.212, 'difficulty', 6.4133, 'due', now() + interval '5 minutes', 'lapses', 0));
+select 'C19. Shoham''s counts: cards ' || cards || ', new ' || new_cards || ', learning ' || learning_due || ', review ' || review_due
+  || ', studied ' || studied || ', hidden ' || hidden || ' (expect 8, 0, 1, 1, 2, 1: decision 8, no part is in his deck yet, so no card is new)'
+  from public.study_my_card_counts(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1';
+select public.study_card_adopt('eeeeeeee-0000-4000-8000-0000000000c1', null, true)::text as c19a \gset
+select 'C19a. Shoham adds every part (the lecture has no outline: the parts its rounds were written in): ' || :'c19a' || '; new ' || new_cards
+  || ' (expect {0,1}; 5: the eight less the studied two and the hidden one)'
+  from public.study_my_card_counts(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1';
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'C19b. Noa''s counts: new ' || new_cards || ', review ' || review_due || ', hidden ' || hidden || ' (expect 0, 0, 0: Shoham''s deck, hiding and answers are his own)'
+  from public.study_my_card_counts(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1';
+select public.study_card_adopt('eeeeeeee-0000-4000-8000-0000000000c1', null, true) is not null as noa_adds \gset
+select 'C19c. Noa adds every part: new ' || new_cards || ' (expect 8)'
+  from public.study_my_card_counts(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1';
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'C20. today''s numbers: ' || reviews || ' answers, ' || first_seen || ' first seen, ' || again || ' שוב (expect 1, 1, 1: the 9-days-ago answer is another day)'
+  from public.study_my_card_days(:'gid') where day = date '1970-01-01' + public.study_day(now());
+select 'C21. weak points: ' || topic || '/' || aspect || ' studied ' || studied || ' of ' || cards || ', recall now ' || recall || ' (expect Metronidazole/mechanism 1 of 1, 0.894: 9 days after an S = 8.3 answer)'
+  from public.study_my_card_topics(:'gid') where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1' and topic = 'Metronidazole' and aspect = 'mechanism';
+select 'C22. study days: ' || public.study_day('2026-01-10 01:59:00+00') || ', ' || public.study_day('2026-01-10 02:00:00+00') || ', '
+  || public.study_day('2026-07-10 00:59:00+00') || ', ' || public.study_day('2026-07-10 01:00:00+00') || ' (expect 20462, 20463, 20643, 20644: 04:00 in Israel, winter and summer)';
+select 'C22b. day ends: ' || to_char(public.study_day_end('2026-11-16 12:00+02') at time zone 'Asia/Jerusalem', 'YYYY-MM-DD HH24:MI') || ', '
+  || to_char(public.study_day_end('2026-11-17 03:30+02') at time zone 'Asia/Jerusalem', 'YYYY-MM-DD HH24:MI') || ', '
+  || to_char(public.study_day_end('2026-03-27 01:30+02') at time zone 'Asia/Jerusalem', 'YYYY-MM-DD HH24:MI')
+  || ' (expect 2026-11-17 04:00, 2026-11-17 04:00, 2026-03-27 04:00)';
+select 'C23. recall at S days: ' || round(public.study_card_recall(10, 10)::numeric, 4) || ', at 0: ' || public.study_card_recall(10, 0) || ' (expect 0.9000, 1)';
+-- Settings: one's own, on every device
+insert into public.study_card_settings (new_per_day, retention) values (30, 0.92)
+  on conflict (user_id) do update set new_per_day = excluded.new_per_day, retention = excluded.retention, updated_at = now();
+select 'C24. Shoham''s settings: ' || new_per_day || ' new a day, retention ' || retention || ' (expect 30, 0.92)' from public.study_card_settings;
+do $$ begin update public.study_card_settings set new_per_day = 300; raise notice 'C24b. FAIL: 300 new cards a day';
+exception when check_violation then raise notice 'C24b. ok: limits hold (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'C24c. Noa sees ' || count(*) || ' settings rows (expect 0)' from public.study_card_settings;
+do $$ begin insert into public.study_card_settings (user_id, new_per_day) values ('bbbbbbbb-0000-4000-8000-000000000002', 1); raise notice 'C24d. FAIL: Noa wrote Shoham''s settings';
+exception when insufficient_privilege then raise notice 'C24d. ok: nobody writes someone else''s settings (%)', sqlerrm; end $$;
+-- A member's own card
+select public.study_add_card('eeeeeeee-0000-4000-8000-0000000000c1',
+    '{"kind":"qa","front":"איזו תופעת לוואי של Metronidazole מחייבת הפסקת טיפול?","back":"פרכוסים.","slides":[7],"topic":"Metronidazole","aspect":"adverse"}') as c25 \gset
+select 'C25. Noa adds a card: source ' || source || ', part ' || coalesce(part_idx::text, 'none') || ', by Noa ' || (created_by = 'cccccccc-0000-4000-8000-000000000003')
+  || ', cards now ' || (select count(*) from public.study_cards where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1') || ' (expect member, none, true, 9)'
+  from public.study_cards where id = :'c25';
+do $$ begin perform public.study_add_card('eeeeeeee-0000-4000-8000-0000000000c1', '{"kind":"cloze","front":"אין כאן סוגריים.","slides":[7]}'); raise notice 'C25b. FAIL';
+exception when others then raise notice 'C25b. %: a member''s card keeps the rules (%)', case when sqlerrm = 'bad cloze' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_card_review('aaaa0003-0000-4000-8000-000000000003', current_setting('t.ca')::uuid, 3, now(), 1500, 1,
+  jsonb_build_object('state', 2, 'step', 0, 'stability', 20.5, 'difficulty', 1, 'due', now() + interval '20 days', 'lapses', 0));
+select 'C21b. answering the card again: undo copies left ' || count(*) filter (where prev is not null) || ' of ' || count(*)
+  || ' (expect 1 of 2: the 9-day-old copy is gone, today''s stays)' from public.study_card_reviews where card_id = current_setting('t.ca')::uuid;
+do $$ begin perform public.study_card_undo((select id from public.study_card_reviews where card_id = current_setting('t.ca')::uuid and prev is null)); raise notice 'C21c. FAIL: an old answer was undone';
+exception when others then raise notice 'C21c. %: an old answer cannot be undone (%)', case when sqlerrm in ('not the latest', 'too old') then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'C26. reset: ' || public.study_card_reset('eeeeeeee-0000-4000-8000-0000000000c1') || ' states removed, reviews kept ' || (select count(*) from public.study_card_reviews) || ' (expect 3, 3)';
+
+-- Caps, publication, deletion, anon
+-- Part 1 never got written: it fails, so round 1 is closed and the cap is what decides.
+select 'C27a. part 1: ' || slide_from || '-' || slide_to from public.study_card_claim(current_setting('t.b1')::uuid, current_setting('t.key'));
+select public.study_card_finish(current_setting('t.b1')::uuid, 'failed', 0, null, 0, 'timeout', current_setting('t.key'));
+reset role;
+insert into public.study_cards (group_id, lecture_id, kind, front, back, slides)
+select :'gid', 'eeeeeeee-0000-4000-8000-0000000000c1', 'qa', 'מילוי ' || i || '?', 'x', '{1}' from generate_series(1, 141) i;
+set role authenticated;
+do $$ begin perform public.study_card_round('eeeeeeee-0000-4000-8000-0000000000c1'); raise notice 'C27. FAIL: a round was planned on a full lecture';
+exception when others then raise notice 'C27. %: at 150 active cards a lecture takes no more (%)', case when sqlerrm = 'enough cards' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select 'C28. published: ' || string_agg(tablename, ', ' order by tablename) || ' (expect study_card_batches, study_card_edits, study_cards)'
+  from pg_publication_tables where pubname = 'supabase_realtime' and tablename like 'study\_card%';
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_delete_lecture('eeeeeeee-0000-4000-8000-0000000000c1') is not null as c_hidden \gset
+do $$ begin perform public.study_card_round('eeeeeeee-0000-4000-8000-0000000000c1'); raise notice 'C28b. FAIL: a round on a deleted lecture';
+exception when others then raise notice 'C28b. %: a deleted lecture takes no new round (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+delete from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-0000000000c1';   -- the purge, 30 days later
+select 'C29. after purging the lecture: ' || (select count(*) from public.study_cards where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1') || ' cards, '
+  || (select count(*) from public.study_card_batches where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c1') || ' parts, '
+  || (select count(*) from public.study_card_states) || ' states, ' || (select count(*) from public.study_card_reviews) || ' reviews, '
+  || (select count(*) from public.study_card_edits) || ' history rows (expect all 0)';
+
+-- ════ Review checks: B1, M6 ════
+reset role;
+insert into public.study_lectures (id, group_id, title, source_kind, slides, created_by)
+select 'eeeeeeee-0000-4000-8000-0000000000c2', :'gid', 'Review cards', 'pptx',
+       jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array(repeat('Primaquine G6PD ', 30)),
+                                    'tables', '[]'::jsonb, 'notes', '', 'figures', '[]'::jsonb) order by n), 'bbbbbbbb-0000-4000-8000-000000000002'
+from generate_series(1, 6) n;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select round as rc from public.study_card_round('eeeeeeee-0000-4000-8000-0000000000c2') \gset
+select set_config('t.bc', (select id::text from public.study_card_batches where lecture_id = 'eeeeeeee-0000-4000-8000-0000000000c2' order by part_idx limit 1), false) is not null as have_bc \gset
+do $$ begin perform public.study_card_claim(current_setting('t.bc')::uuid); raise notice 'CR1. FAIL: a member claimed a card batch with her token alone';
+exception when others then raise notice 'CR1. %: a member''s token alone cannot claim (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_save_card(current_setting('t.bc')::uuid, '{"kind":"qa","front":"מה זה?","back":"x","slides":[1]}'); raise notice 'CR1b. FAIL: a member saved a card marked as Claude''s';
+exception when others then raise notice 'CR1b. %: a card marked ai is saved only by the server (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select count(*) as c1 from public.study_card_claim(current_setting('t.bc')::uuid, current_setting('t.key')) \gset
+reset role;
+update public.study_card_batches set updated_at = now() - interval '7 minutes' where id = current_setting('t.bc')::uuid;
+set role authenticated;
+select count(*) as c2 from public.study_card_claim(current_setting('t.bc')::uuid, current_setting('t.key')) \gset
+reset role;
+update public.study_card_batches set updated_at = now() - interval '7 minutes' where id = current_setting('t.bc')::uuid;
+set role authenticated;
+select count(*) as c3 from public.study_card_claim(current_setting('t.bc')::uuid, current_setting('t.key')) \gset
+reset role;
+update public.study_card_batches set updated_at = now() - interval '7 minutes' where id = current_setting('t.bc')::uuid;
+set role authenticated;
+do $$ begin perform public.study_card_claim(current_setting('t.bc')::uuid, current_setting('t.key')); raise notice 'CR2. FAIL: a fourth paid try of one batch';
+exception when others then raise notice 'CR2. %: a batch gets three paid tries (%)', case when sqlerrm = 'gave up' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'CR2b. tries ' || :c1 || :c2 || :c3 || '; the round is no longer held open: next round ' || round || ', fresh ' || fresh || ' (expect 111; 2, true)'
+  from public.study_card_round('eeeeeeee-0000-4000-8000-0000000000c2');
+select 'C-reg. the registry: ' || (public.study_schema() ->> 'C') || ' (expect 2: with section C''s end)';
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION C's end checks · CA (anchors, trap cards, the marks after a
+--  correction), CS (the deck part by part, private cards, one review home),
+--  CW (the worker path), CR (SR6e-SR6g on a trap card that waits for the next
+--  study day) and FR4   (package C; spec §12.3.C)
+--  The addendum's shared (CA1-CA4), server (CS1-CS10) and review (FR4)
+--  checks, ported to this file's session: one group (:gid) with Shoham, Noa
+--  and the stranger; a lecture of its own with three written parts, seven
+--  keyed questions and four cards. What changes from them, and why:
+--   - Maya's and Itai's lines are Noa's and Shoham's; the stranger is dddd…;
+--   - CS5-CS6b: the practice and quiz answers go in as the owner, as section
+--     Q's and Z's definer functions write them;
+--   - CS8: the question is a comment Noa asks on the paragraph (package K's
+--     study_ask_to_group is K's end, not built);
+--   - CS9b sets a third home on Noa's row (the addendum's insert met the
+--     primary key first);
+--   - C's end as built: a card Claude wrote on a member's tap is not hers
+--     (only source 'member' is), and a lecture without an outline offers the
+--     parts its rounds were written in (C19a, CS1d).
+--  Every fixture goes at the end. Throwaway local Postgres only.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by)
+select 'eeeeeeee-0000-4000-8000-0000000000c3', :'gid', 'פתוגן מאכסן', 'Anti parasite', 'pptx',
+       jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array(repeat('מלריה ותרופות ', 20)),
+                                    'tables', '[]'::jsonb, 'notes', '', 'figures', '[]'::jsonb) order by n),
+       'ready', 'bbbbbbbb-0000-4000-8000-000000000002'
+from generate_series(1, 40) n;
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ ('eeeeeeee-0000-4000-8000-0000000000c3', 0, 'מחזור החיים', 1, 12, 'ready', E'## מחזור החיים\n\nאף תרופה לא הורגת את ה-Sporozoite. [ש'' 3]\n\nה-Hypnozoite ישן בכבד. [ש'' 5]\n\nלפני Primaquine בודקים G6PD. [ש'' 7]'),
+ ('eeeeeeee-0000-4000-8000-0000000000c3', 1, 'מנגנונים', 13, 24, 'ready', E'## מנגנונים\n\nChloroquine מצטברת בוואקואולה. [ש'' 15]\n\nMefloquine ניתנת פעם בשבוע. [ש'' 20]'),
+ ('eeeeeeee-0000-4000-8000-0000000000c3', 2, 'שילובים', 25, 40, 'ready', E'## שילובים\n\nArtemisinins לעולם לא לבד. [ש'' 30]\n\nQuinine עם Doxycycline, לא בהיריון. [ש'' 33]');
+-- Questions Q01-Q05 on part 0, Q06 on part 1, Q07 on part 2; the key is the
+-- last digit's entry in the case below.
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, anchor, quote, kind, question, options, slides, topic, aspect, created_by)
+select ('c3a40000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, :'gid', 'eeeeeeee-0000-4000-8000-0000000000c3', 'ai',
+       case when i <= 5 then 0 when i = 6 then 1 else 2 end, case when i in (1, 2) then 2 else 1 end, 'פסקה', 'mcq', 'שאלה ' || i || '?',
+       array['Sporozoite', 'Hypnozoite', 'Schizont', 'Gametocyte', 'Merozoite'],
+       array[case when i <= 5 then 3 when i = 6 then 15 else 30 end],
+       case when i <= 5 then 'Primaquine' when i = 6 then 'Chloroquine' else 'Artemisinin' end, 'mechanism', null
+  from generate_series(1, 7) i;
+insert into public.study_question_keys (question_id, answer, explanations, takeaway)
+select q.id, case right(q.id::text, 1) when '1' then 1 when '2' then 0 when '3' then 2 when '4' then 3 when '5' then 0 when '6' then 1 else 2 end,
+       array['למה א [ש'' 3]', 'למה ב [ש'' 5]', 'למה ג [ש'' 7]', 'למה ד [ש'' 7]', 'למה ה [ש'' 3]'], 'מה לזכור [ש'' 3]'
+  from public.study_questions q where q.id::text like 'c3a40000-%';
+-- Cards: two on part 0 (one on paragraph 2), one on part 1, and a trap card on part 2.
+insert into public.study_cards (id, group_id, lecture_id, source, part_idx, anchor, kind, front, back, slides, trap_key, created_by) values
+ ('c3a50000-0000-4000-8000-000000000001', :'gid', 'eeeeeeee-0000-4000-8000-0000000000c3', 'ai', 0, 2, 'qa', 'למה Primaquine ב-vivax?', 'בגלל hypnozoites', array[5], null, null),
+ ('c3a50000-0000-4000-8000-000000000002', :'gid', 'eeeeeeee-0000-4000-8000-0000000000c3', 'ai', 0, 3, 'qa', 'מה בודקים לפני Primaquine?', 'G6PD', array[7], null, null),
+ ('c3a50000-0000-4000-8000-000000000003', :'gid', 'eeeeeeee-0000-4000-8000-0000000000c3', 'ai', 1, 1, 'qa', 'איפה Chloroquine מצטברת?', 'בוואקואולה', array[15], null, null),
+ ('c3a50000-0000-4000-8000-000000000004', :'gid', 'eeeeeeee-0000-4000-8000-0000000000c3', 'trap', 2, 1, 'qa', 'Artemisinins לבד?', 'לעולם לא', array[30], 'test:fixture', null);
+select set_config('t.l3', 'eeeeeeee-0000-4000-8000-0000000000c3', false) is not null as l3 \gset
+\set l3 'eeeeeeee-0000-4000-8000-0000000000c3'
+
+-- ═════════ CS1-CS4 · decision 8: the deck part by part ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'CS1. new before adding: ' || new_cards || ' of ' || cards || ' (expect 1 of 4: the trap card only)'
+  from public.study_my_card_counts(:'gid') where lecture_id = :'l3';
+select 'CS1b. deck page: ' || string_agg(part_idx || ':' || cards || ':' || in_deck, ' ' order by part_idx) || ' (expect 0:2:false 1:1:false 2:1:false)'
+  from public.study_my_deck(:'l3');
+select 'CS1c. its parts carry their headings and slides: ' || string_agg(heading || ' ' || slide_from || '-' || slide_to, ', ' order by part_idx)
+       || ' (expect מחזור החיים 1-12, מנגנונים 13-24, שילובים 25-40)' from public.study_my_deck(:'l3');
+select 'CS2. added part 0: ' || public.study_card_adopt(:'l3', array[0], true)::text || ' (expect {0})';
+select 'CS2b. new now: ' || new_cards || ' (expect 3: part 0''s two and the trap card)' from public.study_my_card_counts(:'gid') where lecture_id = :'l3';
+select 'CS2c. every part: ' || public.study_card_adopt(:'l3', null, true)::text || ', then part 1 out: ' || public.study_card_adopt(:'l3', array[1], false)::text
+       || ' (expect {0,1,2}, then {0,2})';
+do $$ begin perform public.study_card_adopt(current_setting('t.l3')::uuid, array[7], true); raise notice 'CS2d. FAIL: a part that does not exist';
+exception when others then raise notice 'CS2d. %: only the lecture''s parts (%)', case when sqlerrm = 'bad parts' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin insert into public.study_card_adoptions (lecture_id, part_idx) values (current_setting('t.l3')::uuid, 1); raise notice 'CS2e. FAIL: an adoption was written directly';
+exception when insufficient_privilege then raise notice 'CS2e. ok: only study_card_adopt writes the deck (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'CS3. Shoham''s deck is his own: new ' || new_cards || ', in_deck parts ' || (select count(*) from public.study_my_deck(:'l3') where in_deck)
+       || ', rows he sees ' || (select count(*) from public.study_card_adoptions) || ' (expect 1, 0, 0: Noa''s are hers, and his of C19a went with its lecture)'
+  from public.study_my_card_counts(:'gid') where lecture_id = :'l3';
+select public.study_add_card(:'l3', '{"kind":"qa","front":"מה הופך Sb(V)?","back":"Sb(III)","slides":[15]}'::jsonb) is not null as cs3b \gset
+select 'CS3b. his own card counts as new: ' || new_cards || ' (expect 2)' from public.study_my_card_counts(:'gid') where lecture_id = :'l3';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_card_adopt(current_setting('t.l3')::uuid, null, true); raise notice 'CS4. FAIL: a stranger added a deck';
+exception when others then raise notice 'CS4. %: strangers cannot (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_my_deck(current_setting('t.l3')::uuid); raise notice 'CS4b. FAIL: a stranger read the deck page';
+exception when others then raise notice 'CS4b. %: nor read its page (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ CR · SR6e-SR6g: a trap card waiting for the next study day ═════════
+reset role;
+select set_config('t.tw', study_private.trap_card(:'l3', 2, 2, 'Quinine עם', E'שאלה 7?\nלמה לא Sporozoite?', 'למה א [ש'' 3]',
+  'התשובה הנכונה: Schizont', array[30], 'q:test-wait:0', now() + interval '1 day')::text, false) is not null as tw \gset
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'CR1. before it opens Noa sees ' || (select count(*) from public.study_cards where id = current_setting('t.tw')::uuid)
+       || ' card; her new ' || new_cards || ', cards ' || cards || '; the deck page''s part 2: ' || (select cards from public.study_my_deck(:'l3') where part_idx = 2)
+       || ' (expect 0; 3, 5; 1: a closed card is in no list, SR6e)'
+  from public.study_my_card_counts(:'gid') where lecture_id = :'l3';
+reset role;
+update public.study_cards set opens_at = now() - interval '1 minute' where id = current_setting('t.tw')::uuid;
+set role authenticated;
+select 'CR1b. once open: ' || (select count(*) from public.study_cards where id = current_setting('t.tw')::uuid) || ' card; new ' || new_cards
+       || ' (expect 1; 4: a trap card is new for every member, SR6g)'
+  from public.study_my_card_counts(:'gid') where lecture_id = :'l3';
+reset role;
+delete from public.study_cards where id = current_setting('t.tw')::uuid;
+
+-- ═════════ CS5-CS8 · private cards from mistakes and answers ═════════
+-- Noa's practice: 01, 04, 06 wrong; 02, 03 right; 07 wrong twice.
+insert into public.study_answers (user_id, question_id, choice, correct, mode) values
+ ('cccccccc-0000-4000-8000-000000000003', 'c3a40000-0000-4000-8000-000000000001', 2, false, 'lecture'),
+ ('cccccccc-0000-4000-8000-000000000003', 'c3a40000-0000-4000-8000-000000000002', 0, true, 'lecture'),
+ ('cccccccc-0000-4000-8000-000000000003', 'c3a40000-0000-4000-8000-000000000003', 2, true, 'lecture'),
+ ('cccccccc-0000-4000-8000-000000000003', 'c3a40000-0000-4000-8000-000000000004', 0, false, 'course'),
+ ('cccccccc-0000-4000-8000-000000000003', 'c3a40000-0000-4000-8000-000000000006', null, false, 'mistakes'),
+ ('cccccccc-0000-4000-8000-000000000003', 'c3a40000-0000-4000-8000-000000000007', 0, false, 'lecture'),
+ ('cccccccc-0000-4000-8000-000000000003', 'c3a40000-0000-4000-8000-000000000007', 1, false, 'lecture');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'CS5. her mistake cards: ' || string_agg(right(question_id::text, 2) || ':' || origin, ' ' order by question_id)
+       || ' (expect 01:practice 04:practice 06:practice 07:practice)'
+  from public.study_my_cards where question_id is not null;
+select 'CS5b. the card of 01: front «' || front || '», back «' || back || '», extra «' || extra || '», part ' || part_idx || ', anchor ' || anchor
+       || ' (expect שאלה 1?, Hypnozoite: למה ב [ש'' 5], ענית Schizont: למה ג [ש'' 7], 0, 2)'
+  from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000001';
+select 'CS5c. right answers make none: ' || count(*) || ' (expect 0 for 02 and 03)'
+  from public.study_my_cards where question_id in ('c3a40000-0000-4000-8000-000000000002', 'c3a40000-0000-4000-8000-000000000003');
+select 'CS5d. a second miss of 07 made no second card: ' || count(*) || ' (expect 1)'
+  from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000007';
+select 'CS5e. "לא יודעים" on 06: the takeaway on the back''s extra: «' || extra || '» (expect מה לזכור [ש'' 3])'
+  from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000006';
+reset role;
+-- A question whose key names no option makes no card, and the answer is still saved.
+update public.study_question_keys set answer = 9 where question_id = 'c3a40000-0000-4000-8000-000000000005';
+insert into public.study_answers (user_id, question_id, choice, correct, mode)
+values ('cccccccc-0000-4000-8000-000000000003', 'c3a40000-0000-4000-8000-000000000005', 1, false, 'lecture');
+select 'CS5f. a card that cannot be made never stops the answer: answers to 05 ' || (select count(*) from public.study_answers where question_id = 'c3a40000-0000-4000-8000-000000000005')
+       || ', cards ' || (select count(*) from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000005') || ' (expect 1, 0)';
+update public.study_question_keys set answer = 0 where question_id = 'c3a40000-0000-4000-8000-000000000005';
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'CS6. Shoham sees ' || count(*) || ' of Noa''s private cards (expect 0)' from public.study_my_cards where user_id = 'cccccccc-0000-4000-8000-000000000003';
+-- A live quiz's first vote (section Z copies it into study_answers with mode 'quiz').
+reset role;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, confidence)
+values ('bbbbbbbb-0000-4000-8000-000000000002', 'c3a40000-0000-4000-8000-000000000006', 3, false, 'quiz', 3);
+set role authenticated;
+select 'CS6b. his card from the quiz: ' || origin || ', extra «' || extra || '» (expect quiz, ענית Gametocyte: למה ד [ש'' 7])'
+  from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000006';
+select id as mc from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000006' \gset
+do $$ begin update public.study_my_cards set front = 'שלי' where user_id = auth.uid(); raise notice 'CS6c. FAIL: a private card was changed directly';
+exception when insufficient_privilege then raise notice 'CS6c. ok: only the functions write private cards (%)', sqlerrm; end $$;
+
+-- CS7: reviewing a private card (FSRS from the phone, checked here), undo, delete.
+select 'CS7. review: ' || public.study_my_card_review('c3a60000-0000-4000-8000-000000000001', :'mc', 3, now(), 4000, 0,
+  jsonb_build_object('state', 1, 'step', 0, 'stability', 2.3, 'difficulty', 5.1, 'due', now() + interval '10 minutes', 'lapses', 0))
+  || ', again: ' || public.study_my_card_review('c3a60000-0000-4000-8000-000000000001', :'mc', 3, now(), 4000, 0,
+  jsonb_build_object('state', 1, 'step', 0, 'stability', 2.3, 'difficulty', 5.1, 'due', now() + interval '10 minutes', 'lapses', 0))
+  || ' (expect ok, dup)';
+do $$ begin perform public.study_my_card_review('c3a60000-0000-4000-8000-000000000002',
+  (select id from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000006' and user_id = auth.uid()),
+  3, now(), 1000, 0, jsonb_build_object('state', 2, 'step', 0, 'stability', 5, 'difficulty', 5, 'due', now() + interval '1 day', 'lapses', 0));
+  raise notice 'CS7b. FAIL: a stale review (reps 0 after one answer)';
+exception when others then raise notice 'CS7b. %: another device''s answer in between (%)', case when sqlerrm = 'stale' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_my_card_review('c3a60000-0000-4000-8000-000000000003',
+  (select id from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000006' and user_id = auth.uid()),
+  1, now(), 1000, 1, jsonb_build_object('state', 3, 'step', 0, 'stability', 1, 'difficulty', 6, 'due', now() + interval '5 minutes', 'lapses', 1));
+  raise notice 'CS7c. FAIL: a lapse counted on a learning card';
+exception when others then raise notice 'CS7c. %: a lapse is שוב on a card in review only (%)', case when sqlerrm = 'bad state' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_my_card_undo('c3a60000-0000-4000-8000-000000000001') is null as u \gset
+select 'CS7d. undone: state ' || state || ', reps ' || reps || ' (expect 0, 0)' from public.study_my_cards where id = :'mc';
+select public.study_my_card_set(:'mc', 'hide')::text as h \gset
+select 'CS7e. hidden: ' || suspended || ' (expect true)' from public.study_my_cards where id = :'mc';
+select public.study_my_card_set(:'mc', 'delete')::text as d \gset
+select 'CS7e2. deleted: ' || (deleted_at is not null) || ' (expect true)' from public.study_my_cards where id = :'mc';
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_my_card_set((select id from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000001'), 'delete')::text as d \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_my_card_set((select id from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000004'
+  and user_id = 'cccccccc-0000-4000-8000-000000000003'), 'restore'); raise notice 'CS7f. FAIL: Shoham restored Noa''s card';
+exception when others then raise notice 'CS7f. %: only the owner (%)', case when sqlerrm = 'card not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+insert into public.study_answers (user_id, question_id, choice, correct, mode)
+values ('cccccccc-0000-4000-8000-000000000003', 'c3a40000-0000-4000-8000-000000000001', 3, false, 'lecture');
+select 'CS7g. a deleted card''s question makes no new one: ' || count(*) || ' card, deleted ' || bool_and(deleted_at is not null) || ' (expect 1, true)'
+  from public.study_my_cards where question_id = 'c3a40000-0000-4000-8000-000000000001';
+
+-- CS8: K4. The answer to her own question becomes her card; not someone else's question.
+insert into public.study_comments (id, lecture_id, part_idx, anchor, quote, kind, body, author_id)
+values ('c3a70000-0000-4000-8000-000000000001', :'l3', 0, 2, 'ה-Hypnozoite ישן', 'question', 'למה דווקא Primaquine?', 'cccccccc-0000-4000-8000-000000000003');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'CS8. card from her answered question: ' || (public.study_my_card_add(:'l3', 'answer', 0, 2, 'Primaquine: למה דווקא היא?',
+  'רק היא מגיעה ל-hypnozoites', array[5], 'c3a70000-0000-4000-8000-000000000001') is not null) || ' (expect true)';
+do $$ begin perform public.study_my_card_add(current_setting('t.l3')::uuid, 'answer', 0, 2, 'שוב?', 'כן', '{}', 'c3a70000-0000-4000-8000-000000000001');
+  raise notice 'CS8b. FAIL: a second card for one thread';
+exception when others then raise notice 'CS8b. %: one card per thread (%)', case when sqlerrm = 'already' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_my_card_add(current_setting('t.l3')::uuid, 'answer', 0, 2, 'שקף שאין?', 'כן', '{99}', null);
+  raise notice 'CS8e. FAIL: a slide the lecture does not have';
+exception when others then raise notice 'CS8e. %: the lecture''s slides only (%)', case when sqlerrm = 'unknown slide' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_my_card_add(current_setting('t.l3')::uuid, 'answer', 0, 2, 'של נועה?', 'לא', '{}', 'c3a70000-0000-4000-8000-000000000001');
+  raise notice 'CS8c. FAIL: a card from someone else''s question';
+exception when others then raise notice 'CS8c. %: only from one''s own question (%)', case when sqlerrm = 'not yours' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'CS8d. a wrong cell of a blank table: ' || (public.study_my_card_add(:'l3', 'table', 0, null, 'Atovaquone-proguanil על hypnozoite?',
+  'לא: רק כבד ראשוני ודם [ש'' 23]', array[23]) is not null) || ' (expect true)';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_my_card_add(current_setting('t.l3')::uuid, 'table', 0, null, 'זר?', 'לא', '{}');
+  raise notice 'CS8f. FAIL: a stranger made a private card in the group''s lecture';
+exception when others then raise notice 'CS8f. %: members only (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- CS9: C6, one review home, written by the owner through RLS.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+insert into public.study_card_settings (home) values ('anki');
+select 'CS9. home: ' || home || ' (expect anki)' from public.study_card_settings where user_id = auth.uid();
+do $$ begin update public.study_card_settings set home = 'both' where user_id = auth.uid(); raise notice 'CS9b. FAIL: a third home';
+exception when check_violation then raise notice 'CS9b. ok: a home is the app or Anki (%)', sqlerrm; end $$;
+update public.study_card_settings set home = 'app', updated_at = now() where user_id = auth.uid();
+select 'CS9c. changed to ' || home || ' (expect app)' from public.study_card_settings where user_id = auth.uid();
+
+-- CS10: privacy. The new private tables: RLS on, never published, no anon grant.
+reset role;
+select 'CS10. private tables published: ' || count(*) || ' (expect 0)' from pg_publication_tables
+ where pubname = 'supabase_realtime' and tablename in ('study_card_adoptions', 'study_my_cards', 'study_my_card_reviews');
+select 'CS10b. RLS on: ' || count(*) filter (where relrowsecurity) || ' of ' || count(*) || ', anon may read: '
+       || count(*) filter (where has_table_privilege('anon', oid, 'select')) || ' (expect 3 of 3, 0)'
+  from pg_class where relname in ('study_card_adoptions', 'study_my_cards', 'study_my_card_reviews') and relnamespace = 'public'::regnamespace;
+select 'CS-reg. C = ' || (public.study_schema() ->> 'C') || ' (expect 2)';
+select 'FR4. the private card''s key to its question: ' || count(*) || ' (expect 1: section Q is loaded)'
+  from pg_constraint where conname = 'study_my_cards_question_id_fkey';
+
+-- ═════════ CA · placed cards, trap cards, "עדיין נכון" ═════════
+insert into public.study_card_batches (id, lecture_id, round, part_idx, heading, slide_from, slide_to, wanted, status)
+values ('c3a80000-0000-4000-8000-000000000001', :'l3', 1, 1, 'מנגנונים', 13, 24, 4, 'writing');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.ca1', public.study_save_card('c3a80000-0000-4000-8000-000000000001',
+  '{"kind":"qa","front":"כל כמה זמן Mefloquine?","back":"פעם בשבוע","slides":[20],"para":2,"quote":"Mefloquine ניתנת"}', :'key')::text, false) is not null as c \gset
+select 'CA1. a generated card on its paragraph: part ' || part_idx || ', anchor ' || anchor || ', quote "' || quote || '", part_gen ' || part_gen
+       || ' (expect 1, 2, "Mefloquine ניתנת", 0)'
+  from public.study_cards where id = current_setting('t.ca1')::uuid;
+select set_config('t.ca2', public.study_add_card(:'l3',
+  '{"kind":"qa","front":"מה בודקים לפני Primaquine כשמתחילים?","back":"G6PD","slides":[7],"part":0,"para":3,"quote":"לפני Primaquine"}')::text, false) is not null as c \gset
+select set_config('t.ca3', public.study_add_card(:'l3',
+  '{"kind":"qa","front":"איפה מצטברת Chloroquine בטפיל?","back":"בוואקואולה","slides":[15]}')::text, false) is not null as c \gset
+select 'CA2. a member''s card from the paragraph sheet: part ' || a.part_idx || ', anchor ' || a.anchor || '; from the deck: part '
+       || b.part_idx || ', anchor ' || coalesce(b.anchor::text, 'null') || ' (expect 0, 3; 1, null)'
+  from public.study_cards a, public.study_cards b where a.id = current_setting('t.ca2')::uuid and b.id = current_setting('t.ca3')::uuid;
+reset role;
+select 'CA3. members cannot make a trap card themselves: ' ||
+       has_function_privilege('authenticated', 'study_private.trap_card(uuid,integer,integer,text,text,text,text,integer[],text,timestamp with time zone)', 'execute')
+       || ' (expect false)';
+select set_config('t.tc', study_private.trap_card(:'l3', 2, 2, 'Quinine עם',
+  E'מה מצרפים ל-Quinine?\nלמה לא Doxycycline?', 'tetracycline: לא בהיריון [ש'' 33]', 'התשובה הנכונה: Clindamycin', array[33], 'test:trap')::text, false) is not null as t \gset
+select 'CA3b. a trap card: source ' || source || ', anchor ' || anchor || ', opens ' || coalesce(opens_at::text, 'now') || '; the same key again gives the same card: '
+       || (study_private.trap_card(:'l3', 2, 2, '', 'אחר?', 'אחר', '', array[33], 'test:trap') = id)
+       || ' (expect trap, 2, now, true)'
+  from public.study_cards where id = current_setting('t.tc')::uuid;
+select 'CA3c. a trap that fails the card checks makes no card: ' ||
+       coalesce(study_private.trap_card(:'l3', 2, 2, '', 'אחר?', 'תשובה', '', array[99], 'test:bad')::text, 'null')
+       || ' (expect null: slide 99 is not in the lecture)';
+select set_config('t.tv', study_private.trap_card(:'l3', 2, 1, '', 'Artemisinins: למה לעולם לא לבד?', 'עמידות', '', array[30], 'test:void')::text, false) is not null as t \gset
+select study_private.trap_card_drop(current_setting('t.tv')::uuid) is null as d \gset
+select 'CA3e. a trap card of a voided round goes: ' || count(*) || ' (expect 0)' from public.study_cards where id = current_setting('t.tv')::uuid;
+set role authenticated;
+select public.study_edit_card(current_setting('t.tc')::uuid, 1, '{"front":"נערך ע״י הקבוצה: מה מצרפים ל-Quinine?"}') is not null as e \gset
+reset role;
+select study_private.trap_card_drop(current_setting('t.tc')::uuid) is null as d \gset
+select 'CA3d. an edited trap card stays when its round is voided: ' || count(*) || ' (expect 1)' from public.study_cards where id = current_setting('t.tc')::uuid;
+update public.study_cards set stale_at = now(), stale_edit = gen_random_uuid() where id in (current_setting('t.ca1')::uuid, current_setting('t.ca3')::uuid);
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_edit_card(current_setting('t.ca1')::uuid, 1, '{"back":"פעם בשבוע (Mefloquine)"}') is not null as e \gset
+select public.study_card_still_true(current_setting('t.ca3')::uuid) is null as s \gset
+select 'CA4. an edit clears the mark: ' || (select stale_at is null from public.study_cards where id = current_setting('t.ca1')::uuid)
+       || '; "עדיין נכון" by Shoham: ' || (select stale_at is null and checked_by = 'bbbbbbbb-0000-4000-8000-000000000002' from public.study_cards where id = current_setting('t.ca3')::uuid)
+       || ' (expect true; true)';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_card_still_true(current_setting('t.ca3')::uuid); raise notice 'CA4b. FAIL: a stranger checked a card';
+exception when others then raise notice 'CA4b. %: members only (%)', case when sqlerrm = 'card not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select 'CA-reg. the registry: ' || (public.study_schema() ->> 'C') || ' (expect 2)';
+
+-- ═════════ CW · the worker path: planned and saved with the key alone, a held part busy for a tap ═════════
+select 'CW1. anon may call study_card_round: ' || has_function_privilege('anon', 'public.study_card_round(uuid, text)', 'execute')
+       || ', study_save_card: ' || has_function_privilege('anon', 'public.study_save_card(uuid, jsonb, text)', 'execute')
+       || '; the one-argument round is gone: ' || (to_regprocedure('public.study_card_round(uuid)') is null)
+       || ' (expect false, false; true: the worker reaches them only through section B)';
+create schema if not exists ctest;
+create or replace function ctest.worker_round(p_lecture uuid, p_key text) returns int language plpgsql security definer as $$
+declare r int;
+begin
+  perform set_config('request.jwt.claim.sub', '', true);
+  select x.round into r from public.study_card_round(p_lecture, p_key) x;
+  return r;
+end $$;
+create or replace function ctest.worker_claim(p_batch uuid, p_key text) returns int language plpgsql security definer as $$
+begin
+  perform set_config('request.jwt.claim.sub', '', true);
+  return (select x.wanted from public.study_card_claim(p_batch, p_key) x);
+end $$;
+create or replace function ctest.worker_save(p_batch uuid, p_c jsonb, p_key text) returns uuid language plpgsql security definer as $$
+begin
+  perform set_config('request.jwt.claim.sub', '', true);
+  return public.study_save_card(p_batch, p_c, p_key);
+end $$;
+create or replace function ctest.worker_finish(p_batch uuid, p_key text) returns void language plpgsql security definer as $$
+begin
+  perform set_config('request.jwt.claim.sub', '', true);
+  perform public.study_card_finish(p_batch, 'ready', 1, 'claude-opus-5-5', 0.02, null, p_key);
+end $$;
+delete from public.study_card_batches where lecture_id = :'l3';
+select ctest.worker_round(:'l3', :'key') as wr \gset
+select 'CW1b. the worker planned round ' || :'wr' || ': ' || count(*) || ' parts, ' || sum(wanted) || ' cards, created by ' || coalesce(max(created_by::text), 'none')
+       || ' (expect 1: 3 parts, 24 cards, none)' from public.study_card_batches where lecture_id = :'l3';
+do $$ begin perform ctest.worker_round(current_setting('t.l3')::uuid, 'not-the-key-0123456789abcdef0123'); raise notice 'CW1c. FAIL: planned without the key';
+exception when others then raise notice 'CW1c. %: no key, no plan (%)', case when sqlerrm in ('not signed in', 'forbidden') then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.cw0', (select id::text from public.study_card_batches where lecture_id = :'l3' and part_idx = 0), false) is not null as cw \gset
+select 'CW2. the worker claims part 0: ' || ctest.worker_claim(current_setting('t.cw0')::uuid, :'key') || ' to write (expect 8)';
+select ctest.worker_save(current_setting('t.cw0')::uuid, '{"kind":"qa","front":"Primaquine: מה בודקים לפני?","back":"G6PD","slides":[7],"topic":"Primaquine","aspect":"contra","para":3,"quote":"לפני Primaquine","model":"claude-opus-5-5"}'::jsonb, :'key') as cw1 \gset
+select 'CW2b. saved by the worker: source ' || source || ', part ' || part_idx || ', anchor ' || anchor || ', created_by ' || coalesce(created_by::text, 'none')
+       || ' (expect ai, 0, 3, none)' from public.study_cards where id = :'cw1';
+do $$ begin perform ctest.worker_save(current_setting('t.cw0')::uuid, '{"kind":"qa","front":"שקף מחלק אחר?","back":"x","slides":[20]}'::jsonb, 'not-the-key-0123456789abcdef0123');
+  raise notice 'CW2c. FAIL: saved without the key';
+exception when others then raise notice 'CW2c. %: no key, no card (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+update public.study_card_batches set hold_until = now() + interval '3 hours' where lecture_id = :'l3' and part_idx = 2;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_card_claim((select id from public.study_card_batches where lecture_id = current_setting('t.l3')::uuid and part_idx = 2),
+  current_setting('t.key')); raise notice 'CW3. FAIL: a member took a part the Batch API holds';
+exception when others then raise notice 'CW3. %: a held part is busy for a tap (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update public.study_card_batches set hold_until = now() - interval '1 minute' where lecture_id = :'l3' and part_idx = 2;
+set role authenticated;
+select 'CW3b. after the hold, a tap claims it: ' || (wanted > 0) || ' (expect true)'
+  from public.study_card_claim((select id from public.study_card_batches where lecture_id = :'l3' and part_idx = 2), :'key');
+reset role;
+select ctest.worker_finish(current_setting('t.cw0')::uuid, :'key') is null as wf \gset
+select 'CW4. finished by the worker: ' || status || ', made ' || made || ', rejected ' || rejected || ', hold ' || coalesce(hold_until::text, 'none')
+       || ' (expect ready, 1, 1, none)' from public.study_card_batches where id = current_setting('t.cw0')::uuid;
+drop function ctest.worker_round(uuid, text), ctest.worker_claim(uuid, text), ctest.worker_save(uuid, jsonb, text), ctest.worker_finish(uuid, text);
+drop schema ctest;
+delete from public.study_card_settings where user_id = 'cccccccc-0000-4000-8000-000000000003';
+delete from public.study_lectures where id = :'l3';
+select 'CS-end. after the lecture goes: ' || (select count(*) from public.study_my_cards where lecture_id = :'l3') || ' private cards, '
+       || (select count(*) from public.study_card_adoptions where lecture_id = :'l3') || ' adoptions (expect 0, 0)';
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+reset role;
+delete from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-0000000000c2';
+set role anon;
+reset request.jwt.claim.sub;
+do $$ declare n int; begin select count(*) into n from public.study_cards; raise notice 'C30. FAIL: anon read % cards', n;
+exception when insufficient_privilege then raise notice 'C30. ok: anon cannot read cards (%)', sqlerrm; end $$;
+do $$ begin perform public.study_my_card_counts('22222222-2222-4222-8222-222222222222'); raise notice 'C30b. FAIL: anon called a function';
+exception when insufficient_privilege then raise notice 'C30b. ok: anon cannot call the functions (%)', sqlerrm; end $$;
+reset role;
+-- ════ END SECTION C ════
+
+-- ════ BEGIN SECTION K · corrections, shared answers, memory aids (package K) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION K checks · corrections, shared answers, memory aids   (package K)
+-- ════════════════════════════════════════════════════════════════════════
+-- Behaviour test for sql/collab.sql, on a throwaway local Postgres (never the
+-- real project). Runs after supabase/tests/study.sql in the same database
+-- (its users and group). Every line reads "ok ..." or a value; "FAIL" means
+-- a rule no longer holds.
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+select id as gid from public.study_groups limit 1 \gset
+
+-- meeting addendum: an applied edit is now a proposal plus a second
+-- approval (section K's end). This helper does both, as the caller and then
+-- as another member, and raises what either step raises (a paragraph that
+-- changed meanwhile comes back from the approval as "conflict").
+reset role;
+create schema if not exists mtest;
+grant usage on schema mtest to authenticated, anon;
+create or replace function mtest.edit_block(p_lecture uuid, p_part int, p_anchor int, p_before text, p_after text,
+  p_base_rev int, p_base_gen int, p_occurrence int default 1, p_note text default '', p_undo_of uuid default null)
+returns jsonb language plpgsql as $f$
+declare
+  me  text := current_setting('request.jwt.claim.sub', true);
+  pid uuid;
+  res jsonb;
+begin
+  if p_undo_of is not null then
+    return public.study_edit_block(p_lecture, p_part, p_anchor, p_before, p_after, p_base_rev, p_base_gen, p_occurrence, p_note, p_undo_of);
+  end if;
+  pid := public.study_propose_edit(p_lecture, p_part, p_anchor, p_before, p_after, p_base_rev, p_base_gen, coalesce(p_occurrence, 1),
+                                   p_note, 'external', '{}', null, 'בדיקה');
+  perform set_config('request.jwt.claim.sub',
+                     case when me = 'bbbbbbbb-0000-4000-8000-000000000002' then 'cccccccc-0000-4000-8000-000000000003'
+                          else 'bbbbbbbb-0000-4000-8000-000000000002' end, true);
+  res := public.study_approve_edit(pid);
+  perform set_config('request.jwt.claim.sub', me, true);
+  if coalesce((res ->> 'conflict')::boolean, false) then raise exception '%', res ->> 'reason'; end if;
+  return res;
+end;
+$f$;
+grant execute on function mtest.edit_block(uuid, int, int, text, text, int, int, int, text, uuid) to authenticated, anon;
+select set_config('t.gid', :'gid', false) is not null as have_gid \gset
+-- A lecture with two parts written by the summary writer (as the owner, like section.ts would).
+insert into public.study_lectures (id, group_id, title, source_kind, slides, created_by)
+values ('eeeeeeee-0000-4000-8000-000000000007', :'gid', 'Corrections test', 'pptx', '[]'::jsonb, 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+('eeeeeeee-0000-4000-8000-000000000007', 0, 'Metronidazole: מנגנון ושימושים', 4, 7, 'pending', ''),
+('eeeeeeee-0000-4000-8000-000000000007', 1, 'Tidy', 3, 3, 'pending', '');
+select 'K1. new parts start at rev ' || min(rev) || ', gen ' || min(gen) || ' (expect 0, 0)' from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+-- The writer claims and finishes part 0 (status writing, then ready with text).
+update public.study_sections set status = 'writing', markdown = '' where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+update public.study_sections set status = 'ready', markdown = $md$## Metronidazole: מנגנון ושימושים
+
+### מנגנון פעולה
+
+**מנגנון פעולה:** Metronidazole היא prodrug שמשופעלת בתאים אנאירוביים על ידי PFOR. [ש' 5]
+
+- Headache
+- Headache
+- Metallic taste
+
+> **שימו לב:** בשקף 7 כתוב 48 שעות. [ש' 7]
+
+**טבלה: Amebicides** [ש' 4]
+
+| קבוצה | תרופות |
+|---|---|
+| Luminal | Paromomycin |
+| Mixed | Metronidazole |
+
+![שיני זהב כתזכורת לטעם המתכתי (שקף 7)](fig:7-1)$md$
+ where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0;
+update public.study_sections set status = 'ready', markdown = E'## Tidy\n\nהטווח הוא 7 – 31 ימים.‏ [ש'' 3]'
+ where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 1;
+select 'K2. after one writing: rev ' || rev || ', gen ' || gen || ' (expect 1, 1: the first text is rev 1)' from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0;
+
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';   -- Noa, a member
+do $$ begin update public.study_sections set rev = 99, gen = 99 where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 1;
+  raise notice 'K3. % (expect rev 1, gen 1: a client cannot set the counters)', (select 'rev ' || rev || ', gen ' || gen from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 1);
+exception when insufficient_privilege then raise notice 'K3. ok: after W2 a member cannot write a part at all';
+end $$;
+
+-- C4. Noa corrects the paragraph (anchor 2), with a note.
+select 'K4. ' || case when (r ->> 'rev')::int = 2 and (r ->> 'merged')::boolean = false then 'ok: saved, rev 2' else 'FAIL ' || r::text end
+  from (select mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 2,
+    $b$**מנגנון פעולה:** Metronidazole היא prodrug שמשופעלת בתאים אנאירוביים על ידי PFOR. [ש' 5]$b$,
+    $a$**מנגנון פעולה:** Metronidazole היא prodrug שמשופעלת בתאים אנאירוביים על ידי PFOR או hydrogenase. [ש' 5]$a$,
+    1, 1, 1, 'בשקף 5 מופיע גם hydrogenase') as r) x;
+select 'K5. ' || case when markdown like '%PFOR או hydrogenase. [ש'' 5]%' and markdown like '## Metronidazole%' and markdown like '%(fig:7-1)'
+                       and (length(markdown) - length(replace(markdown, E'\n\n', ''))) / 2 = 7 then 'ok: only that paragraph changed, the 7 gaps between blocks kept' else 'FAIL ' || markdown end
+  from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0;
+select 'K6. history: ' || count(*) || ' row, author Noa: ' || bool_and(author_id = 'cccccccc-0000-4000-8000-000000000003') || ', kind ' || min(kind) || ', anchor ' || min(anchor) || ', gen ' || min(gen) || ', note kept: ' || bool_and(note <> '')
+  from public.study_edits where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+
+-- C7. Shoham, editor opened at rev 2, corrects ANOTHER paragraph (the box): merged.
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'K7. ' || case when (r ->> 'merged')::boolean and (r ->> 'rev')::int = 3 then 'ok: other paragraph changed meanwhile, merged' else 'FAIL ' || r::text end
+  from (select mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 6,
+    $b$> **שימו לב:** בשקף 7 כתוב 48 שעות. [ש' 7]$b$, $a$> **שימו לב:** בשקף 7 כתוב 48 שעות אחרי המנה האחרונה. [ש' 7]$a$, 1, 1) as r) x;
+-- C8. Shoham, also from rev 2, corrects the paragraph Noa already changed: conflict.
+do $$ begin perform mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 2,
+    $b$**מנגנון פעולה:** Metronidazole היא prodrug שמשופעלת בתאים אנאירוביים על ידי PFOR. [ש' 5]$b$,
+    $a$**מנגנון פעולה:** Metronidazole היא prodrug. [ש' 5]$a$, 1, 1);
+  raise notice 'K8. FAIL: a stale correction overwrote a newer one';
+exception when others then
+  if sqlerrm = 'edit conflict' then raise notice 'K8. ok: same paragraph changed meanwhile -> edit conflict'; else raise notice 'K8. FAIL: %', sqlerrm; end if;
+end $$;
+
+-- C9. Duplicate items: with the current rev, occurrence 2 is the second "- Headache".
+select mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 4, '- Headache', '- Nausea', 3, 1, 2) as r \gset
+select 'K9. ' || case when not (:'r'::jsonb ->> 'merged')::boolean and markdown like E'%- Headache\n- Nausea\n- Metallic taste%' then 'ok: the second of two identical items changed' else 'FAIL ' || markdown end
+  from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0;
+-- C10. Same text twice and a stale rev: no guessing.
+reset role;
+update public.study_sections set markdown = replace(markdown, '- Nausea', '- Headache') where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0;
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 3, '- Headache', '- Dizziness', 4, 1, 1);  -- rev is 5 now
+  raise notice 'K10. FAIL: an ambiguous block was edited on a stale rev';
+exception when others then
+  if sqlerrm = 'edit conflict' then raise notice 'K10. ok: ambiguous text on a stale rev -> edit conflict'; else raise notice 'K10. FAIL: %', sqlerrm; end if;
+end $$;
+
+-- C11. Edits that would move anchors (or touch what is not text) are refused.
+do $$
+declare
+  cur int := (select rev from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0);
+  c record;
+  n_ok int := 0;
+begin
+  for c in select * from (values
+    ('blank line',      0, '### מנגנון פעולה', E'### מנגנון\n\nפעולה'),
+    ('heading level',   1, '### מנגנון פעולה', '#### מנגנון פעולה'),
+    ('heading -> text', 1, '### מנגנון פעולה', 'מנגנון פעולה'),
+    ('para -> list',    2, 'x', '- x'),
+    ('item marker',     3, '- Headache', '* Headache'),
+    ('item -> para',    3, '- Headache', 'Headache'),
+    ('box label',       6, E'> **שימו לב:** בשקף 7 כתוב 48 שעות אחרי המנה האחרונה. [ש'' 7]', E'> **הרחבה (לא מהשקפים):** בשקף 7 כתוב 48 שעות. [ש'' 7]'),
+    ('box -> para',     6, E'> **שימו לב:** בשקף 7 כתוב 48 שעות אחרי המנה האחרונה. [ש'' 7]', 'בשקף 7 כתוב 48 שעות.'),
+    ('table add row',   8, E'| קבוצה | תרופות |\n|---|---|\n| Luminal | Paromomycin |\n| Mixed | Metronidazole |', E'| קבוצה | תרופות |\n|---|---|\n| Luminal | Paromomycin |\n| Mixed | Metronidazole |\n| X | Y |'),
+    ('table columns',   8, E'| קבוצה | תרופות |\n|---|---|\n| Luminal | Paromomycin |\n| Mixed | Metronidazole |', E'| קבוצה | תרופות | עוד |\n|---|---|\n| Luminal | Paromomycin |\n| Mixed | Metronidazole |'),
+    ('table delimiter', 8, E'| קבוצה | תרופות |\n|---|---|\n| Luminal | Paromomycin |\n| Mixed | Metronidazole |', E'| קבוצה | תרופות |\n|:---|---|\n| Luminal | Paromomycin |\n| Mixed | Metronidazole |'),
+    ('table backslash', 8, E'| קבוצה | תרופות |\n|---|---|\n| Luminal | Paromomycin |\n| Mixed | Metronidazole |', E'| קבוצה | תרופות |\n|---|---|\n| Luminal | Paromomycin\\\\|\n| Mixed | Metronidazole |'),
+    ('figure ref',      9, '![שיני זהב כתזכורת לטעם המתכתי (שקף 7)](fig:7-1)', '![שיני זהב](fig:7-2)'),
+    ('figure bracket',  9, '![שיני זהב כתזכורת לטעם המתכתי (שקף 7)](fig:7-1)', '![שיני [זהב](fig:7-1)'),
+    ('rule',            2, 'x', '---'),
+    ('html',            2, 'x', '<div>x</div>'),
+    ('link definition', 2, 'x', '[ש]: http://x'),
+    ('code fence',      2, 'x', '```'),
+    ('indented code',   2, 'x', '    x'),
+    ('two lines',       2, 'x', E'x\ny')
+  ) as t(label, anchor, before, after) loop
+    begin
+      perform mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, c.anchor, c.before, c.after, cur, 1, 1);
+      raise notice 'K11. FAIL: % was accepted', c.label;
+    exception when others then
+      if sqlerrm = 'bad block' then n_ok := n_ok + 1;
+      else raise notice 'K11. FAIL: % refused for another reason: %', c.label, sqlerrm; end if;
+    end;
+  end loop;
+  raise notice 'K11. ok: % of 20 structure-changing edits refused as bad block', n_ok;
+end $$;
+-- C12. A table cell and a figure caption can be corrected (rows, columns, ids kept).
+select mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 8,
+  E'| קבוצה | תרופות |\n|---|---|\n| Luminal | Paromomycin |\n| Mixed | Metronidazole |',
+  E'| קבוצה | תרופות |\n|---|---|\n| Luminal | Paromomycin, Diloxanide furoate |\n| Mixed | Metronidazole |',
+  (select rev from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0), 1) as a \gset
+select mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 9,
+  '![שיני זהב כתזכורת לטעם המתכתי (שקף 7)](fig:7-1)', '![שיני זהב: הטעם המתכתי בפה (שקף 7)](fig:7-1)',
+  (select rev from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0), 1) as b \gset
+select 'K12. ' || case when (:'b'::jsonb ->> 'rev')::int = (:'a'::jsonb ->> 'rev')::int + 1 and not (:'b'::jsonb ->> 'merged')::boolean
+                       then 'ok: table cell and figure caption corrected' else 'FAIL ' || :'a' || ' ' || :'b' end;
+-- C13. No change, an empty after, and a note over 300 characters.
+do $$ begin perform mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 1, '### מנגנון פעולה', '### מנגנון פעולה', 0, 1);
+  raise notice 'K13. FAIL: an unchanged block was saved';
+exception when others then if sqlerrm = 'no change' then raise notice 'K13. ok: no change refused'; else raise notice 'K13. FAIL: %', sqlerrm; end if; end $$;
+do $$ begin perform mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 1, '### מנגנון פעולה', '### מנגנון', 0, 1, 1, repeat('x', 301));
+  raise notice 'K13b. FAIL: a long note was saved';
+exception when others then if sqlerrm = 'too long' then raise notice 'K13b. ok: note over 300 characters refused'; else raise notice 'K13b. FAIL: %', sqlerrm; end if; end $$;
+
+-- C14. The part's own heading is its title too.
+select mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 0, '## Metronidazole: מנגנון ושימושים', '## Metronidazole: מנגנון, שימושים ועמידות',
+  (select rev from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0), 1) as r \gset
+select 'K14. ' || case when title = 'Metronidazole: מנגנון, שימושים ועמידות' then 'ok: title follows the ## heading' else 'FAIL title ' || title end
+  from public.study_sections s where s.lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and s.idx = 0;
+
+-- C15. Tidy: the stored part had an en dash and a direction mark; the phone sends what it renders.
+select mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 1, 1, E'הטווח הוא 7-31 ימים. [ש'' 3]', E'הטווח הוא 7 \u2013 31 ימים, לפי שקף 3. [ש'' 3]', 1, 1) as r \gset
+select 'K15. ' || case when s.markdown = E'## Tidy\n\nהטווח הוא 7-31 ימים, לפי שקף 3. [ש'' 3]' then 'ok: found in the tidy text; stored tidy' else 'FAIL ' || s.markdown end
+  from public.study_sections s where s.lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and s.idx = 1;
+
+-- C16. Undo: Noa's correction is put back by Shoham (an undo is a correction with undo_of).
+select set_config('t.noa_edit', (select id::text from public.study_edits where anchor = 2 and lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' order by rev limit 1), false) is not null as have_edit \gset
+select mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 2,
+  $a$**מנגנון פעולה:** Metronidazole היא prodrug שמשופעלת בתאים אנאירוביים על ידי PFOR או hydrogenase. [ש' 5]$a$,
+  $b$**מנגנון פעולה:** Metronidazole היא prodrug שמשופעלת בתאים אנאירוביים על ידי PFOR. [ש' 5]$b$,
+  (select rev from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0), 1, 1, '',
+  current_setting('t.noa_edit')::uuid) as r \gset
+select 'K16. ' || case when s.markdown like '%על ידי PFOR. [ש'' 5]%' and e.undo_of::text = current_setting('t.noa_edit') then 'ok: undone, linked to the edit it undoes' else 'FAIL' end
+  from public.study_sections s, public.study_edits e
+ where s.lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and s.idx = 0 and e.id = (:'r'::jsonb ->> 'edit_id')::uuid;
+do $$ begin perform mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 1, '### מנגנון פעולה', '### מנגנון', 0, 1, 1, '', current_setting('t.noa_edit')::uuid);
+  raise notice 'K16b. FAIL: an undo pointed at another paragraph';
+exception when others then if sqlerrm = 'bad undo' then raise notice 'K16b. ok: an undo must point at an edit of the same paragraph'; else raise notice 'K16b. FAIL: %', sqlerrm; end if; end $$;
+
+-- C17. Nobody writes the history directly; a stranger can neither read it nor correct.
+do $$ begin insert into public.study_edits (lecture_id, part_idx, anchor, gen, rev, kind, before_text, after_text) values ('eeeeeeee-0000-4000-8000-000000000007', 0, 0, 1, 1, 'paragraph', 'a', 'b');
+  raise notice 'K17. FAIL: a member wrote history directly';
+exception when insufficient_privilege then raise notice 'K17. ok: no direct insert (%)', sqlerrm; end $$;
+do $$ begin update public.study_edits set after_text = 'x'; raise notice 'K17b. FAIL: history rewritten';
+exception when insufficient_privilege then raise notice 'K17b. ok: no update'; end $$;
+do $$ begin delete from public.study_edits; raise notice 'K17c. FAIL: history deleted';
+exception when insufficient_privilege then raise notice 'K17c. ok: no delete'; end $$;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'K18. stranger sees ' || count(*) || ' history rows (expect 0)' from public.study_edits;
+do $$ begin perform mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 1, '### מנגנון פעולה', '### x', 0, 1);
+  raise notice 'K18b. FAIL: a stranger corrected a part';
+exception when others then if sqlerrm = 'forbidden' then raise notice 'K18b. ok: stranger refused'; else raise notice 'K18b. FAIL: %', sqlerrm; end if; end $$;
+reset role;
+set role anon;
+do $$ begin perform public.study_edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 1, '### מנגנון פעולה', '### x', 0, 1);
+  raise notice 'K18c. FAIL: anon called the function';
+exception when insufficient_privilege then raise notice 'K18c. ok: anon cannot call it (%)', sqlerrm; end $$;
+reset role;
+
+-- C19. A part being written cannot be corrected; a rewrite starts a new generation,
+--      and the writer gets the old generation's net corrections.
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'K19. corrections now (no earlier generation): ' || public.study_part_corrections('eeeeeeee-0000-4000-8000-000000000007', 0)::text || ' (expect [])';
+reset role;
+update public.study_sections set status = 'writing', markdown = '' where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 1, '### מנגנון פעולה', '### x', 0, 2);
+  raise notice 'K19b. FAIL: a part being written was corrected';
+exception when others then if sqlerrm = 'part busy' then raise notice 'K19b. ok: part busy while written'; else raise notice 'K19b. FAIL: %', sqlerrm; end if; end $$;
+select 'K19c. gen after the rewrite started: ' || gen || ' (expect 2)' from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0;
+select 'K19d. corrections for the writer: ' || jsonb_array_length(c) || ' (expect 5: the undone paragraph drops out)'
+       || case when c::text like '%48 שעות אחרי המנה האחרונה%' and c::text like '%Diloxanide furoate%' and c::text like '%שימושים ועמידות%' and c::text not like '%hydrogenase%' then ', ok' else ', FAIL ' || c::text end
+  from public.study_part_corrections('eeeeeeee-0000-4000-8000-000000000007', 0) c;
+select 'K19e. history kept: ' || count(*) || ' rows (expect 8)' from public.study_edits where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+reset role;
+update public.study_sections set status = 'ready', markdown = '## Metronidazole' where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform mtest.edit_block('eeeeeeee-0000-4000-8000-000000000007', 0, 0, '## Metronidazole', '## Metronidazole: x', (select rev from public.study_sections where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007' and idx = 0), 1);
+  raise notice 'K19f. FAIL: an editor opened on the old generation saved';
+exception when others then if sqlerrm = 'part rewritten' then raise notice 'K19f. ok: an editor from the old generation gets part rewritten'; else raise notice 'K19f. FAIL: %', sqlerrm; end if; end $$;
+
+-- C20. Comments: shared memory aids and answers are top-level; answers may be longer.
+insert into public.study_comments (lecture_id, part_idx, anchor, quote, kind, body) values
+ ('eeeeeeee-0000-4000-8000-000000000007', 0, 0, 'Metronidazole', 'mnemonic', E'MeTRo: Metallic taste · Trichomonas\nM = Metallic taste'),
+ ('eeeeeeee-0000-4000-8000-000000000007', 0, 0, 'Metronidazole', 'answer', repeat('א', 3500));
+select 'K20. a mnemonic and a 3500-character answer saved: ' || count(*) from public.study_comments where lecture_id = 'eeeeeeee-0000-4000-8000-000000000007';
+do $$ begin insert into public.study_comments (lecture_id, part_idx, anchor, kind, body) values ('eeeeeeee-0000-4000-8000-000000000007', 0, 0, 'mnemonic', repeat('א', 2001));
+  raise notice 'K20b. FAIL: a 2001-character mnemonic was saved';
+exception when check_violation then raise notice 'K20b. ok: mnemonics keep the 2000 limit'; end $$;
+do $$ begin insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id)
+  values ('eeeeeeee-0000-4000-8000-000000000007', 0, 0, 'answer', 'x', (select id from public.study_comments where kind = 'mnemonic' limit 1));
+  raise notice 'K20c. FAIL: an answer was saved as a reply';
+exception when check_violation then raise notice 'K20c. ok: replies are plain comments'; end $$;
+do $$ begin insert into public.study_comments (lecture_id, part_idx, anchor, kind, body) values ('eeeeeeee-0000-4000-8000-000000000007', 0, 0, 'note', 'x');
+  raise notice 'K20d. FAIL: an unknown kind was saved';
+exception when check_violation then raise notice 'K20d. ok: unknown kinds refused'; end $$;
+
+-- C21. My uses today: only my own rows of that kind, today in Israel.
+reset role;
+insert into public.study_usage (group_id, lecture_id, user_id, kind, ref, model, cost_usd, created_at) values
+ (:'gid', 'eeeeeeee-0000-4000-8000-000000000007', 'cccccccc-0000-4000-8000-000000000003', 'ask', 'answer', 'claude-opus-5-5', 0.02, now()),
+ (:'gid', 'eeeeeeee-0000-4000-8000-000000000007', 'cccccccc-0000-4000-8000-000000000003', 'ask', 'answer', 'claude-opus-5-5', 0.02, now()),
+ (:'gid', 'eeeeeeee-0000-4000-8000-000000000007', 'cccccccc-0000-4000-8000-000000000003', 'ask', 'route', 'claude-opus-5-5', 0.01, now()),
+ (:'gid', 'eeeeeeee-0000-4000-8000-000000000007', 'cccccccc-0000-4000-8000-000000000003', 'ask', 'answer', 'claude-opus-5-5', 0.02,
+  (date_trunc('day', now() at time zone 'Asia/Jerusalem') at time zone 'Asia/Jerusalem') - interval '1 minute'),
+ (:'gid', 'eeeeeeee-0000-4000-8000-000000000007', 'bbbbbbbb-0000-4000-8000-000000000002', 'ask', 'answer', 'claude-opus-5-5', 0.02, now()),
+ (:'gid', 'eeeeeeee-0000-4000-8000-000000000007', 'cccccccc-0000-4000-8000-000000000003', 'mnemonic', null, 'claude-opus-5-5', 0.03, now());
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'K21. Noa asked today: ' || public.study_my_uses_today(:'gid', 'ask', 'answer') || ' (expect 2), mnemonics: ' || public.study_my_uses_today(:'gid', 'mnemonic') || ' (expect 1)';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_my_uses_today((select current_setting('t.gid'))::uuid, 'ask');
+  raise notice 'K21b. FAIL: a stranger got a count';
+exception when others then if sqlerrm = 'forbidden' then raise notice 'K21b. ok: stranger refused'; else raise notice 'K21b. ok: refused (%)', sqlerrm; end if; end $$;
+reset role;
+
+-- ════ Review checks: M9 (no new links in a correction) ════
+select 'KR1. a correction that adds a URL: ' || coalesce(public.study_block_edit_problem('Primaquine גורמת להמוליזה. [ש'' 3]', 'Primaquine גורמת להמוליזה, ראו https://evil.example/login [ש'' 3]'), 'accepted') || ' (expect link)';
+select 'KR1b. a Markdown link: ' || coalesce(public.study_block_edit_problem('ההקלטה של ההרצאה. [ש'' 3]', 'ההקלטה [המלאה](https://x.example) של ההרצאה. [ש'' 3]'), 'accepted') || ' (expect link)';
+select 'KR1c. "www." without a scheme: ' || coalesce(public.study_block_edit_problem('טקסט. [ש'' 3]', 'טקסט, ב-www.evil.example. [ש'' 3]'), 'accepted') || ' (expect link)';
+select 'KR1d. an ordinary fix with its slide tag: ' || coalesce(public.study_block_edit_problem('טקסט. [ש'' 3]', 'טקסט מתוקן. [ש'' 3]'), 'accepted') || ' (expect accepted)';
+select 'KR1e. a link the block already had may stay: ' || coalesce(public.study_block_edit_problem('ראו https://moodle.bgu.ac.il/x. [ש'' 3]', 'ראו גם https://moodle.bgu.ac.il/x. [ש'' 3]'), 'accepted') || ' (expect accepted)';
+-- ════ Package K's checks: edits the spec's block rules let by (edits.test.ts found them) ════
+select 'KH1. a paragraph moved under the list before it: ' || coalesce(public.study_block_edit_problem('**תופעות לוואי נדירות:**', '  **תופעות לוואי נדירות:**'), 'accepted')
+       || ', made code: ' || coalesce(public.study_block_edit_problem('**תופעות לוואי נדירות:**', E' \t**תופעות לוואי נדירות:**'), 'accepted')
+       || ', an item that keeps its indentation: ' || coalesce(public.study_block_edit_problem('  - Nausea', '  - Vomiting'), 'accepted')
+       || ' (expect bad block, bad block, accepted)';
+select 'KH2. an item that is a rule: ' || coalesce(public.study_block_edit_problem('- Nausea', '- ---'), 'accepted')
+       || ', a fence in an item: ' || coalesce(public.study_block_edit_problem('- Nausea', '- ```x'), 'accepted')
+       || ', HTML in an item: ' || coalesce(public.study_block_edit_problem('1. Nausea', '1. <!-- x'), 'accepted')
+       || ', a fence in a quote in an item: ' || coalesce(public.study_block_edit_problem('- Nausea', '- > ~~~ Nausea'), 'accepted')
+       || ', "<40%" in an item: ' || coalesce(public.study_block_edit_problem('- 30% מהחולים', '- <40% מהחולים'), 'accepted')
+       || ' (expect bad block, bad block, bad block, bad block, accepted)';
+select 'K-reg. the registry: ' || (public.study_schema() ->> 'K') || ' (expect 2: with section K''s end)';
+
+-- C22. Realtime publishes the history; the trigger function is not callable.
+select 'K22. study_edits in supabase_realtime: ' || exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'study_edits');
+select 'K22b. authenticated may execute study_sections_versions: ' || has_function_privilege('authenticated', 'public.study_sections_versions()', 'execute') || ' (expect false)';
+
+-- C23. Deleting the lecture removes its parts and their history.
+delete from public.study_lectures where id = 'eeeeeeee-0000-4000-8000-000000000007';
+select 'K23. history rows left: ' || count(*) || ' (expect 0)' from public.study_edits;
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION K's end checks · a correction is a proposal with a source and a
+--  second approval; undo only of the paragraph's latest correction; "לשאול
+--  את הקבוצה" through the op; who marked a question answered; fix_check's
+--  writer (spec §12.3.K: KA1-KA12, KR-1's SR1a-SR1f, SR3a-SR3b, SR9a-SR9b,
+--  KS1-KS3). The addendum's checks with fixtures of their own: three more
+--  members and a lecture of three written parts, removed at the end, so the
+--  sections after K find what they found before. SR3c-SR3e (an approval
+--  aloud that goes through, and a reading that went silent) need section
+--  M's live reading: they run with the review's checks once M is loaded;
+--  here, without M, "אישור בקול" is always "not live" (SR3b).
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+insert into auth.users (id, raw_user_meta_data) values
+ ('4b000000-0000-4000-8000-000000000001', '{"app":"study","full_name":"מאיה"}'),
+ ('4b000000-0000-4000-8000-000000000002', '{"app":"study","full_name":"איתי"}'),
+ ('4b000000-0000-4000-8000-000000000003', '{"app":"study","full_name":"דניאל"}');
+insert into public.study_members (group_id, user_id, name) values
+ (:'gid', '4b000000-0000-4000-8000-000000000001', 'מאיה'),
+ (:'gid', '4b000000-0000-4000-8000-000000000002', 'איתי'),
+ (:'gid', '4b000000-0000-4000-8000-000000000003', 'דניאל');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, created_by) values
+ ('4b100000-0000-4000-8000-000000000001', :'gid', 'פתוגן מאכסן', 'מלריה (תיקונים)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array('טקסט ' || n)) order by n) from generate_series(1, 40) n),
+  'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ ('4b100000-0000-4000-8000-000000000001', 0, 'מחזור החיים', 1, 12, 'ready',
+  E'## מחזור החיים\n\nאף תרופה לא הורגת את ה-Sporozoite. [ש'' 3]\n\nה-Hypnozoite ישן בכבד. [ש'' 5]\n\nלפני Primaquine בודקים G6PD. [ש'' 7]'),
+ ('4b100000-0000-4000-8000-000000000001', 1, 'מנגנונים', 13, 24, 'ready',
+  E'## מנגנונים\n\nChloroquine מצטברת בוואקואולה. [ש'' 15]\n\nMefloquine ניתנת פעם בשבוע. [ש'' 20]'),
+ ('4b100000-0000-4000-8000-000000000001', 2, 'שילובים', 25, 40, 'ready',
+  E'## שילובים\n\nArtemisinins לעולם לא לבד. [ש'' 30]\n\nQuinine עם Doxycycline, לא בהיריון. [ש'' 33]');
+select set_config('t.kl', '4b100000-0000-4000-8000-000000000001', false) is not null as kl \gset
+\set kl '4b100000-0000-4000-8000-000000000001'
+-- The text of block n of a part, and a part's rev (read as the owner: the checks compare, they do not act).
+create or replace function mtest.kblock(p_part int, p_n int) returns text language sql security definer set search_path = public as $f$
+  select split_part((select markdown from public.study_sections where lecture_id = '4b100000-0000-4000-8000-000000000001' and idx = p_part),
+                    E'\n\n', p_n + 1) $f$;
+create or replace function mtest.krev(p_part int) returns int language sql security definer set search_path = public as $f$
+  select rev from public.study_sections where lecture_id = '4b100000-0000-4000-8000-000000000001' and idx = p_part $f$;
+grant execute on function mtest.kblock(int, int), mtest.krev(int) to authenticated;
+
+-- ═════════ KA · a source, a second approval, undo in one tap (meeting addendum §3.4) ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$
+declare c record; n int := 0;
+begin
+  for c in select * from (values ('no kind', null::text, null::int[], null::int, ''),
+                                 ('slide not in the lecture', 'slide', array[99], null::int, ''),
+                                 ('no slide', 'slide', '{}'::int[], null::int, ''),
+                                 ('recording without the minute', 'recording', null::int[], null::int, ''),
+                                 ('outside source without a note', 'external', null::int[], null::int, 'x')) as t(label, k, sl, at, note) loop
+    begin
+      perform public.study_propose_edit(current_setting('t.kl')::uuid, 1, 1,
+        'Chloroquine מצטברת בוואקואולה. [ש'' 15]', 'Chloroquine מצטברת בוואקואולה של הטפיל. [ש'' 15]', 0, 0, 1, '',
+        c.k, c.sl, c.at, c.note);
+      raise notice 'KA1. FAIL: % was accepted', c.label;
+    exception when others then if sqlerrm = 'bad source' then n := n + 1; else raise notice 'KA1. FAIL: % → %', c.label, sqlerrm; end if; end;
+  end loop;
+  raise notice 'KA1. %: % of 5 proposals without a usable source refused as bad source', case when n = 5 then 'ok' else 'FAIL' end, n;
+end $$;
+select set_config('t.kp1', public.study_propose_edit(:'kl', 1, 1,
+  'Chloroquine מצטברת בוואקואולה. [ש'' 15]', 'Chloroquine מצטברת בוואקואולה של הטפיל. [ש'' 15]', 0, 0, 1,
+  'ממלאת מה שכתוב בשקף 15', 'slide', array[15], null, '')::text, false) is not null as p \gset
+select 'KA2. proposed: ' || p.state || ', source ' || p.source_kind || ' ' || array_to_string(p.source_slides, ',') || '; the summary unchanged: '
+       || (mtest.kblock(1, 1) = 'Chloroquine מצטברת בוואקואולה. [ש'' 15]') || ' (expect pending, slide 15; true)'
+  from public.study_edit_proposals p where p.id = current_setting('t.kp1')::uuid;
+do $$ begin perform public.study_approve_edit(current_setting('t.kp1')::uuid);
+  raise notice 'KA3. FAIL: Noa approved her own correction';
+exception when others then raise notice 'KA3. %: a second member approves (%)', case when sqlerrm = 'own proposal' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_edit_block(current_setting('t.kl')::uuid, 1, 2, 'Mefloquine ניתנת פעם בשבוע. [ש'' 20]',
+    'Mefloquine ניתנת פעם בשבוע בלבד. [ש'' 20]', 0, 0);
+  raise notice 'KA4. FAIL: a direct correction went in without approval';
+exception when others then raise notice 'KA4. %: direct corrections need approval (%)', case when sqlerrm = 'needs approval' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000001';
+do $$ begin perform public.study_propose_edit(current_setting('t.kl')::uuid, 1, 1, 'Chloroquine מצטברת בוואקואולה. [ש'' 15]',
+    'Chloroquine מצטברת. [ש'' 15]', 0, 0, 1, '', 'slide', array[15], null, '');
+  raise notice 'KA5. FAIL: two open proposals on one paragraph';
+exception when others then raise notice 'KA5. %: one open proposal a paragraph (%)', case when sqlerrm = 'pending exists' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_approve_edit(current_setting('t.kp1')::uuid, true);
+  raise notice 'KA6. FAIL: approval aloud without a live reading';
+exception when others then raise notice 'KA6. %: only the meeting''s reader approves aloud (%)', case when sqlerrm = 'not live' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.ke1', (public.study_approve_edit(current_setting('t.kp1')::uuid) ->> 'edit_id'), false) is not null as a \gset
+select 'KA7. approved by Shoham: proposal ' || p.state || '; history author Noa ' || (e.author_id = 'cccccccc-0000-4000-8000-000000000003')
+       || ', approved by Shoham ' || (e.approved_by = 'bbbbbbbb-0000-4000-8000-000000000002') || ', aloud ' || e.aloud || ', source ' || e.source_kind
+       || ' ' || array_to_string(e.source_slides, ',') || ', linked ' || (p.edit_id = e.id and e.proposal_id = p.id)
+       || '; the summary now: ' || (mtest.kblock(1, 1) = 'Chloroquine מצטברת בוואקואולה של הטפיל. [ש'' 15]')
+       || ' (expect applied; true, true, false, slide 15, true; true)'
+  from public.study_edit_proposals p, public.study_edits e
+ where p.id = current_setting('t.kp1')::uuid and e.id = current_setting('t.ke1')::uuid;
+-- A paragraph that changed after the proposal: the approval reports a conflict instead of guessing.
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000001';
+select set_config('t.kp2', public.study_propose_edit(:'kl', 2, 2,
+  'Quinine עם Doxycycline, לא בהיריון. [ש'' 33]', 'Quinine עם Doxycycline או Clindamycin. [ש'' 33]', 0, 0, 1, '',
+  'recording', null, 2470, '')::text, false) is not null as p \gset
+reset role;
+update public.study_sections set markdown = replace(markdown, 'Quinine עם Doxycycline, לא בהיריון.', 'Quinine עם Doxycycline (לא בהיריון).')
+ where lecture_id = :'kl' and idx = 2;
+set role authenticated;
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000002';
+select set_config('t.kc2', public.study_approve_edit(current_setting('t.kp2')::uuid) ->> 'conflict', false) is not null as c \gset
+select 'KA8. the paragraph changed meanwhile: ' || current_setting('t.kc2') || ', proposal ' || state || ', the source minute ' || source_at
+       || ' (expect true, conflict, 2470)'
+  from public.study_edit_proposals where id = current_setting('t.kp2')::uuid;
+reset role;
+update public.study_sections set markdown = replace(markdown, 'Quinine עם Doxycycline (לא בהיריון).', 'Quinine עם Doxycycline, לא בהיריון.')
+ where lecture_id = :'kl' and idx = 2;
+set role authenticated;
+-- One tap undoes it, at once.
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000002';
+select set_config('t.ku1', (public.study_edit_block(:'kl', 1, 1,
+  'Chloroquine מצטברת בוואקואולה של הטפיל. [ש'' 15]', 'Chloroquine מצטברת בוואקואולה. [ש'' 15]',
+  mtest.krev(1), 0, 1, '', current_setting('t.ke1')::uuid) ->> 'edit_id'), false) is not null as u \gset
+select 'KA9. undone in one tap by Itai: ' || (mtest.kblock(1, 1) = 'Chloroquine מצטברת בוואקואולה. [ש'' 15]') || ', source ' || e.source_kind
+       || ', undo of the correction ' || (e.undo_of::text = current_setting('t.ke1')) || ' (expect true, undo, true)'
+  from public.study_edits e where e.id = current_setting('t.ku1')::uuid;
+select set_config('t.kp3', public.study_propose_edit(:'kl', 2, 1,
+  'Artemisinins לעולם לא לבד. [ש'' 30]', 'Artemisinins לעולם לא לבד, תמיד עם שותף. [ש'' 30]', 0, 0, 1, '',
+  'external', null, null, 'ההנחיות של WHO')::text, false) is not null as p \gset
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000003';
+do $$ begin perform public.study_withdraw_edit(current_setting('t.kp3')::uuid);
+  raise notice 'KA10. FAIL: Daniel withdrew Itai''s proposal';
+exception when others then raise notice 'KA10. %: only the proposer withdraws (%)', case when sqlerrm = 'not pending' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000002';
+select public.study_withdraw_edit(current_setting('t.kp3')::uuid) is null as w \gset
+select 'KA10b. withdrawn by Itai: ' || state || ' (expect withdrawn)' from public.study_edit_proposals where id = current_setting('t.kp3')::uuid;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'KA11. a stranger sees ' || count(*) || ' proposals (expect 0)' from public.study_edit_proposals;
+do $$ begin perform public.study_propose_edit(current_setting('t.kl')::uuid, 2, 1, 'Artemisinins לעולם לא לבד. [ש'' 30]',
+  'x [ש'' 30]', 0, 0, 1, '', 'slide', array[30], null, '');
+  raise notice 'KA11b. FAIL: a stranger proposed';
+exception when others then raise notice 'KA11b. %: a stranger cannot propose (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+set role anon;
+reset request.jwt.claim.sub;
+do $$ begin perform public.study_propose_edit(gen_random_uuid(), 0, 0, 'a', 'b', 0, 0, 1, '', 'slide', array[1], null, '');
+  raise notice 'KA11c. FAIL: anon called it';
+exception when insufficient_privilege then raise notice 'KA11c. ok: anon cannot propose (%)', sqlerrm; end $$;
+reset role;
+select 'KA12. proposals are published (the pending mark and "לאשר" live): '
+       || exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'study_edit_proposals')
+       || '; the registry: ' || (public.study_schema() ->> 'K') || ' (expect true; 2)';
+
+-- ═════════ SR1 · review SEC-1: an undo is only of the latest correction, back to its own text ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.ksp1', public.study_propose_edit(:'kl', 0, 3, 'לפני Primaquine בודקים G6PD. [ש'' 7]',
+  'לפני Primaquine בודקים רמת G6PD. [ש'' 7]', mtest.krev(0), 0, 1, '', 'slide', array[7], null, '')::text, false) is not null as p \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.kse1', public.study_approve_edit(current_setting('t.ksp1')::uuid) ->> 'edit_id', false) is not null as e \gset
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000003';
+do $$ begin perform public.study_edit_block(current_setting('t.kl')::uuid, 0, 3, 'לפני Primaquine בודקים רמת G6PD. [ש'' 7]',
+    'Primaquine בטוחה גם בלי בדיקה. [ש'' 7]', mtest.krev(0), 0, 1, '', current_setting('t.kse1')::uuid);
+  raise notice 'SR1a. FAIL: an "undo" carried a text of its own';
+exception when others then raise notice 'SR1a. %: an undo puts back only the undone text (%)', case when sqlerrm = 'bad undo' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'SR1b. ' || case when mtest.kblock(0, 3) = 'לפני Primaquine בודקים רמת G6PD. [ש'' 7]' then 'ok' else 'FAIL' end
+       || ': the paragraph kept the approved text: ' || mtest.kblock(0, 3);
+do $$ begin perform public.study_edit_block(current_setting('t.kl')::uuid, 0, 3, 'לפני Primaquine בודקים רמת G6PD. [ש'' 7]',
+    'Primaquine בטוחה גם בלי בדיקה. [ש'' 7]', mtest.krev(0), 0, 1, '');
+  raise notice 'SR1c. FAIL: a direct correction went in';
+exception when others then raise notice 'SR1c. %: without an undo, a change is a proposal (%)', case when sqlerrm = 'needs approval' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.kse2', public.study_undo_edit(current_setting('t.kse1')::uuid) ->> 'edit_id', false) is not null as u \gset
+select 'SR1d. ' || case when mtest.kblock(0, 3) = 'לפני Primaquine בודקים G6PD. [ש'' 7]' and e.source_kind = 'undo'
+                          and e.undo_of::text = current_setting('t.kse1') and e.author_id = '4b000000-0000-4000-8000-000000000003' then 'ok' else 'FAIL' end
+       || ': study_undo_edit puts the text before back, as an undo by Daniel: ' || mtest.kblock(0, 3) || ' · source ' || e.source_kind
+  from public.study_edits e where e.id = current_setting('t.kse2')::uuid;
+do $$ begin perform public.study_undo_edit(current_setting('t.kse2')::uuid);
+  raise notice 'SR1e. FAIL: an undo was undone';
+exception when others then raise notice 'SR1e. %: an undo is not undone (%)', case when sqlerrm = 'bad undo' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_undo_edit(current_setting('t.kse1')::uuid);
+  raise notice 'SR1f. FAIL: an older correction was undone';
+exception when others then raise notice 'SR1f. %: only the paragraph''s latest correction (%)', case when sqlerrm = 'bad undo' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ SR3 · review SEC-3: never one's own proposal, aloud either; aloud needs a live reading ═════════
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000003';
+select set_config('t.ksp3', public.study_propose_edit(:'kl', 1, 2, 'Mefloquine ניתנת פעם בשבוע. [ש'' 20]',
+  'Mefloquine ניתנת פעם בשבוע, למניעה. [ש'' 20]', mtest.krev(1), 0, 1, '', 'slide', array[20], null, '')::text, false) is not null as p \gset
+do $$ begin perform public.study_approve_edit(current_setting('t.ksp3')::uuid, true);
+  raise notice 'SR3a. FAIL: Daniel approved his own proposal aloud';
+exception when others then raise notice 'SR3a. %: one''s own proposal, aloud either (%)', case when sqlerrm = 'own proposal' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.ksp4', public.study_propose_edit(:'kl', 2, 1, 'Artemisinins לעולם לא לבד. [ש'' 30]',
+  'Artemisinins לעולם לא לבד, תמיד עם שותף. [ש'' 30]', mtest.krev(2), 0, 1, '', 'slide', array[30], null, '')::text, false) is not null as p \gset
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000003';
+do $$ begin perform public.study_approve_edit(current_setting('t.ksp4')::uuid, true);
+  raise notice 'SR3b. FAIL: approved aloud with nobody following';
+exception when others then raise notice 'SR3b. %: aloud needs a live reading with two following (%)', case when sqlerrm = 'not live' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'SR3b2. the proposal waits: ' || state || ', the paragraph unchanged: ' || (mtest.kblock(2, 1) = 'Artemisinins לעולם לא לבד. [ש'' 30]')
+       || ' (expect pending, true)' from public.study_edit_proposals where id = current_setting('t.ksp4')::uuid;
+select public.study_withdraw_edit(current_setting('t.ksp3')::uuid) is null as w \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_withdraw_edit(current_setting('t.ksp4')::uuid) is null as w \gset
+
+-- ═════════ SR9 · review SEC-9: Claude's attempt only through the op (the server key) ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_ask_to_group(current_setting('t.kl')::uuid, 0, 3, '', 'צריך לבדוק משהו לפני Primaquine?',
+    'לא צריך לבדוק כלום לפני Primaquine. [ש'' 7]');
+  raise notice 'SR9a. FAIL: a member attached an "attempt" without the op';
+exception when others then raise notice 'SR9a. %: an attempt needs the server key (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.kask', public.study_ask_to_group(:'kl', 0, 3, '', 'צריך לבדוק משהו לפני Primaquine?',
+  'כן: רמת G6PD. [ש'' 7]', :'key')::text, false) is not null as k \gset
+select 'SR9b. ' || case when string_agg(kind || case when ask_attempt then '+attempt' else '' end, ' ' order by parent_id nulls first) = 'question comment+attempt'
+                        then 'ok' else 'FAIL' end
+       || ': through the op, the question and the attempt: ' || string_agg(kind || case when ask_attempt then '+attempt' else '' end, ' ' order by parent_id nulls first)
+  from public.study_comments where id = current_setting('t.kask')::uuid or parent_id = current_setting('t.kask')::uuid;
+
+-- ═════════ KS · "לשאול את הקבוצה", who marked it answered, fix_check's writer (server addendum §3.3) ═════════
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000001';   -- מאיה
+do $$ begin perform public.study_ask_to_group(current_setting('t.kl')::uuid, 2, 1, '', 'שאלה?', 'לא צריך לבדוק כלום. [ש'' 7]');
+  raise notice 'KS1a. FAIL: a member attached an "attempt" of her own';
+exception when others then raise notice 'KS1a. %: an attempt needs the op (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_ask_to_group(:'kl', 2, 1, 'Artemisinins לעולם', 'הבנתי שצריך שותף, אבל למה דווקא ארוך טווח?',
+  'Artemisinins לעולם לא לבד: ה-t½ שלהן 1-2 שעות [ש'' 30]. איזה שותף בדיוק: לא מופיע בשקפים.', :'key') as kq \gset
+select 'KS1. posted: ' || string_agg(kind || case when ask_attempt then '+attempt' else '' end || case when parent_id is null then '' else '(reply)' end, ' '
+       order by parent_id nulls first) || ' (expect question comment+attempt(reply))'
+  from public.study_comments where id = :'kq' or parent_id = :'kq';
+do $$ begin insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id, ask_attempt)
+  values (current_setting('t.kl')::uuid, 2, 1, 'comment', 'זה של Claude', (select id from public.study_comments where body like 'הבנתי שצריך שותף%'), true);
+  raise notice 'KS1b. FAIL: a member labelled her own reply as Claude''s attempt';
+exception when others then raise notice 'KS1b. ok: only the function attaches an attempt (%)', sqlerrm; end $$;
+do $$ begin perform public.study_ask_to_group(current_setting('t.kl')::uuid, 9, 1, '', 'שאלה?', ''); raise notice 'KS1c. FAIL: a part that does not exist';
+exception when others then raise notice 'KS1c. %: the paragraph must exist (%)', case when sqlerrm = 'bad parts' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000002';   -- איתי answers
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id)
+values (:'kl', 2, 1, 'comment', 'תחשבו על ספרינטרים: פי 10-100 יותר חזקות, אבל ה-t½ שעה-שעתיים [ש'' 30]', :'kq');
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000001';
+update public.study_comments set resolved = true where id = :'kq';
+select 'KS2. marked answered by Maya: ' || (resolved_by = '4b000000-0000-4000-8000-000000000001') || ', at ' || (resolved_at is not null)
+       || ' (expect true, true)' from public.study_comments where id = :'kq';
+update public.study_comments set resolved = false where id = :'kq';
+select 'KS2b. unmarked: ' || coalesce(resolved_by::text, 'none') || ' (expect none)' from public.study_comments where id = :'kq';
+-- KS3: the optional check of a correction (op fix_check, the key and a member's token).
+do $$ begin perform public.study_edit_proposal_checked(gen_random_uuid(), true, 'תואם', null); raise notice 'KS3. FAIL: no key';
+exception when others then raise notice 'KS3. %: the server key (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_edit_proposal_checked(gen_random_uuid(), true, 'תואם', current_setting('t.key')); raise notice 'KS3b. FAIL: no such proposal';
+exception when others then raise notice 'KS3b. %: only a pending proposal (%)', case when sqlerrm = 'not pending' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.ksp5', public.study_propose_edit(:'kl', 0, 2, 'ה-Hypnozoite ישן בכבד. [ש'' 5]',
+  'ה-Hypnozoite ישן בכבד חודשים. [ש'' 5]', mtest.krev(0), 0, 1, '', 'slide', array[5], null, '')::text, false) is not null as p \gset
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000002';
+select public.study_edit_proposal_checked(current_setting('t.ksp5')::uuid, false, '  בשקף 5 לא כתוב כמה זמן.  ', current_setting('t.key')) is null as c \gset
+select 'KS3c. the check''s result on the proposal: ok ' || check_ok || ', note «' || check_note || '», at ' || (checked_at is not null)
+       || ', still ' || state || ' (expect false, «בשקף 5 לא כתוב כמה זמן.», true, pending)'
+  from public.study_edit_proposals where id = current_setting('t.ksp5')::uuid;
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000001';
+select public.study_withdraw_edit(current_setting('t.ksp5')::uuid) is null as w \gset
+select 'KS-reg. K = ' || (public.study_schema() ->> 'K') || ' (expect 2)';
+
+-- ═════════ KU · an undo touches only the paragraph its correction wrote ═════════
+-- A part where the corrected text also stands as another, earlier paragraph
+-- ("- B" twice once "- A" is corrected), and a history row written by K's
+-- first version (an undo with undo_of but no source_kind).
+reset role;
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, created_by) values
+ ('4b100000-0000-4000-8000-000000000002', :'gid', 'פתוגן מאכסן', 'פסקאות כפולות', 'pptx',
+  '[{"n":1,"title":"שקף 1","lines":["B"]},{"n":2,"title":"שקף 2","lines":["A"]}]'::jsonb, 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ ('4b100000-0000-4000-8000-000000000002', 0, 'כפולים', 1, 2, 'ready', E'## כפולים\n\n- B\n\n- A\n\nend');
+\set ku '4b100000-0000-4000-8000-000000000002'
+create or replace function mtest.kumd() returns text language sql security definer set search_path = public as $f$
+  select markdown from public.study_sections where lecture_id = '4b100000-0000-4000-8000-000000000002' and idx = 0 $f$;
+create or replace function mtest.kurev() returns int language sql security definer set search_path = public as $f$
+  select rev from public.study_sections where lecture_id = '4b100000-0000-4000-8000-000000000002' and idx = 0 $f$;
+grant execute on function mtest.kumd(), mtest.kurev() to authenticated;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.kup1', public.study_propose_edit(:'ku', 0, 2, '- A', '- B', mtest.kurev(), 0, 1, '', 'slide', array[1], null, '')::text, false)
+       is not null as p \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.kue1', public.study_approve_edit(current_setting('t.kup1')::uuid) ->> 'edit_id', false) is not null as e \gset
+select 'KU1. ' || case when mtest.kumd() = E'## כפולים\n\n- B\n\n- B\n\nend' and e.occurrence = 2 then 'ok' else 'FAIL' end
+       || ': the correction wrote the second "- B" and recorded it: occurrence ' || coalesce(e.occurrence::text, 'null')
+  from public.study_edits e where e.id = current_setting('t.kue1')::uuid;
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000001';
+select set_config('t.kue2', public.study_undo_edit(current_setting('t.kue1')::uuid) ->> 'edit_id', false) is not null as u \gset
+select 'KU2. ' || case when mtest.kumd() = E'## כפולים\n\n- B\n\n- A\n\nend' and e.anchor = 2 and e.source_kind = 'undo' then 'ok' else 'FAIL' end
+       || ': the undo put "- A" back in the corrected paragraph, the first "- B" untouched: ' || replace(mtest.kumd(), E'\n\n', ' | ')
+  from public.study_edits e where e.id = current_setting('t.kue2')::uuid;
+-- Corrected again, then another paragraph changes: the corrected text now stands twice, so the undo cannot tell which.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.kup2', public.study_propose_edit(:'ku', 0, 2, '- A', '- B', mtest.kurev(), 0, 1, '', 'slide', array[1], null, '')::text, false)
+       is not null as p \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.kue3', public.study_approve_edit(current_setting('t.kup2')::uuid) ->> 'edit_id', false) is not null as e \gset
+reset role;
+update public.study_sections set markdown = replace(markdown, E'\n\nend', E'\n\nend.') where lecture_id = :'ku' and idx = 0;
+set role authenticated;
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000001';
+do $$ begin perform public.study_undo_edit(current_setting('t.kue3')::uuid);
+  raise notice 'KU3. FAIL: an undo guessed between two paragraphs that read the same';
+exception when others then raise notice 'KU3. %: an ambiguous undo is refused (%)', case when sqlerrm = 'edit conflict' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'KU3b. ' || case when mtest.kumd() = E'## כפולים\n\n- B\n\n- B\n\nend.' then 'ok' else 'FAIL' end
+       || ': the part is untouched: ' || replace(mtest.kumd(), E'\n\n', ' | ');
+-- K's first version wrote an undo with undo_of and no source_kind; undoing it would re-apply a correction nobody approved.
+reset role;
+insert into public.study_edits (id, lecture_id, part_idx, anchor, gen, rev, kind, before_text, after_text, note, undo_of, author_id) values
+ ('4b200000-0000-4000-8000-000000000001', :'ku', 0, 3, 0, 100, 'paragraph', 'end.', 'end2', '', null, 'cccccccc-0000-4000-8000-000000000003'),
+ ('4b200000-0000-4000-8000-000000000002', :'ku', 0, 3, 0, 101, 'paragraph', 'end2', 'end.', '', '4b200000-0000-4000-8000-000000000001', 'cccccccc-0000-4000-8000-000000000003');
+set role authenticated;
+set request.jwt.claim.sub = '4b000000-0000-4000-8000-000000000002';
+do $$ begin perform public.study_undo_edit('4b200000-0000-4000-8000-000000000002');
+  raise notice 'KU4. FAIL: an undo from K''s first version was undone';
+exception when others then raise notice 'KU4. %: an undo without source_kind is still an undo (%)', case when sqlerrm = 'bad undo' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'KU4b. ' || case when mtest.kumd() like E'%\n\nend.' then 'ok' else 'FAIL' end || ': the paragraph kept its text: ' || replace(mtest.kumd(), E'\n\n', ' | ');
+reset role;
+delete from public.study_lectures where id = :'ku';
+drop function mtest.kumd();
+drop function mtest.kurev();
+reset request.jwt.claim.sub;
+-- The fixtures go: the lecture (its parts, history, proposals and comments with it), the members.
+delete from public.study_lectures where id = :'kl';
+delete from public.study_members where user_id::text like '4b000000-%';
+delete from auth.users where id::text like '4b000000-%';
+drop function mtest.kblock(int, int);
+drop function mtest.krev(int);
+select 'K-end. fixtures removed: ' || (select count(*) from public.study_edit_proposals) || ' proposals, '
+       || (select count(*) from public.study_edits) || ' history rows left (expect 0, 0)';
+-- ════ END SECTION K ════
+
+-- ════ BEGIN SECTION P · progress, plan, marathons (package A) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION P checks · reading progress, private numbers, marathons, and
+--  P's end: readiness as a range, the danger list, aspects, calibration,
+--  the counts in one call, a moved block   (package A, A2; spec §3.5's ME
+--  checks that do not need an account, and §12.3.A's PS1-PS6). Decision 1
+--  (17 Nov 2026): no account, so no merge checks (ME52-ME64 are gone with
+--  section A's merge). Every line says ok or FAIL by itself. Times are
+--  fixed: T = 2026-11-15 10:00 UTC (12:00 in Israel, study day 15 Nov).
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+select id as pgid from public.study_groups order by created_at limit 1 \gset
+\set pa 'a5a00000-0000-4000-8000-000000000001'
+\set pb 'a5a00000-0000-4000-8000-000000000002'
+\set pr 'a5a00000-0000-4000-8000-000000000003'
+\set pd 'a5a00000-0000-4000-8000-000000000004'
+\set ps 'a5a00000-0000-4000-8000-000000000005'
+\set noa 'cccccccc-0000-4000-8000-000000000003'
+\set shoham 'bbbbbbbb-0000-4000-8000-000000000002'
+\set T '2026-11-15 10:00:00+00'
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by, created_at) values
+ (:'pa', :'pgid', 'פתוגן מאכסן', 'Antimalarials', 'pptx', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 12) n), 'ready', :'shoham', '2026-09-01'),
+ (:'pb', :'pgid', 'פתוגן מאכסן', 'Anthelmintics', 'pptx', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 4) n), 'ready', :'shoham', '2026-09-02'),
+ (:'pr', :'pgid', 'פתוגן מאכסן', 'Readiness', 'pptx', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 8) n), 'ready', :'shoham', '2026-09-03'),
+ (:'pd', :'pgid', 'פתוגן מאכסן', 'Danger', 'pptx', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 8) n), 'ready', :'shoham', '2026-09-04'),
+ (:'ps', :'pgid', 'פתוגן מאכסן', 'Aspects', 'pptx', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 8) n), 'ready', :'shoham', '2026-09-05');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, markdown, status) values
+ (:'pa', 0, 'מלריה: מחזור החיים', 1, 4, repeat('א', 3000), 'ready'),
+ (:'pa', 1, 'Primaquine', 5, 8, repeat('ב', 4500), 'ready'),
+ (:'pa', 2, 'Artemisinins', 9, 12, '', 'pending'),
+ (:'pb', 0, 'Benzimidazoles', 1, 4, repeat('ג', 2000), 'ready'),
+ (:'pr', 0, 'Amebiasis', 1, 4, 'x', 'ready'),
+ (:'pr', 1, 'מלריה', 5, 8, 'x', 'ready'),
+ (:'pd', 0, 'מקרים', 1, 4, 'x', 'ready'),
+ (:'pd', 1, 'עוד', 5, 8, 'x', 'ready'),
+ (:'ps', 0, 'היבטים', 1, 8, 'x', 'ready');
+-- Antimalarials and Anthelmintics: the spec's ME fixtures (practice answers with fixed dates).
+insert into public.study_questions (id, group_id, lecture_id, part_idx, kind, question, options, slides, topic, aspect, created_at, retired_at) values
+ ('a5f00000-0000-4000-8000-000000000001', :'pgid', :'pa', 1, 'mcq',  'מה אסור עם Primaquine?',  '{a,b,c,d,e}', '{20,21}', 'Primaquine',  'contra',    '2026-09-01', null),
+ ('a5f00000-0000-4000-8000-000000000002', :'pgid', :'pa', 1, 'mcq',  'למי אסור Primaquine?',    '{a,b,c,d,e}', '{21}',    'primaquine ', 'contra',    '2026-09-01', null),
+ ('a5f00000-0000-4000-8000-000000000003', :'pgid', :'pa', 1, 'case', 'מקרה: איזו תרופה תינתן?', '{a,b,c,d,e}', '{22}',    'Primaquine',  'uses',      '2026-09-01', null),
+ ('a5f00000-0000-4000-8000-000000000004', :'pgid', :'pa', 0, 'mcq',  'איך Chloroquine פועלת?',  '{a,b,c,d,e}', '{5}',     'Chloroquine', 'mechanism', '2026-09-01', null),
+ ('a5f00000-0000-4000-8000-000000000005', :'pgid', :'pa', 0, 'mcq',  'מה מעכבת Chloroquine?',   '{a,b,c,d,e}', '{6}',     'Chloroquine', 'mechanism', '2026-09-01', null),
+ ('a5f00000-0000-4000-8000-000000000006', :'pgid', :'pa', 0, 'mcq',  'שאלה בלי נושא בכלל?',     '{a,b,c,d,e}', '{7}',     '',            'other',     '2026-09-01', null),
+ ('a5f00000-0000-4000-8000-000000000007', :'pgid', :'pb', 0, 'mcq',  'איך Albendazole פועלת?',  '{a,b,c,d,e}', '{3}',     'Albendazole', 'mechanism', '2026-09-01', null),
+ ('a5f00000-0000-4000-8000-000000000008', :'pgid', :'pa', 1, 'mcq',  'שאלה שהוצאה מהתרגול?',    '{a,b,c,d,e}', '{20}',    'Primaquine',  'contra',    '2026-09-01', '2026-11-01');
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000001', 1, false, 'lecture',  '2026-11-14 10:00:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000001', 0, true,  'mistakes', '2026-11-14 10:05:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000002', 2, false, 'lecture',  '2026-11-13 10:00:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000003', 0, true,  'lecture',  '2026-11-13 10:00:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000004', 0, true,  'lecture',  '2026-10-16 10:00:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000004', 0, true,  'course',   '2026-11-14 10:00:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000005', null, false, 'lecture', '2026-09-16 10:00:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000006', 3, false, 'lecture',  '2026-11-14 10:00:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000008', 3, false, 'lecture',  '2026-11-14 10:00:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000007', 0, true,  'lecture',  '2026-11-14 10:00:00+00'),
+ (:'shoham', 'a5f00000-0000-4000-8000-000000000007', 0, true,  'lecture',  '2026-11-15 01:30:00+00'),
+ (:'noa',    'a5f00000-0000-4000-8000-000000000001', 2, false, 'lecture',  '2026-11-14 10:00:00+00');
+insert into public.study_read_parts (user_id, lecture_id, part_idx, done_at, seconds) values
+ (:'shoham', :'pa', 0, '2026-11-13 18:00:00+00', 600),
+ (:'shoham', :'pa', 1, '2026-11-14 18:00:00+00', 900);
+select set_config('t.pa', :'pa', false) is not null as pa_set \gset
+
+-- ═════════ ME · the numbers per lecture, weak points, days (the spec's, on fixed times) ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'ME1. Shoham, Antimalarials at T: ' || case when s = '6 1 6 3 2 3 8' then 'ok' else 'FAIL ' || s end
+       || ' (questions, cases, answered, right now, first try, wrong now, answers: 6, 1, 6, 3, 2, 3, 8)'
+  from (select questions || ' ' || cases || ' ' || answered || ' ' || correct_now || ' ' || first_try || ' ' || wrong_now || ' ' || answers as s
+          from public.study_my_lectures(:'pgid', :'T') where lecture_id = :'pa') x;
+select 'ME2. Anthelmintics: ' || case when s = '1 1 2' then 'ok' else 'FAIL ' || s end || ' (answered 1, right 1, answers 2)'
+  from (select answered || ' ' || correct_now || ' ' || answers as s from public.study_my_lectures(:'pgid', :'T') where lecture_id = :'pb') x;
+select 'ME3. as of 13 Nov 22:00 UTC: ' || case when s = '4 4' then 'ok' else 'FAIL ' || s end || ' (later answers not yet counted)'
+  from (select answered || ' ' || answers as s from public.study_my_lectures(:'pgid', '2026-11-13 22:00:00+00') where lecture_id = :'pa') x;
+select 'ME4. parts: ' || case when s = '3 {0,1} {"0": 600, "1": 900} 4500 false' then 'ok' else 'FAIL ' || s end
+  from (select jsonb_array_length(parts) || ' ' || parts_done::text || ' ' || part_seconds::text || ' ' || (parts -> 1 ->> 'chars') || ' ' || (parts -> 2 ->> 'ready') as s
+          from public.study_my_lectures(:'pgid', :'T') where lecture_id = :'pa') x;
+select 'ME5. parts done as of 14 Nov 00:00 UTC: ' || case when parts_done = '{0}' then 'ok' else 'FAIL ' || parts_done::text end
+  from public.study_my_lectures(:'pgid', '2026-11-14 00:00:00+00') where lecture_id = :'pa';
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'ME7. Noa sees her own numbers only: ' || case when s = '1 1 {}' then 'ok' else 'FAIL ' || s end
+  from (select answered || ' ' || wrong_now || ' ' || parts_done::text as s from public.study_my_lectures(:'pgid', :'T') where lecture_id = :'pa') x;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'ME8. a stranger gets no rows: ' || case when count(*) = 0 then 'ok' else 'FAIL ' || count(*) end from public.study_my_lectures(:'pgid', :'T');
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'ME9. weak points of the spec''s fixtures: ' || case when s = 'primaquine 0.483 weak · chloroquine 0.788 ok · albendazole 0.798 ok' then 'ok' else 'FAIL ' || s end
+  from (select string_agg(topic_key || ' ' || score || ' ' || status, ' · ' order by score) as s
+          from public.study_my_weak_points(:'pgid', :'T') where topic_key in ('primaquine', 'chloroquine', 'albendazole')) x;
+select 'ME10. primaquine: ' || case when s = '3 2.84 1 contra' then 'ok' else 'FAIL ' || s end || ' (items, weight, wrong now, worst aspect)'
+  from (select items || ' ' || weight || ' ' || wrong_now || ' ' || worst_aspect as s from public.study_my_weak_points(:'pgid', :'T') where topic_key = 'primaquine') x;
+select 'ME14. activity days: ' || case when s like '%2026-11-13: 2/1 1 600%' and s like '%2026-11-14: 7/4 1 900%' then 'ok' else 'FAIL ' || s end
+  from (select string_agg(day || ': ' || answers || '/' || correct || ' ' || parts_read || ' ' || read_seconds, ' · ' order by day) as s
+          from public.study_my_days(:'pgid', 7, :'T') d where d.day in ('2026-11-13', '2026-11-14')) x;
+
+-- ═════════ ME · reading progress through the functions ═════════
+select public.study_note_reading(:'pa', 2, 5, true, 120);
+select 'ME15. after reading part 2: ' || case when parts_done = '{0,1,2}' then 'ok' else 'FAIL ' || parts_done::text end
+  from public.study_my_lectures(:'pgid') where lecture_id = :'pa';
+select public.study_note_reading(:'pa', 1, 7, false, 0);
+select 'ME16. the newest place: ' || case when part_idx = 1 and anchor = 7 then 'ok' else 'FAIL ' || part_idx || '.' || anchor end from public.study_read_places where lecture_id = :'pa';
+do $$ begin perform public.study_note_reading(current_setting('t.pa')::uuid, 9, 0, true); raise notice 'ME17. FAIL: a part that does not exist';
+exception when others then raise notice 'ME17. %: an unknown part is refused (%)', case when sqlerrm = 'bad part' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'ME18. marked by hand, then unmarked: ' || case when public.study_mark_parts(:'pb', '{0,7}', true) = 1 and public.study_mark_parts(:'pb', '{0}', false) = 1 then 'ok' else 'FAIL' end;
+do $$ begin insert into public.study_read_parts (lecture_id, part_idx) values (current_setting('t.pa')::uuid, 0); raise notice 'ME19. FAIL: a direct write';
+exception when insufficient_privilege then raise notice 'ME19. ok: parts are written only through the functions (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'ME20. Noa sees none of Shoham''s reading: ' || case when (select count(*) from public.study_read_parts) + (select count(*) from public.study_read_places) = 0 then 'ok' else 'FAIL' end;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_note_reading(current_setting('t.pa')::uuid, 0, 0, true); raise notice 'ME21. FAIL: the stranger saved a place';
+exception when others then raise notice 'ME21. %: a stranger is refused (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ ME · the plan's tables (kept as the spec printed them, unused: §12.3.A) ═════════
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin insert into public.study_plans (group_id, title, exam_date) values ((select id from public.study_groups limit 1), 'x', current_date + 9); raise notice 'ME27. FAIL: a direct plan insert';
+exception when insufficient_privilege then raise notice 'ME27. ok: plans are saved only through study_plan_save (%)', sqlerrm; end $$;
+
+-- ═════════ ME · marathons ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.agenda', jsonb_build_array(
+  jsonb_build_object('k', 'intro', 'min', 5),
+  jsonb_build_object('k', 'read', 'l', :'pa', 'from', 0, 'to', 1, 'min', 40),
+  jsonb_build_object('k', 'quiz', 'l', :'pa', 'n', 5, 'mode', 'coop', 'min', 10),
+  jsonb_build_object('k', 'break', 'min', 10),
+  jsonb_build_object('k', 'wrap', 'min', 5))::text, false) is not null as agenda \gset
+select set_config('t.m1', (select id::text from public.study_marathon_save(null, null, :'pgid', 'מרתון לפני המבחן', now() + interval '2 days', 240,
+  'ספרייה, קומה 2', '', array[:'pa', :'pb', :'pa']::uuid[], current_setting('t.agenda')::jsonb)), false) is not null as m1 \gset
+select 'ME34. Noa opened a marathon: ' || case when s = '1 2 planned -1 in' then 'ok' else 'FAIL ' || s end
+  from (select version || ' ' || cardinality(lecture_ids) || ' ' || state || ' ' || step || ' ' || (select answer from public.study_marathon_people where marathon_id = m.id) as s
+          from public.study_marathons m where id = current_setting('t.m1')::uuid) x;
+do $$ begin perform public.study_marathon_save(null, null, (select id from public.study_groups limit 1), 'x', now() + interval '1 day', 120, '', '',
+  array[current_setting('t.pa')::uuid], '[{"k":"intro","min":5,"color":"red"}]'::jsonb); raise notice 'ME35. FAIL: an unknown field accepted';
+exception when others then raise notice 'ME35. %: an unknown field is refused (%)', case when sqlerrm = 'bad agenda' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_marathon_answer(current_setting('t.m1')::uuid, 'maybe');
+select public.study_marathon_answer(current_setting('t.m1')::uuid, 'in');
+select 'ME37. one answer each: ' || case when s = 'in,in' then 'ok' else 'FAIL ' || s end
+  from (select string_agg(answer, ',' order by answer) as s from public.study_marathon_people where marathon_id = current_setting('t.m1')::uuid) x;
+select 'ME41. start: ' || case when public.study_marathon_step(current_setting('t.m1')::uuid, -1, 0) = 0 then 'ok' else 'FAIL' end;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'ME42. a second "start" a moment later moves nothing: ' || case when public.study_marathon_step(current_setting('t.m1')::uuid, -1, 0) = 0
+       and (select version from public.study_marathons where id = current_setting('t.m1')::uuid) = 2 then 'ok' else 'FAIL' end || ' (version 2: moved once)';
+do $$ begin update public.study_marathons set title = 'x'; raise notice 'ME40. FAIL: a direct update';
+exception when insufficient_privilege then raise notice 'ME40. ok: marathons change only through the functions (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select 'ME49. the stranger sees no marathon: ' || case when (select count(*) from public.study_marathons) + (select count(*) from public.study_marathon_people) = 0 then 'ok' else 'FAIL' end;
+reset role;
+select 'ME51. published: ' || case when s = 'study_marathon_people, study_marathons' then 'ok' else 'FAIL ' || coalesce(s, 'none') end || ' (no private table)'
+  from (select string_agg(tablename, ', ' order by tablename) as s from pg_publication_tables where pubname = 'supabase_realtime'
+         and tablename in ('study_marathons', 'study_marathon_people', 'study_read_parts', 'study_read_places', 'study_plans', 'study_plan_lectures', 'study_plan_checks', 'study_answers')) x;
+
+-- The fixtures of P's end (after the ME checks, so their days stay the spec's).
+-- Readiness: ten questions on Readiness part 0, each answered "על בטוח" on two
+-- days (7 then 8 right: 20 answers, 15 right), once more on the second day
+-- (a re-answer, not evidence), and once 40 days before T (too old); three on part 1.
+insert into public.study_questions (id, group_id, lecture_id, part_idx, kind, question, options, slides, topic, aspect)
+select ('a5b00000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, :'pgid', :'pr', case when i <= 10 then 0 else 1 end, 'mcq',
+       'שאלת מוכנות מספר ' || i, '{a,b,c,d}', '{2}', 'Amebiasis', 'mechanism'
+  from generate_series(1, 13) i;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, confidence, answered_at)
+select :'shoham'::uuid, ('a5b00000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, 0, i <= 7, 'lecture', 3, '2026-11-12 09:00:00+00'::timestamptz from generate_series(1, 10) i
+union all
+select :'shoham'::uuid, ('a5b00000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, 0, i <= 8, 'lecture', 3, '2026-11-13 09:00:00+00'::timestamptz from generate_series(1, 10) i
+union all
+select :'shoham'::uuid, ('a5b00000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, 0, true, 'mistakes', 3, '2026-11-13 09:30:00+00'::timestamptz from generate_series(1, 10) i
+union all
+select :'shoham'::uuid, ('a5b00000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, 0, false, 'lecture', 2, '2026-10-06 09:00:00+00'::timestamptz from generate_series(1, 10) i
+union all
+select :'shoham'::uuid, ('a5b00000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, 0, true, 'lecture', 1, '2026-11-14 09:00:00+00'::timestamptz from generate_series(11, 13) i;
+-- The danger list (lecture Danger, part 0): D1 on paragraph 1 wrong "על בטוח"
+-- yesterday (D2 is on the same paragraph); D3 wrong "על בטוח" on 10 Nov, right
+-- "על בטוח" on 11 Nov; D4 wrong on 9 Nov, right "על בטוח" on 10 and 12 Nov
+-- (out); D5 wrong "נראה לי" (not a danger); D6 wrong "על בטוח" but hidden by
+-- two flags; D7 on paragraph 2, wrong "על בטוח" on 8 Nov, then D8 (also on
+-- paragraph 2) right "על בטוח" on 9 and 11 Nov (out by its paragraph).
+insert into public.study_questions (id, group_id, lecture_id, part_idx, kind, question, options, slides, topic, aspect, anchor, hidden_at, created_at)
+select ('a5d00000-0000-4000-8000-00000000000' || i)::uuid, :'pgid', :'pd', 0, 'mcq', 'שאלת סכנה מספר ' || i, '{אחת,שתיים,שלוש,ארבע}', array[i],
+       'Danger', 'contra', case when i in (1, 2) then 1 when i in (7, 8) then 2 else null end,
+       case when i = 6 then now() else null end, '2026-09-01'::timestamptz + make_interval(mins => i)
+  from generate_series(1, 8) i;
+insert into public.study_question_keys (question_id, answer, explanations, takeaway)
+select id, 1, '{a,b,c,d}', 'לזכור' from public.study_questions where lecture_id in (:'pa', :'pb', :'pr', :'pd');
+insert into public.study_answers (user_id, question_id, choice, correct, mode, confidence, answered_at) values
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000001', 0, false, 'lecture', 3, '2026-11-14 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000003', 2, false, 'lecture', 3, '2026-11-10 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000003', 1, true,  'lecture', 3, '2026-11-11 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000004', 2, false, 'lecture', 3, '2026-11-09 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000004', 1, true,  'lecture', 3, '2026-11-10 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000004', 1, true,  'lecture', 3, '2026-11-12 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000005', 2, false, 'lecture', 2, '2026-11-14 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000006', 2, false, 'lecture', 3, '2026-11-14 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000007', 3, false, 'lecture', 3, '2026-11-08 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000008', 1, true,  'lecture', 3, '2026-11-09 10:00:00+00'),
+ (:'shoham', 'a5d00000-0000-4000-8000-000000000008', 1, true,  'lecture', 3, '2026-11-11 10:00:00+00'),
+ (:'noa',    'a5d00000-0000-4000-8000-000000000003', 0, false, 'lecture', 3, '2026-11-14 10:00:00+00');
+-- Aspects (lecture Aspects): mechanism 4 questions, 2 wrong now (hot); contra 4, 1 wrong (warm);
+-- uses 4, none wrong (cool); pk 2 (too few: no bucket yet). A wrong answer later fixed counts as right.
+insert into public.study_questions (id, group_id, lecture_id, part_idx, kind, question, options, slides, topic, aspect)
+select ('a5e00000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, :'pgid', :'ps', 0, 'mcq', 'שאלת היבט מספר ' || i, '{a,b,c,d}', '{1}', 'היבט',
+       case when i <= 4 then 'mechanism' when i <= 8 then 'contra' when i <= 12 then 'uses' else 'pk' end
+  from generate_series(1, 14) i;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at)
+select :'shoham'::uuid, ('a5e00000-0000-4000-8000-0000000000' || lpad(i::text, 2, '0'))::uuid, 0, not (i in (1, 2, 5)), 'lecture', '2026-11-14 08:00:00+00'
+  from generate_series(1, 14) i
+union all
+select :'shoham'::uuid, 'a5e00000-0000-4000-8000-000000000009', 1, false, 'lecture', '2026-11-13 08:00:00+00'::timestamptz;
+-- ═════════ PS1 · readiness as a range (PR2) ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'PS1. readiness: ' || case when s = '0 Amebiasis 20/15 65-85 | 1 מלריה 3/3 -' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+       || ' (20 first answers a day, 15 right: 65–85%; a re-answer the same day and one 40 days old do not count; 3 answers: no range yet)'
+  from (select string_agg(part_idx || ' ' || heading || ' ' || answers || '/' || right_n || ' ' || coalesce(lo || '-' || hi, '-'), ' | ' order by part_idx) as s
+          from public.study_my_readiness(:'pgid', :'T') where lecture_id = :'pr') x;
+select 'PS1a. a deleted lecture leaves readiness: ' || case when not exists (select 1 from public.study_my_readiness(:'pgid', :'T') r join public.study_lectures l on l.id = r.lecture_id where l.deleted_at is not null) then 'ok' else 'FAIL' end;
+
+-- ═════════ PS2 · the danger list (PR3) ═════════
+select 'PS2. the danger list: ' || case when s = 'D3 r1 2026-11-14 D3 | D1 r0 2026-11-15 D2' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+       || ' (D3 back 3 days after its first right "על בטוח"; D1 tomorrow after the miss, asked as D2 on its paragraph; D4 and D7 out after two rights; D5 was "נראה לי"; D6 hidden)'
+  from (select string_agg('D' || right(question_id::text, 1) || ' r' || rights || ' ' || due_day || ' D' || right(ask_id::text, 1), ' | ' order by due_day, wrong_at) as s
+          from public.study_my_danger_list(:'pgid', :'T') where lecture_id = :'pd') x;
+select 'PS2a. what was chosen and what is right: ' || case when s = 'אחת → שתיים' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+  from (select chosen || ' → ' || right_text as s from public.study_my_danger_list(:'pgid', :'T') where question_id = 'a5d00000-0000-4000-8000-000000000001') x;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'PS2b. Noa''s list is her own: ' || case when s = 'D3 r0 2026-11-15' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+  from (select string_agg('D' || right(question_id::text, 1) || ' r' || rights || ' ' || due_day, ' | ') as s from public.study_my_danger_list(:'pgid', :'T') where lecture_id = :'pd') x;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+
+-- ═════════ PS3 · aspects (PR4) ═════════
+select 'PS3. aspects: ' || case when s = 'mechanism 4/2 hot | contra 4/1 warm | uses 4/0 cool | pk 2/0 -' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+       || ' (her latest answer per question; from 4 questions a bucket, below that none)'
+  from (select string_agg(aspect || ' ' || questions || '/' || wrong_now || ' ' || coalesce(bucket, '-'), ' | ') as s from public.study_my_aspects(:'pgid', :'ps')) x;
+
+-- ═════════ PS4 · calibration (PR5) ═════════
+select 'PS4. calibration of Readiness part 0: ' || case when s = '20 15 75' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+       || ' (20 "על בטוח" first answers a day, 15 right: 75%)'
+  from (select sure || ' ' || sure_right || ' ' || coalesce(pct::text, '-') as s from public.study_my_calibration(:'pgid', :'T') where scope = 'part' and lecture_id = :'pr' and part_idx = 0) x;
+select 'PS4a. below 20 no percent: ' || case when s = '10 -' then 'ok' else 'FAIL ' || coalesce(s, 'none') end || ' (Danger: 10 "על בטוח" first answers a day)'
+  from (select sure || ' ' || coalesce(pct::text, '-') as s from public.study_my_calibration(:'pgid', :'T') where scope = 'lecture' and lecture_id = :'pd') x;
+select 'PS4b. one overall row, the sum of the lectures'': ' || case when count(*) = 1 and min(sure) = (select sum(sure) from public.study_my_calibration(:'pgid', :'T') where scope = 'lecture') then 'ok' else 'FAIL ' || count(*) || ' ' || min(sure) end
+  from public.study_my_calibration(:'pgid', :'T') where scope = 'all';
+
+-- ═════════ PS5 · the counts in one call (PR7) agree with the lists ═════════
+select 'PS5. counts: ' || case when c.answers = (select sum(answers) from public.study_my_readiness(:'pgid', :'T'))
+                                 and c.parts = (select count(*) from public.study_my_readiness(:'pgid', :'T'))
+                                 and c.parts_ranged = 1
+                                 and (c.sure, c.sure_right) = (select sure, sure_right from public.study_my_calibration(:'pgid', :'T') where scope = 'all')
+                                 and c.danger = (select count(*) from public.study_my_danger_list(:'pgid', :'T'))
+                                 and c.danger_due = (select count(*) from public.study_my_danger_list(:'pgid', :'T') where due_day <= '2026-11-15')
+                                 and c.mistakes = (select count(*) from public.study_open_mistakes(:'pgid'))
+                                 and c.rewordings_due = (select count(*) from public.study_my_rewordings(:'pgid', :'T'))
+                                 and c.again_due = (select count(distinct q) from (select question_id as q from public.study_my_danger_list(:'pgid', :'T') where due_day <= '2026-11-15'
+                                                                                   union all select question_id from public.study_my_rewordings(:'pgid', :'T')) x)
+                                 and c.again_due < c.danger_due + c.rewordings_due
+                            then 'ok' else 'FAIL ' || row(c.*)::text end
+  from public.study_my_progress_counts(:'pgid', :'T') c;
+select 'PS5a. Danger''s rows due by T (D3 since yesterday, D1 today), none the day before: ' || case when
+       (select count(*) from public.study_my_danger_list(:'pgid', :'T') where lecture_id = :'pd' and due_day <= '2026-11-15') = 2
+       and (select count(*) from public.study_my_danger_list(:'pgid', '2026-11-13 10:00:00+00') where lecture_id = :'pd' and due_day <= '2026-11-13') = 0 then 'ok' else 'FAIL' end;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'PS5b. Noa''s counts are her own: ' || case when danger = (select count(*) from public.study_my_danger_list(:'pgid', :'T')) and parts_ranged = 0
+       and not exists (select 1 from public.study_my_danger_list(:'pgid', :'T') d join public.study_answers a on a.question_id = d.question_id and a.user_id = :'shoham' and a.answered_at = d.wrong_at) then 'ok' else 'FAIL ' || row(c.*)::text end
+  from public.study_my_progress_counts(:'pgid', :'T') c;
+
+-- ═════════ PS6 · a moved block (PL2/PL5), strangers, anonymous calls ═════════
+reset role;
+select 'PS6. a step may be moved: ' || case when public.study_marathon__agenda_ok('[{"k":"break","min":5,"moved":true}]', '{}')
+       and not public.study_marathon__agenda_ok('[{"k":"break","min":5,"moved":"yes"}]', '{}') then 'ok' else 'FAIL' end;
+set role authenticated;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ declare f text; begin
+  foreach f in array array['study_my_readiness', 'study_my_danger_list', 'study_my_calibration', 'study_my_progress_counts'] loop
+    begin
+      execute format('select count(*) from public.%I(%L::uuid)', f, (select id from public.study_groups limit 1));
+      raise notice 'PS6a. FAIL: a stranger read %', f;
+    exception when others then raise notice 'PS6a. %: a stranger is refused % (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, f, sqlerrm;
+    end;
+  end loop;
+end $$;
+do $$ begin perform public.study_my_aspects((select id from public.study_groups limit 1)); raise notice 'PS6b. FAIL: a stranger read aspects';
+exception when others then raise notice 'PS6b. %: (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select 'PS6c. anon may call none of the private reads: ' || case when not has_function_privilege('anon', 'public.study_my_readiness(uuid, timestamptz)', 'execute')
+       and not has_function_privilege('anon', 'public.study_my_danger_list(uuid, timestamptz)', 'execute')
+       and not has_function_privilege('anon', 'public.study_my_aspects(uuid, uuid)', 'execute')
+       and not has_function_privilege('anon', 'public.study_my_calibration(uuid, timestamptz)', 'execute')
+       and not has_function_privilege('anon', 'public.study_my_progress_counts(uuid, timestamptz)', 'execute')
+       and not has_function_privilege('anon', 'public.study_my_lectures(uuid, timestamptz)', 'execute')
+       and has_function_privilege('authenticated', 'public.study_my_progress_counts(uuid, timestamptz)', 'execute') then 'ok' else 'FAIL' end;
+
+-- A lecture split into parts again: the old "read" marks go with the old parts (ME67).
+delete from public.study_sections where lecture_id = :'pa' and idx = 2;
+select 'ME67. a deleted part takes its read marks: ' || case when (select count(*) from public.study_read_parts where lecture_id = :'pa' and part_idx = 2) = 0
+       and (select count(*) from public.study_read_parts where lecture_id = :'pa' and part_idx < 2) = 2 then 'ok' else 'FAIL' end;
+
+select 'P-reg. the registry: ' || case when public.study_schema() ->> 'P' = '2' then 'ok' else 'FAIL ' || coalesce(public.study_schema() ->> 'P', 'missing') end || ' (P at 2: P''s end)';
+select 'P-A. no section A without accounts (decision 1): ' || case when public.study_schema() ? 'A' then 'FAIL' else 'ok' end;
+delete from public.study_marathons where id = current_setting('t.m1')::uuid;
+delete from public.study_lectures where id in (:'pa', :'pb', :'pr', :'pd', :'ps');
+select 'P-end. the fixtures are gone: ' || case when (select count(*) from public.study_questions where lecture_id in (:'pa', :'pb', :'pr', :'pd', :'ps'))
+       + (select count(*) from public.study_answers a where a.question_id::text like 'a5%') + (select count(*) from public.study_read_parts where lecture_id in (:'pa', :'pb')) = 0 then 'ok' else 'FAIL' end;
+-- ════ END SECTION P ════
+
+-- ════ BEGIN SECTION M · the daily meeting (package M) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION M checks · the day's meeting   (package M; spec §12.4.M: M1-M14
+--  and M-reg of the meeting design's tests/shared/96-meeting-test.sql, with
+--  the review's SR4a-SR4h, SR11a-SR11c, SR5a and SR12a-SR12b on the same
+--  fixtures). Same session, after section Z's checks: their members (שוהם,
+--  נועה, מאיה, איתי, דניאל, רוני, יעל, דנה), the lectures L1 (today),
+--  L2 (yesterday's) and L3, their keyed questions and the mtest helpers.
+--  Every line says ok or FAIL by itself. Section J's wall (the catch-up's
+--  pinned association) is used when it exists. Time is simulated by moving
+--  times into the past as the owner, never by sleeping.
+-- ════════════════════════════════════════════════════════════════════════
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+select id as gid from public.study_groups order by created_at limit 1 \gset
+select set_config('t.gid', :'gid', false) is not null as g \gset
+update public.study_quizzes set state = 'ended', ended_at = now() where state in ('lobby', 'question', 'reveal');
+-- ── Fixtures: section Z's (its checks remove them at their end) ──
+-- Members: שוהם (b…2), נועה כהן (c…3), יעל (f…6), דנה (ab…7) from the
+-- earlier checks, and מאיה, איתי, דניאל, רוני. A stranger: d…4.
+insert into auth.users (id, raw_user_meta_data) values
+ ('3c000000-0000-4000-8000-000000000001', '{"app":"study","full_name":"מאיה"}'),
+ ('3c000000-0000-4000-8000-000000000002', '{"app":"study","full_name":"איתי"}'),
+ ('3c000000-0000-4000-8000-000000000003', '{"app":"study","full_name":"דניאל"}'),
+ ('3c000000-0000-4000-8000-000000000004', '{"app":"study","full_name":"רוני"}');
+insert into public.study_members (group_id, user_id, name) values
+ (:'gid', '3c000000-0000-4000-8000-000000000001', 'מאיה'),
+ (:'gid', '3c000000-0000-4000-8000-000000000002', 'איתי'),
+ (:'gid', '3c000000-0000-4000-8000-000000000003', 'דניאל'),
+ (:'gid', '3c000000-0000-4000-8000-000000000004', 'רוני');
+-- L1 today's lecture (40 slides, three parts), L2 yesterday's, L3 an older one.
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, created_by) values
+ ('3c100000-0000-4000-8000-000000000001', :'gid', 'פתוגן מאכסן', 'מלריה (פגישה)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 40) n), 'bbbbbbbb-0000-4000-8000-000000000002'),
+ ('3c100000-0000-4000-8000-000000000002', :'gid', 'פתוגן מאכסן', 'לישמניה (פגישה)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 20) n), 'bbbbbbbb-0000-4000-8000-000000000002'),
+ ('3c100000-0000-4000-8000-000000000003', :'gid', 'פתוגן מאכסן', 'אמבות (פגישה)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 10) n), 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ ('3c100000-0000-4000-8000-000000000001', 0, 'מחזור החיים', 1, 12, 'ready',
+  E'## מחזור החיים\n\nאף תרופה לא הורגת את ה-Sporozoite. [ש'' 3]\n\nה-Hypnozoite ישן בכבד. [ש'' 5]\n\nלפני Primaquine בודקים G6PD. [ש'' 7]'),
+ ('3c100000-0000-4000-8000-000000000001', 1, 'מנגנונים', 13, 24, 'ready',
+  E'## מנגנונים\n\nChloroquine מצטברת בוואקואולה. [ש'' 15]\n\nMefloquine ניתנת פעם בשבוע. [ש'' 20]'),
+ ('3c100000-0000-4000-8000-000000000001', 2, 'שילובים', 25, 40, 'ready',
+  E'## שילובים\n\nArtemisinins לעולם לא לבד. [ש'' 30]\n\nQuinine עם Doxycycline, לא בהיריון. [ש'' 33]'),
+ ('3c100000-0000-4000-8000-000000000002', 0, 'טיפול', 1, 10, 'ready', E'## טיפול\n\nMiltefosine טרטוגנית. [ש'' 6]\n\nPentostam דורשת ECG. [ש'' 8]'),
+ ('3c100000-0000-4000-8000-000000000002', 1, 'מנגנון', 11, 20, 'ready', E'## מנגנון\n\nSb(V) הופך ל-Sb(III). [ש'' 15]'),
+ ('3c100000-0000-4000-8000-000000000003', 0, 'אמבות', 1, 10, 'ready', E'## אמבות\n\nMetronidazole ובירה. [ש'' 7]');
+-- Questions placed on paragraphs (key = the option index given).
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, anchor, quote, kind, question, options, slides, topic, aspect, teaser)
+values
+ ('3c2a0000-0000-4000-8000-000000000001', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 0, 1, 'אף תרופה לא הורגת', 'mcq', 'איזה שלב אף תרופה לא הורגת?', array['Sporozoite','Hypnozoite','Schizont','Gametocyte','Merozoite'], array[3], 'Sporozoite', 'lifecycle', 'ה-Sporozoite נכנס בלי כרטיס'),
+ ('3c2a0000-0000-4000-8000-000000000002', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 0, 2, 'ה-Hypnozoite ישן', 'mcq', 'מה גורם להישנות ב-vivax?', array['א','ב','ג','ד','ה'], array[5], 'Primaquine', 'lifecycle', ''),
+ ('3c2a0000-0000-4000-8000-000000000003', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 0, 2, 'ה-Hypnozoite ישן', 'mcq', 'מה מסלק hypnozoites?', array['א','ב','ג','ד','ה'], array[5], 'Primaquine', 'uses', ''),
+ ('3c2a0000-0000-4000-8000-000000000004', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 0, 3, 'לפני Primaquine', 'mcq', 'מה בודקים לפני Primaquine?', array['א','ב','ג','ד','ה'], array[7], 'Primaquine', 'contra', ''),
+ ('3c2a0000-0000-4000-8000-000000000005', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 1, 1, 'Chloroquine מצטברת', 'mcq', 'איפה מצטברת Chloroquine?', array['א','ב','ג','ד','ה'], array[15], 'Chloroquine', 'mechanism', ''),
+ ('3c2a0000-0000-4000-8000-000000000006', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 1, 2, 'Mefloquine ניתנת', 'mcq', 'כל כמה זמן Mefloquine?', array['א','ב','ג','ד','ה'], array[20], 'Mefloquine', 'dosing', ''),
+ ('3c2a0000-0000-4000-8000-000000000007', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 2, 1, 'Artemisinins לעולם', 'mcq', 'למה Artemisinins לא לבד?', array['א','ב','ג','ד','ה'], array[30], 'Artemisinin', 'uses', ''),
+ ('3c2a0000-0000-4000-8000-000000000008', :'gid', '3c100000-0000-4000-8000-000000000001', 'ai', 2, 2, 'Quinine עם Doxycycline', 'mcq', 'מה מצרפים ל-Quinine בהיריון?', array['א','ב','ג','ד','ה'], array[33], 'Quinine', 'contra', ''),
+ ('3c2b0000-0000-4000-8000-000000000001', :'gid', '3c100000-0000-4000-8000-000000000002', 'ai', 0, 1, 'Miltefosine טרטוגנית', 'mcq', 'מה Miltefosine מחייבת?', array['א','ב','ג','ד','ה'], array[6], 'Miltefosine', 'contra', 'Miltefosine סיימה קורס, אבל עוד לא עזבה'),
+ ('3c2b0000-0000-4000-8000-000000000002', :'gid', '3c100000-0000-4000-8000-000000000002', 'ai', 0, 2, 'Pentostam דורשת', 'mcq', 'למה Pentostam דורשת ECG?', array['א','ב','ג','ד','ה'], array[8], 'Pentostam', 'adverse', ''),
+ ('3c2b0000-0000-4000-8000-000000000003', :'gid', '3c100000-0000-4000-8000-000000000002', 'ai', 0, 2, 'Pentostam דורשת', 'mcq', 'מה מנטרים ב-Pentostam?', array['א','ב','ג','ד','ה'], array[8], 'Pentostam', 'adverse', ''),
+ ('3c2b0000-0000-4000-8000-000000000004', :'gid', '3c100000-0000-4000-8000-000000000002', 'ai', 1, 1, 'Sb(V) הופך', 'mcq', 'איך Pentostam מופעלת?', array['א','ב','ג','ד','ה'], array[15], 'Pentostam', 'mechanism', ''),
+ ('3c2c0000-0000-4000-8000-000000000001', :'gid', '3c100000-0000-4000-8000-000000000003', 'ai', 0, 1, 'Metronidazole ובירה', 'mcq', 'מה קורה עם Metronidazole ובירה?', array['א','ב','ג','ד','ה'], array[7], 'Metronidazole', 'interactions', 'Metronidazole נתפסה עם בירה');
+insert into public.study_question_keys (question_id, answer, explanations, takeaway)
+select q.id, (case right(q.id::text, 1) when '1' then 0 when '2' then 1 when '3' then 2 when '4' then 3 when '5' then 0 when '6' then 1 when '7' then 2 else 3 end)::smallint,
+       array['הסבר א [ש'' 3]', 'הסבר ב: לא כאן [ש'' 5]', 'הסבר ג [ש'' 7]', 'הסבר ד', 'הסבר ה'], 'מה לזכור'
+  from public.study_questions q where q.id::text like '3c2%';
+
+-- Test helpers (the owner calls them; no member can).
+create schema if not exists mtest;
+create or replace function mtest.shift(p_quiz uuid, p_secs numeric) returns void language sql as $$
+  update public.study_quiz_rounds set opens_at = opens_at - make_interval(secs => p_secs::double precision),
+                                      closes_at = closes_at - make_interval(secs => p_secs::double precision)
+   where quiz_id = p_quiz and opens_at is not null and revealed_at is null;
+  update public.study_quizzes set opens_at = opens_at - make_interval(secs => p_secs::double precision),
+                                  closes_at = closes_at - make_interval(secs => p_secs::double precision)
+   where id = p_quiz;
+$$;
+create or replace function mtest.key_now(p_quiz uuid) returns int language sql as $$
+  select k.answer::int from public.study_quizzes z
+    join public.study_quiz_rounds r on r.quiz_id = z.id and r.idx = z.idx
+    join public.study_question_keys k on k.question_id = r.question_id where z.id = p_quiz $$;
+create or replace function mtest.q_now(p_quiz uuid) returns uuid language sql as $$
+  select r.question_id from public.study_quizzes z join public.study_quiz_rounds r on r.quiz_id = z.id and r.idx = z.idx
+   where z.id = p_quiz $$;
+revoke all on schema mtest from public;
+grant usage on schema mtest to authenticated, anon;
+
+create schema if not exists mtest;
+-- "M1e. ok: …" or "M1e. FAIL: … (expect …)" (the owner's helper; members never call it).
+create or replace function mtest.m_is(p_label text, p_got text, p_want text) returns text language sql immutable as $$
+  select p_label || case when p_got is not distinct from p_want then '. ok: ' || coalesce(p_got, 'null')
+                         else '. FAIL: ' || coalesce(p_got, 'null') || ' (expect ' || coalesce(p_want, 'null') || ')' end $$;
+grant usage on schema mtest to authenticated;
+grant execute on function mtest.m_is(text, text, text) to authenticated;
+\set u_shoham 'bbbbbbbb-0000-4000-8000-000000000002'
+\set u_noa 'cccccccc-0000-4000-8000-000000000003'
+\set u_maya '3c000000-0000-4000-8000-000000000001'
+\set u_itai '3c000000-0000-4000-8000-000000000002'
+\set u_daniel '3c000000-0000-4000-8000-000000000003'
+\set u_roni '3c000000-0000-4000-8000-000000000004'
+\set u_dana 'abababab-0000-4000-8000-000000000007'
+\set l1 '3c100000-0000-4000-8000-000000000001'
+\set l2 '3c100000-0000-4000-8000-000000000002'
+
+-- Yesterday: L2, part 0 read; Noa was there, Dana was not. Three days ago: L3.
+insert into public.study_meetings (id, group_id, day, starts_at, lecture_id, part_from, part_to, started_at, read_part, reader_id, created_by)
+values ('3c6a0000-0000-4000-8000-000000000001', :'gid', study_private.day_of(now()) - 1, now() - interval '1 day',
+        :'l2', 0, 0, now() - interval '1 day', 0, :'u_shoham', :'u_shoham'),
+       ('3c6a0000-0000-4000-8000-000000000002', :'gid', study_private.day_of(now()) - 3, now() - interval '3 days',
+        '3c100000-0000-4000-8000-000000000003', 0, 0, now() - interval '3 days', 0, :'u_shoham', :'u_shoham');
+insert into public.study_meeting_presence (meeting_id, user_id, first_at, last_at)
+values ('3c6a0000-0000-4000-8000-000000000001', :'u_noa', now() - interval '1 day', now() - interval '23 hours');
+insert into public.study_meeting_taps (meeting_id, user_id, lecture_id, part_idx, anchor, quote, created_at)
+values ('3c6a0000-0000-4000-8000-000000000001', :'u_noa', :'l2', 0, 1, '', now() - interval '1 day' + interval '10 minutes');
+insert into public.study_meeting_events (meeting_id, kind, part_idx, anchor, quote, created_by, created_at)
+values ('3c6a0000-0000-4000-8000-000000000001', 'explain', 0, 1, '', :'u_shoham', now() - interval '1 day' + interval '12 minutes');
+-- Yesterday's threads: Itai's question on ¶1, answered by Daniel in the meeting; Maya's on ¶2, still
+-- open and sent "לשאלה פתוחה למחר".
+insert into public.study_comments (id, lecture_id, part_idx, anchor, quote, kind, body, resolved, author_id, created_at) values
+ ('3c7a0000-0000-4000-8000-000000000001', :'l2', 0, 1, 'Miltefosine', 'question', 'עד מתי אמצעי מניעה?', true,
+  :'u_itai', now() - interval '1 day' + interval '5 minutes'),
+ ('3c7a0000-0000-4000-8000-000000000003', :'l2', 0, 2, 'Pentostam', 'question', 'למה ECG?', false,
+  :'u_maya', now() - interval '1 day' + interval '20 minutes');
+insert into public.study_comments (id, lecture_id, part_idx, anchor, kind, body, parent_id, author_id, created_at) values
+ ('3c7a0000-0000-4000-8000-000000000002', :'l2', 0, 1, 'comment', 'בטיפול ועוד 5 חודשים.',
+  '3c7a0000-0000-4000-8000-000000000001', :'u_daniel', now() - interval '1 day' + interval '30 minutes');
+insert into public.study_meeting_events (meeting_id, kind, part_idx, anchor, quote, comment_id, created_by, created_at)
+values ('3c6a0000-0000-4000-8000-000000000001', 'question', 0, 2, '', '3c7a0000-0000-4000-8000-000000000003',
+        :'u_shoham', now() - interval '1 day' + interval '21 minutes');
+-- Daniel's association pinned in the meeting: the wall's moment (section J, review F-13), when J exists.
+do $$ begin
+  if to_regclass('public.study_aids') is not null then
+    execute $q$insert into public.study_aids (id, group_id, lecture_id, part_idx, anchor, quote, kind, body, fact, slides, named_by, created_at)
+      values ('3c7b0000-0000-4000-8000-000000000001', $1, '3c100000-0000-4000-8000-000000000002', 0, 2, 'Pentostam', 'moment',
+              'Pentostam: 5 כוכבים, עובדת ב-3', 'Pentostam: חמש-ערכי, ECG לפני [ש'' 3]', '{3}', '3c000000-0000-4000-8000-000000000003',
+              now() - interval '1 day' + interval '1 hour')$q$ using current_setting('t.gid')::uuid;
+    perform set_config('t.m_j', 'yes', false);
+  else
+    perform set_config('t.m_j', 'no', false);
+  end if;
+end $$;
+
+-- ═════════ M1 · planning today's meeting ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.m', id::text, false) is not null as m
+  from public.study_meeting_save(null, null, :'gid', now(), :'l1', 0, 1, '', :'u_shoham') \gset
+do $$
+declare c record; n int := 0; bad text := '';
+begin
+  for c in select * from (values
+      ('the same lecture twice a day', '3c100000-0000-4000-8000-000000000001'::uuid, 0, 1, now(), null::uuid, 'meeting exists'),
+      ('parts that are not there', '3c100000-0000-4000-8000-000000000001'::uuid, 0, 5, now(), null::uuid, 'bad parts'),
+      ('parts backwards', '3c100000-0000-4000-8000-000000000001'::uuid, 1, 0, now(), null::uuid, 'bad parts'),
+      ('a lecture of no group', gen_random_uuid(), 0, 0, now(), null::uuid, 'lecture not found'),
+      ('a reader who is not a member', '3c100000-0000-4000-8000-000000000003'::uuid, 0, 0, now(), 'dddddddd-0000-4000-8000-000000000004'::uuid, 'member not found'),
+      ('a month ahead', '3c100000-0000-4000-8000-000000000003'::uuid, 0, 0, now() + interval '30 days', null::uuid, 'bad time')
+    ) as t(label, lec, pf, pt, at, reader, want) loop
+    begin
+      perform public.study_meeting_save(null, null, current_setting('t.gid')::uuid, c.at, c.lec, c.pf, c.pt, '', c.reader);
+      bad := bad || c.label || ' was saved; ';
+    exception when others then if sqlerrm = c.want then n := n + 1; else bad := bad || c.label || ' → ' || sqlerrm || '; '; end if; end;
+  end loop;
+  raise notice '%', mtest.m_is('M1', n || ' of 6 bad meetings refused with their reason' || case when bad <> '' then ' (' || bad || ')' else '' end,
+                                '6 of 6 bad meetings refused with their reason');
+end $$;
+do $$ begin perform public.study_meeting_save(current_setting('t.m')::uuid, 1, current_setting('t.gid')::uuid, now(),
+    '3c100000-0000-4000-8000-000000000001', 0, 1, repeat('x', 121), null);
+  raise notice 'M1a. FAIL: a 121-character title';
+exception when others then raise notice 'M1a. %: (%)', case when sqlerrm = 'bad title' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_meeting_save(null, null, current_setting('t.gid')::uuid, now(), '3c100000-0000-4000-8000-000000000003', 0, 0);
+  raise notice 'M1b. FAIL: a stranger planned a meeting';
+exception when others then raise notice 'M1b. %: members only (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select mtest.m_is('M1c. a stranger sees meetings', count(*)::text, '0') from public.study_meetings;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_meeting_save(current_setting('t.m')::uuid, 7, current_setting('t.gid')::uuid, now(),
+    '3c100000-0000-4000-8000-000000000001', 0, 1, 'מלריה', null);
+  raise notice 'M1d. FAIL: an old version saved';
+exception when others then raise notice 'M1d. %: someone changed it meanwhile (%)', case when sqlerrm = 'conflict' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select mtest.m_is('M1e. today''s band',
+       (b ->> 'lecture_title') || ' · ' || (b ->> 'title') || ' · slides ' || (b ->> 'slide_from') || '-' || (b ->> 'slide_to')
+       || ' · reader Shoham ' || ((b ->> 'planned_reader') = :'u_shoham') || ' · today ' || (b ->> 'today') || ' · over ' || (b ->> 'over'),
+       'מלריה (פגישה) · מחזור החיים · מנגנונים · slides 1-24 · reader Shoham true · today true · over false')
+  from jsonb_array_elements(public.study_meeting_band(:'gid')) b;
+-- Any member changes the plan, with its version (a title; the same parts keep the guesses).
+select mtest.m_is('M1f. Noa renames it (version 1 → 2)', (select version::text from public.study_meeting_save(current_setting('t.m')::uuid, 1, :'gid', now(), :'l1', 0, 1, 'מלריה', :'u_shoham')), '2');
+select mtest.m_is('M1g. the band shows the title', (select string_agg(b ->> 'title', ',') from jsonb_array_elements(public.study_meeting_band(:'gid')) b), 'מלריה');
+select public.study_meeting_save(current_setting('t.m')::uuid, 2, :'gid', now(), :'l1', 0, 1, '', :'u_shoham') is not null as s \gset
+
+-- ═════════ M2 · the pre-guess, before the reading (M-2) ═════════
+select set_config('t.g', array_to_string(public.study_meeting_guess_pick(current_setting('t.m')::uuid), ','), false) is not null as g \gset
+select mtest.m_is('M2. two guesses on the first part, distinct paragraphs, in reading order; a second pick keeps them',
+       (select string_agg(q.anchor::text, ',' order by q.anchor) from public.study_questions q where q.id = any (string_to_array(current_setting('t.g'), ',')::uuid[]))
+       || ' · ' || (array_to_string(public.study_meeting_guess_pick(current_setting('t.m')::uuid), ',') = current_setting('t.g')), '1,2 · true');
+select set_config('t.g1', split_part(current_setting('t.g'), ',', 1), false) is not null as g \gset
+reset role;
+select set_config('t.gk', (select answer::text from public.study_question_keys where question_id = current_setting('t.g1')::uuid), false) is not null as k \gset
+set role authenticated;
+select public.study_meeting_guess(current_setting('t.m')::uuid, current_setting('t.g1')::uuid, (current_setting('t.gk')::int + 1) % 5) is null as a \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_meeting_guess(current_setting('t.m')::uuid, current_setting('t.g1')::uuid, (current_setting('t.gk')::int + 1) % 5) is null as a \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select public.study_meeting_guess(current_setting('t.m')::uuid, current_setting('t.g1')::uuid, (current_setting('t.gk')::int + 1) % 5) is null as a \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000003';
+select public.study_meeting_guess(current_setting('t.m')::uuid, current_setting('t.g1')::uuid, current_setting('t.gk')::int) is null as a \gset
+do $$ begin perform public.study_meeting_guess(current_setting('t.m')::uuid, current_setting('t.g1')::uuid, 9);
+  raise notice 'M2b. FAIL: option 9 of 5';
+exception when others then raise notice 'M2b. %: a guess is one of the options (%)', case when sqlerrm = 'bad choice' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_meeting_guess(current_setting('t.m')::uuid, '3c2a0000-0000-4000-8000-000000000005', 0);
+  raise notice 'M2c. FAIL: guessed a question that is not a guess';
+exception when others then raise notice 'M2c. %: only the two guesses (%)', case when sqlerrm = 'question not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select mtest.m_is('M2d. Noa before the reading: released · key sent · her guess kept',
+       (e ->> 'released') || ' · ' || (e ? 'answer') || ' · ' || ((e ->> 'mine')::int = (current_setting('t.gk')::int + 1) % 5), 'false · false · true')
+  from jsonb_array_elements(public.study_meeting_guess_state(current_setting('t.m')::uuid)) e where (e ->> 'n')::int = 1;
+select mtest.m_is('M2f. the band counts her guesses (2 of them, 1 made)',
+       (select (b ->> 'guesses') || ' · ' || (b ->> 'my_guesses') from jsonb_array_elements(public.study_meeting_band(:'gid')) b), '2 · 1');
+reset role;
+select mtest.m_is('M2e. a guess never counts as an answer: Daniel''s rows for it in study_answers',
+       (select count(*)::text from public.study_answers where user_id = :'u_daniel' and question_id = current_setting('t.g1')::uuid), '0');
+
+-- ═════════ M3-M4 · reading aloud: the reader, the place, the release ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.rm', public.study_meeting_reading(:'l1', true, 0, 0)::text, false) is not null as r \gset
+select mtest.m_is('M3. Shoham reads aloud: the same meeting · reading · started · reader Shoham',
+       (current_setting('t.rm') = current_setting('t.m')) || ' · ' || reading || ' · ' || (started_at is not null) || ' · ' || (reader_id = auth.uid()),
+       'true · true · true · true')
+  from public.study_meetings where id = current_setting('t.m')::uuid;
+reset role;
+update study_private.features set enabled = true where name = 'pulse';   -- decision 1's switch governs the warning (review F-14)
+insert into study_private.features (name, enabled) select 'pulse', true where not exists (select 1 from study_private.features where name = 'pulse');
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select mtest.m_is('M3b. with the switch pulse, the reader is warned before the first guess''s paragraph (3 of 4 guessed wrong)',
+       'guess ' || (v -> 'guess_warn' ->> 'guess') || ' at ' || (v -> 'guess_warn' ->> 'part') || '.' || (v -> 'guess_warn' ->> 'anchor'), 'guess 1 at 0.1')
+  from (select public.study_meeting_reader_view(current_setting('t.m')::uuid) as v) x;
+reset role;
+update study_private.features set enabled = false where name = 'pulse';
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select mtest.m_is('M3e. without it, no warning', coalesce((public.study_meeting_reader_view(current_setting('t.m')::uuid) -> 'guess_warn')::text, 'none'), 'null');
+-- Noa and Maya follow the reading (review SEC-3, SEC-4: a reading counts as live with two followers)
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_meeting_here(current_setting('t.m')::uuid) is null as h \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_meeting_here(current_setting('t.m')::uuid) is null as h \gset
+do $$ begin perform public.study_meeting_place(current_setting('t.m')::uuid, 0, 5);
+  raise notice 'M3c. FAIL: a follower moved the reader''s place';
+exception when others then raise notice 'M3c. %: only the reader reports the place (%)', case when sqlerrm = 'not the reader' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_meeting_reader_view(current_setting('t.m')::uuid);
+  raise notice 'M3d. FAIL: a follower read the reader''s screen';
+exception when others then raise notice 'M3d. %: the counts are on the reader''s screen only (%)', case when sqlerrm = 'not the reader' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select mtest.m_is('M3f. the reader''s card counts who follows (Noa and Maya), never the reader',
+       (public.study_meeting_reader_view(current_setting('t.m')::uuid) ->> 'followers'), '2');
+select mtest.m_is('M4. the reading reaches ¶0.1: guesses released (the second waits for ¶0.2)',
+       public.study_meeting_place(current_setting('t.m')::uuid, 0, 1)::text, '1');
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select mtest.m_is('M4b. "דינג!" on Noa''s phone: key · right · like most of the group · most right · a count anywhere',
+       ((e ->> 'answer')::int = current_setting('t.gk')::int) || ' · ' || (e ->> 'correct') || ' · ' || (e -> 'majority' ->> 'with_most')
+       || ' · ' || (e -> 'majority' ->> 'most_right') || ' · ' || (e::text ~ '"(counts?|right|answered|guessers|n_right)"'),
+       'true · false · true · false · false')
+  from jsonb_array_elements(public.study_meeting_guess_state(current_setting('t.m')::uuid)) e where (e ->> 'n')::int = 1;
+select mtest.m_is('M4e. the second guess is still closed: released · key sent',
+       (e ->> 'released') || ' · ' || (e ? 'answer'), 'false · false')
+  from jsonb_array_elements(public.study_meeting_guess_state(current_setting('t.m')::uuid)) e where (e ->> 'n')::int = 2;
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000003';
+select mtest.m_is('M4c. Daniel''s: right · with most', (e ->> 'correct') || ' · ' || (e -> 'majority' ->> 'with_most'), 'true · false')
+  from jsonb_array_elements(public.study_meeting_guess_state(current_setting('t.m')::uuid)) e where (e ->> 'n')::int = 1;
+do $$ begin perform public.study_meeting_guess(current_setting('t.m')::uuid, current_setting('t.g1')::uuid, 0);
+  raise notice 'M4d. FAIL: a guess after its paragraph was read';
+exception when others then raise notice 'M4d. %: too late once it lit up (%)', case when sqlerrm = 'released' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ M5 · "לא ברור לי", and the reader's count from 3 ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 2, 'ה-Hypnozoite ישן') as t \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 2, 'ה-Hypnozoite ישן') as t \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select mtest.m_is('M5. two taps: callouts on the reader''s card (from 3)', jsonb_array_length(public.study_meeting_reader_view(current_setting('t.m')::uuid) -> 'taps')::text, '0');
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 2, 'ה-Hypnozoite ישן') as t \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 2, 'ה-Hypnozoite ישן') as t \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select mtest.m_is('M5b. three members (Noa twice): one callout, no names and no text (review SEC-11)',
+       (public.study_meeting_reader_view(current_setting('t.m')::uuid) -> 'taps')::text, '[{"n": 3, "part": 0, "anchor": 2}]');
+select mtest.m_is('M5c. Shoham sees tap rows of others', count(*)::text, '0') from public.study_meeting_taps;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select mtest.m_is('M5d. Noa sees her own tap', count(*)::text, '1') from public.study_meeting_taps where meeting_id = current_setting('t.m')::uuid;
+select public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 2, '', false) as t \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select mtest.m_is('M5e. Noa took hers back: callouts', jsonb_array_length(public.study_meeting_reader_view(current_setting('t.m')::uuid) -> 'taps')::text, '0');
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 2, 'ה-Hypnozoite ישן') as t \gset
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 2);
+  raise notice 'M5f. FAIL: a stranger tapped';
+exception when others then raise notice 'M5f. %: members only (%)', case when sqlerrm = 'meeting not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_meeting_unclear(current_setting('t.m')::uuid, 7, 2);
+  raise notice 'M5g. FAIL: a tap on a part that is not there';
+exception when others then raise notice 'M5g. %: (%)', case when sqlerrm = 'bad parts' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin
+  if to_regprocedure('public.study_paragraph_chips(uuid)') is null then
+    raise notice 'M5h. ok: (section N is not loaded; its chip reads the taps when it is)';
+  else
+    raise notice '%', mtest.m_is('M5h. section N''s chip: today''s tap shows on her paragraph, only to her',
+      (select string_agg(c.part_idx || '.' || c.anchor, ',') from public.study_paragraph_chips('3c100000-0000-4000-8000-000000000001') c where c.my_unclear), '0.2');
+  end if;
+end $$;
+-- The reader's three answers.
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_meeting_stop(current_setting('t.m')::uuid, 'explain', 0, 2, 'ה-Hypnozoite ישן') is null as s \gset
+select mtest.m_is('M6. "לעצור ולהסביר": callouts left', jsonb_array_length(public.study_meeting_reader_view(current_setting('t.m')::uuid) -> 'taps')::text, '0');
+do $$ begin perform public.study_meeting_stop(current_setting('t.m')::uuid, 'pause', 0, 2);
+  raise notice 'M6b. FAIL: an unknown answer';
+exception when others then raise notice 'M6b. %: (%)', case when sqlerrm = 'bad kind' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+insert into public.study_comments (lecture_id, part_idx, anchor, quote, kind, body)
+values (:'l1', 0, 3, 'לפני Primaquine', 'question', 'לא ברור בהקראה: למה G6PD?');
+select public.study_meeting_stop(current_setting('t.m')::uuid, 'question', 0, 3, 'לפני Primaquine',
+  (select id from public.study_comments where body = 'לא ברור בהקראה: למה G6PD?')) is null as s \gset
+do $$ begin perform public.study_meeting_stop(current_setting('t.m')::uuid, 'question', 1, 1, '', gen_random_uuid());
+  raise notice 'M6c. FAIL: an open question that is not on the paragraph';
+exception when others then raise notice 'M6c. %: (%)', case when sqlerrm = 'question not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select mtest.m_is('M6d. the group sees what the reader did', string_agg(kind || ' ' || part_idx || '.' || anchor, ', ' order by kind), 'explain 0.2, question 0.3')
+  from public.study_meeting_events where meeting_id = current_setting('t.m')::uuid;
+do $$ begin perform public.study_meeting_stop(current_setting('t.m')::uuid, 'continue', 0, 2);
+  raise notice 'M6e. FAIL: a follower answered for the reader';
+exception when others then raise notice 'M6e. %: (%)', case when sqlerrm = 'not the reader' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ M7 · a correction approved aloud (section K's end, decision 5) ═════════
+select set_config('t.pa', public.study_propose_edit(:'l1', 1, 2,
+  'Mefloquine ניתנת פעם בשבוע. [ש'' 20]', 'Mefloquine ניתנת פעם בשבוע, למניעה ולטיפול. [ש'' 20]',
+  (select rev from public.study_sections where lecture_id = :'l1' and idx = 1), 0, 1, '', 'slide', array[20], null, '')::text, false) is not null as p \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+do $$ begin perform public.study_approve_edit(current_setting('t.pa')::uuid, true);
+  raise notice 'M7. FAIL: a follower approved aloud';
+exception when others then raise notice 'M7. %: aloud is the reader''s (%)', case when sqlerrm = 'not live' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.ea', public.study_approve_edit(current_setting('t.pa')::uuid, true) ->> 'edit_id', false) is not null as a \gset
+select mtest.m_is('M7b. approved aloud by the reader: aloud · approver Shoham · author Noa',
+       aloud || ' · ' || (approved_by = :'u_shoham') || ' · ' || (author_id = :'u_noa'), 'true · true · true')
+  from public.study_edits where id = current_setting('t.ea')::uuid;
+select set_config('t.pb', public.study_propose_edit(:'l1', 2, 1,
+  'Artemisinins לעולם לא לבד. [ש'' 30]', 'Artemisinins לעולם לא לבד: t½ של 1-2 שעות. [ש'' 30]',
+  (select rev from public.study_sections where lecture_id = :'l1' and idx = 2), 0, 1, '', 'slide', array[30], null, '')::text, false) is not null as p \gset
+do $$ begin perform public.study_approve_edit(current_setting('t.pb')::uuid, true);
+  raise notice 'M7c. FAIL: the reader approved her own proposal aloud';
+exception when others then raise notice 'M7c. %: the reader''s own proposal needs another member, aloud too (%)',
+  case when sqlerrm = 'own proposal' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_withdraw_edit(current_setting('t.pb')::uuid) is null as w \gset
+-- One follower only (Maya's and Itai's last signs 11 minutes old): the reading no longer counts as
+-- live (two others must follow).
+reset role;
+update public.study_meeting_presence set last_at = now() - interval '11 minutes'
+ where meeting_id = current_setting('t.m')::uuid and user_id in ('3c000000-0000-4000-8000-000000000001', '3c000000-0000-4000-8000-000000000002');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.pc', public.study_propose_edit(:'l1', 2, 2,
+  'Quinine עם Doxycycline, לא בהיריון. [ש'' 33]', 'Quinine עם Doxycycline, אבל לא בהיריון. [ש'' 33]',
+  (select rev from public.study_sections where lecture_id = :'l1' and idx = 2), 0, 1, '', 'slide', array[33], null, '')::text, false) is not null as p \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_approve_edit(current_setting('t.pc')::uuid, true);
+  raise notice 'M7d. FAIL: approved aloud with one follower';
+exception when others then raise notice 'M7d. %: aloud needs two others following (%)', case when sqlerrm = 'not live' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_withdraw_edit(current_setting('t.pc')::uuid) is null as w \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_meeting_here(current_setting('t.m')::uuid) is null as h \gset
+-- Put the approved one back (one tap).
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_undo_edit(current_setting('t.ea')::uuid) is not null as u \gset
+
+-- ═════════ SR4-2 · review SEC4-2: a started meeting keeps its lecture, parts and day ═════════
+-- While Shoham reads lecture 1 aloud, Noa tries to move the meeting to lecture 3, or to other parts,
+-- or to tomorrow: each is refused, so "אישור בקול" can never land on a lecture nobody is reading.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$
+declare c record; n int := 0; bad text := ''; v int;
+begin
+  for c in select * from (values
+      ('another lecture', '3c100000-0000-4000-8000-000000000003'::uuid, 0, 0, now()),
+      ('other parts', '3c100000-0000-4000-8000-000000000001'::uuid, 1, 2, now()),
+      ('another day', '3c100000-0000-4000-8000-000000000001'::uuid, 0, 1, now() + interval '2 days')
+    ) as t(label, lec, pf, pt, at) loop
+    select m.version into v from public.study_meetings m where m.id = current_setting('t.m')::uuid;
+    begin
+      perform public.study_meeting_save(current_setting('t.m')::uuid, v, current_setting('t.gid')::uuid, c.at, c.lec, c.pf, c.pt, '', 'bbbbbbbb-0000-4000-8000-000000000002');
+      bad := bad || c.label || ' was saved; ';
+    exception when others then if sqlerrm = 'meeting started' then n := n + 1; else bad := bad || c.label || ' → ' || sqlerrm || '; '; end if; end;
+  end loop;
+  raise notice '%', mtest.m_is('SR4-2', n || ' of 3 moves of a started meeting refused (meeting started)' || case when bad <> '' then ' (' || bad || ')' else '' end,
+                                '3 of 3 moves of a started meeting refused (meeting started)');
+end $$;
+select mtest.m_is('SR4-2b. the meeting still reads lecture 1, parts 0-1, reading, reader Shoham',
+       (lecture_id = '3c100000-0000-4000-8000-000000000001') || ' · ' || part_from || '-' || part_to || ' · ' || reading || ' · ' || (reader_id = :'u_shoham'),
+       'true · 0-1 · true · true')
+  from public.study_meetings where id = current_setting('t.m')::uuid;
+-- The time and the title may still change once it started.
+select public.study_meeting_save(current_setting('t.m')::uuid, (select version from public.study_meetings where id = current_setting('t.m')::uuid), :'gid',
+       (select starts_at from public.study_meetings where id = current_setting('t.m')::uuid) + interval '5 minutes', :'l1', 0, 1, 'מלריה בקול', :'u_shoham') is not null as s \gset
+select mtest.m_is('SR4-2c. a started meeting''s time and title change (same lecture, parts and day)',
+       title || ' · ' || reading, 'מלריה בקול · true')
+  from public.study_meetings where id = current_setting('t.m')::uuid;
+-- A proposal on lecture 3, which nobody reads: approving it aloud stays "not live".
+select set_config('t.pm', public.study_propose_edit('3c100000-0000-4000-8000-000000000003', 0, 1,
+  'Metronidazole ובירה. [ש'' 7]', 'Metronidazole ובירה: תגובת דיסולפירם. [ש'' 7]',
+  (select rev from public.study_sections where lecture_id = '3c100000-0000-4000-8000-000000000003' and idx = 0), 0, 1, '', 'slide', array[7], null, '')::text, false) is not null as p \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_approve_edit(current_setting('t.pm')::uuid, true);
+  raise notice 'SR4-2d. FAIL: approved aloud on a lecture nobody reads';
+exception when others then raise notice 'SR4-2d. %: aloud only on the lecture being read (%)', case when sqlerrm = 'not live' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_withdraw_edit(current_setting('t.pm')::uuid) is null as w \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+
+-- ═════════ M8-M9 · the opening ("3 לקפה") and the closing quiz (decision 7) ═════════
+reset role;
+update public.study_quizzes set created_at = created_at - interval '1 day'
+ where group_id = :'gid' and preset in ('coffee', 'end');
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.cq', public.study_meeting_quiz(current_setting('t.m')::uuid, 'coffee')::text, false) is not null as c \gset
+select mtest.m_is('M8. the opening', preset || ', ' || title || ', ' || mode || ', ' || n_wanted || ' questions, ' || seconds || ' s',
+       'coffee, 3 לקפה, coop, 3 questions, 45 s') from public.study_quizzes where id = current_setting('t.cq')::uuid;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_quiz_join(current_setting('t.cq')::uuid) is null as j \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_quiz_join(current_setting('t.cq')::uuid) is null as j \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select public.study_quiz_next(current_setting('t.cq')::uuid, -1) is null as n \gset
+reset role;
+select mtest.m_is('M8b. two on yesterday''s parts, one older, none from today''s parts; a teaser among yesterday''s',
+       string_agg(case when q.lecture_id = :'l2' and q.part_idx = 0 then 'yesterday'
+                       when q.lecture_id = :'l1' and q.part_idx <= 1 then 'TODAY'
+                       else 'older' end, ',' order by r.idx)
+       || '; ' || bool_or(q.teaser <> '' and q.lecture_id = :'l2'), 'yesterday,yesterday,older; true')
+  from public.study_quiz_rounds r join public.study_questions q on q.id = r.question_id where r.quiz_id = current_setting('t.cq')::uuid;
+select set_config('t.ck', mtest.key_now(current_setting('t.cq')::uuid)::text, false) is not null as k \gset
+select mtest.shift(current_setting('t.cq')::uuid, 5) is null as s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.cq')::uuid, 0, current_setting('t.ck')::int, 2) \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.cq')::uuid, 0, current_setting('t.ck')::int, 2) \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select bet is not null as a from public.study_quiz_answer(current_setting('t.cq')::uuid, 0, (current_setting('t.ck')::int + 1) % 5, 3) \gset
+select mtest.m_is('M8c. the opening''s reveal (2 of 3 right): stage · majority · counts sent · numbers sent · key',
+       (s -> 'quiz' ->> 'stage') || ' · ' || (s -> 'round' ->> 'majority') || ' · ' || ((s -> 'round') ? 'counts') || ' · ' || ((s -> 'round') ? 'right')
+       || ' · ' || ((s -> 'round') ? 'answer'), 'final · most_right · false · false · true')
+  from (select public.study_quiz_state(current_setting('t.cq')::uuid) as s) x;
+select mtest.m_is('M8f. the band shows the opening', (select b -> 'coffee' ->> 'state' from jsonb_array_elements(public.study_meeting_band(:'gid')) b), 'reveal');
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_meeting_quiz(current_setting('t.m')::uuid, 'end');
+  raise notice 'M8d. FAIL: a second quiz while the opening is open';
+exception when others then raise notice 'M8d. %: one live quiz at a time (%)', case when sqlerrm = 'quiz open' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_quiz_end(current_setting('t.cq')::uuid) is null as e \gset
+do $$ begin perform public.study_meeting_quiz(current_setting('t.m')::uuid, 'coffee');
+  raise notice 'M8e. FAIL: a second opening in one meeting';
+exception when others then raise notice 'M8e. %: one opening a meeting, decision 7 (%)', case when sqlerrm = 'already' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_meeting_quiz(current_setting('t.m')::uuid, 'lunch');
+  raise notice 'M8g. FAIL: an unknown preset';
+exception when others then raise notice 'M8g. %: (%)', case when sqlerrm = 'bad preset' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_meeting_place(current_setting('t.m')::uuid, 1, 1) is not null as p \gset
+select set_config('t.sq', public.study_meeting_quiz(current_setting('t.m')::uuid, 'stop', 'coop', null, 0)::text, false) is not null as c \gset
+select mtest.m_is('M9b. a stop at a part''s end', preset || ', parts ' || part_from || '-' || part_to || ', ' || n_wanted || ' question',
+       'stop, parts 0-0, 1 question') from public.study_quizzes where id = current_setting('t.sq')::uuid;
+select public.study_quiz_end(current_setting('t.sq')::uuid) is null as e \gset
+select set_config('t.eq', public.study_meeting_quiz(current_setting('t.m')::uuid, 'end')::text, false) is not null as c \gset
+select mtest.m_is('M9. the closing quiz on what was read', preset || ', parts ' || part_from || '-' || part_to || ', ' || n_wanted || ' questions, ' || mode,
+       'end, parts 0-1, 5 questions, coop') from public.study_quizzes where id = current_setting('t.eq')::uuid;
+select mtest.m_is('M9c. the band shows the closing', (select b -> 'closing' ->> 'state' from jsonb_array_elements(public.study_meeting_band(:'gid')) b), 'lobby');
+select public.study_quiz_end(current_setting('t.eq')::uuid) is null as e \gset
+
+-- ═════════ M10 · the agenda ═════════
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000004';
+select mtest.m_is('M10. the agenda: reading · reader · hot spot · open question · sent from a meeting',
+       (a -> 'reading' ->> 'lecture_title') || ' · slides ' || (a -> 'reading' ->> 'slide_from') || '-' || (a -> 'reading' ->> 'slide_to')
+       || ' · הקראה: ' || (a -> 'reading' ->> 'reader') || ' · ' || coalesce(a ->> 'hot_spot', 'none')
+       || ' · ' || (a -> 'open_question' ->> 'body') || ' · ' || (a -> 'open_question' ->> 'from_meeting'),
+       'מלריה (פגישה) · slides 1-24 · הקראה: שוהם · none · למה ECG? · true')
+  from (select public.study_meeting_agenda(current_setting('t.m')::uuid) as a) x;
+
+-- ═════════ M11-M12 · what comes back later (M7) and catching up (T3, SR12) ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select mtest.m_is('M11. Noa''s "לא ברור" from yesterday (today''s waits for tomorrow): rows · explained · thread',
+       count(*) || ' · ' || bool_and(explained) || ' · ' || max(thread), '1 · true · answered')
+  from public.study_my_unclear(:'gid');
+select public.study_unclear_done((select tap_id from public.study_my_unclear(:'gid') limit 1)) is null as d \gset
+select mtest.m_is('M11b. seen again: left', count(*)::text, '0') from public.study_my_unclear(:'gid');
+select mtest.m_is('M12. Noa was at yesterday''s meeting: missed', count(*)::text, '0') from public.study_my_missed(:'gid') where meeting_id = '3c6a0000-0000-4000-8000-000000000001';
+set request.jwt.claim.sub = 'abababab-0000-4000-8000-000000000007';
+select mtest.m_is('M12b. Dana missed it', count(*)::text, '1') from public.study_my_missed(:'gid') where meeting_id = '3c6a0000-0000-4000-8000-000000000001';
+select mtest.m_is('M12c. the catch-up: stops · answered (by) · memory aids · questions (the stopped paragraph''s first) · minutes · read by',
+       jsonb_array_length(c -> 'stops') || ' · ' || jsonb_array_length(c -> 'resolved') || ' (' || (c -> 'resolved' -> 0 ->> 'answer_by') || ') · '
+       || jsonb_array_length(c -> 'pins') || ' · ' || jsonb_array_length(c -> 'questions') || ' (' || ((c -> 'questions' ->> 0) = '3c2b0000-0000-4000-8000-000000000001') || ') · '
+       || (c ->> 'minutes') || ' · ' || jsonb_array_length(c -> 'readers'),
+       case when current_setting('t.m_j') = 'yes' then '1 · 1 (דניאל) · 1 · 3 (true) · 10 · 0' else '1 · 1 (דניאל) · 0 · 3 (true) · 9 · 0' end)
+  from (select public.study_meeting_catchup('3c6a0000-0000-4000-8000-000000000001') as c) x;
+do $$ begin perform public.study_meeting_catchup('3c6a0000-0000-4000-8000-000000000002');
+  raise notice 'M12g. ok: an older meeting''s catch-up opens too';
+exception when others then raise notice 'M12g. FAIL: %', sqlerrm; end $$;
+select public.study_meeting_catchup_done('3c6a0000-0000-4000-8000-000000000001') is null as d \gset
+select mtest.m_is('SR12a/M12e. finished: in "קראו" at once · still offered',
+       (select count(*) from public.study_reads where lecture_id = :'l2' and user_id = auth.uid()) || ' · '
+       || (select count(*) from public.study_my_missed(:'gid') where meeting_id = '3c6a0000-0000-4000-8000-000000000001'), '0 · 0');
+reset role;
+update public.study_meeting_catchups set done_at = done_at - interval '1 day'
+ where meeting_id = '3c6a0000-0000-4000-8000-000000000001' and user_id = :'u_dana';
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_meeting_band(:'gid') is not null as b \gset
+select mtest.m_is('SR12b/M12f. the next study day: Dana in "קראו" · at the meeting''s time',
+       count(*) || ' · ' || bool_and(r.read_at = m.started_at), '1 · true')
+  from public.study_reads r join public.study_meetings m on m.id = '3c6a0000-0000-4000-8000-000000000001'
+ where r.lecture_id = :'l2' and r.user_id = :'u_dana';
+
+-- ═════════ SR4 · SEC-4: nobody takes over a live reading; a part at a time; guesses need followers ═════════
+reset role;
+update public.study_meetings set guess_ids = array['3c2a0000-0000-4000-8000-000000000001', '3c2a0000-0000-4000-8000-000000000002']::uuid[],
+       guess_released = 0 where id = current_setting('t.m')::uuid;
+delete from public.study_meeting_presence where meeting_id = current_setting('t.m')::uuid;
+update public.study_meeting_live set max_part = 0, max_anchor = 0, part_idx = 0, anchor = 0, place_at = now() where meeting_id = current_setting('t.m')::uuid;
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_meeting_reading('3c100000-0000-4000-8000-000000000001', true);
+  raise notice 'SR4a. FAIL: Noa took over a live reading';
+exception when others then raise notice 'SR4a. %: (%)', case when sqlerrm = 'reading' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_meeting_reader_view(current_setting('t.m')::uuid);
+  raise notice 'SR4b. FAIL: Noa read the reader''s card';
+exception when others then raise notice 'SR4b. %: (%)', case when sqlerrm = 'not the reader' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select mtest.m_is('SR4c. the reader is still Shoham', (reader_id = :'u_shoham')::text, 'true') from public.study_meetings where id = current_setting('t.m')::uuid;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select mtest.m_is('SR4d. at guess 2''s paragraph with nobody following: released', public.study_meeting_place(current_setting('t.m')::uuid, 0, 2)::text, '0');
+select public.study_meeting_place(current_setting('t.m')::uuid, 2, 2) is not null as p \gset
+reset role;
+select mtest.m_is('SR4e. a jump to the end moves one part', (select max_part || '.' || max_anchor from public.study_meeting_live where meeting_id = current_setting('t.m')::uuid), '1.0');
+set role authenticated;
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_meeting_here(current_setting('t.m')::uuid) is null as h \gset
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000002';
+select public.study_meeting_here(current_setting('t.m')::uuid) is null as h \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select mtest.m_is('SR4f. with two followers both release', public.study_meeting_place(current_setting('t.m')::uuid, 1, 0)::text, '2');
+reset role;
+update public.study_meeting_live set place_at = now() - interval '2 minutes' where meeting_id = current_setting('t.m')::uuid;
+set role authenticated;
+do $$ begin perform public.study_meeting_reader_view(current_setting('t.m')::uuid);
+  raise notice 'SR4g. FAIL: the card answered with no place for two minutes';
+exception when others then raise notice 'SR4g. %: (%)', case when sqlerrm = 'not live' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_meeting_reading(:'l1', true) is not null as r \gset
+select mtest.m_is('SR4h. a minute of silence hands over: reader Noa', (reader_id = :'u_noa')::text, 'true') from public.study_meetings where id = current_setting('t.m')::uuid;
+
+-- ═════════ SR11 · SEC-11: the reader does not tap; no text from the phone ═════════
+do $$ begin perform public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 3, 'x');
+  raise notice 'SR11a. FAIL: the reader tapped';
+exception when others then raise notice 'SR11a. %: (%)', case when sqlerrm = 'is reader' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000001';
+select public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 3, 'שוהם מקריאה כמו רובוט, תעצרי כבר') as t \gset
+select mtest.m_is('SR11b. no text kept from the tap', (select quote from public.study_meeting_taps where meeting_id = current_setting('t.m')::uuid and part_idx = 0 and anchor = 3), '');
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_meeting_stop(current_setting('t.m')::uuid, 'continue', 0, 3, 'טקסט חופשי מהטלפון') is null as s \gset
+select mtest.m_is('SR11c. no text kept from a stop', (select string_agg(distinct quote, ',') from public.study_meeting_events where meeting_id = current_setting('t.m')::uuid), '');
+select public.study_meeting_reading(:'l1', false) is not null as off \gset
+
+-- ═════════ SR5a · SEC-5: the opening never reads one player's private answers ═════════
+-- Maya answered yesterday's L2 questions in practice, wrong on the two without a teaser.
+reset role;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values
+ (:'u_maya', '3c2b0000-0000-4000-8000-000000000001', 0, true, 'lecture', now() - interval '2 days'),
+ (:'u_maya', '3c2b0000-0000-4000-8000-000000000002', 4, false, 'lecture', now() - interval '2 days'),
+ (:'u_maya', '3c2b0000-0000-4000-8000-000000000003', 4, false, 'lecture', now() - interval '2 days');
+do $$
+declare i int; hits int := 0; ids uuid[];
+begin
+  for i in 1 .. 20 loop
+    ids := public.study_quiz__pick_preset(current_setting('t.cq')::uuid);
+    if ids[1:2] @> array['3c2b0000-0000-4000-8000-000000000002', '3c2b0000-0000-4000-8000-000000000003']::uuid[] then hits := hits + 1; end if;
+  end loop;
+  raise notice '%', mtest.m_is('SR5a. the opening''s first two are Maya''s two mistakes', case when hits < 10 then 'about chance (' || hits || ' of 20)' else hits || ' of 20' end,
+                               'about chance (' || hits || ' of 20)');
+end $$;
+
+-- ═════════ M13-M14 · stopping, attendance, cancelling, privacy ═════════
+set role authenticated;
+set request.jwt.claim.sub = '3c000000-0000-4000-8000-000000000004';
+do $$ begin perform public.study_meeting_unclear(current_setting('t.m')::uuid, 0, 3);
+  raise notice 'M13. FAIL: a tap with nobody reading';
+exception when others then raise notice 'M13. %: (%)', case when sqlerrm = 'not live' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'ffffffff-0000-4000-8000-000000000006';
+select public.study_meeting_here(current_setting('t.m')::uuid) is null as h \gset
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select mtest.m_is('M13b. Shoham sees presence rows of others (attendance is private)', count(*)::text, '0')
+  from public.study_meeting_presence where user_id <> auth.uid();
+select set_config('t.m2', id::text, false) is not null as m
+  from public.study_meeting_save(null, null, :'gid', now() + interval '1 day', '3c100000-0000-4000-8000-000000000003', 0, 0, 'אמבות', null) \gset
+select public.study_meeting_cancel(current_setting('t.m2')::uuid) is null as c \gset
+do $$ begin perform public.study_meeting_cancel(current_setting('t.m')::uuid);
+  raise notice 'M13c. FAIL: a meeting that started was cancelled';
+exception when others then raise notice 'M13c. %: (%)', case when sqlerrm = 'meeting started' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform count(*) from public.study_meeting_live;
+  raise notice 'M13d. FAIL: the reader''s place is readable';
+exception when insufficient_privilege then raise notice 'M13d. ok: the reader''s place is not readable (%)', sqlerrm; end $$;
+do $$ begin insert into public.study_meeting_taps (meeting_id, lecture_id, part_idx, anchor) values (current_setting('t.m')::uuid, '3c100000-0000-4000-8000-000000000001', 0, 1);
+  raise notice 'M13e. FAIL: a member wrote a tap directly';
+exception when insufficient_privilege then raise notice 'M13e. ok: taps are written only by the functions (%)', sqlerrm; end $$;
+do $$ begin update public.study_meetings set reader_id = auth.uid(), reading = true where id = current_setting('t.m')::uuid;
+  raise notice 'M13f. FAIL: a member rewrote the meeting directly';
+exception when insufficient_privilege then raise notice 'M13f. ok: the meeting changes only through the functions (%)', sqlerrm; end $$;
+reset role;
+select mtest.m_is('M14. published', string_agg(tablename, ', ' order by tablename), 'study_meetings')
+  from pg_publication_tables where pubname = 'supabase_realtime' and tablename like 'study\_meeting%';
+select mtest.m_is('M14b. the cancelled meeting is out of the band', (select count(*)::text from public.study_meetings where id = current_setting('t.m2')::uuid and cancelled_at is not null), '1');
+set role anon;
+reset request.jwt.claim.sub;
+do $$ begin perform public.study_meeting_band(gen_random_uuid()); raise notice 'M14c. FAIL: anon read a band';
+exception when insufficient_privilege then raise notice 'M14c. ok: anon cannot call the meeting''s functions (%)', sqlerrm; end $$;
+reset role;
+-- Leave nothing open for the sections after this one.
+update public.study_quizzes set state = 'ended', ended_at = now() where state in ('lobby', 'question', 'reveal');
+update public.study_meetings set reading = false where reading;
+select mtest.m_is('M-reg. the registry', public.study_schema() ->> 'M', '1');
+-- The fixtures go, as at section Z's end: the quizzes, the lectures (their meetings, taps, guesses,
+-- questions and answers with them), the members and the helpers.
+delete from public.study_quizzes where group_id = :'gid';
+delete from public.study_meetings where group_id = :'gid';
+delete from public.study_lectures where id::text like '3c10%';
+delete from public.study_members where user_id::text like '3c00%';
+delete from auth.users where id::text like '3c00%';
+drop function mtest.shift(uuid, numeric), mtest.key_now(uuid), mtest.q_now(uuid), mtest.m_is(text, text, text);
+select 'M-end. fixtures removed: ' || case when (select count(*) from public.study_meetings) + (select count(*) from public.study_meeting_taps)
+       + (select count(*) from public.study_meeting_guess_answers) = 0 then 'ok' else 'FAIL' end;
+-- ════ END SECTION M ════
+
+-- ════ BEGIN SECTION N · the paragraph anchor (package N) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION N checks · the paragraph anchor   (package N; spec §12.4.N, the
+--  addendum's N1-N3 and N-reg on fixtures of their own). Every line says ok
+--  or FAIL by itself. Cards are placed by the points to know (section C's
+--  end, which gives a card its own anchor, is simulated in a transaction
+--  that is rolled back, as are section M's taps and section J's wall).
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+select id as ngid from public.study_groups order by created_at limit 1 \gset
+\set nl 'a7100000-0000-4000-8000-000000000001'
+\set noa 'cccccccc-0000-4000-8000-000000000003'
+\set shoham 'bbbbbbbb-0000-4000-8000-000000000002'
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'nl', :'ngid', 'פתוגן מאכסן', 'Anchor', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array('עובדה ' || n), 'tables', '[]'::jsonb,
+                                       'notes', '', 'figures', '[]'::jsonb) order by n) from generate_series(1, 10) n),
+  'ready', :'shoham');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ (:'nl', 0, 'מקרים', 1, 6, 'ready', E'## מקרים\n\nמקרה 1. [ש'' 2]\n\nמקרה 2. [ש'' 3]\n\nמקרה 3. [ש'' 5]'),
+ (:'nl', 1, 'סיכום', 7, 10, 'ready', E'## סיכום\n\nסוף. [ש'' 8]');
+insert into public.study_point_parts (lecture_id, part_idx, src_md5, status)
+select :'nl', s.idx, md5(s.markdown), 'ready' from public.study_sections s where s.lecture_id = :'nl';
+insert into public.study_points (id, lecture_id, part_idx, n, kind, text, anchor, slides) values
+ ('a7200000-0000-4000-8000-000000000001', :'nl', 0, 1, 'drug', 'נקודה על מקרה 1', 1, '{2}'),
+ ('a7200000-0000-4000-8000-000000000002', :'nl', 0, 2, 'contra', 'נקודה על מקרה 2', 2, '{3}'),
+ ('a7200000-0000-4000-8000-000000000003', :'nl', 0, 3, 'mechanism', 'נקודה על מקרה 3', 3, '{5}'),
+ ('a7200000-0000-4000-8000-000000000004', :'nl', 1, 1, 'number', 'נקודה בסיכום', 1, '{8}');
+-- Q1 its own anchor (0.1); Q2 no anchor, covers point 2 (0.2); Q3 no anchor
+-- and no point, shares slide 3 with point 2 (0.2); Q4 on 0.2, hidden by two
+-- flags; Q5 retired on 0.1; Q6 on no paragraph (slide 9).
+insert into public.study_questions (id, group_id, lecture_id, part_idx, kind, question, options, slides, anchor, points, hidden_at, retired_at, created_at) values
+ ('a7300000-0000-4000-8000-000000000001', :'ngid', :'nl', 0, 'case', 'מה עושים במקרה 1?', '{א,ב,ג,ד}', '{2}', 1, '{}', null, null, now() - interval '5 minutes'),
+ ('a7300000-0000-4000-8000-000000000002', :'ngid', :'nl', 0, 'mcq', 'מה בודקים לפני מקרה 2?', '{א,ב,ג,ד}', '{3}', null, '{a7200000-0000-4000-8000-000000000002}', null, null, now() - interval '4 minutes'),
+ ('a7300000-0000-4000-8000-000000000003', :'ngid', :'nl', 0, 'mcq', 'על אילו שלבים במקרה 2?', '{א,ב,ג,ד}', '{3}', null, '{}', null, null, now() - interval '3 minutes'),
+ ('a7300000-0000-4000-8000-000000000004', :'ngid', :'nl', 0, 'mcq', 'שאלה שהוסתרה עד בדיקה', '{א,ב,ג,ד}', '{3}', 2, '{}', now(), null, now() - interval '2 minutes'),
+ ('a7300000-0000-4000-8000-000000000005', :'ngid', :'nl', 0, 'mcq', 'שאלה שהוצאה מהבנק', '{א,ב,ג,ד}', '{2}', 1, '{}', null, now(), now() - interval '1 minute'),
+ ('a7300000-0000-4000-8000-000000000006', :'ngid', :'nl', 0, 'mcq', 'שאלה בלי פסקה', '{א,ב,ג,ד}', '{9}', null, '{}', null, null, now());
+-- C1 shares slide 3 with point 2 (0.2); C2 deleted; C3 part 1 (1.1); C4 slide 9: no paragraph.
+insert into public.study_cards (id, group_id, lecture_id, part_idx, kind, front, back, slides, deleted_at) values
+ ('a7400000-0000-4000-8000-000000000001', :'ngid', :'nl', 0, 'qa', 'מה בודקים לפני מקרה 2?', 'בדיקה', '{3}', null),
+ ('a7400000-0000-4000-8000-000000000002', :'ngid', :'nl', 0, 'qa', 'כרטיס שנמחק', 'x', '{2}', now()),
+ ('a7400000-0000-4000-8000-000000000003', :'ngid', :'nl', 1, 'cloze', 'בסוף יש {{סיכום}} קצר', '', '{8}', null),
+ ('a7400000-0000-4000-8000-000000000004', :'ngid', :'nl', 0, 'qa', 'כרטיס בלי פסקה', 'x', '{9}', null);
+-- A question to the group on 0.3 with a reply, and a memory aid (not a comment).
+insert into public.study_comments (id, lecture_id, part_idx, anchor, kind, body, author_id) values
+ ('a7500000-0000-4000-8000-000000000001', :'nl', 0, 3, 'question', 'למה דווקא כאן?', :'shoham');
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, author_id, parent_id) values
+ (:'nl', 0, 3, 'comment', 'כי כך בשקף', :'noa', 'a7500000-0000-4000-8000-000000000001');
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, author_id) values (:'nl', 0, 3, 'mnemonic', 'זכרו', :'noa');
+-- Noa: Q1 wrong twice (still wrong); Q2 wrong then right. Shoham: Q3 wrong.
+insert into public.study_answers (user_id, question_id, choice, correct, answered_at) values
+ (:'noa', 'a7300000-0000-4000-8000-000000000001', 1, false, now() - interval '2 days'),
+ (:'noa', 'a7300000-0000-4000-8000-000000000001', 2, false, now() - interval '1 hour'),
+ (:'noa', 'a7300000-0000-4000-8000-000000000002', 1, false, now() - interval '2 hours'),
+ (:'noa', 'a7300000-0000-4000-8000-000000000002', 0, true, now() - interval '1 hour'),
+ (:'shoham', 'a7300000-0000-4000-8000-000000000003', 3, false, now() - interval '1 hour');
+insert into public.study_card_states (user_id, card_id, state, step, stability, difficulty, due, last_review, reps, lapses) values
+ (:'noa', 'a7400000-0000-4000-8000-000000000001', 2, 0, 3.2, 5, now() + interval '2 days', now() - interval '1 day', 3, 2),
+ (:'noa', 'a7400000-0000-4000-8000-000000000003', 0, 0, 0, 0, null, null, 0, 0);
+update public.study_card_states set suspended = true where user_id = :'noa' and card_id = 'a7400000-0000-4000-8000-000000000003';
+select set_config('t.nl', :'nl', false) is not null as nl_set \gset
+
+-- ═════════ N1 · the chip row ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'N1. Noa''s chips: ' || case when s = '0.1 q1 c0 t0 a0 w2 | 0.2 q2 c1 t0 a0 w0 | 0.3 q0 c0 t1 a0 w0 | 1.1 q0 c1 t0 a0 w0' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+       || ' (0.1: Q1 alone, the retired one not counted, her two wrong answers; 0.2: Q2 by its point, Q3 by its slide, the hidden one not counted, C1 by its slide; 0.3: the question to the group, not its reply or the memory aid; 1.1: the cloze card)'
+  from (select string_agg(c.part_idx || '.' || c.anchor || ' q' || c.questions || ' c' || c.cards || ' t' || c.comments || ' a' || c.aids || ' w' || c.my_wrong
+                          || case when c.my_unclear then ' u' else '' end, ' | ' order by c.part_idx, c.anchor) as s
+          from public.study_paragraph_chips(:'nl') c) x;
+select 'N1a. a right answer after a wrong one clears "טעית כאן": ' || case when coalesce(max(c.my_wrong) filter (where c.anchor = 2), -1) = 0 then 'ok' else 'FAIL' end
+       || ' (Q2 on 0.2: wrong, then right)'
+  from public.study_paragraph_chips(:'nl') c where c.part_idx = 0;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'N1b. Shoham''s private chips are his own: ' || case when s = '0.1 w0 | 0.2 w1 | 0.3 w0 | 1.1 w0' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+       || ' (Noa''s wrong answers on 0.1 are not his; his own on 0.2)'
+  from (select string_agg(c.part_idx || '.' || c.anchor || ' w' || c.my_wrong, ' | ' order by c.part_idx, c.anchor) as s
+          from public.study_paragraph_chips(:'nl') c) x;
+select 'N1c. without sections M and J: no "לא ברור" and no wall entries: ' || case when bool_or(c.my_unclear) or sum(c.aids) > 0 then 'FAIL' else 'ok' end
+  from public.study_paragraph_chips(:'nl') c;
+
+-- ═════════ N2 · the "תרגול" tab ═════════
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'N2. Noa''s tab of 0.2: ' || case when s = 'Q2 a2 w1 r=true | Q3 a0 w0 r=null | Q4 hidden a0 w0 r=null ; C1 deck lapses=2' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+       || ' (her answers on each question, the hidden one listed last and marked; the card in her deck with her lapses)'
+  from (select (select string_agg('Q' || right(q ->> 'id', 1) || case when (q ->> 'hidden')::boolean then ' hidden' else '' end
+                                  || ' a' || (q ->> 'answered') || ' w' || (q ->> 'wrong') || ' r=' || coalesce(q ->> 'last_correct', 'null'), ' | ' order by ord)
+                  from jsonb_array_elements(t -> 'questions') with ordinality as e(q, ord))
+               || ' ; ' ||
+               (select string_agg('C' || right(c ->> 'id', 1) || case when (c ->> 'in_deck')::boolean then ' deck' else ' not' end || ' lapses=' || (c ->> 'lapses'), ' | ')
+                  from jsonb_array_elements(t -> 'cards') c) as s
+          from (select public.study_paragraph_practice(:'nl', 0, 2) as t) y) x;
+select 'N2a. a card she hid from herself is "עוד לא בחפיסה": ' || case when (t -> 'cards' -> 0 ->> 'in_deck')::boolean = false and jsonb_array_length(t -> 'cards') = 1 and t -> 'cards' -> 0 ->> 'kind' = 'cloze' then 'ok' else 'FAIL ' || t::text end
+  from (select public.study_paragraph_practice(:'nl', 1, 1) as t) x;
+select 'N2b. a paragraph with nothing on it: ' || case when t = '{"cards": [], "questions": []}'::jsonb then 'ok' else 'FAIL ' || t::text end
+  from (select public.study_paragraph_practice(:'nl', 0, 9) as t) x;
+
+-- ═════════ N3 · strangers, anonymous calls, a deleted lecture ═════════
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_paragraph_practice(current_setting('t.nl')::uuid, 0, 2);
+  raise notice 'N3. FAIL: a stranger read a paragraph''s tab';
+exception when others then raise notice 'N3. %: a stranger is refused the tab (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'N3a. a stranger''s chips: ' || case when count(*) = 0 then 'ok' else 'FAIL ' || count(*) || ' rows' end from public.study_paragraph_chips(:'nl');
+reset role;
+select 'N3b. anon may not call the chips or the tab: ' || case when not has_function_privilege('anon', 'public.study_paragraph_chips(uuid)', 'execute')
+       and not has_function_privilege('anon', 'public.study_paragraph_practice(uuid, int, int)', 'execute')
+       and has_function_privilege('authenticated', 'public.study_paragraph_chips(uuid)', 'execute') then 'ok' else 'FAIL' end;
+select 'N3c. the helpers are not callable by members: ' || case when not has_function_privilege('authenticated', 'study_private.card_spots(uuid)', 'execute')
+       and not has_function_privilege('authenticated', 'study_private.question_spots(uuid)', 'execute') then 'ok' else 'FAIL' end;
+update public.study_lectures set deleted_at = now() where id = :'nl';
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'N3d. a deleted lecture has no chips: ' || case when count(*) = 0 then 'ok' else 'FAIL ' || count(*) end from public.study_paragraph_chips(:'nl');
+do $$ begin perform public.study_paragraph_practice(current_setting('t.nl')::uuid, 0, 2);
+  raise notice 'N3e. FAIL: the tab of a deleted lecture';
+exception when others then raise notice 'N3e. %: a deleted lecture''s tab is refused (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update public.study_lectures set deleted_at = null where id = :'nl';
+
+-- ═════════ N4 · with section C's end, M's taps and J's wall (simulated, rolled back) ═════════
+begin;
+alter table public.study_cards add column if not exists anchor int, add column if not exists opens_at timestamptz, add column if not exists stale_at timestamptz;
+do $$ begin
+  if to_regclass('public.study_meeting_taps') is null then
+    create table public.study_meeting_taps (user_id uuid, lecture_id uuid, part_idx int, anchor int, done_at timestamptz, created_at timestamptz default now());
+    insert into public.study_meeting_taps (user_id, lecture_id, part_idx, anchor) values ('cccccccc-0000-4000-8000-000000000003', current_setting('t.nl')::uuid, 0, 2);
+    insert into public.study_meeting_taps (user_id, lecture_id, part_idx, anchor, created_at) values ('cccccccc-0000-4000-8000-000000000003', current_setting('t.nl')::uuid, 0, 3, now() - interval '20 days');
+    perform set_config('t.n_m', 'yes', true);
+  end if;
+  if to_regclass('public.study_aids') is null then
+    create table public.study_aids (lecture_id uuid, part_idx int, anchor int, kind text, flag text);
+    insert into public.study_aids values (current_setting('t.nl')::uuid, 0, 1, 'text', null), (current_setting('t.nl')::uuid, 0, 1, 'draft', null),
+                                         (current_setting('t.nl')::uuid, 0, 1, 'text', 'not_ok'), (current_setting('t.nl')::uuid, 0, 3, 'photo', 'ok');
+    perform set_config('t.n_j', 'yes', true);
+  end if;
+end $$;
+-- C4 gets its own anchor (0.3); a trap card on 0.1 opens tomorrow; C1 is marked by a correction.
+update public.study_cards set anchor = 3 where id = 'a7400000-0000-4000-8000-000000000004';
+update public.study_cards set stale_at = now() where id = 'a7400000-0000-4000-8000-000000000001';
+insert into public.study_cards (id, group_id, lecture_id, part_idx, kind, front, back, slides, anchor, opens_at) values
+ ('a7400000-0000-4000-8000-000000000005', :'ngid', :'nl', 0, 'qa', 'מלכודת שעוד לא נפתחה', 'x', '{2}', 1, now() + interval '1 day');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select 'N4. with C''s end: ' || case when s = '0.1 c0 | 0.2 c1 | 0.3 c1 | 1.1 c1' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+       || ' (a card''s own anchor places it; a trap card before it opens is not counted: review SEC-6)'
+  from (select string_agg(c.part_idx || '.' || c.anchor || ' c' || c.cards, ' | ' order by c.part_idx, c.anchor) as s from public.study_paragraph_chips(:'nl') c) x;
+select 'N4a. the tab says a card is marked by a correction, and lists no unopened trap: '
+       || case when (select (t -> 'cards' -> 0 ->> 'stale')::boolean from (select public.study_paragraph_practice(:'nl', 0, 2) as t) a)
+                and (select jsonb_array_length(t -> 'cards') from (select public.study_paragraph_practice(:'nl', 0, 1) as t) b) = 0 then 'ok' else 'FAIL' end;
+select 'N4b. M''s taps and J''s wall when they exist: '
+       || case when current_setting('t.n_m', true) is distinct from 'yes' or current_setting('t.n_j', true) is distinct from 'yes' then 'ok (sections M and J are loaded: their own checks cover this)'
+               when s = '0.1 a1 | 0.2 a0 u | 0.3 a1' then 'ok' else 'FAIL ' || coalesce(s, 'none') end
+       || ' (her "לא ברור" of the last 14 days; the wall''s entries, not drafts or ones marked not ok)'
+  from (select string_agg(c.part_idx || '.' || c.anchor || ' a' || c.aids || case when c.my_unclear then ' u' else '' end, ' | ' order by c.part_idx, c.anchor) as s
+          from public.study_paragraph_chips(:'nl') c where c.part_idx = 0) x;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select 'N4c. Noa''s "לא ברור" is not Shoham''s: ' || case when bool_or(c.my_unclear) then 'FAIL' else 'ok' end from public.study_paragraph_chips(:'nl') c;
+reset role;
+rollback;
+
+select 'N-reg. the registry: ' || case when public.study_schema() ->> 'N' = '1' then 'ok' else 'FAIL ' || coalesce(public.study_schema() ->> 'N', 'missing') end || ' (N at 1)';
+delete from public.study_lectures where id = :'nl';
+select 'N5. the fixtures are gone: ' || case when (select count(*) from public.study_questions where lecture_id = :'nl') + (select count(*) from public.study_cards where lecture_id = :'nl')
+       + (select count(*) from public.study_points where lecture_id = :'nl') = 0 then 'ok' else 'FAIL' end;
+-- ════ END SECTION N ════
+
+-- ════ BEGIN SECTION V · disputes, VAR, the log, the spread (package V) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION V checks · disputes, VAR, the lecture's log, the spread
+--  (package V; spec §12.4.V: V1-V9 and V-reg, the review's SR10a-SR10d and
+--  SR15a-SR15b, on fixtures of their own). Four more members and a lecture
+--  of three written parts, removed at the end, so the sections after V find
+--  what they found before. Every line says ok or FAIL by itself.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+select id as vgid from public.study_groups order by created_at limit 1 \gset
+\set vl '56100000-0000-4000-8000-000000000001'
+\set key 'k-0123456789abcdef0123456789abcdef'
+\set noa 'cccccccc-0000-4000-8000-000000000003'
+\set shoham 'bbbbbbbb-0000-4000-8000-000000000002'
+\set maya '56000000-0000-4000-8000-000000000001'
+\set itai '56000000-0000-4000-8000-000000000002'
+\set daniel '56000000-0000-4000-8000-000000000003'
+\set roni '56000000-0000-4000-8000-000000000004'
+insert into auth.users (id, raw_user_meta_data) values
+ (:'maya', '{"app":"study","full_name":"מאיה"}'), (:'itai', '{"app":"study","full_name":"איתי"}'),
+ (:'daniel', '{"app":"study","full_name":"דניאל"}'), (:'roni', '{"app":"study","full_name":"רוני"}');
+insert into public.study_members (group_id, user_id, name) values
+ (:'vgid', :'maya', 'מאיה'), (:'vgid', :'itai', 'איתי'), (:'vgid', :'daniel', 'דניאל'), (:'vgid', :'roni', 'רוני');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'vl', :'vgid', 'פתוגן מאכסן', 'מלריה (VAR)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n,
+                    'lines', jsonb_build_array(case n when 33 then 'tetracyclines are contraindicated (pregnant women, children <8y old)'
+                                                      when 30 then 'combine with long-acting partner' else 'טקסט ' || n end),
+                    'tables', '[]'::jsonb, 'notes', '', 'figures', '[]'::jsonb) order by n) from generate_series(1, 40) n),
+  'ready', :'shoham');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ (:'vl', 0, 'מחזור החיים', 1, 12, 'ready', E'## מחזור החיים\n\nאף תרופה לא הורגת את ה-Sporozoite. [ש'' 3]'),
+ (:'vl', 1, 'מנגנונים', 13, 24, 'ready', E'## מנגנונים\n\nChloroquine מצטברת בוואקואולה. [ש'' 15]\n\nMefloquine ניתנת פעם בשבוע. [ש'' 20]'),
+ (:'vl', 2, 'שילובים', 25, 40, 'ready', E'## שילובים\n\nArtemisinins לעולם לא לבד. [ש'' 30]\n\nQuinine עם Doxycycline, לא בהיריון. [ש'' 33]');
+-- On the Chloroquine paragraph (1.1): a question Noa answered, a card Maya reviewed; one more question elsewhere (1.2).
+insert into public.study_questions (id, group_id, lecture_id, part_idx, kind, question, options, slides, anchor) values
+ ('56200000-0000-4000-8000-000000000001', :'vgid', :'vl', 1, 'mcq', 'איפה מצטברת Chloroquine?', '{א,ב,ג,ד}', '{15}', 1),
+ ('56200000-0000-4000-8000-000000000002', :'vgid', :'vl', 1, 'mcq', 'כל כמה זמן Mefloquine?', '{א,ב,ג,ד}', '{20}', 2);
+insert into public.study_cards (id, group_id, lecture_id, part_idx, kind, front, back, slides, anchor) values
+ ('56300000-0000-4000-8000-000000000001', :'vgid', :'vl', 1, 'qa', 'איפה מצטברת Chloroquine?', 'בוואקואולה', '{15}', 1);
+insert into public.study_answers (user_id, question_id, choice, correct, answered_at) values
+ (:'noa', '56200000-0000-4000-8000-000000000001', 0, true, now() - interval '2 days'),
+ (:'daniel', '56200000-0000-4000-8000-000000000002', 1, false, now() - interval '1 day');
+insert into public.study_card_reviews (id, user_id, card_id, rating, reviewed_at, elapsed_days, state_before, state_after, stability, difficulty, due) values
+ (gen_random_uuid(), :'maya', '56300000-0000-4000-8000-000000000001', 3, now() - interval '1 day', 0, 0, 2, 2.5, 5, now() + interval '2 days');
+select set_config('t.vl', :'vl', false) is not null as vl_set \gset
+
+-- ═════════ V1 · opening a yellow card ═════════
+set role authenticated;
+set request.jwt.claim.sub = :'noa';
+select set_config('t.d1', public.study_dispute_open(:'vl', 2, 2, 'Quinine עם Doxycycline',
+  'Quinine עם Doxycycline, גם בהיריון', array[33])::text, false) is not null as d \gset
+do $$
+declare c record; n int := 0;
+begin
+  for c in select * from (values
+      ('a second card on the paragraph', 2, 2, 'טענה ארוכה מספיק', array[33], 'dispute open'),
+      ('a claim of three letters', 2, 1, 'לא!', array[30], 'bad claim'),
+      ('a slide not in the lecture', 2, 1, 'טענה ארוכה מספיק', array[99], 'bad source'),
+      ('no slide', 2, 1, 'טענה ארוכה מספיק', '{}'::int[], 'bad source'),
+      ('five slides', 2, 1, 'טענה ארוכה מספיק', array[30, 31, 32, 33, 34], 'bad source'),
+      ('a part that is not there', 9, 1, 'טענה ארוכה מספיק', array[30], 'part not found')
+    ) as t(label, part, anchor, claim, slides, want) loop
+    begin
+      perform public.study_dispute_open(current_setting('t.vl')::uuid, c.part, c.anchor, '', c.claim, c.slides);
+      raise notice 'V1. FAIL: % was opened', c.label;
+    exception when others then if sqlerrm = c.want then n := n + 1; else raise notice 'V1. FAIL: % → %', c.label, sqlerrm; end if; end;
+  end loop;
+  raise notice 'V1. %: % of 6 bad yellow cards refused with their reason', case when n = 6 then 'ok' else 'FAIL' end, n;
+end $$;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_dispute_open(current_setting('t.vl')::uuid, 2, 1, '', 'טענה של זר', array[30]);
+  raise notice 'V1b. FAIL: a stranger opened a yellow card';
+exception when others then raise notice 'V1b. %: a stranger opens none (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_dispute_state(current_setting('t.d1')::uuid);
+  raise notice 'V1c. FAIL: a stranger read a yellow card';
+exception when others then raise notice 'V1c. %: a stranger reads none (%)', case when sqlerrm = 'dispute not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'V1d. a stranger sees ' || case when count(*) = 0 then 'ok' else 'FAIL' end || ' (no row of the group''s disputes)' from public.study_disputes;
+
+-- ═════════ V2 · the other side, backing without names (review SEC-10) ═════════
+set request.jwt.claim.sub = :'maya';
+select public.study_dispute_claim(current_setting('t.d1')::uuid, 'Doxycycline אסורה בהיריון: רק Clindamycin', array[33]) is null as c \gset
+set request.jwt.claim.sub = :'itai';
+do $$ begin perform public.study_dispute_claim(current_setting('t.d1')::uuid, 'עוד צד שלישי', array[33]);
+  raise notice 'V2. FAIL: a third side';
+exception when others then raise notice 'V2. %: two sides (%)', case when sqlerrm = 'sides taken' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select version as v0 from public.study_disputes where id = current_setting('t.d1')::uuid \gset
+select set_config('t.v0', :'v0', false) is not null as v0_set \gset
+set role authenticated;
+set request.jwt.claim.sub = :'itai';
+select public.study_dispute_back(current_setting('t.d1')::uuid, 'a') is null as b \gset
+set request.jwt.claim.sub = :'daniel';
+select public.study_dispute_back(current_setting('t.d1')::uuid, 'b') is null as b \gset
+select 'V2b. two backers: ' || case when s -> 'backs' = 'null'::jsonb and s ->> 'backers' = '2' and (s ->> 'backing_open')::boolean then 'ok' else 'FAIL ' || s::text end
+       || ' (no split, the total 2, backing open)'
+  from (select public.study_dispute_state(current_setting('t.d1')::uuid) as s) x;
+set request.jwt.claim.sub = :'roni';
+select public.study_dispute_back(current_setting('t.d1')::uuid, 'b') is null as b \gset
+set request.jwt.claim.sub = :'shoham';
+select public.study_dispute_back(current_setting('t.d1')::uuid, 'a') is null as b \gset
+set request.jwt.claim.sub = :'noa';
+do $$ begin perform public.study_dispute_back(current_setting('t.d1')::uuid, 'a');
+  raise notice 'V2c. FAIL: a side backed itself';
+exception when others then raise notice 'V2c. %: a side does not back (%)', case when sqlerrm = 'a side cannot back' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_dispute_back(current_setting('t.d1')::uuid, 'c');
+  raise notice 'V2c2. FAIL: a third side was backed';
+exception when others then raise notice 'V2c2. %: (%)', case when sqlerrm in ('bad side', 'a side cannot back') then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'V2d. Noa sees: ' || case when s -> 'a' ->> 'name' = 'נועה כהן' and s -> 'b' ->> 'name' = 'מאיה' and s -> 'backs' = 'null'::jsonb
+                                     and not (s::text like '%איתי%' or s::text like '%דניאל%' or s::text like '%רוני%' or s::text like '%שוהם%')
+                                     and (select count(*) from public.study_dispute_backs) = 0 then 'ok' else 'FAIL ' || s::text end
+       || ' (the sides'' names; no split while backing is open; no backer''s name; no backing row she can read)'
+  from (select public.study_dispute_state(current_setting('t.d1')::uuid) as s) x;
+select rv as sr10a from (select case when s -> 'backs' = 'null'::jsonb and s ->> 'backers' = '4' then 'ok' else 'FAIL ' || s::text end as rv
+  from (select public.study_dispute_state(current_setting('t.d1')::uuid) as s) x) y \gset
+select 'SR10a. four backers, backing open: ' || :'sr10a' || ' (the total only, review SEC-10)';
+set request.jwt.claim.sub = :'itai';
+select 'V2e. Itai sees his own side: ' || case when public.study_dispute_state(current_setting('t.d1')::uuid) ->> 'mine' = 'a' then 'ok' else 'FAIL' end
+       || '; his backing row: ' || (select count(*) from public.study_dispute_backs) || ' (expect 1)';
+reset role;
+select 'SR10b. a back leaves the published row alone: ' || case when (select version::text from public.study_disputes where id = current_setting('t.d1')::uuid) = current_setting('t.v0')
+                                and not exists (select 1 from information_schema.columns where table_name = 'study_disputes' and column_name = 'backs_n') then 'ok' else 'FAIL' end
+       || ' (the version unchanged, no backs_n column)';
+
+-- ═════════ V2f-V2i, SR15 · VAR takes the dispute first, one at a time (review SEC-15) ═════════
+set role authenticated;
+set request.jwt.claim.sub = :'noa';
+do $$ begin perform public.study_dispute_judge_begin(current_setting('t.d1')::uuid);
+  raise notice 'SR15a. FAIL: the hold without the server key';
+exception when others then raise notice 'SR15a. %: only op var takes the dispute (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_dispute_judge_begin(current_setting('t.d1')::uuid, :'key') is null as j \gset
+do $$ begin perform public.study_dispute_judge_begin(current_setting('t.d1')::uuid, 'k-0123456789abcdef0123456789abcdef');
+  raise notice 'SR15b. FAIL: a second phone''s VAR while the first runs';
+exception when others then raise notice 'SR15b. %: one VAR call at a time (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_dispute_claim(current_setting('t.d1')::uuid, 'Quinine עם Doxycycline, תמיד', array[33]);
+  raise notice 'V2f. FAIL: a claim was rewritten while VAR read it';
+exception when others then raise notice 'V2f. %: no claim changes while VAR reads (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'SR10c. VAR asked, backing closed: Noa sees ' || case when public.study_dispute_state(current_setting('t.d1')::uuid) -> 'backs' = '{"a": 2, "b": 2}'::jsonb
+                                                         and not (public.study_dispute_state(current_setting('t.d1')::uuid) ->> 'backing_open')::boolean then 'ok' else 'FAIL' end
+       || ' (the split {a: 2, b: 2}: four others backed)';
+set request.jwt.claim.sub = :'itai';
+select 'V2h. Itai, one of four backers, sees the split from three others: '
+       || case when public.study_dispute_state(current_setting('t.d1')::uuid) -> 'backs' = '{"a": 2, "b": 2}'::jsonb then 'ok' else 'FAIL' end;
+do $$ begin perform public.study_dispute_back(current_setting('t.d1')::uuid, 'b');
+  raise notice 'SR10d. FAIL: backing after VAR was asked';
+exception when others then raise notice 'SR10d. %: backing closes when VAR is asked (%)', case when sqlerrm = 'not open' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_dispute_back(current_setting('t.d1')::uuid, null);
+  raise notice 'V2i. FAIL: a back taken back after VAR was asked';
+exception when others then raise notice 'V2i. %: no un-back either (%)', case when sqlerrm = 'not open' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ V3 · the verdict, by key, once, checked again by the database ═════════
+set request.jwt.claim.sub = :'noa';
+do $$ begin perform public.study_dispute_verdict(current_setting('t.d1')::uuid,
+    '{"certainty":"slide","summary":"כתוב בשקף 33","on_slides":[],"interpretation":[],"listen":false,"trap":null}'::jsonb, 'claude-opus-5-5');
+  raise notice 'V3. FAIL: a verdict without the server key';
+exception when others then raise notice 'V3. %: only op var saves a verdict (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$
+declare v jsonb; n int := 0;
+begin
+  foreach v in array array[
+      '{"certainty":"maybe","summary":"כתוב בשקף 33","on_slides":[],"interpretation":[],"listen":false}'::jsonb,
+      '{"certainty":"slide","summary":"","on_slides":[],"interpretation":[],"listen":false}'::jsonb,
+      '{"certainty":"slide","on_slides":[],"interpretation":[],"listen":false}'::jsonb,
+      '{"certainty":"slide","summary":"כתוב בשקף 33","on_slides":[],"interpretation":[]}'::jsonb,
+      '{"certainty":"slide","summary":"כתוב בשקף 99","on_slides":[{"text":"x x x","slides":[99]}],"interpretation":[],"listen":false}'::jsonb,
+      '{"certainty":"slide","summary":"כתוב בשקף 33","on_slides":[{"text":"x x x","slides":["33a"]}],"interpretation":[],"listen":false}'::jsonb,
+      '{"certainty":"slide","summary":"כתוב בשקף 33","on_slides":[{"slides":[33]}],"interpretation":[],"listen":false}'::jsonb,
+      '{"certainty":"slide","summary":"כתוב בשקף 33","on_slides":[],"interpretation":[],"listen":"no"}'::jsonb,
+      '{"certainty":"slide","summary":"כתוב בשקף 33","on_slides":[],"interpretation":[],"listen":false,"trap":{"front":"קצר","back":"x","slides":[33]}}'::jsonb,
+      '{"certainty":"slide","summary":"כתוב בשקף 33","on_slides":[],"interpretation":[],"listen":false,"trap":{"front":"שאלה ארוכה מספיק?","slides":[33]}}'::jsonb,
+      '{"certainty":"slide","summary":"כתוב בשקף 33","on_slides":[],"interpretation":[],"listen":false,"trap":"כן"}'::jsonb] loop
+    begin
+      perform public.study_dispute_verdict(current_setting('t.d1')::uuid, v, 'claude-opus-5-5', 'k-0123456789abcdef0123456789abcdef');
+      raise notice 'V3b. FAIL: a bad verdict was saved: %', v;
+    exception when others then if sqlerrm = 'bad verdict' then n := n + 1; else raise notice 'V3b. FAIL: %', sqlerrm; end if; end;
+  end loop;
+  raise notice 'V3b. %: % of 11 malformed verdicts refused (a missing key is not a pass)', case when n = 11 then 'ok' else 'FAIL' end, n;
+end $$;
+select public.study_dispute_verdict(current_setting('t.d1')::uuid, jsonb_build_object(
+  'certainty', 'interpretation',
+  'summary', 'שתי הטענות נשענות על שקף 33; Doxycycline אסורה בהיריון, Clindamycin היא החלופה.',
+  'on_slides', jsonb_build_array(jsonb_build_object('text', 'tetracyclines are contraindicated (pregnant women, children <8y old)', 'slides', jsonb_build_array(33))),
+  'interpretation', jsonb_build_array(jsonb_build_object('text', 'השילוב עם Quinine בהיריון הוא עם Clindamycin', 'slides', jsonb_build_array(33))),
+  'listen', true,
+  'trap', jsonb_build_object('front', 'מטופלת בהיריון מקבלת Quinine: למה לא Doxycycline?', 'back', 'tetracycline: אסורה בהיריון ובילדים מתחת לגיל 8 [ש'' 33]',
+                             'slides', jsonb_build_array(33))),
+  'claude-opus-5-5', :'key') is null as v \gset
+select 'V3c. judged: ' || case when state = 'judged' and verdict ->> 'certainty' = 'interpretation' and (verdict ->> 'listen')::boolean
+                                    and judging_until is null and verdict_model = 'claude-opus-5-5' then 'ok' else 'FAIL ' || state end
+       || ' (judged, interpretation, listen, the hold cleared, the model kept)'
+  from public.study_disputes where id = current_setting('t.d1')::uuid;
+do $$ begin perform public.study_dispute_verdict(current_setting('t.d1')::uuid,
+    '{"certainty":"slide","summary":"שוב פעם","on_slides":[],"interpretation":[],"listen":false}'::jsonb, 'claude-opus-5-5', 'k-0123456789abcdef0123456789abcdef');
+  raise notice 'V3d. FAIL: a second verdict';
+exception when others then raise notice 'V3d. %: one VAR a dispute (%)', case when sqlerrm = 'not ready' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ V4 · "לקבל": the box and the trap card for everyone ═════════
+set request.jwt.claim.sub = :'roni';
+select set_config('t.dc', coalesce(public.study_dispute_decide(current_setting('t.d1')::uuid, 'accept')::text, ''), false) is not null as d \gset
+reset role;
+select 'V4. "לקבל": ' || case when d.state = 'accepted' and d.trap_card = c.id and c.source = 'trap' and c.part_idx = 2 and c.anchor = 2
+                                   and c.trap_key = 'd:' || d.id::text and c.created_by is null then 'ok' else 'FAIL' end
+       || ' (accepted; a trap card of the group on 2.2, its key the dispute''s, made by no member)'
+  from public.study_disputes d join public.study_cards c on c.id = nullif(current_setting('t.dc'), '')::uuid where d.id = current_setting('t.d1')::uuid;
+set role authenticated;
+select 'V4a. decided by: ' || case when public.study_dispute_state(current_setting('t.d1')::uuid) ->> 'decided_by' = 'רוני' then 'ok' else 'FAIL' end;
+do $$ begin perform public.study_dispute_decide(current_setting('t.d1')::uuid, 'override');
+  raise notice 'V4b. FAIL: decided twice';
+exception when others then raise notice 'V4b. %: (%)', case when sqlerrm = 'not judged' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ V5 · a yellow card on a pending correction holds it ═════════
+set request.jwt.claim.sub = :'itai';
+select set_config('t.pv', public.study_propose_edit(:'vl', 2, 1,
+  'Artemisinins לעולם לא לבד. [ש'' 30]', 'Artemisinins לעולם לא לבד, תמיד עם שותף ארוך טווח. [ש'' 30]',
+  (select rev from public.study_sections where lecture_id = :'vl' and idx = 2), 0, 1, '', 'slide', array[30], null, '')::text, false) is not null as p \gset
+set request.jwt.claim.sub = :'daniel';
+select set_config('t.d2', public.study_dispute_open(:'vl', 2, 1, 'Artemisinins',
+  'השותף לא חייב להיות ארוך טווח לפי השקף', array[30], current_setting('t.pv')::uuid)::text, false) is not null as d \gset
+do $$ begin perform public.study_approve_edit(current_setting('t.pv')::uuid);
+  raise notice 'V5. FAIL: a disputed correction was approved';
+exception when others then raise notice 'V5. %: a yellow card holds the correction (%)', case when sqlerrm = 'not pending' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_dispute_judge_begin(current_setting('t.d2')::uuid, 'k-0123456789abcdef0123456789abcdef');
+  raise notice 'V5a. FAIL: VAR with one side';
+exception when others then raise notice 'V5a. %: VAR needs both sides (%)', case when sqlerrm = 'not ready' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = :'itai';
+select public.study_dispute_claim(current_setting('t.d2')::uuid, 'בשקף 30: combine with long-acting partner', array[30]) is null as c \gset
+select public.study_dispute_judge_begin(current_setting('t.d2')::uuid, :'key') is null as j \gset
+select public.study_dispute_verdict(current_setting('t.d2')::uuid,
+  '{"certainty":"slide","summary":"כתוב בשקף 30: שותף ארוך טווח.","on_slides":[{"text":"combine with long-acting partner","slides":[30]}],"interpretation":[],"listen":false,"trap":null}'::jsonb,
+  'claude-opus-5-5', :'key') is null as v \gset
+set request.jwt.claim.sub = :'daniel';
+select public.study_dispute_decide(current_setting('t.d2')::uuid, 'override', 'בהרצאה נאמר שכל שותף מתאים') is null as d \gset
+reset role;
+select 'V5b. "בהרצאה נאמר אחרת": ' || case when d.state = 'overridden' and d.decision_note <> '' and d.trap_card is null and p.state = 'pending' then 'ok' else 'FAIL' end
+       || ' (overridden, the note kept, no card; the correction waits for approval again)'
+  from public.study_disputes d, public.study_edit_proposals p where d.id = current_setting('t.d2')::uuid and p.id = current_setting('t.pv')::uuid;
+set role authenticated;
+set request.jwt.claim.sub = :'roni';
+select set_config('t.ev', public.study_approve_edit(current_setting('t.pv')::uuid) ->> 'edit_id', false) is not null as a \gset
+-- The opener closes her own open card; nobody else does.
+set request.jwt.claim.sub = :'noa';
+select set_config('t.d3', public.study_dispute_open(:'vl', 0, 1, 'Sporozoite', 'Primaquine כן פועלת על שלב הכבד', array[3])::text, false) is not null as d \gset
+set request.jwt.claim.sub = :'maya';
+do $$ begin perform public.study_dispute_close(current_setting('t.d3')::uuid);
+  raise notice 'V9. FAIL: a member closed someone else''s yellow card';
+exception when others then raise notice 'V9. %: only the opener closes it (%)', case when sqlerrm = 'dispute not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = :'noa';
+select public.study_dispute_close(current_setting('t.d3')::uuid) is null as c \gset
+select 'V9a. "ביטול הכרטיס הצהוב": ' || case when state = 'closed' then 'ok' else 'FAIL ' || state end from public.study_disputes where id = current_setting('t.d3')::uuid;
+
+-- ═════════ V6-V7 · the deck's own slips, the lecture's log ═════════
+set request.jwt.claim.sub = :'shoham';
+select set_config('t.f1', public.study_slide_flag(:'vl', array[28],
+  'הכותרת היא mefloquine, אבל רובו העתק של שקף 27 על Quinine')::text, false) is not null as f \gset
+do $$ begin perform public.study_slide_flag(current_setting('t.vl')::uuid, array[28], 'קצר');
+  raise notice 'V6. FAIL: a flag without a real note';
+exception when others then raise notice 'V6. %: a slip needs words (%)', case when sqlerrm = 'bad note' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_slide_flag(current_setting('t.vl')::uuid, array[41], 'שקף שלא קיים בהרצאה');
+  raise notice 'V6b. FAIL: a flag on a slide the deck lacks';
+exception when others then raise notice 'V6b. %: (%)', case when sqlerrm = 'bad source' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = :'roni';
+select public.study_slide_flag_remove(current_setting('t.f1')::uuid) is null as r \gset
+select 'V7. the lecture''s log: ' || case when x.s = 'edit 1, slide 1, verdict 2' then 'ok' else 'FAIL ' || coalesce(x.s, 'none') end
+       || '; the slide flag removed by ' || case when (select e ->> 'removed_by' from jsonb_array_elements(public.study_lecture_log(:'vl')) e where e ->> 'kind' = 'slide') = 'רוני' then 'ok' else 'FAIL' end
+       || '; the correction''s approver ' || case when (select e ->> 'approver' from jsonb_array_elements(public.study_lecture_log(:'vl')) e
+                                                    where e ->> 'kind' = 'edit' and e ->> 'id' = current_setting('t.ev')) = 'רוני' then 'ok' else 'FAIL' end
+       || '; the verdicts'' sides named ' || case when (select bool_and(e ->> 'name_a' is not null and e ->> 'name_b' is not null) from jsonb_array_elements(public.study_lecture_log(:'vl')) e where e ->> 'kind' = 'verdict') then 'ok' else 'FAIL' end
+       || ' (one correction, one slide flag, two verdicts; the closed card not listed)'
+  from (select string_agg(k || ' ' || n, ', ' order by k) as s from (select e ->> 'kind' as k, count(*) as n from jsonb_array_elements(public.study_lecture_log(:'vl')) e group by 1) y) x;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_lecture_log(current_setting('t.vl')::uuid);
+  raise notice 'V7b. FAIL: a stranger read the log';
+exception when others then raise notice 'V7b. %: (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_slide_flag_remove(current_setting('t.f1')::uuid, false);
+  raise notice 'V7c. FAIL: a stranger put a flag back';
+exception when others then raise notice 'V7c. %: (%)', case when sqlerrm = 'flag not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ V8 · the spread: marks and a private "עדכון" ═════════
+set request.jwt.claim.sub = :'itai';
+select set_config('t.ps', public.study_propose_edit(:'vl', 1, 1,
+  'Chloroquine מצטברת בוואקואולה. [ש'' 15]', 'Chloroquine מצטברת בוואקואולה החומצית של הטפיל. [ש'' 15]',
+  (select rev from public.study_sections where lecture_id = :'vl' and idx = 1), 0, 1, '', 'slide', array[15], null, '')::text, false) is not null as p \gset
+set request.jwt.claim.sub = :'daniel';
+select set_config('t.es', public.study_approve_edit(current_setting('t.ps')::uuid) ->> 'edit_id', false) is not null as a \gset
+reset role;
+select 'V8. after the correction: ' || case when (select stale_edit::text = current_setting('t.es') from public.study_questions where id = '56200000-0000-4000-8000-000000000001')
+                                             and (select stale_edit::text = current_setting('t.es') from public.study_cards where id = '56300000-0000-4000-8000-000000000001')
+                                             and (select stale_at is null from public.study_questions where id = '56200000-0000-4000-8000-000000000002') then 'ok' else 'FAIL' end
+       || ' (the question and the card on 1.1 marked, the one on 1.2 not); "עדכון" for '
+       || case when (select string_agg(m.name || ' (' || u.reason || ')', ', ' order by m.name) from public.study_updates u
+                       join public.study_members m on m.user_id = u.user_id and m.group_id = :'vgid' where u.edit_id = current_setting('t.es')::uuid) = 'מאיה (card), נועה כהן (question)'
+               then 'ok' else 'FAIL' end
+       || ' (Maya for the card, Noa for the question; not Daniel, who studied another paragraph, nor the author or the approver)';
+set role authenticated;
+set request.jwt.claim.sub = :'noa';
+select 'V8b. Noa''s "עדכון": ' || case when before_text like 'Chloroquine מצטברת בוואקואולה.%' and after_text like '%החומצית%' and author = 'איתי' and approver = 'דניאל'
+                                            and source_kind = 'slide' and source_slides = '{15}' and reason = 'question' and lecture_title = 'מלריה (VAR)' then 'ok' else 'FAIL' end
+       || ' (the old and new line, איתי, דניאל, slide 15, why: a question)'
+  from public.study_my_updates(:'vgid') where edit_id = current_setting('t.es')::uuid;
+select 'V8c. Noa reads only her own: ' || case when (select count(*) from public.study_updates) = 1 then 'ok' else 'FAIL' end
+       || '; the question is out of the paragraph''s practice: '
+       || case when (select (t -> 'questions' -> 0 ->> 'stale')::boolean from (select public.study_paragraph_practice(:'vl', 1, 1) as t) a) then 'ok' else 'FAIL' end;
+-- Review SEC4-1: "עדיין נכון" in the paragraph's "תרגול" tab brings the question back for everyone.
+select public.study_question_still_true('56200000-0000-4000-8000-000000000001') is null as st \gset
+select 'V8c2. "עדיין נכון": ' || case when not (t -> 'questions' -> 0 ->> 'stale')::boolean
+                                          and (select stale_at is null and checked_by = :'noa' from public.study_questions where id = '56200000-0000-4000-8000-000000000001')
+                                     then 'ok' else 'FAIL' end
+       || ' (back in the paragraph''s practice, checked by Noa)'
+  from (select public.study_paragraph_practice(:'vl', 1, 1) as t) a;
+set request.jwt.claim.sub = :'maya';
+do $$ begin perform public.study_update_seen((select id from public.study_updates where user_id <> auth.uid() limit 1));
+  raise notice 'V8d0. FAIL: Maya marked another''s update';
+exception when others then raise notice 'V8d0. %: one''s own only (%)', case when sqlerrm = 'not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = :'noa';
+select public.study_update_seen((select id from public.study_my_updates(:'vgid') where edit_id = current_setting('t.es')::uuid)) is null as s \gset
+select 'V8d. "הבנתי": ' || case when count(*) = 0 then 'ok' else 'FAIL' end from public.study_my_updates(:'vgid') where edit_id = current_setting('t.es')::uuid;
+set request.jwt.claim.sub = :'roni';
+select public.study_edit_block(:'vl', 1, 1,
+  'Chloroquine מצטברת בוואקואולה החומצית של הטפיל. [ש'' 15]', 'Chloroquine מצטברת בוואקואולה. [ש'' 15]',
+  (select rev from public.study_sections where lecture_id = :'vl' and idx = 1), 0, 1, '',
+  current_setting('t.es')::uuid) is not null as u \gset
+reset role;
+select 'V8e. undone: ' || case when (select stale_at is null from public.study_questions where id = '56200000-0000-4000-8000-000000000001')
+                                   and (select stale_at is null from public.study_cards where id = '56300000-0000-4000-8000-000000000001')
+                                   and not exists (select 1 from public.study_updates where edit_id = current_setting('t.es')::uuid and user_id = :'maya')
+                                   and exists (select 1 from public.study_updates where edit_id = current_setting('t.es')::uuid and user_id = :'noa')
+                                   and not exists (select 1 from public.study_updates u join public.study_edits e on e.id = u.edit_id where e.undo_of is not null)
+                              then 'ok' else 'FAIL' end
+       || ' (the marks cleared, Maya''s unseen update gone, Noa''s seen one kept, an undo sends none)';
+-- Review SEC4-1: the server switch 'spread_questions' (on unless Yoad turns it off) governs the questions' marks only.
+select 'V8f. the switch: ' || case when (select enabled from study_private.features where name = 'spread_questions') then 'ok' else 'FAIL' end || ' (spread_questions is on)';
+update study_private.features set enabled = false where name = 'spread_questions';
+set role authenticated;
+set request.jwt.claim.sub = :'itai';
+select set_config('t.ps2', public.study_propose_edit(:'vl', 1, 1,
+  'Chloroquine מצטברת בוואקואולה. [ש'' 15]', 'Chloroquine מצטברת בוואקואולה החומצית. [ש'' 15]',
+  (select rev from public.study_sections where lecture_id = :'vl' and idx = 1), 0, 1, '', 'slide', array[15], null, '')::text, false) is not null as p \gset
+set request.jwt.claim.sub = :'daniel';
+select set_config('t.es2', public.study_approve_edit(current_setting('t.ps2')::uuid) ->> 'edit_id', false) is not null as a \gset
+reset role;
+select 'V8g. switched off: ' || case when (select stale_at is null from public.study_questions where id = '56200000-0000-4000-8000-000000000001')
+                                    and (select stale_edit::text = current_setting('t.es2') from public.study_cards where id = '56300000-0000-4000-8000-000000000001')
+                               then 'ok' else 'FAIL' end
+       || ' (the question stays in practice; the card is still marked: the deck has its own "עדיין נכון")';
+update study_private.features set enabled = true where name = 'spread_questions';
+
+-- ═════════ V9 · what is published, who reads what, the registry ═════════
+select 'V9b. published: ' || case when string_agg(tablename, ', ' order by tablename) = 'study_disputes, study_slide_flags' then 'ok' else 'FAIL ' || string_agg(tablename, ', ') end
+       || ' (the disputes and the slide flags: never backing or updates)'
+  from pg_publication_tables where pubname = 'supabase_realtime' and tablename in ('study_disputes', 'study_dispute_backs', 'study_slide_flags', 'study_updates');
+select 'V9c. a member writes no row directly: ' || case when not exists (
+         select 1 from information_schema.role_table_grants
+          where grantee in ('authenticated', 'anon') and table_name in ('study_disputes', 'study_dispute_backs', 'study_slide_flags', 'study_updates')
+            and privilege_type in ('INSERT', 'UPDATE', 'DELETE')) then 'ok' else 'FAIL' end;
+set role anon;
+do $$ begin perform public.study_dispute_state(current_setting('t.d1')::uuid);
+  raise notice 'V9d. FAIL: anon read a yellow card';
+exception when insufficient_privilege then raise notice 'V9d. ok: anon has no access (%)', sqlerrm;
+  when others then raise notice 'V9d. %: (%)', case when sqlerrm = 'not signed in' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select 'V-reg. the registry: ' || case when public.study_schema() ->> 'V' = '1' then 'ok' else 'FAIL ' || coalesce(public.study_schema() ->> 'V', 'missing') end || ' (V at 1)';
+-- No member's identity outlives V's fixtures: the sections after V insert as
+-- postgres, and a row whose created_by defaults to auth.uid() must not name a
+-- member deleted here.
+reset request.jwt.claim.sub;
+delete from public.study_lectures where id = :'vl';
+delete from public.study_members where user_id::text like '56000000-%';
+delete from auth.users where id::text like '56000000-%';
+select 'V10. the fixtures are gone: ' || case when (select count(*) from public.study_disputes) + (select count(*) from public.study_slide_flags)
+       + (select count(*) from public.study_updates) + (select count(*) from public.study_cards where lecture_id = :'vl') = 0 then 'ok' else 'FAIL' end;
+-- ════ END SECTION V ════
+
+-- ════ BEGIN SECTION U · the anonymous counts, the pulse, traps and the museum (package U) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION U checks · the anonymous counts and the pulse   (package U,
+--  U-1 and U-2; spec §12.5.U's U-1 and U-1b on the fun design's fixtures,
+--  with Yoad's decisions 1 and 3 of 17 Nov 2026). Every line says ok or
+--  FAIL by itself. In the file's one group: six members of their own who
+--  joined weeks ago (anonymous identities, as every member is: decision 1),
+--  a second phone that joined two days ago, and an outsider. Time is
+--  simulated by counting for a fixed instant (pulse_night's p_now), never by
+--  sleeping. U-3 (traps and the museum, section U at 2) has its checks MU0-MU5
+--  at the end of this block.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+reset request.jwt.claim.sub;
+select id as ugid from public.study_groups order by created_at limit 1 \gset
+select set_config('t.ugid', :'ugid', false) is not null as g \gset
+\set ul1 '75100000-0000-4000-8000-000000000001'
+\set ul2 '75100000-0000-4000-8000-000000000002'
+select set_config('t.ul1', :'ul1', false) is not null as l \gset
+create or replace function pg_temp.ux(p_label text, p_got text, p_want text) returns text language sql as $$
+  select p_label || '. ' || case when p_got is not distinct from p_want then 'ok' else 'FAIL: got ' || coalesce(p_got, 'null') || ', want ' || coalesce(p_want, 'null') end
+$$;
+-- a1 שוהם-ב · a2 נועה-ב · a3 מאיה-ב · a4 איתי-ב · a5 דניאל-ב · a6 רוני (opts out) · b2 a second phone (2 days) · a9 an outsider
+insert into auth.users (id, raw_user_meta_data, is_anonymous) values
+ ('75a00000-0000-4000-8000-0000000000a1', '{"app":"study","full_name":"אורי"}', true),
+ ('75a00000-0000-4000-8000-0000000000a2', '{"app":"study","full_name":"טל"}', true),
+ ('75a00000-0000-4000-8000-0000000000a3', '{"app":"study","full_name":"גל"}', true),
+ ('75a00000-0000-4000-8000-0000000000a4', '{"app":"study","full_name":"עדי"}', true),
+ ('75a00000-0000-4000-8000-0000000000a5', '{"app":"study","full_name":"שי"}', true),
+ ('75a00000-0000-4000-8000-0000000000a6', '{"app":"study","full_name":"רוני"}', true),
+ ('75a00000-0000-4000-8000-0000000000b2', '{"app":"study","full_name":"טל (מחשב)"}', true),
+ ('75a00000-0000-4000-8000-0000000000a9', '{"app":"study","full_name":"זר"}', true);
+insert into public.study_members (group_id, user_id, name, joined_at) values
+ (:'ugid', '75a00000-0000-4000-8000-0000000000a1', 'אורי', now() - interval '60 days'),
+ (:'ugid', '75a00000-0000-4000-8000-0000000000a2', 'טל', now() - interval '60 days'),
+ (:'ugid', '75a00000-0000-4000-8000-0000000000a3', 'גל', now() - interval '60 days'),
+ (:'ugid', '75a00000-0000-4000-8000-0000000000a4', 'עדי', now() - interval '60 days'),
+ (:'ugid', '75a00000-0000-4000-8000-0000000000a5', 'שי', now() - interval '60 days'),
+ (:'ugid', '75a00000-0000-4000-8000-0000000000a6', 'רוני', now() - interval '60 days'),
+ (:'ugid', '75a00000-0000-4000-8000-0000000000b2', 'טל (מחשב)', now() - interval '2 days');
+-- Two lectures (38 and 6 slides), five ready parts.
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'ul1', :'ugid', 'פתוגן מאכסן', 'Pulse', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', '[]'::jsonb, 'tables', '[]'::jsonb, 'notes', '', 'figures', '[]'::jsonb) order by n)
+     from generate_series(1, 38) n), 'ready', 'bbbbbbbb-0000-4000-8000-000000000002'),
+ (:'ul2', :'ugid', 'פתוגן מאכסן', 'Pulse 2', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', '[]'::jsonb, 'tables', '[]'::jsonb, 'notes', '', 'figures', '[]'::jsonb) order by n)
+     from generate_series(1, 6) n), 'ready', 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, markdown, status) values
+ (:'ul1', 0, 'Amebiasis ו-Metronidazole', 1, 12, '## Amebiasis', 'ready'),
+ (:'ul1', 1, 'Leishmaniasis', 13, 18, '## Leishmaniasis', 'ready'),
+ (:'ul1', 2, 'מלריה: תרופות', 19, 33, '## מלריה', 'ready'),
+ (:'ul1', 3, 'Primaquine ו-G6PD', 34, 38, '## Primaquine', 'ready'),
+ (:'ul2', 0, 'Cestodes', 1, 6, '## Cestodes', 'ready');
+-- The bank: question, part, paragraph, topic, aspect, slides, key (the fun design's fixtures).
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, anchor, kind, question, options, slides, topic, aspect) values
+ ('75200000-0000-4000-8000-000000000001', :'ugid', :'ul1', 'ai', 3, 2, 'mcq', 'מה בודקים לפני מתן Primaquine?',
+  array['תפקודי כליה', 'G6PD', 'ספירת דם', 'ECG', 'אין צורך'], array[37], 'Primaquine', 'contra'),
+ ('75200000-0000-4000-8000-000000000002', :'ugid', :'ul1', 'ai', 3, 2, 'mcq', 'Primaquine בהיריון?',
+  array['אסורה', 'מותרת', 'רק בשליש השלישי', 'רק עם Chloroquine', 'רק בילדים'], array[37, 38], 'Primaquine', 'contra'),
+ ('75200000-0000-4000-8000-000000000003', :'ugid', :'ul1', 'ai', 1, 4, 'mcq', 'כמה זמן אמצעי מניעה אחרי Miltefosine?',
+  array['שבוע', 'חודש', '5 חודשים', 'שנה', 'לא צריך'], array[16], 'Miltefosine', 'contra'),
+ ('75200000-0000-4000-8000-000000000004', :'ugid', :'ul1', 'ai', 0, 3, 'mcq', 'Metronidazole ואלכוהול: מה קורה?',
+  array['תגובה דמוית Disulfiram', 'שום דבר', 'היפוגליקמיה', 'QT ארוך', 'פריחה'], array[7], 'Metronidazole', 'interactions'),
+ ('75200000-0000-4000-8000-000000000005', :'ugid', :'ul1', 'ai', 2, 1, 'mcq', 'למה משמשת Quinine?',
+  array['מניעת מלריה', 'מלריה קלה בלבד', 'טוקסופלזמה', 'טיפול, בשילוב עם Doxycycline או Clindamycin', 'רק בילדים'], array[27, 33], 'Quinine', 'uses'),
+ ('75200000-0000-4000-8000-000000000006', :'ugid', :'ul1', 'ai', 0, 1, 'mcq', 'Paromomycin: luminal או tissue?',
+  array['luminal', 'tissue', 'שניהם', 'אף אחד', 'תלוי במינון'], array[4], 'Luminal', 'classification'),
+ ('75200000-0000-4000-8000-000000000007', :'ugid', :'ul1', 'ai', 2, 0, 'mcq', 'מה ה-t½ הסופי של Chloroquine?',
+  array['1-2 חודשים', '18 שעות', 'שבוע', 'יום', 'שנה'], array[26], 'Chloroquine', 'pk'),
+ ('75200000-0000-4000-8000-000000000008', :'ugid', :'ul1', 'ai', 2, 0, 'mcq', 'Chloroquine: Vd?',
+  array['קטן', '100-1000 L/kg', '1 L/kg', 'לא ידוע', 'תלוי'], array[26], 'Chloroquine', 'pk');
+insert into public.study_question_keys (question_id, answer, explanations, takeaway)
+select q.id, k.a, array['הסבר א', 'הסבר ב', 'הסבר ג', 'הסבר ד', 'הסבר ה'], 'מה לזכור'
+  from public.study_questions q
+  join (values ('75200000-0000-4000-8000-000000000001'::uuid, 1::smallint), ('75200000-0000-4000-8000-000000000002', 0),
+               ('75200000-0000-4000-8000-000000000003', 2), ('75200000-0000-4000-8000-000000000004', 0),
+               ('75200000-0000-4000-8000-000000000005', 3), ('75200000-0000-4000-8000-000000000006', 0),
+               ('75200000-0000-4000-8000-000000000007', 0), ('75200000-0000-4000-8000-000000000008', 1)) k(id, a) on k.id = q.id;
+insert into public.study_question_flags (question_id, user_id, reason)
+values ('75200000-0000-4000-8000-000000000008', '75a00000-0000-4000-8000-0000000000a2', 'wrong_key');
+-- Cards on paragraphs.
+insert into public.study_cards (id, group_id, lecture_id, source, part_idx, anchor, kind, front, back, slides, topic, aspect, created_by) values
+ ('75300000-0000-4000-8000-000000000001', :'ugid', :'ul1', 'ai', 1, 4, 'qa', 'Miltefosine: כמה זמן אמצעי מניעה אחרי הטיפול?', '5 חודשים', array[16], 'Miltefosine', 'contra', null),
+ ('75300000-0000-4000-8000-000000000002', :'ugid', :'ul1', 'ai', 2, 1, 'qa', 'Quinine: לטיפול או למניעה?', 'לטיפול, בשילוב', array[27], 'Quinine', 'uses', null),
+ ('75300000-0000-4000-8000-000000000003', :'ugid', :'ul1', 'ai', 0, 3, 'qa', 'Metronidazole: כמה זמן בלי אלכוהול?', '48 שעות', array[7], 'Metronidazole', 'interactions', null);
+-- The meeting the "לא ברור" taps were made in (section M).
+insert into public.study_meetings (id, group_id, day, starts_at, lecture_id, part_from, part_to)
+values ('75400000-0000-4000-8000-000000000001', :'ugid', current_date - 3, now() - interval '3 days', :'ul1', 0, 1);
+
+-- The study day's start, and the fixtures' times around it.
+select study_private.pulse_cutoff(now()) as uc0 \gset
+select set_config('t.uc0', :'uc0', false) is not null as c \gset
+create or replace function pg_temp.at(p_days numeric) returns timestamptz language sql as $$
+  select current_setting('t.uc0')::timestamptz + make_interval(secs => (p_days * 86400)::double precision) + interval '2 hours' $$;
+create or replace function pg_temp.ans(p_user text, p_q int, p_choice int, p_conf int, p_at timestamptz)
+returns void language sql as $$
+  insert into public.study_answers (user_id, question_id, choice, correct, mode, ms, answered_at, confidence)
+  select ('75a00000-0000-4000-8000-0000000000' || p_user)::uuid, ('75200000-0000-4000-8000-00000000000' || p_q)::uuid,
+         p_choice, p_choice = k.answer, 'lecture', 9000, p_at, p_conf
+    from public.study_question_keys k where k.question_id = ('75200000-0000-4000-8000-00000000000' || p_q)::uuid $$;
+create or replace function pg_temp.rev(p_user text, p_card int, p_rating int, p_before int, p_at timestamptz)
+returns void language sql as $$
+  insert into public.study_card_reviews (id, user_id, card_id, rating, reviewed_at, elapsed_days, state_before, state_after, stability, difficulty, due)
+  values (gen_random_uuid(), ('75a00000-0000-4000-8000-0000000000' || p_user)::uuid, ('75300000-0000-4000-8000-00000000000' || p_card)::uuid,
+          p_rating, p_at, 3, p_before, case when p_rating = 1 then 3 else 2 end, 4.2, 5.1, p_at + interval '1 day') $$;
+create or replace function pg_temp.tap(p_user text, p_part int, p_anchor int, p_at timestamptz) returns void language sql as $$
+  insert into public.study_meeting_taps (meeting_id, user_id, lecture_id, part_idx, anchor, created_at)
+  values ('75400000-0000-4000-8000-000000000001', ('75a00000-0000-4000-8000-0000000000' || p_user)::uuid,
+          '75100000-0000-4000-8000-000000000001', p_part, p_anchor, p_at) $$;
+\o /dev/null
+-- q1 Primaquine: four of five counted wrong this week (option 2), Roni too.
+select pg_temp.ans('a1', 1, 2, 2, pg_temp.at(-3)), pg_temp.ans('a2', 1, 2, 3, pg_temp.at(-3)), pg_temp.ans('a3', 1, 2, 1, pg_temp.at(-3)),
+       pg_temp.ans('a4', 1, 2, 2, pg_temp.at(-3)), pg_temp.ans('a5', 1, 1, 3, pg_temp.at(-3)), pg_temp.ans('a6', 1, 2, 3, pg_temp.at(-3));
+-- q2 Primaquine: three of four wrong this week.
+select pg_temp.ans('a1', 2, 1, 2, pg_temp.at(-3)), pg_temp.ans('a2', 2, 1, 2, pg_temp.at(-3)), pg_temp.ans('a3', 2, 3, 2, pg_temp.at(-3)),
+       pg_temp.ans('a5', 2, 0, 2, pg_temp.at(-3));
+-- q5 Quinine: four of five wrong "על בטוח" on option 0, Roni too.
+select pg_temp.ans('a1', 5, 0, 3, pg_temp.at(-2)), pg_temp.ans('a2', 5, 0, 3, pg_temp.at(-2)), pg_temp.ans('a3', 5, 0, 3, pg_temp.at(-2)),
+       pg_temp.ans('a4', 5, 0, 3, pg_temp.at(-2)), pg_temp.ans('a5', 5, 3, 2, pg_temp.at(-2)), pg_temp.ans('a6', 5, 0, 3, pg_temp.at(-2));
+-- q3 Miltefosine: split, 9 days ago.
+select pg_temp.ans('a1', 3, 2, 2, pg_temp.at(-9)), pg_temp.ans('a2', 3, 0, 2, pg_temp.at(-9)), pg_temp.ans('a3', 3, 2, 2, pg_temp.at(-9)),
+       pg_temp.ans('a4', 3, 4, 2, pg_temp.at(-9));
+-- q4 Metronidazole: right this week; three wrong today (after the cut-off).
+select pg_temp.ans('a1', 4, 0, 2, pg_temp.at(-3)), pg_temp.ans('a2', 4, 0, 2, pg_temp.at(-3)), pg_temp.ans('a3', 4, 0, 2, pg_temp.at(-3)),
+       pg_temp.ans('a4', 4, 0, 2, pg_temp.at(-3));
+select pg_temp.ans('a2', 4, 2, 3, pg_temp.at(0) - interval '90 minutes'), pg_temp.ans('a3', 4, 2, 3, pg_temp.at(0) - interval '90 minutes'),
+       pg_temp.ans('a4', 4, 2, 3, pg_temp.at(0) - interval '90 minutes');
+-- q6 Luminal: three wrong 9 days ago, right 3 days ago (a hole that closed this week).
+select pg_temp.ans('a1', 6, 1, 2, pg_temp.at(-9)), pg_temp.ans('a2', 6, 1, 2, pg_temp.at(-9)), pg_temp.ans('a3', 6, 1, 2, pg_temp.at(-9));
+select pg_temp.ans('a1', 6, 0, 2, pg_temp.at(-3)), pg_temp.ans('a2', 6, 0, 2, pg_temp.at(-3)), pg_temp.ans('a3', 6, 0, 2, pg_temp.at(-3));
+-- q7 Chloroquine: two counted members and Roni wrong (below the floor). q8: flagged as wrong; four wrong.
+select pg_temp.ans('a2', 7, 1, 2, pg_temp.at(-3)), pg_temp.ans('a3', 7, 1, 2, pg_temp.at(-3)), pg_temp.ans('a6', 7, 1, 2, pg_temp.at(-3));
+select pg_temp.ans('a1', 8, 0, 2, pg_temp.at(-3)), pg_temp.ans('a2', 8, 0, 2, pg_temp.at(-3)), pg_temp.ans('a3', 8, 0, 2, pg_temp.at(-3)),
+       pg_temp.ans('a4', 8, 0, 2, pg_temp.at(-3));
+-- The second phone (joined 2 days ago): wrong on q7 too. Not counted: a week in the group first.
+select pg_temp.ans('b2', 7, 1, 3, pg_temp.at(-1));
+-- Cards: Miltefosine forgotten after learning by three; Metronidazole by two.
+select pg_temp.rev('a1', 1, 1, 2, pg_temp.at(-3)), pg_temp.rev('a2', 1, 1, 2, pg_temp.at(-3)), pg_temp.rev('a3', 1, 1, 2, pg_temp.at(-3)),
+       pg_temp.rev('a4', 1, 3, 2, pg_temp.at(-3));
+select pg_temp.rev('a2', 3, 1, 2, pg_temp.at(-3)), pg_temp.rev('a5', 3, 1, 2, pg_temp.at(-3));
+-- "לא ברור": three on part 0 ¶5; two and Roni on part 0 ¶6.
+select pg_temp.tap('a1', 0, 5, pg_temp.at(-3)), pg_temp.tap('a2', 0, 5, pg_temp.at(-3)), pg_temp.tap('a3', 0, 5, pg_temp.at(-3));
+select pg_temp.tap('a1', 0, 6, pg_temp.at(-3)), pg_temp.tap('a2', 0, 6, pg_temp.at(-3)), pg_temp.tap('a6', 0, 6, pg_temp.at(-3));
+\o
+-- Roni opts out (his own row, through RLS).
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a6';
+insert into public.study_pulse_optout (group_id) values (:'ugid');
+reset role;
+
+-- ═════════ U0 · the switch is off: nothing counted, nothing shown ═════════
+update study_private.features set enabled = false where name = 'pulse';
+select pg_temp.ux('U0', (select enabled::text from study_private.features where name = 'pulse'), 'false');
+select pg_temp.ux('U0a', study_private.pulse_night(:'ugid')::text, '0');
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+select pg_temp.ux('U0b', coalesce(public.study_pulse_ready(:'ugid')::text, 'null') || ' · rows ' || (select count(*) from public.study_pulse(:'ugid'))
+                          || ' · meter ' || (public.study_pulse_meter(:'ugid') ->> 'state'), 'null · rows 0 · meter off');
+reset role;
+select pg_temp.ux('U0c', (select schedule || ' ' || command from cron.job where jobname = 'study-pulse-night'), '17 2 * * * select study_private.pulse_night()');
+select pg_temp.ux('U0d', study_private.pulse_floor() || '/' || study_private.pulse_join_days() || '/' || study_private.pulse_window_days()
+                          || '/' || study_private.pulse_week_days() || '/' || study_private.pulse_forget_days(), '3/7/28/7/60');
+update study_private.features set enabled = true, changed_at = now() where name = 'pulse';
+
+-- ═════════ U1 · three nights: 6 days ago, yesterday, today ═════════
+select pg_temp.ux('U1', study_private.pulse_night(:'ugid', :'uc0'::timestamptz - interval '6 days' + interval '1 hour')::text, '1');
+select pg_temp.ux('U1a', (select bucket || ' ' || topic from public.study_pulse_topics where topic_key = 'luminal' and lecture_id = :'ul1'), 'hot Luminal');
+select pg_temp.ux('U1b', study_private.pulse_night(:'ugid', :'uc0'::timestamptz - interval '1 day' + interval '1 hour')::text, '1');
+select pg_temp.ux('U1e', study_private.pulse_night(:'ugid', :'uc0'::timestamptz + interval '1 hour')::text, '1');
+select pg_temp.ux('U1f', study_private.pulse_night(:'ugid', :'uc0'::timestamptz + interval '3 hours')::text, '0');
+-- (U-3's traps are counted too: q6's option 1 from 9 days ago, opened the next study day; q1's option 2 and
+--  q5's option 0, found last night and opened at today's start; q5's chosen "על בטוח" by four: an exhibit.
+--  q1's option 2 was bet "על בטוח" by one counted member: the closest candidate exhibit needs 2 more)
+select pg_temp.ux('U1g', (select counted::text from study_private.pulse_runs where group_id = :'ugid'),
+       '{"cards": 1, "spots": 4, "topics": 5, "exhibits": 1, "questions": 4, "traps_open": 3, "exhibit_need": 2}');
+
+-- ═════════ D1 · decision 1: who is counted without accounts ═════════
+select pg_temp.ux('D1', (select string_agg(right(user_id::text, 2), ',' order by user_id) from study_private.pulse_counted(:'ugid')
+                          where user_id::text like '75a00000-%'), 'a1,a2,a3,a4,a5');
+select pg_temp.ux('D1a', (select string_agg(right(m::text, 2), ',' order by m) from study_private.pulse_runs r, unnest(r.members) m
+                           where r.group_id = :'ugid' and m::text like '75a00000-%'), 'a1,a2,a3,a4,a5');
+select pg_temp.ux('D1b', 'anonymous identities counted: ' || (select count(*) from study_private.pulse_counted(:'ugid') c join auth.users u on u.id = c.user_id
+                                                                where u.is_anonymous), 'anonymous identities counted: 5');
+select pg_temp.ux('D1c', 'the night counts only members of a week: ' || not exists (
+         select 1 from study_private.pulse_runs r, unnest(r.members) m join public.study_members x on x.user_id = m and x.group_id = :'ugid'
+          where r.group_id = :'ugid' and x.joined_at > r.cutoff - interval '7 days'), 'the night counts only members of a week: true');
+
+-- ═════════ U2 · what a reader sees: words, never numbers or names ═════════
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+select pg_temp.ux('U2', (select string_agg(bucket || ':' || topic || '/' || aspect || case when closed_week then '(closed)' else '' end, ', ')
+                          from public.study_pulse(:'ugid', :'ul1')),
+       'hot:Miltefosine/contra, hot:Primaquine/contra, hot:Quinine/uses, warm:Metronidazole/interactions, cool:Luminal/classification(closed)');
+select pg_temp.ux('U2a', (select string_agg(topic || ' ' || slides::text, ', ' order by topic) from public.study_pulse(:'ugid') where bucket = 'hot'),
+       'Miltefosine {16}, Primaquine {37,38}, Quinine {27,33}');
+select pg_temp.ux('U2b', (select string_agg(right(question_id::text, 1) || '=' || signal, ', ' order by question_id) from public.study_pulse_questions),
+       '1=missed, 2=missed, 3=split, 5=sure');
+select pg_temp.ux('U2c', (select string_agg(part_idx || '.' || anchor, ', ' order by part_idx, anchor) from public.study_pulse_spots),
+       '0.5, 1.4, 2.1, 3.2');
+select pg_temp.ux('U2d', (select string_agg(right(card_id::text, 1), ', ') from public.study_pulse_cards), '1');
+select pg_temp.ux('U2e', (select string_agg(column_name, ',' order by column_name) from information_schema.columns
+                           where table_schema = 'public' and table_name = 'study_pulse_topics'),
+       'aspect,bucket,closed_week,cutoff,group_id,id,lecture_id,slides,topic,topic_key');
+-- Not counted: Roni (out) and the second phone (two days), today's answers (after the cut-off), a question flagged as wrong.
+select pg_temp.ux('U2f', 'q7 ' || exists (select 1 from public.study_pulse_questions where question_id = '75200000-0000-4000-8000-000000000007')
+       || ', ¶0.6 ' || exists (select 1 from public.study_pulse_spots where part_idx = 0 and anchor = 6 and lecture_id = :'ul1')
+       || ', q4 ' || exists (select 1 from public.study_pulse_questions where question_id = '75200000-0000-4000-8000-000000000004')
+       || ', q8 ' || exists (select 1 from public.study_pulse_questions where question_id = '75200000-0000-4000-8000-000000000008'),
+       'q7 false, ¶0.6 false, q4 false, q8 false');
+
+-- "אצלך": the member's own buckets, live (her wrong answer this morning counts for her alone).
+select pg_temp.ux('U3', (select string_agg(topic_key || '/' || aspect || '=' || mine || ' (' || wrong || '/' || items || ')', ', ' order by topic_key)
+                          from public.study_my_pulse(:'ugid', :'ul1')),
+       'chloroquine/pk=hot (1/1), luminal/classification=cool (0/1), metronidazole/interactions=hot (2/2), miltefosine/contra=hot (2/2), primaquine/contra=hot (2/2), quinine/uses=hot (1/1)');
+select pg_temp.ux('U3a', (select string_agg(p.topic, ', ') from public.study_pulse(:'ugid') p
+                           join public.study_my_pulse(:'ugid') m on m.lecture_id = p.lecture_id and m.topic_key = p.topic_key and m.aspect = p.aspect
+                          where p.bucket <> 'hot' and m.mine = 'hot'), 'Metronidazole');
+select pg_temp.ux('U3b', (select jsonb_build_object('hot', b -> 'hot' ->> 'topic', 'q', b -> 'question' ->> 'question')::text
+                           from public.study_pulse_brief(:'ul1') b),
+       '{"q": "למה משמשת Quinine?", "hot": "Miltefosine"}');
+
+-- ═════════ MT · decision 3: the meter, from the night's real counts ═════════
+select pg_temp.ux('MT1', (select (v ->> 'state') || ' · group needs ' || (v ->> 'group_need') || ' · '
+                                 || (select string_agg(case when e ->> 'lecture_id' = current_setting('t.ul1', true) then 'l1' else 'l?' end
+                                                       || ' open ' || (e ->> 'open') || ' waiting ' || (e ->> 'waiting') || ' need ' || coalesce(e ->> 'need', '-'), '; ')
+                                       from jsonb_array_elements(v -> 'lectures') e where e ->> 'lecture_id' like '75100000-%')
+                            from (select public.study_pulse_meter(:'ugid') as v) x),
+       'open · group needs 0 · l1 open 5 waiting 1 need 1');
+reset role;
+-- (the waiting cell is chloroquine/pk: two counted members, "עוד אדם אחד וזה נפתח"; the rest of the meter is the same night's cells)
+select pg_temp.ux('MT1a', (select string_agg(topic_key || '/' || aspect || '=' || people, ', ') from study_private.pulse_cells
+                            where lecture_id = :'ul1' and people < 3), 'chloroquine/pk=2');
+-- The second phone (two days in the group): its own meter only, the days left from its own joining date.
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000b2';
+select pg_temp.ux('MT2', (select (v ->> 'state') || ' · ' || ((v ->> 'join_days_left')::int between 5 and 6) || ' · lectures ' || coalesce(v ->> 'lectures', 'none')
+                            from (select public.study_pulse_meter(:'ugid') as v) x), 'waiting · true · lectures none');
+select pg_temp.ux('MT2a', coalesce(public.study_pulse_ready(:'ugid')::text, 'null') || ' · rows ' || (select count(*) from public.study_pulse(:'ugid'))
+                           || ' · table rows ' || (select count(*) from public.study_pulse_topics), 'null · rows 0 · table rows 0');
+-- "אצלך" is the member's own, below any floor (decision 3: a member always sees their own data).
+select pg_temp.ux('MT2b', (select string_agg(topic_key || '=' || mine, ', ') from public.study_my_pulse(:'ugid', :'ul1')), 'chloroquine=hot');
+-- Roni (out): reads nothing, his meter says only that he is out (review SEC-8, reciprocity).
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a6';
+select pg_temp.ux('MT3', (public.study_pulse_meter(:'ugid') ->> 'state') || ' · ' || coalesce(public.study_pulse_ready(:'ugid')::text, 'null')
+                          || ' · ' || (select count(*) from public.study_pulse(:'ugid')) || ' · ' || (select count(*) from public.study_pulse_spots)
+                          || ' · needed ' || (select count(*) from public.study_pulse_needed(:'ugid')), 'out · null · 0 · 0 · needed 0');
+-- Back in: still nothing until a night counts him; the meter says the next night.
+delete from public.study_pulse_optout where group_id = :'ugid';
+select pg_temp.ux('MT3a', (select (v ->> 'state') || ' · days ' || (v ->> 'join_days_left') from (select public.study_pulse_meter(:'ugid') as v) x)
+                           || ' · rows ' || (select count(*) from public.study_pulse(:'ugid')), 'waiting · days 1 · rows 0');
+reset role;
+select pg_temp.ux('MT3b', study_private.pulse_night(:'ugid', :'uc0'::timestamptz + interval '2 hours', true)::text, '1');
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a6';
+-- (his answers bring chloroquine/pk to three members: the meter's waiting row opens, as it said it would)
+select pg_temp.ux('MT3c', 'Roni reads ' || (select count(*) from public.study_pulse(:'ugid', :'ul1')) || ' rows, ' ||
+                          (select string_agg(bucket || ':' || topic, ', ') from public.study_pulse(:'ugid', :'ul1') where topic_key = 'chloroquine'),
+       'Roni reads 6 rows, hot:Chloroquine');
+insert into public.study_pulse_optout (group_id) values (:'ugid');
+-- Below the floor for the whole group: three of the six out; the night counts two.
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a3';
+insert into public.study_pulse_optout (group_id) values (:'ugid');
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a4';
+insert into public.study_pulse_optout (group_id) values (:'ugid');
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a5';
+insert into public.study_pulse_optout (group_id) values (:'ugid');
+reset role;
+select pg_temp.ux('MT4', study_private.pulse_night(:'ugid', :'uc0'::timestamptz + interval '2 hours', true)::text, '1');
+select pg_temp.ux('MT4c', 'counted ' || (select string_agg(right(m::text, 2), ',' order by m) from study_private.pulse_runs r, unnest(r.members) m
+                                          where r.group_id = :'ugid' and m::text like '75a00000-%'), 'counted a1,a2');
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+select pg_temp.ux('MT4a', (select (v ->> 'state') || ' · group needs ' || (v ->> 'group_need') from (select public.study_pulse_meter(:'ugid') as v) x)
+                          || ' · rows ' || (select count(*) from public.study_pulse(:'ugid')), 'open · group needs 1 · rows 0');
+reset role;
+delete from public.study_pulse_optout where group_id = :'ugid' and user_id <> '75a00000-0000-4000-8000-0000000000a6';
+select pg_temp.ux('MT4b', study_private.pulse_night(:'ugid', :'uc0'::timestamptz + interval '2 hours', true)::text, '1');
+select pg_temp.ux('MT4d', (select counted::text from study_private.pulse_runs where group_id = :'ugid'),
+       '{"cards": 1, "spots": 4, "topics": 5, "exhibits": 1, "questions": 4, "traps_open": 3, "exhibit_need": 2}');
+
+-- ═════════ U4 · the hooks: Z's signal, M's agenda, J's "דרושה אסוציאציה" ═════════
+-- (study_quiz__signal is internal: section Z's picker calls it as its owner)
+select pg_temp.ux('U4', public.study_quiz__signal('75200000-0000-4000-8000-000000000005') || ',' || public.study_quiz__signal('75200000-0000-4000-8000-000000000001')
+                        || ',' || public.study_quiz__signal('75200000-0000-4000-8000-000000000003') || ',' || public.study_quiz__signal('75200000-0000-4000-8000-000000000004'),
+       '3,2,1,0');
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+select pg_temp.ux('U4a', (select (a -> 'hot_spot' ->> 'title') || ' · ' || (a -> 'hot_spot' ->> 'aspect') || ' · ' || (a -> 'hot_spot' ->> 'slides')
+                           from (select public.study_meeting_agenda('75400000-0000-4000-8000-000000000001') as a) x), 'Miltefosine · contra · [16]');
+select pg_temp.ux('U4b', (select string_agg(part_idx || '.' || anchor || ' ' || front, ', ') from public.study_pulse_needed(:'ugid', :'ul1')),
+       '1.4 Miltefosine: כמה זמן אמצעי מניעה אחרי הטיפול?');
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a6';
+select pg_temp.ux('U4c', coalesce((public.study_meeting_agenda('75400000-0000-4000-8000-000000000001') -> 'hot_spot')::text, 'none'), 'null');
+reset role;
+-- A winner on the paragraph: the request leaves (section J's table, when J is loaded).
+do $$ begin
+  if to_regclass('public.study_aid_winners') is not null then
+    insert into public.study_aids (id, group_id, lecture_id, part_idx, anchor, kind, body, fact, slides)
+    values ('75500000-0000-4000-8000-000000000001', current_setting('t.ugid')::uuid, '75100000-0000-4000-8000-000000000001', 1, 4, 'line',
+            'Miltefosine = מילואים: 28 יום בפנים, ועוד 5 חודשים.', 'אמצעי מניעה 5 חודשים אחרי [ש׳ 16]', '{16}');
+    insert into public.study_aid_winners (lecture_id, part_idx, anchor, aid_id)
+    values ('75100000-0000-4000-8000-000000000001', 1, 4, '75500000-0000-4000-8000-000000000001');
+  end if;
+end $$;
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+select pg_temp.ux('U4d', 'requests with a winner there: ' || (select count(*) from public.study_pulse_needed(:'ugid', :'ul1')), 'requests with a winner there: 0');
+reset role;
+-- Switched off: the signal, the hot spot, the rows and the meter all go.
+update study_private.features set enabled = false where name = 'pulse';
+select pg_temp.ux('U4f', 'the signal ' || public.study_quiz__signal('75200000-0000-4000-8000-000000000005'), 'the signal 0');
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+select pg_temp.ux('U4e', coalesce((public.study_meeting_agenda('75400000-0000-4000-8000-000000000001') -> 'hot_spot')::text, 'none')
+                          || ' · ' || (select count(*) from public.study_pulse_topics) || ' · ' || (public.study_pulse_meter(:'ugid') ->> 'state'),
+       'null · 0 · off');
+reset role;
+update study_private.features set enabled = true where name = 'pulse';
+
+-- ═════════ U5 · privacy: nothing private, members only, nothing published ═════════
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+do $$ begin perform count(*) from study_private.pulse_q; raise notice 'U5. FAIL: the numbers are readable';
+exception when insufficient_privilege then raise notice 'U5. ok: the numbers stay in study_private (%)', sqlerrm; end $$;
+do $$ begin perform study_private.pulse_night(current_setting('t.ugid')::uuid, now(), true); raise notice 'U5b. FAIL: a member forced a count';
+exception when insufficient_privilege then raise notice 'U5b. ok: only the night and the first read count (%)', sqlerrm; end $$;
+select pg_temp.ux('U5c', 'Tal sees ' || (select count(*) from public.study_pulse_optout) || ' opt-out rows', 'Tal sees 0 opt-out rows');
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a6';
+select pg_temp.ux('U5d', 'Roni sees ' || (select count(*) from public.study_pulse_optout) || ' (his own)', 'Roni sees 1 (his own)');
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+do $$ begin insert into public.study_pulse_optout (group_id, user_id) values (current_setting('t.ugid')::uuid, '75a00000-0000-4000-8000-0000000000a3');
+  raise notice 'U5e. FAIL: Tal opted Gal out';
+exception when insufficient_privilege then raise notice 'U5e. ok: only one''s own opt-out (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a9';
+do $$ begin perform public.study_pulse(current_setting('t.ugid')::uuid); raise notice 'U5f. FAIL: an outsider read the pulse';
+exception when others then raise notice 'U5f. %: members only (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_pulse_meter(current_setting('t.ugid')::uuid); raise notice 'U5f2. FAIL: an outsider read the meter';
+exception when others then raise notice 'U5f2. %: members only (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select pg_temp.ux('U5g', 'outsider sees ' || (select count(*) from public.study_pulse_topics) || ' topics, ' || (select count(*) from public.study_pulse_questions) || ' signals',
+       'outsider sees 0 topics, 0 signals');
+reset role;
+set role anon;
+do $$ begin perform public.study_pulse(current_setting('t.ugid')::uuid); raise notice 'U5h. FAIL: anon read the pulse';
+exception when insufficient_privilege then raise notice 'U5h. ok: anon cannot call it (%)', sqlerrm; end $$;
+do $$ begin perform public.study_pulse_meter(current_setting('t.ugid')::uuid); raise notice 'U5h2. FAIL: anon read the meter';
+exception when insufficient_privilege then raise notice 'U5h2. ok: anon cannot call it (%)', sqlerrm; end $$;
+reset role;
+select pg_temp.ux('U5i', (select string_agg(tablename, ', ' order by tablename) from pg_publication_tables
+                           where pubname = 'supabase_realtime' and tablename like 'study_pulse%'), null);
+select pg_temp.ux('U5j', 'a member writes no count: ' || not exists (
+         select 1 from information_schema.role_table_grants
+          where grantee in ('authenticated', 'anon') and table_name like 'study_pulse_%' and table_name <> 'study_pulse_optout'
+            and privilege_type in ('INSERT', 'UPDATE', 'DELETE')), 'a member writes no count: true');
+select pg_temp.ux('U-reg', public.study_schema() ->> 'U', '2');   -- U-3 (traps and the museum) raised it to 2
+
+-- ═════════ MU · U-3: traps and the museum (section U at 2; decision 3's meter) ═════════
+-- On the nights above: q6's option 1 (three counted members, 9 days ago) became a trap the night of
+-- 6 days ago and opened the next study day; q1's option 2 (four) and q5's option 0 (four, all "על
+-- בטוח": an exhibit) were found last night and opened at today's start. Roni's and the second
+-- phone's answers count for nothing. q2's option 1 (two members) and q3's (two) are below the floor.
+select pg_temp.ux('MU0', study_private.museum_retire_days() || '/' || study_private.museum_active_days() || '/' || study_private.museum_new_days(), '2/14/3');
+select pg_temp.ux('MU1', (select string_agg('q' || right(question_id::text, 1) || '/' || option || ' ' || state || coalesce(' #' || exhibit_no, ''), ', '
+                                            order by question_id, option) from public.study_traps where group_id = :'ugid'),
+       'q1/2 open, q5/0 open #1, q6/1 open, q7/1 pending');
+-- (q7's option 1: the forced night above counted Roni while he was back in, so three counted members
+--  chose it then; found then, it opens at the next study day's start, and stays pending until a night does)
+select set_config('t.q5trap', (select id::text from public.study_traps where question_id = '75200000-0000-4000-8000-000000000005'), false) is not null as t5 \gset
+select pg_temp.ux('MU1a', (select string_agg('q' || right(t.question_id::text, 1) || ' ' || c.source || ' ' || (c.trap_key = 'q:' || t.question_id || ':' || t.option)
+                                             || ' ' || (c.deleted_at is null) || ' ' || coalesce(c.opens_at::text, 'open'), ', ' order by t.question_id)
+                             from public.study_traps t join public.study_cards c on c.id = t.card_id where t.group_id = :'ugid'),
+       'q1 trap true true open, q5 trap true true open, q6 trap true true open');
+select pg_temp.ux('MU1b', (select c.back || ' · ' || c.extra from public.study_traps t join public.study_cards c on c.id = t.card_id
+                            where t.question_id = '75200000-0000-4000-8000-000000000005'),
+       'טיפול, בשילוב עם Doxycycline או Clindamycin · המלכודת: מניעת מלריה · הסבר א');
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+select pg_temp.ux('MU1c', (select string_agg(exhibit_no || ' ' || state || ' ' || stem || ' ׳' || claim || '׳ → ' || truth || ' · ' || confused
+                                             || ' ' || slides::text || ' card ' || (card_id is not null), ', ')
+                             from public.study_museum(:'ugid')),
+       '1 new למה משמשת Quinine? ׳מניעת מלריה׳ → טיפול, בשילוב עם Doxycycline או Clindamycin · הסבר א {27,33} card true');
+select pg_temp.ux('MU1d', (select string_agg('q' || right(split_part(x.trap_key, ':', 2), 1) || '=' || c.kind || coalesce('#' || c.exhibit_no, ''), ', ' order by x.trap_key)
+                             from public.study_trap_cards(:'ugid') c join public.study_cards x on x.id = c.card_id),
+       'q1=trap, q5=museum#1, q6=trap');
+select pg_temp.ux('MU1e', (select (v ->> 'state') || ' · exhibits ' || (v ->> 'exhibits') || ' · soon ' || (v ->> 'soon') || ' · traps ' || (v ->> 'traps')
+                                 || ' · need ' || (v ->> 'need') || ' · group needs ' || (v ->> 'group_need')
+                            from (select public.study_museum_meter(:'ugid') as v) x),
+       'open · exhibits 1 · soon 0 · traps 3 · need 2 · group needs 0');
+select pg_temp.ux('MU1f', (select count(*)::text from public.study_museum(:'ugid', :'ul2')) || ' in the second lecture · meter '
+                          || (public.study_museum_meter(:'ugid', :'ul2') ->> 'exhibits'), '0 in the second lecture · meter 0');
+do $$ begin perform count(*) from public.study_traps; raise notice 'MU1g. FAIL: the traps table is readable';
+exception when insufficient_privilege then raise notice 'MU1g. ok: traps are read only through the museum''s functions (%)', sqlerrm; end $$;
+-- The trap cards are group cards: every member reads them, as C's queue gives them to everyone.
+select pg_temp.ux('MU1h', (select count(*)::text from public.study_cards where source = 'trap' and lecture_id = :'ul1'), '3');
+-- Not counted, not reading (review SEC-8, decision 1): the second phone and Roni read no exhibit and no badge.
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000b2';
+select pg_temp.ux('MU2', (select count(*) from public.study_museum(:'ugid')) || ' · ' || (select count(*) from public.study_trap_cards(:'ugid'))
+                         || ' · ' || (public.study_museum_meter(:'ugid') ->> 'state') || ' · exhibits ' || coalesce(public.study_museum_meter(:'ugid') ->> 'exhibits', 'none'),
+       '0 · 0 · waiting · exhibits none');
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a6';
+select pg_temp.ux('MU2a', (select count(*) from public.study_museum(:'ugid')) || ' · ' || (public.study_museum_meter(:'ugid') ->> 'state'), '0 · out');
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a9';
+do $$ begin perform public.study_museum_meter(current_setting('t.ugid')::uuid); raise notice 'MU2b. FAIL: an outsider read the museum''s meter';
+exception when others then raise notice 'MU2b. %: members only (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_museum_shown(current_setting('t.q5trap')::uuid); raise notice 'MU2c. FAIL: an outsider marked an exhibit';
+exception when others then raise notice 'MU2c. %: (%)', case when sqlerrm = 'exhibit not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+set role anon;
+do $$ begin perform public.study_museum(current_setting('t.ugid')::uuid); raise notice 'MU2d. FAIL: anon read the museum';
+exception when insufficient_privilege then raise notice 'MU2d. ok: anon cannot call it (%)', sqlerrm; end $$;
+reset role;
+
+-- MU4: the meeting's opening exhibit, marked shown once.
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+select set_config('t.ex1', public.study_museum_pick(:'ul1')::text, false) is not null as ex \gset
+select pg_temp.ux('MU3', (select exhibit_no::text from public.study_museum(:'ugid') where trap_id = current_setting('t.ex1')::uuid), '1');
+select public.study_museum_shown(current_setting('t.ex1')::uuid);
+reset role;
+select pg_temp.ux('MU3a', (select (shown_at is not null)::text from public.study_traps where id = current_setting('t.ex1')::uuid), 'true');
+-- The plaque's hold (for op 'plaque', review SEC-15): the server key only; a second hold is busy; written once.
+select count(*) = 0 as no_key from vault.decrypted_secrets where name = 'study_worker_key' \gset
+\if :no_key
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef');
+\endif
+select decrypted_secret as wkey from vault.decrypted_secrets where name = 'study_worker_key' limit 1 \gset
+select set_config('t.wkey', :'wkey', false) is not null as k \gset
+set role authenticated;
+do $$ begin perform public.study_trap_plaque_begin(current_setting('t.ex1')::uuid, null); raise notice 'MU3b. FAIL: a phone held the exhibit';
+exception when others then raise notice 'MU3b. %: the server key only (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_trap_plaque_begin(current_setting('t.ex1')::uuid, current_setting('t.wkey'));
+do $$ begin perform public.study_trap_plaque_begin(current_setting('t.ex1')::uuid, current_setting('t.wkey')); raise notice 'MU3c. FAIL: two holds';
+exception when others then raise notice 'MU3c. %: a second phone pays nothing (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select pg_temp.ux('MU3d', public.study_trap_plaque(current_setting('t.ex1')::uuid, 'Quinine משמשת למניעת מלריה', 'חומרים: ביטחון עצמי, שקף 27', current_setting('t.wkey'))::text
+                          || ' · ' || (select plaque ->> 'line' from public.study_museum(:'ugid') where trap_id = current_setting('t.ex1')::uuid), 'true · חומרים: ביטחון עצמי, שקף 27');
+do $$ begin perform public.study_trap_plaque_begin(current_setting('t.ex1')::uuid, current_setting('t.wkey')); raise notice 'MU3e. FAIL: a second plaque';
+exception when others then raise notice 'MU3e. %: (%)', case when sqlerrm = 'checked' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+
+-- MU5: retests after opening. Today: q1 wrong for two of three who retry ("עוד נופלים"); q5 right for
+-- every active member, today and tomorrow (two study days): retired the night after, its card leaves
+-- the decks and the exhibit stays, "בפנסיה". q6's question is flagged as wrong: withdrawn.
+\o /dev/null
+select pg_temp.ans('a1', 1, 2, 2, pg_temp.at(0)), pg_temp.ans('a2', 1, 2, 2, pg_temp.at(0)), pg_temp.ans('a3', 1, 1, 2, pg_temp.at(0));
+select pg_temp.ans(u, 5, 3, 2, pg_temp.at(0)) from unnest(array['a1', 'a2', 'a3', 'a4', 'a5']) u;
+\o
+select pg_temp.ux('MU5', study_private.pulse_night(:'ugid', :'uc0'::timestamptz + interval '1 day 1 hour')::text, '1');
+select pg_temp.ux('MU5a', (select string_agg('q' || right(question_id::text, 1) || ' ' || state || case when falling then ' falling' else '' end, ', ' order by question_id)
+                             from public.study_traps where group_id = :'ugid'), 'q1 open falling, q4 pending, q5 open, q6 open, q7 open');
+-- (q4's option 2: three wrong this morning, after the cut-off; tonight's count finds it, and it opens the
+--  study day after, as every trap: nothing practised today shows before tomorrow, and then a day later)
+\o /dev/null
+select pg_temp.ans(u, 5, 3, 2, pg_temp.at(1)) from unnest(array['a1', 'a2', 'a3', 'a4', 'a5']) u;
+\o
+insert into public.study_question_flags (question_id, user_id, reason)
+values ('75200000-0000-4000-8000-000000000006', '75a00000-0000-4000-8000-0000000000a3', 'wrong_key');
+select pg_temp.ux('MU5b', study_private.pulse_night(:'ugid', :'uc0'::timestamptz + interval '2 days 1 hour')::text, '1');
+select pg_temp.ux('MU5c', (select string_agg('q' || right(t.question_id::text, 1) || ' ' || t.state || ' card ' || case when c.deleted_at is null then 'in decks' else 'gone' end, ', '
+                                             order by t.question_id) from public.study_traps t join public.study_cards c on c.id = t.card_id where t.group_id = :'ugid'),
+       'q1 open card in decks, q4 open card in decks, q5 retired card gone, q6 withdrawn card gone, q7 open card in decks');
+select pg_temp.ux('MU5d', (select string_agg(e.action, ',') from public.study_card_edits e join public.study_traps t on t.card_id = e.card_id
+                            where t.question_id = '75200000-0000-4000-8000-000000000005'), 'delete');
+set role authenticated;
+set request.jwt.claim.sub = '75a00000-0000-4000-8000-0000000000a2';
+select pg_temp.ux('MU5e', (select string_agg(exhibit_no || ' ' || state || ' card ' || (card_id is not null), ', ') from public.study_museum(:'ugid'))
+                          || ' · badges ' || (select string_agg(kind, ',' order by kind) from public.study_trap_cards(:'ugid'))
+                          || ' · meter ' || (select (v ->> 'exhibits') || '/' || (v ->> 'retired') || '/' || (v ->> 'traps') from (select public.study_museum_meter(:'ugid') as v) x),
+       '1 retired card false · badges trap,trap,trap · meter 1/1/3');
+reset role;
+
+-- Clean-up for the sections after this one: the lectures take their parts,
+-- questions, cards, answers, reviews, taps, meeting and pulse rows; then the
+-- members, the identities and the night's run. The switch goes back off.
+reset request.jwt.claim.sub;
+delete from public.study_lectures where id in (:'ul1', :'ul2');
+delete from study_private.pulse_runs where group_id = :'ugid';
+delete from public.study_pulse_optout where user_id::text like '75a00000-%';
+delete from public.study_members where user_id::text like '75a00000-%';
+delete from auth.users where id::text like '75a00000-%';
+update study_private.features set enabled = false where name = 'pulse';
+select pg_temp.ux('U6', 'left behind: ' || ((select count(*) from public.study_pulse_topics) + (select count(*) from public.study_pulse_questions)
+                         + (select count(*) from public.study_traps)
+                         + (select count(*) from public.study_pulse_cards) + (select count(*) from public.study_pulse_spots)
+                         + (select count(*) from study_private.pulse_cells) + (select count(*) from study_private.pulse_q)), 'left behind: 0');
+-- ════ END SECTION U ════
+
+-- ════ BEGIN SECTION J · the association wall (package J) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION J checks · the association wall   (package J; spec §12.5.J: the
+--  fun design's J1-J14 and the review's SR14a-SR14d on fixtures of their
+--  own, plus J15-J16 for this file's two hardenings). Every line says ok or
+--  FAIL by itself. The members: Shoham and Noa (the file's own), Maya, Itai
+--  and Daniel (added here); the stranger has no group.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+select id as jgid from public.study_groups order by created_at limit 1 \gset
+select set_config('t.jgid', :'jgid', false) is not null as g \gset
+select set_config('t.key', 'k-0123456789abcdef0123456789abcdef', false) is not null as k \gset
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+\set jl1 'a8100000-0000-4000-8000-000000000001'
+\set jl2 'a8100000-0000-4000-8000-000000000002'
+\set shoham 'bbbbbbbb-0000-4000-8000-000000000002'
+\set noa 'cccccccc-0000-4000-8000-000000000003'
+\set maya 'a8a00000-0000-4000-8000-0000000000a3'
+\set itai 'a8a00000-0000-4000-8000-0000000000a4'
+\set daniel 'a8a00000-0000-4000-8000-0000000000a5'
+insert into auth.users (id, raw_user_meta_data) values
+ (:'maya', '{"app":"study","full_name":"מאיה"}'), (:'itai', '{"app":"study","full_name":"איתי"}'), (:'daniel', '{"app":"study","full_name":"דניאל"}');
+insert into public.study_members (group_id, user_id, name) values (:'jgid', :'maya', 'מאיה'), (:'jgid', :'itai', 'איתי'), (:'jgid', :'daniel', 'דניאל');
+-- Two lectures: the first with 20 slides (slide 7 has one picture), two ready parts; the second with 3.
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'jl1', :'jgid', 'פתוגן מאכסן', 'Wall', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array('עובדה ' || n), 'tables', '[]'::jsonb, 'notes', '',
+                                       'figures', case when n = 7 then '[{"k": 1, "path": "x/y/fig-7-1.jpg", "w": 400, "h": 300}]'::jsonb else '[]'::jsonb end)
+                    order by n) from generate_series(1, 20) n), 'ready', :'shoham'),
+ (:'jl2', :'jgid', 'פתוגן מאכסן', 'Wall 2', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', '[]'::jsonb, 'tables', '[]'::jsonb, 'notes', '', 'figures', '[]'::jsonb) order by n)
+     from generate_series(1, 3) n), 'ready', :'shoham');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ (:'jl1', 0, 'Metronidazole', 1, 10, 'ready', E'## Metronidazole\n\nבלי אלכוהול בטיפול ו-48 שעות אחריו. [ש'' 7]'),
+ (:'jl1', 1, 'Leishmania', 11, 20, 'ready', E'## Leishmania\n\nMiltefosine טרטוגנית (Black Box). [ש'' 16]'),
+ (:'jl2', 0, 'עוד', 1, 3, 'ready', E'## עוד\n\nשורה. [ש'' 3]');
+-- A card on the paragraph 1.4 (section C's end gives cards their own anchor).
+insert into public.study_cards (id, group_id, lecture_id, part_idx, kind, front, back, slides, anchor) values
+ ('a8200000-0000-4000-8000-000000000001', :'jgid', :'jl1', 1, 'qa', 'כמה זמן אמצעי מניעה אחרי Miltefosine?', '5 חודשים', '{16}', 4);
+-- A photo of a paper sketch, uploaded by Shoham's phone to the group's folder (review SEC-14: the uploader is recorded).
+select set_config('t.jphoto', :'jgid' || '/wall/' || gen_random_uuid() || '.jpg', false) is not null as p \gset
+insert into storage.objects (bucket_id, name, owner_id) values ('study', current_setting('t.jphoto'), :'shoham');
+create or replace function pg_temp.jx(p_label text, p_got text, p_want text) returns text language sql as $$
+  select p_label || '. ' || case when p_got is not distinct from p_want then 'ok' else 'FAIL: got ' || coalesce(p_got, 'null') || ', want ' || coalesce(p_want, 'null') end
+$$;
+set role authenticated;
+
+-- ═════════ J1 · posting: by name or without one, always with "על מה זה?" ═════════
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.a1', public.study_aid_post(:'jl1', 1, 4, 'Miltefosine טרטוגנית', 'line',
+  'Miltefosine = מילואים: 28 יום בפנים, ואמצעי מניעה עוד 5 חודשים אחרי השחרור.', 'אמצעי מניעה בטיפול ועוד 5 חודשים אחריו [ש׳ 16]',
+  array[16], 'Miltefosine', true)::text, false) is not null as a1 \gset
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a5';
+select set_config('t.a2', public.study_aid_post(:'jl1', 1, 4, 'Miltefosine טרטוגנית', 'line',
+  'Miltefosine היא אורחת שלא הולכת: המסיבה נגמרה ביום 28, והיא עוד על הספה.', 'ה-t½ שלה 7-31 ימים, ולכן 5 חודשים אחרי [ש׳ 16]',
+  array[16], 'Miltefosine', false)::text, false) is not null as a2 \gset
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 1, 4, '', 'line', 'בלי עובדה זה סתם בדיחה', '', array[16]);
+  raise notice 'J1. FAIL: an entry without "על מה זה?"';
+exception when others then raise notice 'J1. %: the fact line is required (%)', case when sqlerrm = 'bad fact' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 1, 4, '', 'line', 'שורה טובה', 'עובדה טובה', array[99]);
+  raise notice 'J1a. FAIL: a slide the lecture does not have';
+exception when others then raise notice 'J1a. %: (%)', case when sqlerrm = 'unknown slide' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 1, 4, '', 'sketch', 'שרבוט בלי תמונה', 'עובדה טובה', array[16]);
+  raise notice 'J1b. FAIL: a sketch without its photo';
+exception when others then raise notice 'J1b. %: (%)', case when sqlerrm = 'bad photo' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 1, 4, '', 'sketch', 'שרבוט', 'עובדה טובה', array[16], '', true,
+  null, null, null, current_setting('t.jgid') || '/wall/00000000-0000-4000-8000-000000000000.jpg');
+  raise notice 'J1c. FAIL: a photo that was never uploaded';
+exception when others then raise notice 'J1c. %: (%)', case when sqlerrm = 'bad photo' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 7, 4, '', 'line', 'שורה טובה', 'עובדה טובה', array[16]);
+  raise notice 'J1f. FAIL: a part the lecture does not have';
+exception when others then raise notice 'J1f. %: (%)', case when sqlerrm = 'part not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 1, 4, '', 'line', 'שורה של זר', 'עובדה של זר', array[16]);
+  raise notice 'J1d. FAIL: an outsider posted';
+exception when others then raise notice 'J1d. %: members only (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select pg_temp.jx('J1e', 'outsider sees ' || (select count(*) from public.study_aids) || ' entries', 'outsider sees 0 entries');
+
+-- Anonymous: no author on the shared row; only Daniel knows it is his.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select pg_temp.jx('J2', (select coalesce(named_by::text, 'none') from public.study_aids where id = current_setting('t.a2')::uuid), 'none');
+select pg_temp.jx('J2a', (select string_agg(coalesce(author, 'בלי שם') || ' mine=' || mine, ', ' order by created_at)
+                            from public.study_aid_wall(:'jgid', :'jl1')),
+       'שוהם mine=false, בלי שם mine=false');
+select pg_temp.jx('J2b', 'Noa sees ' || (select count(*) from public.study_aid_authors) || ' author rows', 'Noa sees 0 author rows');
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a5';
+select pg_temp.jx('J2c', (select mine::text from public.study_aid_wall(:'jgid') where id = current_setting('t.a2')::uuid), 'true');
+
+-- ═════════ J3 · votes: totals for all, who voted for nobody, never one's own ═════════
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+do $$ begin perform public.study_aid_vote(current_setting('t.a1')::uuid, 'funny', true); raise notice 'J3. FAIL: a vote on one''s own entry';
+exception when others then raise notice 'J3. %: (%)', case when sqlerrm = 'own aid' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_aid_vote(current_setting('t.a1')::uuid, 'funny', true) is not null as v \gset
+select public.study_aid_vote(current_setting('t.a1')::uuid, 'funny', true) is not null as v \gset
+select public.study_aid_vote(current_setting('t.a1')::uuid, 'stuck', true) is not null as v \gset
+-- J15: a check is taken only for an entry that could win (2 votes at least): Daniel's has none.
+do $$ begin perform public.study_aid_check_begin(current_setting('t.a2')::uuid, current_setting('t.key')); raise notice 'J15. FAIL: an entry with no votes was checked';
+exception when others then raise notice 'J15. %: only a would-be winner is checked (%)', case when sqlerrm = 'checked' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a3';
+select pg_temp.jx('J3a', public.study_aid_vote(current_setting('t.a1')::uuid, 'stuck', true)::text,
+       jsonb_build_object('check', current_setting('t.a1'), 'funny', 1, 'stuck', 2)::text);
+select pg_temp.jx('J3b', 'Maya sees ' || (select count(*) from public.study_aid_votes) || ' votes (her own)', 'Maya sees 1 votes (her own)');
+select pg_temp.jx('J3c', (select funny_n || '/' || stuck_n || ' on cards ' || on_cards from public.study_aid_wall(:'jgid') where id = current_setting('t.a1')::uuid),
+       '1/2 on cards false');
+select pg_temp.jx('J3d', (select my_stuck || ' ' || my_funny from public.study_aid_wall(:'jgid') where id = current_setting('t.a1')::uuid), 'true false');
+-- A vote taken back: the total goes down once, never twice.
+select public.study_aid_vote(current_setting('t.a1')::uuid, 'stuck', false) is not null as v \gset
+select pg_temp.jx('J3e', (select (public.study_aid_vote(current_setting('t.a1')::uuid, 'stuck', false) ->> 'stuck')), '1');
+select public.study_aid_vote(current_setting('t.a1')::uuid, 'stuck', true) is not null as v \gset
+
+-- ═════════ J4 · the check against the paragraph (op wall_check), then the winner on the cards ═════════
+do $$ begin perform public.study_aid_check_begin(current_setting('t.a1')::uuid, null); raise notice 'J4. FAIL: a check without the server key';
+exception when others then raise notice 'J4. %: (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select pg_temp.jx('J4a', (select b ->> 'fact' from public.study_aid_check_begin(current_setting('t.a1')::uuid, current_setting('t.key')) b),
+       'אמצעי מניעה בטיפול ועוד 5 חודשים אחריו [ש׳ 16]');
+do $$ begin perform public.study_aid_check_begin(current_setting('t.a1')::uuid, current_setting('t.key')); raise notice 'J4b. FAIL: two phones checked at once';
+exception when others then raise notice 'J4b. %: (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select pg_temp.jx('J4c', coalesce(public.study_aid_check_done(current_setting('t.a1')::uuid, true, '', current_setting('t.key'))::text, 'none'), 'none');
+select pg_temp.jx('J4d', (select aid_id::text from public.study_aid_winners where lecture_id = :'jl1' and part_idx = 1 and anchor = 4), current_setting('t.a1'));
+do $$ begin perform public.study_aid_check_begin(current_setting('t.a1')::uuid, current_setting('t.key')); raise notice 'J4f. FAIL: a checked entry was checked again';
+exception when others then raise notice 'J4f. %: one check an entry (%)', case when sqlerrm = 'checked' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a4';
+select pg_temp.jx('J4e', (select author || ' · pinned ' || pinned || ' · ' || body from public.study_aid_hint('a8200000-0000-4000-8000-000000000001')),
+       'שוהם · pinned false · Miltefosine = מילואים: 28 יום בפנים, ואמצעי מניעה עוד 5 חודשים אחרי השחרור.');
+
+-- J5 · "שלי": Itai pins Daniel's entry for himself; his hint and his Anki Extra follow it, Noa's do not.
+select public.study_aid_pin(current_setting('t.a2')::uuid, true) is null as pin \gset
+select pg_temp.jx('J5', (select coalesce(author, 'בלי שם') || ' · pinned ' || pinned from public.study_aid_hint('a8200000-0000-4000-8000-000000000001')),
+       'בלי שם · pinned true');
+select pg_temp.jx('J5a', (select string_agg(right(card_id::text, 1) || '=' || case when aid_id = current_setting('t.a2')::uuid then 'a2' else 'a1' end || ' pinned ' || pinned, ', ')
+                            from public.study_aid_for_cards(:'jl1')),
+       '1=a2 pinned true');
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select pg_temp.jx('J5b', (select string_agg(right(card_id::text, 1) || '=' || case when aid_id = current_setting('t.a2')::uuid then 'a2' else 'a1' end || ' pinned ' || pinned, ', ')
+                            from public.study_aid_for_cards(:'jl1')),
+       '1=a1 pinned false');
+select pg_temp.jx('J5c', 'Noa sees ' || (select count(*) from public.study_aid_pins) || ' pins', 'Noa sees 0 pins');
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_aid_for_cards('a8100000-0000-4000-8000-000000000001'); raise notice 'J5d. FAIL: a stranger read the cards'' associations';
+exception when others then raise notice 'J5d. %: (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_aid_hint('a8200000-0000-4000-8000-000000000001'); raise notice 'J5e. FAIL: a stranger read a hint';
+exception when others then raise notice 'J5e. %: (%)', case when sqlerrm = 'card not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ J6 · "לא מדויק" keeps it off the cards until the author fixes it ═════════
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a3';
+select public.study_aid_flag(current_setting('t.a1')::uuid, 'inaccurate') is null as f \gset
+select pg_temp.jx('J6', (select count(*)::text from public.study_aid_winners where lecture_id = :'jl1'), '0');
+select pg_temp.jx('J6a', (select flag || ' · ' || flagged_by from public.study_aid_wall(:'jgid') where id = current_setting('t.a1')::uuid), 'inaccurate · מאיה');
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a4';
+do $$ begin perform public.study_aid_flag(current_setting('t.a1')::uuid, null); raise notice 'J6b. FAIL: Itai cleared Maya''s mark';
+exception when others then raise notice 'J6b. %: only the marker or the author (%)', case when sqlerrm = 'not yours' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_aid_edit(current_setting('t.a1')::uuid, 'שורה של נועה', 'עובדה', array[16]); raise notice 'J6c. FAIL: Noa edited Shoham''s entry';
+exception when others then raise notice 'J6c. %: only the author (%)', case when sqlerrm = 'aid not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select pg_temp.jx('J6d', public.study_aid_edit(current_setting('t.a1')::uuid,
+  'Miltefosine = מילואים: 28 יום בפנים, ואמצעי מניעה עוד 5 חודשים אחרי השחרור (Black Box).', 'אמצעי מניעה בטיפול ועוד 5 חודשים אחריו [ש׳ 16]', array[16])::text,
+  current_setting('t.a1'));
+select pg_temp.jx('J6e', (select coalesce(flag, 'no mark') || ' · check ' || x.check_state from public.study_aids x where x.id = current_setting('t.a1')::uuid),
+       'no mark · check no');
+-- A check that fails marks it, without a member's name, until the next fix.
+select (public.study_aid_check_begin(current_setting('t.a1')::uuid, current_setting('t.key')) is not null) as cb \gset
+select public.study_aid_check_done(current_setting('t.a1')::uuid, false, 'Black Box לא מופיע בפסקה', current_setting('t.key')) is null as cd \gset
+select pg_temp.jx('J6f', (select flag || ' · ' || coalesce(flagged_by, 'הבדיקה') || ' · ' || check_note from public.study_aid_wall(:'jgid') where id = current_setting('t.a1')::uuid),
+       'inaccurate · הבדיקה · Black Box לא מופיע בפסקה');
+do $$ begin perform public.study_aid_flag(current_setting('t.a1')::uuid, null); raise notice 'J6g. FAIL: a check''s mark cleared without a fix';
+exception when others then raise notice 'J6g. %: (%)', case when sqlerrm = 'not yours' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_aid_edit(current_setting('t.a1')::uuid, 'Miltefosine = מילואים: 28 יום בפנים, ואמצעי מניעה עוד 5 חודשים אחרי השחרור.',
+  'אמצעי מניעה בטיפול ועוד 5 חודשים אחריו [ש׳ 16]', array[16]) is not null as ed \gset
+select (public.study_aid_check_begin(current_setting('t.a1')::uuid, current_setting('t.key')) is not null) as cb \gset
+-- A check that did not finish (p_ok null) gives the entry back, unchecked.
+select public.study_aid_check_done(current_setting('t.a1')::uuid, null, '', current_setting('t.key')) is not null as cd \gset
+select pg_temp.jx('J6i', (select check_state from public.study_aids where id = current_setting('t.a1')::uuid), 'no');
+select (public.study_aid_check_begin(current_setting('t.a1')::uuid, current_setting('t.key')) is not null) as cb \gset
+select public.study_aid_check_done(current_setting('t.a1')::uuid, true, '', current_setting('t.key')) is null as cd \gset
+select pg_temp.jx('J6h', (select aid_id::text from public.study_aid_winners where lecture_id = :'jl1'), current_setting('t.a1'));
+
+-- J7 · "לא מתאים" (the house rule) hides it from everyone but its author.
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select public.study_aid_flag(current_setting('t.a2')::uuid, 'not_ok') is null as f \gset
+select pg_temp.jx('J7', (select count(*)::text from public.study_aid_wall(:'jgid') where id = current_setting('t.a2')::uuid), '0');
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a5';
+select pg_temp.jx('J7a', (select flag from public.study_aid_wall(:'jgid') where id = current_setting('t.a2')::uuid), 'not_ok');
+select public.study_aid_flag(current_setting('t.a2')::uuid, null) is null as f \gset
+select pg_temp.jx('J7b', (select coalesce(flag, 'none') from public.study_aids where id = current_setting('t.a2')::uuid), 'none');
+
+-- ═════════ J8 · "לנעוץ רגע": the paragraph being read, the lecturer's picture, credit only with a yes ═════════
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a3';
+select set_config('t.m1', public.study_aid_post(:'jl1', 0, 3, 'Metronidazole', 'moment',
+  'Metronidazole היא האקסית: אסור לשתות לידה כל עוד היא בבית, ועוד 48 שעות אחרי שעזבה.', 'בלי אלכוהול בטיפול ו-48 שעות אחריו [ש׳ 7]',
+  array[7], 'Metronidazole', true, null, null, null, null, 'fig:7-1', :'itai')::text, false) is not null as m1 \gset
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 0, 3, '', 'moment', 'רגע', 'עובדה', array[7], '', true,
+  null, null, null, null, 'fig:9-1');
+  raise notice 'J8. FAIL: a picture the slide does not have';
+exception when others then raise notice 'J8. %: (%)', case when sqlerrm = 'bad figure' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 0, 3, '', 'moment', 'רגע', 'עובדה', array[7], '', true,
+  null, null, null, null, null, 'a8a00000-0000-4000-8000-0000000000a3');
+  raise notice 'J8e. FAIL: a credit to oneself';
+exception when others then raise notice 'J8e. %: (%)', case when sqlerrm = 'bad credit' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select pg_temp.jx('J8a', (select coalesce(credit, 'no credit yet') || ' · ' || figure from public.study_aid_wall(:'jgid') where id = current_setting('t.m1')::uuid),
+       'no credit yet · fig:7-1');
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_aid_credit_answer(current_setting('t.m1')::uuid, true); raise notice 'J8b. FAIL: Noa said yes for Itai';
+exception when others then raise notice 'J8b. %: (%)', case when sqlerrm = 'credit not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select pg_temp.jx('J8f', 'Noa sees ' || (select count(*) from public.study_aid_credits) || ' credit requests', 'Noa sees 0 credit requests');
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a4';
+select pg_temp.jx('J8c', (select asked_by || ' · ' || body from public.study_aid_credit_requests(:'jgid')),
+       'מאיה · Metronidazole היא האקסית: אסור לשתות לידה כל עוד היא בבית, ועוד 48 שעות אחרי שעזבה.');
+select public.study_aid_credit_answer(current_setting('t.m1')::uuid, true) is null as ok \gset
+select pg_temp.jx('J8d', (select credit from public.study_aid_wall(:'jgid') where id = current_setting('t.m1')::uuid), 'איתי');
+
+-- ═════════ J9 · "תנו לי 3": saved once per paragraph text, posted only by a person ═════════
+\set drafts '[{"technique":"משחק מילים","hook":"Miltefosine = מילואים: 28 יום בפנים, ואמצעי מניעה עוד 5 חודשים אחרי השחרור.","decode":"מילואים · 28 יום · 5 חודשים"},{"technique":"חרוז","hook":"Miltefosine בהיריון? אין דיון! וחמישה חודשים אחרי הסיום.","decode":"היריון · 5 חודשים"},{"technique":"סצנה הזויה","hook":"Miltefosine היא אורחת שלא הולכת: המסיבה נגמרה ביום 28, והיא עוד על הספה.","decode":"t½ ארוך · 28 יום"}]'
+select set_config('t.drafts', :'drafts', false) is not null as d \gset
+select set_config('t.hash', encode(sha256(convert_to('Miltefosine טרטוגנית (Black Box)', 'UTF8')), 'hex'), false) is not null as h \gset
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_aid_drafts_save('a8100000-0000-4000-8000-000000000001', 1, 4, current_setting('t.hash'), 'אמצעי מניעה [ש׳ 16]', array[16],
+  current_setting('t.drafts')::jsonb, 'claude-opus-5-5', null);
+  raise notice 'J9. FAIL: drafts saved without the server key';
+exception when others then raise notice 'J9. %: only the op saves drafts (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_aid_drafts_save('a8100000-0000-4000-8000-000000000001', 1, 4, current_setting('t.hash'), 'אמצעי מניעה [ש׳ 16]', array[16],
+  jsonb_build_array(current_setting('t.drafts')::jsonb -> 0, current_setting('t.drafts')::jsonb -> 0), 'claude-opus-5-5', current_setting('t.key'));
+  raise notice 'J9a. FAIL: two drafts of one technique saved';
+exception when others then raise notice 'J9a. %: one draft per technique (%)', case when sqlerrm = 'bad drafts' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- J18 (review SEC4-3): the hold op "mnemonic" takes before it reserves: one phone at a time pays for a text.
+select pg_temp.jx('J18', public.study_aid_drafts_begin(:'jl1', 1, 4, current_setting('t.hash'), current_setting('t.key')), 'held');
+do $$ begin perform public.study_aid_drafts_begin('a8100000-0000-4000-8000-000000000001', 1, 4, current_setting('t.hash'), current_setting('t.key'));
+  raise notice 'J18a. FAIL: a second phone took the same text while it was held';
+exception when others then raise notice 'J18a. %: the second phone is told busy, before any reservation (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_aid_drafts_begin('a8100000-0000-4000-8000-000000000001', 1, 4, current_setting('t.hash'), null);
+  raise notice 'J18b. FAIL: held without the server key';
+exception when others then raise notice 'J18b. %: only the op holds (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_aid_drafts_end(:'jl1', 1, 4, current_setting('t.hash'), current_setting('t.key')) is null as e \gset
+select pg_temp.jx('J18c', public.study_aid_drafts_begin(:'jl1', 1, 4, current_setting('t.hash'), current_setting('t.key')), 'held');
+reset role;
+update study_private.aid_draft_holds set held_until = now() - interval '1 second' where lecture_id = :'jl1';
+set role authenticated;
+select pg_temp.jx('J18d', public.study_aid_drafts_begin(:'jl1', 1, 4, current_setting('t.hash'), current_setting('t.key')), 'held');
+reset role;
+select pg_temp.jx('J18e', (select count(*)::text from study_private.aid_draft_holds where lecture_id = :'jl1' and held_until > now()), '1');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select set_config('t.d1', public.study_aid_drafts_save(:'jl1', 1, 4, current_setting('t.hash'), 'אמצעי מניעה בטיפול ועוד 5 חודשים אחריו [ש׳ 16]',
+  array[16], current_setting('t.drafts')::jsonb, 'claude-opus-5-5', current_setting('t.key'))::text, false) is not null as d1 \gset
+select pg_temp.jx('J18f', public.study_aid_drafts_begin(:'jl1', 1, 4, current_setting('t.hash'), current_setting('t.key')), 'saved');
+reset role;
+select pg_temp.jx('J18g', (select count(*)::text from study_private.aid_draft_holds where lecture_id = :'jl1'), '0');
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select pg_temp.jx('J9b', public.study_aid_drafts_save(:'jl1', 1, 4, current_setting('t.hash'), 'עובדה אחרת',
+  array[16], current_setting('t.drafts')::jsonb, 'claude-opus-5-5', current_setting('t.key'))::text || ' · drafts rows ' || (select count(*) from public.study_aid_drafts where lecture_id = :'jl1'),
+  current_setting('t.d1') || ' · drafts rows 1');
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 1, 4, '', 'draft', 'טיוטה ששונתה בשקט', 'אמצעי מניעה [ש׳ 16]',
+  array[16], 'Miltefosine', true, null, current_setting('t.d1')::uuid, 2);
+  raise notice 'J9c. FAIL: a changed draft posted as Claude''s';
+exception when others then raise notice 'J9c. %: "לפרסם כמו שהיא" posts the exact draft (%)', case when sqlerrm = 'bad draft' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select set_config('t.p2', public.study_aid_post(:'jl1', 1, 4, '', 'draft',
+  'Miltefosine בהיריון? אין דיון! וחמישה חודשים אחרי הסיום.', 'אמצעי מניעה בטיפול ועוד 5 חודשים אחריו [ש׳ 16]', array[16], 'Miltefosine', true,
+  null, current_setting('t.d1')::uuid, 2)::text, false) is not null as p2 \gset
+select pg_temp.jx('J9d', (select kind || ' #' || draft_no from public.study_aids where id = current_setting('t.p2')::uuid), 'draft #2');
+select set_config('t.p1', public.study_aid_post(:'jl1', 1, 4, '', 'remix',
+  'Miltefosine = מילואים ארוכים: 28 יום בבסיס, ועוד 5 חודשים בלי ילדים.', 'אמצעי מניעה בטיפול ועוד 5 חודשים אחריו [ש׳ 16]', array[16], 'Miltefosine', true,
+  null, current_setting('t.d1')::uuid, 1)::text, false) is not null as p1 \gset
+select pg_temp.jx('J9e', (select kind || ' of draft #' || draft_no from public.study_aids where id = current_setting('t.p1')::uuid), 'remix of draft #1');
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 0, 3, '', 'draft',
+  'Miltefosine בהיריון? אין דיון! וחמישה חודשים אחרי הסיום.', 'עובדה', array[16], '', true, null, current_setting('t.d1')::uuid, 2);
+  raise notice 'J9f. FAIL: a draft posted on another paragraph';
+exception when others then raise notice 'J9f. %: a draft stays on its paragraph (%)', case when sqlerrm = 'bad draft' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- J16: a draft with two techniques has no third to remix.
+reset role;
+insert into public.study_aid_drafts (group_id, lecture_id, part_idx, anchor, src_hash, fact, slides, drafts)
+values (:'jgid', :'jl1', 0, 3, repeat('a', 64), 'בלי אלכוהול [ש׳ 7]', '{7}', (:'drafts')::jsonb - 2) returning id as d2 \gset
+select set_config('t.d2', :'d2', false) is not null as d2s \gset
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 0, 3, '', 'remix', 'רמיקס של טיוטה שלא קיימת', 'עובדה', array[7], '', true,
+  null, current_setting('t.d2')::uuid, 3);
+  raise notice 'J16. FAIL: a remix of a draft the row does not have';
+exception when others then raise notice 'J16. %: (%)', case when sqlerrm = 'bad draft' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin insert into public.study_aid_drafts (group_id, lecture_id, part_idx, anchor, src_hash, fact, drafts)
+  values (current_setting('t.jgid')::uuid, 'a8100000-0000-4000-8000-000000000001', 0, 1, repeat('b', 64), 'עובדה', '[]');
+  raise notice 'J9g. FAIL: a member wrote drafts directly';
+exception when insufficient_privilege then raise notice 'J9g. ok: drafts are written only by the op (%)', sqlerrm; end $$;
+do $$ begin update public.study_aids set funny_n = 99 where id = current_setting('t.a1')::uuid;
+  raise notice 'J9h. FAIL: a member rewrote a vote total';
+exception when insufficient_privilege then raise notice 'J9h. ok: entries change only through the functions (%)', sqlerrm; end $$;
+
+-- ═════════ J10-J12 · the week's winner, the drug's wall across lectures, deleting ═════════
+select pg_temp.jx('J10', public.study_aid_week(:'jgid')::text, current_setting('t.a1'));
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a4';
+select public.study_aid_post(:'jl2', 0, 0, '', 'line', 'Miltefosine גם כאן, בהרצאה אחרת.', 'עובדה מההרצאה השנייה',
+  array[3], 'miltefosine ', true) is not null as other \gset
+select pg_temp.jx('J11', (select count(distinct lecture_id) || ' lectures, ' || count(*) || ' entries' from public.study_aid_wall(:'jgid', null, 'Miltefosine')),
+       '2 lectures, 5 entries');
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select set_config('t.s1', public.study_aid_post(:'jl1', 1, 4, '', 'sketch', 'Phlebotomus אוכל פלאפל בעולם הישן',
+  'Old World: Phlebotomus [ש׳ 16]', array[16], 'Phlebotomus', true, null, null, null, current_setting('t.jphoto'))::text, false) is not null as s1 \gset
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 1, 4, '', 'meme', 'אותה תמונה פעמיים',
+  'Old World: Phlebotomus [ש׳ 16]', array[16], '', true, null, null, null, current_setting('t.jphoto'));
+  raise notice 'J12b. FAIL: one photo on two entries';
+exception when others then raise notice 'J12b. %: a photo is on one entry (%)', case when sqlerrm = 'bad photo' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_aid_delete(current_setting('t.s1')::uuid); raise notice 'J12. FAIL: Noa deleted Shoham''s sketch';
+exception when others then raise notice 'J12. %: (%)', case when sqlerrm = 'aid not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'bbbbbbbb-0000-4000-8000-000000000002';
+select pg_temp.jx('J12a', public.study_aid_delete(current_setting('t.s1')::uuid), current_setting('t.jphoto'));
+-- Deleting the winner moves the cards to the next entry that may win, or to none.
+select public.study_aid_delete(current_setting('t.a1')::uuid) is null as gone \gset
+select pg_temp.jx('J12c', (select count(*)::text from public.study_aid_winners where lecture_id = :'jl1'), '0');
+-- The daily limit: 30 entries a day.
+reset role;
+insert into public.study_aids (group_id, lecture_id, part_idx, anchor, kind, body, fact)
+select :'jgid', :'jl1', 0, 3, 'line', 'שורה ' || i, 'עובדה ' || i from generate_series(1, 30) i;
+insert into public.study_aid_authors (aid_id, user_id) select id, :'noa' from public.study_aids where body ~ '^שורה [0-9]+$';
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 0, 3, '', 'line', 'עוד שורה', 'עוד עובדה', array[7]);
+  raise notice 'J12d. FAIL: a 31st entry in a day';
+exception when others then raise notice 'J12d. %: (%)', case when sqlerrm = 'daily_limit' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+delete from public.study_aids where body ~ '^שורה [0-9]+$';
+
+-- ═════════ J13 · what is published, and who may call what ═════════
+select pg_temp.jx('J13', (select string_agg(tablename, ', ' order by tablename) from pg_publication_tables
+                            where pubname = 'supabase_realtime' and tablename like 'study_aid%'), 'study_aids');
+select pg_temp.jx('J13a', (select string_agg(column_name, ',' order by column_name) from information_schema.columns
+                             where table_schema = 'public' and table_name = 'study_aids' and column_name in ('author_id', 'user_id', 'created_by')),
+       null);
+set role anon;
+do $$ begin perform public.study_aid_wall(current_setting('t.jgid')::uuid); raise notice 'J13b. FAIL: anon read the wall';
+exception when insufficient_privilege then raise notice 'J13b. ok: anon cannot (%)', sqlerrm; end $$;
+reset role;
+select pg_temp.jx('J13c', (not has_function_privilege('authenticated', 'study_private.aid_rewin(uuid, int, int)', 'execute')
+                           and not has_function_privilege('anon', 'public.study_aid_post(uuid, int, int, text, text, text, text, int[], text, boolean, uuid, uuid, int, text, text, uuid)', 'execute'))::text, 'true');
+-- J14 · "דרושה אסוציאציה" reads section U's study_pulse_cards, which is not built yet: the phone hides the tab (no pulse flag) and this section reads nothing of U.
+select pg_temp.jx('J14', (to_regclass('public.study_pulse_cards') is null or public.study_schema() ? 'U')::text, 'true');
+
+-- ═════════ SR14 · SEC-14: wall photos: one's own upload, deleted only by its uploader; the bucket's limits ═════════
+insert into storage.objects (bucket_id, name, owner_id) values ('study', :'jgid' || '/wall/0f0f0f0f-0000-4000-8000-000000000001.jpg', :'maya');
+set role authenticated;
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a4';
+do $$ begin perform public.study_aid_post('a8100000-0000-4000-8000-000000000001', 0, 3, '', 'sketch', 'Hypnozoite ישן כמו סטודנט', 'Hypnozoite רדום בכבד [ש׳ 5]',
+  array[5], '', true, null, null, null, current_setting('t.jgid') || '/wall/0f0f0f0f-0000-4000-8000-000000000001.jpg');
+  raise notice 'SR14a. FAIL: Itai posted Maya''s upload';
+exception when others then raise notice 'SR14a. %: another member''s upload (%)', case when sqlerrm = 'bad photo' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+with d as (delete from storage.objects where name like '%/wall/0f0f0f0f-%' returning 1) select pg_temp.jx('SR14b', (select count(*)::text from d), '0');
+set request.jwt.claim.sub = 'a8a00000-0000-4000-8000-0000000000a3';
+select set_config('t.sr', public.study_aid_post(:'jl1', 0, 3, '', 'sketch', 'Hypnozoite ישן כמו סטודנט', 'Hypnozoite רדום בכבד [ש׳ 5]',
+  array[5], '', true, null, null, null, :'jgid' || '/wall/0f0f0f0f-0000-4000-8000-000000000001.jpg')::text, false) is not null as a \gset
+select pg_temp.jx('SR14c', public.study_aid_delete(current_setting('t.sr')::uuid), :'jgid' || '/wall/0f0f0f0f-0000-4000-8000-000000000001.jpg');
+with d as (delete from storage.objects where name like '%/wall/0f0f0f0f-%' returning 1) select pg_temp.jx('SR14c2', (select count(*)::text from d), '1');
+reset role;
+select pg_temp.jx('SR14d', (select file_size_limit || ' ' || array_to_string(allowed_mime_types, ',') from storage.buckets where id = 'study'),
+                 '26214400 image/jpeg,image/png,image/webp,application/pdf');
+
+-- ═════════ J-N · section N's chips count the wall's entries, not drafts or hidden ones ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'cccccccc-0000-4000-8000-000000000003';
+select pg_temp.jx('J-N', (select string_agg(c.part_idx || '.' || c.anchor || ' a' || c.aids, ' | ' order by c.part_idx, c.anchor)
+                            from public.study_paragraph_chips(:'jl1') c where c.aids > 0), '0.3 a1 | 1.4 a2');
+reset role;
+
+select pg_temp.jx('J-reg', public.study_schema() ->> 'J', '1');
+delete from public.study_lectures where id in (:'jl1', :'jl2');
+delete from storage.objects where name like :'jgid' || '/wall/%';
+delete from public.study_members where user_id in (:'maya', :'itai', :'daniel');
+delete from auth.users where id in (:'maya', :'itai', :'daniel');
+select pg_temp.jx('J17', ((select count(*) from public.study_aids) + (select count(*) from public.study_aid_drafts)
+                          + (select count(*) from public.study_aid_winners) + (select count(*) from public.study_aid_credits))::text, '0');
+-- ════ END SECTION J ════
+
+-- ════ BEGIN SECTION H · the boss battle (package H) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION H checks · the boss battle   (package H, H-1; spec §12.5.H's H-1
+--  on fixtures of its own (labels HB, as W's
+--  hardening already has H1-H4), with Yoad's decisions 1 and 3 of 17 Nov 2026).
+--  Every line says ok or FAIL by itself. In the file's one group: five
+--  members of weeks (c1-c5), a sixth (c6) who never practised, a member of
+--  one day (c7, not counted yet), and an outsider (c9). One lecture with
+--  five topics: three hot (Mefloquine, Artemisinin, Primaquine, with a trap
+--  and an exhibit on Primaquine), Chloroquine practised by two (waiting),
+--  Ivermectin by nobody. Time is simulated by counting for a fixed instant.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+reset request.jwt.claim.sub;
+select id as hgid from public.study_groups order by created_at limit 1 \gset
+select set_config('t.hgid', :'hgid', false) is not null as g \gset
+\set hl1 '75b10000-0000-4000-8000-000000000001'
+select set_config('t.hl1', :'hl1', false) is not null as l \gset
+create or replace function pg_temp.hx(p_label text, p_got text, p_want text) returns text language sql as $$
+  select p_label || '. ' || case when p_got is not distinct from p_want then 'ok' else 'FAIL: got ' || coalesce(p_got, 'null') || ', want ' || coalesce(p_want, 'null') end
+$$;
+insert into auth.users (id, raw_user_meta_data, is_anonymous)
+select ('75b00000-0000-4000-8000-0000000000' || u)::uuid, jsonb_build_object('app', 'study', 'full_name', 'בוס ' || u), true
+  from unnest(array['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c9']) u;
+insert into public.study_members (group_id, user_id, name, joined_at)
+select :'hgid', ('75b00000-0000-4000-8000-0000000000' || u)::uuid, 'בוס ' || u,
+       case when u = 'c7' then now() - interval '1 day' else now() - interval '60 days' end
+  from unnest(array['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7']) u;
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'hl1', :'hgid', 'אנטי-פרזיטים', 'Malaria', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', '[]'::jsonb, 'tables', '[]'::jsonb, 'notes', '', 'figures', '[]'::jsonb) order by n)
+     from generate_series(1, 40) n), 'ready', 'bbbbbbbb-0000-4000-8000-000000000002');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, markdown, status) values
+ (:'hl1', 0, 'מלריה', 1, 40, '## מלריה', 'ready');
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, kind, question, options, slides, topic, aspect) values
+ ('75b20000-0000-4000-8000-000000000001', :'hgid', :'hl1', 'ai', 0, 'mcq', 'Artemisinin לבד?', array['כן', 'לעולם לא לבד', 'רק IV', 'רק עם Primaquine'], array[30], 'Artemisinin', 'uses'),
+ ('75b20000-0000-4000-8000-000000000002', :'hgid', :'hl1', 'ai', 0, 'mcq', 'ה-t½ של Artemisinin?', array['1-2 שעות', 'יום', 'שבוע', 'חודש'], array[30], 'Artemisinin', 'uses'),
+ ('75b20000-0000-4000-8000-000000000003', :'hgid', :'hl1', 'ai', 0, 'mcq', 'מה בודקים לפני Primaquine?', array['כליה', 'G6PD', 'ECG', 'כבד'], array[37], 'Primaquine', 'contra'),
+ ('75b20000-0000-4000-8000-000000000004', :'hgid', :'hl1', 'ai', 0, 'mcq', 'Primaquine בהיריון?', array['אסורה', 'מותרת', 'רק בשליש השלישי', 'תמיד'], array[37], 'Primaquine', 'contra'),
+ ('75b20000-0000-4000-8000-000000000005', :'hgid', :'hl1', 'ai', 0, 'mcq', 'Mefloquine: כל כמה זמן?', array['כל יום', 'פעמיים ביום', 'פעם בשבוע', 'פעם בחודש'], array[28], 'Mefloquine', 'pk'),
+ ('75b20000-0000-4000-8000-000000000006', :'hgid', :'hl1', 'ai', 0, 'mcq', 'ה-t½ של Chloroquine?', array['1-2 חודשים', 'יום', 'שבוע', 'שעה'], array[26], 'Chloroquine', 'pk'),
+ ('75b20000-0000-4000-8000-000000000007', :'hgid', :'hl1', 'ai', 0, 'mcq', 'Ivermectin: נגד מה?', array['Strongyloides', 'מלריה', 'אמבה', 'שום דבר'], array[40], 'Ivermectin', 'uses');
+insert into public.study_question_keys (question_id, answer, explanations, takeaway)
+select q.id, k.a, array['הסבר א', 'הסבר ב', 'הסבר ג', 'הסבר ד'], 'מה לזכור'
+  from public.study_questions q
+  join (values ('75b20000-0000-4000-8000-000000000001'::uuid, 1::smallint), ('75b20000-0000-4000-8000-000000000002', 0),
+               ('75b20000-0000-4000-8000-000000000003', 1), ('75b20000-0000-4000-8000-000000000004', 0),
+               ('75b20000-0000-4000-8000-000000000005', 2), ('75b20000-0000-4000-8000-000000000006', 0),
+               ('75b20000-0000-4000-8000-000000000007', 0)) k(id, a) on k.id = q.id;
+select study_private.pulse_cutoff(now()) as hc0 \gset
+select set_config('t.hc0', :'hc0', false) is not null as c \gset
+create or replace function pg_temp.hans(p_user text, p_q int, p_choice int, p_conf int) returns void language sql as $$
+  insert into public.study_answers (user_id, question_id, choice, correct, mode, ms, answered_at, confidence)
+  select ('75b00000-0000-4000-8000-0000000000' || p_user)::uuid, ('75b20000-0000-4000-8000-00000000000' || p_q)::uuid,
+         p_choice, p_choice = k.answer, 'lecture', 9000, current_setting('t.hc0')::timestamptz - interval '3 days' + interval '2 hours', p_conf
+    from public.study_question_keys k where k.question_id = ('75b20000-0000-4000-8000-00000000000' || p_q)::uuid $$;
+\o /dev/null
+-- Artemisinin: four of five wrong on q1; q2 two wrong, one right.
+select pg_temp.hans(u, 1, 3, 2) from unnest(array['c1', 'c2', 'c3', 'c4']) u;
+select pg_temp.hans('c5', 1, 1, 2), pg_temp.hans('c1', 2, 2, 2), pg_temp.hans('c2', 2, 2, 2), pg_temp.hans('c3', 2, 0, 2);
+-- Primaquine: q3's option 2 by four, three of them "על בטוח" (a trap and an exhibit); q4 right.
+select pg_temp.hans('c1', 3, 2, 3), pg_temp.hans('c2', 3, 2, 3), pg_temp.hans('c3', 3, 2, 3), pg_temp.hans('c4', 3, 2, 2), pg_temp.hans('c5', 3, 1, 2);
+select pg_temp.hans(u, 4, 0, 2) from unnest(array['c1', 'c2', 'c3']) u;
+-- Mefloquine: three of three wrong. Chloroquine: two (below the floor). Ivermectin: nobody.
+select pg_temp.hans(u, 5, 0, 2) from unnest(array['c1', 'c2', 'c3']) u;
+select pg_temp.hans(u, 6, 1, 2) from unnest(array['c1', 'c2']) u;
+\o
+update study_private.features set enabled = true, changed_at = now() where name = 'pulse';
+-- Two nights: two days ago finds the trap and the exhibit; today opens them.
+select pg_temp.hx('HB0', study_private.pulse_night(:'hgid', :'hc0'::timestamptz - interval '2 days' + interval '1 hour', true)::text
+                        || study_private.pulse_night(:'hgid', :'hc0'::timestamptz + interval '1 hour', true)::text, '11');
+select pg_temp.hx('HB0a', study_private.boss_min_heads() || '/' || study_private.boss_max_heads() || '/' || study_private.boss_head_questions()
+                         || '/' || study_private.boss_players() || '/' || study_private.boss_trap_hp() || '/' || study_private.boss_relapses()
+                         || '/' || study_private.boss_hit_pct() || '/' || study_private.boss_loot_days(), '2/4/3/3/20/2/80/3');
+select pg_temp.hx('HB0b', (select string_agg(right(question_id::text, 1) || '/' || option || ' ' || state || coalesce(' #' || exhibit_no, ''), ', ' order by question_id)
+                           from public.study_traps where lecture_id = :'hl1'), '1/3 open, 3/2 open #1, 5/0 open');
+select pg_temp.hx('HB0c', study_private.boss_hooks_ok()::text || ' · H ' || (public.study_schema() ->> 'H'), 'true · H 2');
+
+-- ═════════ H1 · the card's heads and decision 3's meter ═════════
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c1';
+select pg_temp.hx('HB1', (select (b ->> 'state') || ' · ' || (b -> 'heads')::text || ' · hot ' || (b ->> 'hot') || ' of ' || (b ->> 'topics')
+                                || ' · from ' || (b ->> 'min_heads') || ' · next ' || coalesce(b ->> 'answers_next', 'none') || ' · revenge ' || coalesce(b ->> 'revenge', 'none')
+                           from (select public.study_boss_open(:'hgid', array[:'hl1']::uuid[]) as b) x),
+       'open · ["Mefloquine", "Artemisinin", "Primaquine"] · hot 3 of 5 · from 2 · next 2 · revenge none');
+-- (the next topic is Chloroquine: two members practised it, so it needs one more; the group answered
+--  1.4 questions per member and topic in the window: about 2 answers)
+-- A member of one day is not counted: no heads, the pulse's own meter instead (decision 1, review SEC-8).
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c7';
+select pg_temp.hx('HB1a', (select (b ->> 'state') || ' · ' || (b -> 'heads')::text || ' · topics ' || (b ->> 'topics') || ' · days ' || ((b ->> 'join_days_left')::int between 6 and 7)
+                            from (select public.study_boss_open(:'hgid') as b) x), 'waiting · [] · topics 5 · days true');
+do $$ begin perform public.study_boss_create(current_setting('t.hgid')::uuid, array[current_setting('t.hl1')::uuid]);
+  raise notice 'HB1b. FAIL: a member the night did not count opened a battle';
+exception when others then raise notice 'HB1b. %: (%)', case when sqlerrm = 'no heads' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c9';
+do $$ begin perform public.study_boss_open(current_setting('t.hgid')::uuid); raise notice 'HB1c. FAIL: an outsider read the heads';
+exception when others then raise notice 'HB1c. %: members only (%)', case when sqlerrm in ('group not found', 'forbidden') then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update study_private.features set enabled = false where name = 'pulse';
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c1';
+do $$ begin perform public.study_boss_create(current_setting('t.hgid')::uuid, array[current_setting('t.hl1')::uuid]);
+  raise notice 'HB1d. FAIL: a battle while the pulse is off';
+exception when others then raise notice 'HB1d. %: the boss is built from the counts (%)', case when sqlerrm = 'off' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select pg_temp.hx('HB1e', (public.study_boss_open(:'hgid') ->> 'state') || ' · ' || (public.study_boss_open(:'hgid') -> 'heads')::text, 'off · []');
+reset role;
+update study_private.features set enabled = true where name = 'pulse';
+-- One hot topic is not a battle: a lecture without two heads says so.
+set role authenticated;
+do $$ begin perform public.study_boss_create(current_setting('t.hgid')::uuid, array['75b10000-0000-4000-8000-0000000000ff']::uuid[]);
+  raise notice 'HB1f. FAIL: a battle on a stranger''s lecture';
+exception when others then raise notice 'HB1f. %: (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ H2 · opening a battle: the heads, their hit points, the rounds ═════════
+select set_config('t.bq', public.study_boss_create(:'hgid', array[:'hl1']::uuid[], 45)::text, false) is not null as bq \gset
+reset role;
+select pg_temp.hx('HB2', (select mode || ' · ' || title || ' · ' || n_wanted from public.study_quizzes where id = current_setting('t.bq')::uuid),
+       'boss · קרב הבוס · ההידרה של Malaria · 5');
+select pg_temp.hx('HB2a', (select string_agg((h ->> 'name') || ' ' || (h ->> 'max') || ' HP, ' || jsonb_array_length(h -> 'qs') || 'q'
+                                            || coalesce(', trap q' || right(h ->> 'trap_q', 1) || '/' || (h ->> 'trap_opt'), '') || ' ' || (h -> 'slides')::text, ' · ' order by o)
+                            from public.study_boss_battles b, jsonb_array_elements(b.heads) with ordinality as x(h, o)
+                           where b.quiz_id = current_setting('t.bq')::uuid),
+       'Mefloquine 34 HP, 1q, trap q5/0 [28] · Artemisinin 33 HP, 2q, trap q1/3 [30] · Primaquine 33 HP, 2q, trap q3/2 [37]');
+-- (every head has an open trap: q1's option 3 and q5's option 0 were chosen by three or more too)
+create or replace function pg_temp.hshift(p_quiz uuid, p_secs numeric) returns void language sql as $$
+  update public.study_quiz_rounds set opens_at = opens_at - make_interval(secs => p_secs::double precision),
+                                      closes_at = closes_at - make_interval(secs => p_secs::double precision)
+   where quiz_id = p_quiz and opens_at is not null and revealed_at is null;
+  update public.study_quizzes set opens_at = opens_at - make_interval(secs => p_secs::double precision),
+                                  closes_at = closes_at - make_interval(secs => p_secs::double precision)
+   where id = p_quiz;
+$$;
+create or replace function pg_temp.hnext(p_quiz uuid, p_user text, p_from int) returns void language plpgsql as $$
+begin
+  perform set_config('request.jwt.claim.sub', '75b00000-0000-4000-8000-0000000000' || p_user, true);
+  perform public.study_quiz_next(p_quiz, p_from);
+  perform pg_temp.hshift(p_quiz, 4);   -- the 3-second countdown is over
+end $$;
+create or replace function pg_temp.hplay(p_quiz uuid, p_idx int, p_moves text) returns void language plpgsql as $$
+declare m text;
+begin
+  foreach m in array string_to_array(p_moves, ',') loop
+    perform set_config('request.jwt.claim.sub', '75b00000-0000-4000-8000-0000000000' || split_part(m, ':', 1), true);
+    perform public.study_quiz_answer(p_quiz, p_idx, nullif(split_part(m, ':', 2), 'x')::int);
+  end loop;
+end $$;
+create or replace function pg_temp.hud(p_quiz uuid) returns text language sql as $$
+  select 'team ' || (b ->> 'team_hp') || ' · boss ' || (b ->> 'boss_hp') || ' · heads '
+         || (select string_agg((h ->> 'name') || '=' || (h ->> 'hp') || case when (h ->> 'down')::boolean then '✓' else '' end
+                               || case when (h ->> 'relapses')::int > 0 then '(r' || (h ->> 'relapses') || ')' else '' end, ' ')
+               from jsonb_array_elements(b -> 'heads') h)
+    from public.study_quiz__boss_state(p_quiz) b $$;
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c2';
+select public.study_quiz_join(current_setting('t.bq')::uuid) is null as j \gset
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c1';
+do $$ begin perform public.study_quiz_next(current_setting('t.bq')::uuid, -1); raise notice 'HB2b. FAIL: a battle of two';
+exception when others then raise notice 'HB2b. %: below three players every hit would tell who missed (%)', case when sqlerrm = 'need 3' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c3';
+select public.study_quiz_join(current_setting('t.bq')::uuid) is null as j \gset
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c4';
+select public.study_quiz_join(current_setting('t.bq')::uuid) is null as j \gset
+reset role;
+
+-- ═════════ H3 · the battle: hits, the team's losses, the trap, a relapse, the win ═════════
+select pg_temp.hnext(current_setting('t.bq')::uuid, 'c1', -1);
+select pg_temp.hx('HB3', (select string_agg(right(question_id::text, 1), ',' order by idx) from public.study_quiz_rounds where quiz_id = current_setting('t.bq')::uuid),
+       '5,1,2,3,4');
+select pg_temp.hplay(current_setting('t.bq')::uuid, 0, 'c1:2,c2:2,c3:2,c4:2');
+select pg_temp.hx('HB3a', pg_temp.hud(current_setting('t.bq')::uuid), 'team 100 · boss 66 · heads Mefloquine=0✓ Artemisinin=33 Primaquine=33');
+select pg_temp.hnext(current_setting('t.bq')::uuid, 'c1', 0);
+select pg_temp.hplay(current_setting('t.bq')::uuid, 1, 'c1:1,c2:1,c3:1,c4:3');
+select pg_temp.hx('HB3b', pg_temp.hud(current_setting('t.bq')::uuid), 'team 92 · boss 50 · heads Mefloquine=0✓ Artemisinin=17 Primaquine=33');
+select pg_temp.hnext(current_setting('t.bq')::uuid, 'c1', 1);
+select pg_temp.hplay(current_setting('t.bq')::uuid, 2, 'c1:0,c2:0,c3:0,c4:0');
+select pg_temp.hnext(current_setting('t.bq')::uuid, 'c1', 2);
+-- The trap round: half the answers fell for q3's option 2: at least 20 off the team, named by the head, never a person.
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c3';
+select pg_temp.hx('HB3c', (select (s -> 'boss' ->> 'head') || ' · trap ' || (s -> 'boss' ->> 'trap') || ' · relapse ' || (s -> 'boss' ->> 'relapse')
+                                 from public.study_quiz_state(current_setting('t.bq')::uuid) s), '2 · trap true · relapse false');
+reset role;
+select pg_temp.hplay(current_setting('t.bq')::uuid, 3, 'c1:1,c2:2,c3:1,c4:2');
+select pg_temp.hx('HB3d', pg_temp.hud(current_setting('t.bq')::uuid), 'team 72 · boss 22 · heads Mefloquine=0✓ Artemisinin=0✓ Primaquine=22');
+select pg_temp.hnext(current_setting('t.bq')::uuid, 'c1', 3);
+select pg_temp.hplay(current_setting('t.bq')::uuid, 4, 'c1:0,c2:1,c3:0,c4:1');
+select pg_temp.hx('HB3e', pg_temp.hud(current_setting('t.bq')::uuid) || ' · rounds ' || (select n_total from public.study_quizzes where id = current_setting('t.bq')::uuid)
+                         || ' · relapse round q' || (select right(question_id::text, 1) from public.study_quiz_rounds where quiz_id = current_setting('t.bq')::uuid and idx = 5),
+       'team 57 · boss 20 · heads Mefloquine=0✓ Artemisinin=0✓ Primaquine=20(r1) · rounds 6 · relapse round q3');
+select pg_temp.hnext(current_setting('t.bq')::uuid, 'c1', 4);
+select pg_temp.hplay(current_setting('t.bq')::uuid, 5, 'c1:1,c2:1,c3:1,c4:1');
+select pg_temp.hx('HB3f', pg_temp.hud(current_setting('t.bq')::uuid) || ' · ' || (select outcome from public.study_boss_battles where quiz_id = current_setting('t.bq')::uuid),
+       'team 57 · boss 0 · heads Mefloquine=0✓ Artemisinin=0✓ Primaquine=0✓(r1) · won');
+select pg_temp.hx('HB3g', (select string_agg((m ->> 't') || coalesce(':' || (m ->> 'head'), '') || coalesce(' ' || (m ->> 'hp'), ''), ', ' order by o)
+                            from public.study_boss_battles b, jsonb_array_elements(b.log) with ordinality as x(m, o)
+                           where b.quiz_id = current_setting('t.bq')::uuid),
+       'down:Mefloquine, down:Artemisinin, trap:Primaquine -20, relapse:Primaquine, down:Primaquine, last:Primaquine');
+select pg_temp.hx('HB3h', 'no moment names anyone: ' || not exists (
+         select 1 from public.study_boss_battles b, jsonb_array_elements(b.log) m, public.study_members x
+          where b.quiz_id = current_setting('t.bq')::uuid and x.group_id = b.group_id
+            and (m::text like '%' || x.user_id::text || '%' or m::text like '%' || x.name || '%')), 'no moment names anyone: true');
+select pg_temp.hnext(current_setting('t.bq')::uuid, 'c1', 5);
+select pg_temp.hx('HB3i', (select state from public.study_quizzes where id = current_setting('t.bq')::uuid), 'ended');
+
+-- ═════════ H4 · the loot: private, three study days ═════════
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c4';
+select pg_temp.hx('HB4', (select string_agg('q' || right(question_id::text, 1) || ' ' || topic || ' +' || (due_on - ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date), ', '
+                                           order by due_on, question_id)
+                           from public.study_boss_loot(current_setting('t.bq')::uuid)),
+       'q1 Artemisinin +1, q3 Primaquine +2, q4 Primaquine +2');
+select pg_temp.hx('HB4a', public.study_boss_loot_save(current_setting('t.bq')::uuid)::text || ' saved, again ' || public.study_boss_loot_save(current_setting('t.bq')::uuid)
+                         || ', ' || (select count(*) from public.study_my_loot(:'hgid')) || ' due today', '3 saved, again 0, 0 due today');
+reset role;
+update public.study_loot set due_on = due_on - 1 where user_id = '75b00000-0000-4000-8000-0000000000c4';   -- a day passes
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c4';
+select pg_temp.hx('HB4b', (select string_agg(question || ' ' || slides::text || ' ' || kind, ', ') from public.study_my_loot(:'hgid'))
+                         || ' · today ' || jsonb_array_length(public.study_today(:'hgid')::jsonb -> 'loot'),
+       'Artemisinin לבד? {30} mcq · today 1');
+select pg_temp.hx('HB4c', public.study_loot_done('75b20000-0000-4000-8000-000000000001')::text, '1');
+select pg_temp.hx('HB4c2', 'left today ' || (select count(*) from public.study_my_loot(:'hgid')), 'left today 0');
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c3';
+select pg_temp.hx('HB4d', 'c3 sees ' || (select count(*) from public.study_loot) || ' loot rows of others', 'c3 sees 0 loot rows of others');
+do $$ begin insert into public.study_loot (quiz_id, question_id, due_on) values (current_setting('t.bq')::uuid, '75b20000-0000-4000-8000-000000000001', current_date);
+  raise notice 'HB4e. FAIL: a phone wrote its own loot';
+exception when insufficient_privilege then raise notice 'HB4e. ok: only "לתוכנית שלי" saves it (%)', sqlerrm; end $$;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c9';
+select pg_temp.hx('HB4f', 'outsider sees ' || (select count(*) from public.study_boss_battles) || ' battles', 'outsider sees 0 battles');
+do $$ begin perform public.study_boss_loot(current_setting('t.bq')::uuid); raise notice 'HB4g. FAIL: an outsider read a battle''s loot';
+exception when others then raise notice 'HB4g. %: (%)', case when sqlerrm = 'quiz not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+set role anon;
+do $$ begin perform public.study_boss_open(current_setting('t.hgid')::uuid); raise notice 'HB4h. FAIL: anon read the heads';
+exception when insufficient_privilege then raise notice 'HB4h. ok: anon cannot call it (%)', sqlerrm; end $$;
+reset role;
+
+-- ═════════ H5 · a lost battle: a round of two counts for nothing, the team falls, "סבב נקמה" the next study day ═════════
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c1';
+select set_config('t.bq2', public.study_boss_create(:'hgid', array[:'hl1']::uuid[], 45)::text, false) is not null as bq2 \gset
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c2';
+select public.study_quiz_join(current_setting('t.bq2')::uuid) is null as j \gset
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c3';
+select public.study_quiz_join(current_setting('t.bq2')::uuid) is null as j \gset
+reset role;
+select pg_temp.hnext(current_setting('t.bq2')::uuid, 'c1', -1);
+select pg_temp.hplay(current_setting('t.bq2')::uuid, 0, 'c1:2,c2:2');
+select pg_temp.hshift(current_setting('t.bq2')::uuid, 60);
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c1';
+select public.study_quiz_reveal(current_setting('t.bq2')::uuid, 0) is null as rv \gset
+reset role;
+select pg_temp.hx('HB5', pg_temp.hud(current_setting('t.bq2')::uuid) || ' · few ' || (select b.rounds -> 0 ->> 'few' from public.study_boss_battles b where b.quiz_id = current_setting('t.bq2')::uuid),
+       'team 100 · boss 100 · heads Mefloquine=34 Artemisinin=33 Primaquine=33 · few true');
+select pg_temp.hnext(current_setting('t.bq2')::uuid, 'c1', 0);
+select pg_temp.hplay(current_setting('t.bq2')::uuid, 1, 'c1:0,c2:0,c3:0');
+select pg_temp.hnext(current_setting('t.bq2')::uuid, 'c1', 1);
+select pg_temp.hplay(current_setting('t.bq2')::uuid, 2, 'c1:1,c2:1,c3:1');
+select pg_temp.hnext(current_setting('t.bq2')::uuid, 'c1', 2);
+select pg_temp.hplay(current_setting('t.bq2')::uuid, 3, 'c1:2,c2:2,c3:2');
+select pg_temp.hnext(current_setting('t.bq2')::uuid, 'c1', 3);
+select pg_temp.hplay(current_setting('t.bq2')::uuid, 4, 'c1:1,c2:1,c3:1');
+select pg_temp.hx('HB5a', (select outcome || ' · team ' || team_hp || ' · ' || (select string_agg(m ->> 't', ',' order by o) from jsonb_array_elements(log) with ordinality as x(m, o))
+                            from public.study_boss_battles where quiz_id = current_setting('t.bq2')::uuid),
+       'lost · team 0 · relapse,trap,fall');
+select pg_temp.hx('HB5b', (select count(*)::text from public.study_quiz_rounds where quiz_id = current_setting('t.bq2')::uuid and question_id is not null and opens_at is null),
+       '0');
+select pg_temp.hnext(current_setting('t.bq2')::uuid, 'c1', 4);
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c1';
+select set_config('t.lost', (select id::text from public.study_boss_battles where quiz_id = current_setting('t.bq2')::uuid), false) is not null as l \gset
+select pg_temp.hx('HB5c', (select (b -> 'revenge' ->> 'open') || ' · ' || (b -> 'revenge' -> 'heads')::text from (select public.study_boss_open(:'hgid') as b) x),
+       'false · ["Mefloquine", "Artemisinin", "Primaquine"]');
+do $$ begin perform public.study_boss_create(current_setting('t.hgid')::uuid, null, 45, current_setting('t.lost')::uuid);
+  raise notice 'HB5d. FAIL: a revenge round the same study day';
+exception when others then raise notice 'HB5d. %: the next study day (%)', case when sqlerrm = 'revenge not yet' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+update public.study_boss_battles set ended_at = ended_at - interval '1 day' where id = current_setting('t.lost')::uuid;   -- a day passes
+set role authenticated;
+select set_config('t.bq3', public.study_boss_create(:'hgid', null, 45, current_setting('t.lost')::uuid)::text, false) is not null as bq3 \gset
+reset role;
+select pg_temp.hx('HB5e', (select (revenge_of = current_setting('t.lost')::uuid)::text || ' · ' || pg_temp.hud(quiz_id) from public.study_boss_battles where quiz_id = current_setting('t.bq3')::uuid),
+       'true · team 100 · boss 100 · heads Mefloquine=34 Artemisinin=33 Primaquine=33');
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c1';
+select public.study_quiz_end(current_setting('t.bq3')::uuid) is null as e \gset
+reset role;
+
+-- ═════════ H6 · nothing published, grants, the registry ═════════
+select pg_temp.hx('HB6', (select string_agg(tablename, ', ' order by tablename) from pg_publication_tables
+                          where pubname = 'supabase_realtime' and tablename in ('study_boss_battles', 'study_loot')), null);
+select pg_temp.hx('HB6a', 'a member writes no battle: ' || not exists (
+         select 1 from information_schema.role_table_grants
+          where grantee in ('authenticated', 'anon') and table_name in ('study_boss_battles', 'study_loot')
+            and privilege_type in ('INSERT', 'UPDATE', 'DELETE')), 'a member writes no battle: true');
+select pg_temp.hx('HB6b', 'the hooks are internal: ' || not (has_function_privilege('authenticated', 'public.study_quiz__after_reveal(uuid, int)', 'execute')
+                                                            or has_function_privilege('authenticated', 'public.study_quiz__pick_boss(uuid)', 'execute')),
+       'the hooks are internal: true');
+-- Review H-BATTLE-ROW-READ (H 2): a member reads no head, no planned round and no log from the
+-- table, played or not, counted or not; the battle's plain facts stay readable.
+select set_config('t.hbid', (select id::text from public.study_boss_battles where group_id = :'hgid' order by created_at limit 1), false) is not null as hb \gset
+set role authenticated;
+set request.jwt.claim.sub = '75b00000-0000-4000-8000-0000000000c1';
+do $$ begin perform heads from public.study_boss_battles; raise notice 'HB6c. FAIL: a member read the heads';
+exception when insufficient_privilege then raise notice 'HB6c. ok: heads are not readable (%)', sqlerrm;
+          when others then raise notice 'HB6c. FAIL: (%)', sqlerrm; end $$;
+do $$ begin perform rounds from public.study_boss_battles; raise notice 'HB6d. FAIL: a member read the planned rounds';
+exception when insufficient_privilege then raise notice 'HB6d. ok: the planned rounds are not readable (%)', sqlerrm;
+          when others then raise notice 'HB6d. FAIL: (%)', sqlerrm; end $$;
+do $$ begin perform log from public.study_boss_battles; raise notice 'HB6e. FAIL: a member read the log';
+exception when insufficient_privilege then raise notice 'HB6e. ok: the log is not readable (%)', sqlerrm;
+          when others then raise notice 'HB6e. FAIL: (%)', sqlerrm; end $$;
+do $$ begin perform * from public.study_boss_battles; raise notice 'HB6f. FAIL: select * read every column';
+exception when insufficient_privilege then raise notice 'HB6f. ok: select * is refused (%)', sqlerrm;
+          when others then raise notice 'HB6f. FAIL: (%)', sqlerrm; end $$;
+select pg_temp.hx('HB6g', 'a member reads the facts: ' || count(*) || ' · ' || (min(name) is not null)::text || ' · ' || (min(team_hp) is not null)::text,
+                  'a member reads the facts: 1 · true · true')
+  from public.study_boss_battles where id = current_setting('t.hbid')::uuid;
+reset role;
+select pg_temp.hx('HB6h', (select string_agg(column_name, ',' order by column_name) from information_schema.column_privileges
+                            where grantee = 'authenticated' and table_schema = 'public' and table_name = 'study_boss_battles' and privilege_type = 'SELECT'),
+                  'created_at,ended_at,group_id,id,lecture_ids,name,outcome,planned,quiz_id,revenge_of,team_hp');
+select pg_temp.hx('H-reg', public.study_schema() ->> 'H', '2');
+
+-- Clean-up for the sections after this one: the lecture takes its parts,
+-- questions, answers, quizzes' rounds, traps and pulse rows; the battles go
+-- with their quizzes; then the members, their identities (and their loot)
+-- and the night's run. The switch goes back off.
+reset request.jwt.claim.sub;
+delete from public.study_quizzes where id in (select quiz_id from public.study_boss_battles where group_id = :'hgid');
+delete from public.study_lectures where id = :'hl1';
+delete from study_private.pulse_runs where group_id = :'hgid';
+delete from public.study_members where user_id::text like '75b00000-%';
+delete from auth.users where id::text like '75b00000-%';
+update study_private.features set enabled = false where name = 'pulse';
+select pg_temp.hx('HB7', 'left behind: ' || ((select count(*) from public.study_boss_battles) + (select count(*) from public.study_loot)
+                         + (select count(*) from public.study_traps) + (select count(*) from public.study_pulse_topics)), 'left behind: 0');
+-- ════ END SECTION H ════
+
+-- ════ BEGIN SECTION B · the bank written ahead (package B) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION B checks · the points to know, read ahead   (package B, decision 2
+--  of 17 Nov 2026; docs/study/practice-2-api.md §10). Every line says ok or
+--  FAIL by itself. Fixtures of their own (a lecture of two parts written by
+--  the worker), removed at the end. Server writing is set up as section W's
+--  checks set it (Vault's two secrets; pg_net's stand-in keeps each kick in
+--  net.calls).
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+reset request.jwt.claim.sub;
+\set key 'k-0123456789abcdef0123456789abcdef'
+select set_config('t.key', 'k-0123456789abcdef0123456789abcdef', false) is not null as have_key \gset
+select id as bgid from public.study_groups order by created_at limit 1 \gset
+\set bl 'b4100000-0000-4000-8000-000000000001'
+\set shoham 'bbbbbbbb-0000-4000-8000-000000000002'
+\set noa 'cccccccc-0000-4000-8000-000000000003'
+select set_config('t.bl', :'bl', false) is not null as bl_set \gset
+insert into vault.decrypted_secrets (name, decrypted_secret) values
+  ('study_worker_key', 'k-0123456789abcdef0123456789abcdef'),
+  ('study_site_url', 'https://tamtzit.vercel.app')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+select 'BA1. the switch points_ahead is on by default: ' || case when (select enabled from study_private.features where name = 'points_ahead') then 'ok' else 'FAIL' end
+       || ' (study_features: ' || coalesce(public.study_features() ->> 'points_ahead', 'missing') || ')';
+
+-- A lecture being written by the worker: two parts, each under a lease.
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'bl', :'bgid', 'פתוגן מאכסן', 'Read ahead', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array('עובדה ' || n), 'tables', '[]'::jsonb,
+                                       'notes', '', 'figures', '[]'::jsonb) order by n) from generate_series(1, 12) n),
+  'writing', :'shoham');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, lease_id, lease_until, writer) values
+ (:'bl', 0, 'מחזור החיים', 1, 6, 'writing', 'b4100000-0000-4000-8000-0000000000a0', now() + interval '5 minutes', 'server'),
+ (:'bl', 1, 'טיפול', 7, 12, 'writing', 'b4100000-0000-4000-8000-0000000000a1', now() + interval '5 minutes', 'server');
+delete from net.calls;
+
+set role anon;
+select public.study_finish(:'bl', 'part', 0, 'b4100000-0000-4000-8000-0000000000a0', 'ready', null,
+         E'## מחזור החיים\n\nרק Mockaquine פועלת על ה-dormozoite. [ש'' 3]', null, 'claude-opus-5-5', null, 0, :'key') as bfin0 \gset
+reset role;
+select 'BA2a. part 0 written, part 1 still being written: ' || case when :'bfin0' and (select count(*) from net.calls where body ? 'points') = 0
+       then 'ok' else 'FAIL' end || ' (no read ahead before the whole summary)';
+set role anon;
+select 'BA2b. the last part written: ' || case when public.study_finish(:'bl', 'part', 1, 'b4100000-0000-4000-8000-0000000000a1', 'ready', null,
+         E'## טיפול\n\nלפני Mockaquine בודקים FXR. [ש'' 8]', null, 'claude-opus-5-5', null, 0, :'key') then 'ok' else 'FAIL' end;
+reset role;
+select 'BA2c. one kick for the read ahead: ' || case when count(*) = 1 and max(url) = 'https://tamtzit.vercel.app/api/study/work'
+         and bool_and(headers ->> 'Authorization' = 'Bearer k-0123456789abcdef0123456789abcdef') and max(body ->> 'points') = :'bl'
+       then 'ok' else 'FAIL ' || count(*) || ' ' || coalesce(max(body::text), '') end || ' (POST /api/study/work {"points": lecture}, the server key)'
+  from net.calls where body ? 'points';
+
+-- The worker's claim: the key alone.
+set role authenticated;
+set request.jwt.claim.sub = :'noa';
+do $$ begin perform public.study_points_ahead_claim(current_setting('t.bl')::uuid, current_setting('t.key')); raise notice 'BA2d. FAIL: a member''s token claimed the read ahead';
+exception when others then raise notice 'BA2d. %: only the worker claims the read ahead (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set role anon;
+reset request.jwt.claim.sub;
+do $$ begin perform public.study_points_ahead_claim(current_setting('t.bl')::uuid); raise notice 'BA2e. FAIL: claimed without the key';
+exception when others then raise notice 'BA2e. %: no key, no claim (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_points_ahead_claim(:'bl', :'key') as ahead \gset
+select set_config('t.ahead', :'ahead', false) is not null as ahead_set \gset
+reset role;
+select 'BA2f. the worker claims both parts with their text: '
+       || case when a -> 'parts' -> 0 ->> 'part_idx' = '0' and a -> 'parts' -> 1 ->> 'part_idx' = '1'
+                and a -> 'parts' -> 0 ->> 'md5' = (select md5(markdown) from public.study_sections where lecture_id = :'bl' and idx = 0)
+                and a -> 'parts' -> 1 ->> 'markdown' like '%FXR%' and jsonb_array_length(a -> 'parts' -> 0 -> 'old') = 0
+                and a ->> 'group_id' = :'bgid' and jsonb_array_length(a -> 'slides') = 12
+               then 'ok' else 'FAIL ' || coalesce(a::text, 'null') end
+  from (select current_setting('t.ahead')::jsonb as a) x;
+select 'BA2g. the parts are being read, marked as a read ahead: '
+       || case when count(*) = 2 and bool_and(status = 'writing' and lease_until > now() and ahead_at = updated_at and try_md5 <> '' and attempts = 1) then 'ok' else 'FAIL' end
+  from public.study_point_parts where lecture_id = :'bl';
+set role authenticated;
+set request.jwt.claim.sub = :'noa';
+do $$ begin perform public.study_points_claim(current_setting('t.bl')::uuid, current_setting('t.key')); raise notice 'BA2h. FAIL: a member read the parts the server is reading';
+exception when others then raise notice 'BA2h. %: a tap meanwhile meets the read ahead (%)', case when sqlerrm = 'busy' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'BA2i. members see the read in progress: ' || case when count(*) filter (where busy) = 2 then 'ok' else 'FAIL' end || ' (study_points_state: both busy)'
+  from public.study_points_state(:'bl');
+select 'BA2j. a member reads ahead_at: ' || case when count(*) = 2 and bool_and(ahead_at is not null) then 'ok' else 'FAIL' end from public.study_point_parts where lecture_id = :'bl';
+
+-- The worker saves part 0 and fails part 1 (the key alone: section Q's worker path).
+set role anon;
+reset request.jwt.claim.sub;
+select 'BA2k. the worker saves part 0: ' || case when public.study_points_save(:'bl', 0, (current_setting('t.ahead')::jsonb -> 'parts' -> 0 ->> 'md5'),
+  '[{"kind":"indication","subject":"Mockaquine","text":"רק Mockaquine פועלת על ה-dormozoite.","anchor":1,"quote":"רק Mockaquine","slides":[3],"red_flag":false,"weight":3}]',
+  'claude-opus-5-5', 0.04, :'key') = 1 then 'ok' else 'FAIL' end;
+select public.study_points_fail(:'bl', array[1], 'timeout', 0.03, :'key') is null as bf1 \gset
+do $$ begin perform public.study_points_save(current_setting('t.bl')::uuid, 1, repeat('0', 32), '[]'); raise notice 'BA2l. FAIL: saved without the key';
+exception when others then raise notice 'BA2l. %: no key, no save (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select 'BA2m. part 0 current with its point, part 1 failed with its reason: '
+       || case when string_agg(part_idx || ':' || status || ':' || coalesce(error, '-') || ':' || (src_md5 <> ''), ',' order by part_idx) = '0:ready:-:true,1:failed:timeout:false'
+               then 'ok' else 'FAIL ' || string_agg(part_idx || ':' || status || ':' || coalesce(error, '-'), ',' order by part_idx) end
+  from public.study_point_parts where lecture_id = :'bl';
+
+-- BA2: never twice for the same text.
+set role anon;
+select 'BA2n. the read ahead does not come back to a text it tried: ' || case when public.study_points_ahead_claim(:'bl', :'key') is null then 'ok' else 'FAIL' end;
+reset role;
+delete from net.calls;
+update public.study_lectures set status = 'ready', updated_at = now() where id = :'bl';
+select 'BA2o. no kick when nothing is new: ' || case when count(*) = 0 then 'ok' else 'FAIL ' || count(*) end from net.calls where body ? 'points';
+-- BA5: recoverable. A member's "לנסות שוב" reads the failed part (section Q's claim).
+set role authenticated;
+set request.jwt.claim.sub = :'noa';
+select 'BA5a. a member''s tap reads the part that failed: ' || case when string_agg(part_idx::text, ',') = '1' then 'ok' else 'FAIL ' || coalesce(string_agg(part_idx::text, ','), 'none') end
+  from public.study_points_claim(:'bl', :'key');
+select public.study_points_fail(:'bl', array[1], 'member_share', 0, :'key', true) is null as bf2 \gset
+reset role;
+select 'BA5b. a member''s read is not taken for a read ahead: ' || case when ahead_at is distinct from updated_at then 'ok' else 'FAIL' end
+  from public.study_point_parts where lecture_id = :'bl' and part_idx = 1;
+
+-- A part written again (a new text): read ahead again, only that part.
+reset role;
+reset request.jwt.claim.sub;
+update public.study_sections set status = 'writing', lease_id = 'b4100000-0000-4000-8000-0000000000a2', lease_until = now() + interval '5 minutes', writer = 'server'
+ where lecture_id = :'bl' and idx = 0;
+delete from net.calls;
+set role anon;
+select public.study_finish(:'bl', 'part', 0, 'b4100000-0000-4000-8000-0000000000a2', 'ready', null,
+         E'## מחזור החיים\n\nרק Mockaquine פועלת על ה-dormozoite, ולא על ה-schizont. [ש'' 3]', null, 'claude-opus-5-5', null, 0, :'key') as bf3 \gset
+reset role;
+select 'BA2p. a part written anew is read ahead again: ' || case when count(*) = 1 then 'ok' else 'FAIL ' || count(*) end from net.calls where body ? 'points';
+set role anon;
+select public.study_points_ahead_claim(:'bl', :'key') as ahead2 \gset
+reset role;
+select 'BA2q. only the new text, with its earlier point for the id: '
+       || case when jsonb_array_length(a -> 'parts') = 1 and a -> 'parts' -> 0 ->> 'part_idx' = '0'
+                and a -> 'parts' -> 0 -> 'old' -> 0 ->> 'text' = 'רק Mockaquine פועלת על ה-dormozoite.' then 'ok' else 'FAIL ' || coalesce(a::text, 'null') end
+  from (select :'ahead2'::jsonb as a) x;
+
+-- BA3: the ledger refused (the cap): the claim is given back quietly.
+set role authenticated;
+set request.jwt.claim.sub = :'noa';
+do $$ begin perform public.study_points_ahead_release(current_setting('t.bl')::uuid, array[0], current_setting('t.key')); raise notice 'BA3a. FAIL: a member released the read ahead';
+exception when others then raise notice 'BA3a. %: only the worker gives a claim back (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set role anon;
+reset request.jwt.claim.sub;
+select 'BA3b. given back: ' || case when public.study_points_ahead_release(:'bl', array[0, 1], :'key') = 1 then 'ok' else 'FAIL' end || ' (part 0 only: part 1 is not the read ahead''s)';
+reset role;
+select 'BA3c. part 0 looks as before, its try given back, no reason shown: '
+       || case when status = 'ready' and error is null and lease_until is null and ahead_at is null and attempts = 0 and src_md5 <> md5((select markdown from public.study_sections where lecture_id = :'bl' and idx = 0))
+               then 'ok' else 'FAIL ' || status || ' ' || attempts end
+  from public.study_point_parts where lecture_id = :'bl' and part_idx = 0;
+set role authenticated;
+set request.jwt.claim.sub = :'noa';
+select 'BA3d. the setup screen offers it: ' || case when not current and not busy and status = 'ready' then 'ok' else 'FAIL' end || ' (stale, not busy: "לקרוא שוב את הנקודות")'
+  from public.study_points_state(:'bl') where part_idx = 0;
+set role anon;
+reset request.jwt.claim.sub;
+select 'BA3e. and the read ahead leaves it to a member: ' || case when public.study_points_ahead_claim(:'bl', :'key') is null then 'ok' else 'FAIL' end;
+
+-- BA4: the ledger. A worker's reservation names no member; kind points stops at 80% of the cap.
+select 'BA4a. the worker reserves kind points: ' || case when public.study_reserve(:'bgid', :'bl', 'points', 'ahead', 0.01, 1000000, 0.8, 0.4, 20, 'read', :'key') > 0 then 'ok' else 'FAIL' end;
+reset role;
+select 'BA4b. its row names no member: ' || case when count(*) = 1 and bool_and(user_id is null) then 'ok' else 'FAIL' end
+  from public.study_usage where lecture_id = :'bl' and kind = 'points' and ref = 'ahead';
+select set_config('t.bgid', :'bgid', false) is not null as bgid_set,
+       set_config('t.bcap', (public.study_spent(:'bgid', :'key') + 0.012)::text, false) is not null as bcap_set \gset
+set role anon;
+do $$ begin perform public.study_reserve(current_setting('t.bgid')::uuid, current_setting('t.bl')::uuid, 'points', 'ahead', 0.01,
+                                         current_setting('t.bcap')::numeric, 0.8, 0.4, 20, 'read', current_setting('t.key'));
+  raise notice 'BA4c. FAIL: a read ahead passed the optional features'' line';
+exception when others then raise notice 'BA4c. %: at the line the reservation is refused, and the worker gives the claim back (%)', case when sqlerrm = 'reserve' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+
+-- BA1: the switch off; BA2: a deleted lecture.
+update study_private.features set enabled = false where name = 'points_ahead';
+update public.study_sections set markdown = markdown || E'\n\nעוד. [ש'' 4]' where lecture_id = :'bl' and idx = 1;
+delete from net.calls;
+update public.study_lectures set status = 'ready', updated_at = now() where id = :'bl';
+set role anon;
+select public.study_points_ahead_claim(:'bl', :'key') is null as boff \gset
+reset role;
+select 'BA1b. switched off: no kick, no claim: ' || case when (select count(*) from net.calls where body ? 'points') = 0 and :'boff' then 'ok' else 'FAIL' end;
+update study_private.features set enabled = true where name = 'points_ahead';
+select 'BA1c. switched on again, the new text is due: ' || case when study_private.points_ahead_due(:'bl') then 'ok' else 'FAIL' end;
+update public.study_lectures set deleted_at = now() where id = :'bl';
+delete from net.calls;
+set role anon;
+select public.study_points_ahead_claim(:'bl', :'key') is null as bdel \gset
+reset role;
+select 'BA2r. a deleted lecture is not read ahead: ' || case when :'bdel' and not study_private.points_ahead_due(:'bl') then 'ok' else 'FAIL' end;
+select 'BA2s. nor kicked: ' || case when not study_private.points_ahead_kick(:'bl') and (select count(*) from net.calls) = 0 then 'ok' else 'FAIL' end;
+
+-- Without server writing (no site URL in Vault): no kick, as before.
+update public.study_lectures set deleted_at = null where id = :'bl';
+delete from vault.decrypted_secrets where name = 'study_site_url';
+select 'BA6. no server writing, no kick: ' || case when not study_private.points_ahead_kick(:'bl') and (select count(*) from net.calls) = 0 then 'ok' else 'FAIL' end;
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_site_url', 'https://tamtzit.vercel.app')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+
+select 'B-reg. the registry: ' || case when public.study_schema() ->> 'B' = '1' then 'ok' else 'FAIL ' || coalesce(public.study_schema() ->> 'B', 'missing') end || ' (B at 1)';
+delete from public.study_usage where lecture_id = :'bl';
+delete from public.study_lectures where id = :'bl';
+delete from net.calls;
+select 'BA7. the fixtures are gone: ' || case when (select count(*) from public.study_point_parts where lecture_id = :'bl') + (select count(*) from public.study_points where lecture_id = :'bl') = 0 then 'ok' else 'FAIL' end;
+-- ════ END SECTION B ════
+
+-- ════ BEGIN SECTION G · the group's marathon plan (package G) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION G checks · the group's marathon plan (package G; spec §12.6.G's
+--  GS1-GS5 and GS-reg, plus GS6-GS7 for decision 3's meter and the grants),
+--  on fixtures of their own, removed at the end. Every line says ok or FAIL
+--  by itself.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+select coalesce(current_setting('request.jwt.claim.sub', true), '') as g_sub0 \gset
+select id as ggid from public.study_groups order by created_at limit 1 \gset
+select set_config('t.ggid', :'ggid', false) is not null as g \gset
+\set gl1 'd6100000-0000-4000-8000-000000000001'
+\set gl2 'd6100000-0000-4000-8000-000000000002'
+\set gron 'd6000000-0000-4000-8000-000000000001'
+\set gnoa 'd6000000-0000-4000-8000-000000000002'
+\set gmay 'd6000000-0000-4000-8000-000000000003'
+\set gtal 'd6000000-0000-4000-8000-000000000004'
+\set gout 'd6000000-0000-4000-8000-000000000009'
+select set_config('t.gl1', :'gl1', false) is not null as g \gset
+create schema if not exists gtest;
+create or replace function gtest.is_(p_label text, p_got text, p_want text) returns text language sql immutable as $$
+  select p_label || case when p_got is not distinct from p_want then '. ok: ' || coalesce(p_got, 'null')
+                         else '. FAIL: ' || coalesce(p_got, 'null') || ' (expect ' || coalesce(p_want, 'null') || ')' end $$;
+revoke all on schema gtest from public;
+grant usage on schema gtest to authenticated;
+grant execute on function gtest.is_(text, text, text) to authenticated;
+insert into auth.users (id, raw_user_meta_data) values
+ (:'gron', '{"app":"study","full_name":"רונית"}'), (:'gnoa', '{"app":"study","full_name":"נוי"}'),
+ (:'gmay', '{"app":"study","full_name":"מאי"}'), (:'gtal', '{"app":"study","full_name":"טל"}'), (:'gout', '{"app":"study","full_name":"זר"}');
+insert into public.study_members (group_id, user_id, name) values
+ (:'ggid', :'gron', 'רונית'), (:'ggid', :'gnoa', 'נוי'), (:'ggid', :'gmay', 'מאי'), (:'ggid', :'gtal', 'טל');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'gl1', :'ggid', 'פתוגן מאכסן', 'Malaria (תוכנית)', 'pptx', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 40) n), 'ready', :'gron'),
+ (:'gl2', :'ggid', 'פתוגן מאכסן', 'Helminths (תוכנית)', 'pptx', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 10) n), 'ready', :'gron');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ (:'gl1', 0, 'מחזור החיים', 1, 20, 'ready', E'## מחזור\n\nHypnozoite ישן בכבד. [ש'' 5]\n\nPrimaquine אחרי G6PD. [ש'' 37]'),
+ (:'gl1', 1, 'טיפול', 21, 40, 'ready', E'## טיפול\n\nChloroquine. [ש'' 22]'),
+ (:'gl2', 0, 'תולעים', 1, 10, 'ready', E'## תולעים\n\nAlbendazole. [ש'' 3]');
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, anchor, quote, kind, question, options, slides, topic, aspect) values
+ ('d6200000-0000-4000-8000-000000000001', :'ggid', :'gl1', 'ai', 0, 1, 'Hypnozoite ישן', 'mcq', 'איפה ה-hypnozoite?', array['כבד','דם','טחול','מוח'], array[5], 'Primaquine', 'mechanism'),
+ ('d6200000-0000-4000-8000-000000000002', :'ggid', :'gl1', 'ai', 0, 2, 'Primaquine אחרי', 'mcq', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','כבד','כליה'], array[37], 'Primaquine', 'contra'),
+ ('d6200000-0000-4000-8000-000000000003', :'ggid', :'gl1', 'ai', 1, 1, 'Chloroquine', 'mcq', 'Chloroquine פועלת על?', array['דם','כבד','מעי','עור'], array[22], 'Chloroquine', 'mechanism'),
+ ('d6200000-0000-4000-8000-000000000004', :'ggid', :'gl1', 'ai', 0, 2, 'Primaquine אחרי', 'mcq', 'שאלה שנייה על אותה פסקה', array['א','ב','ג','ד'], array[37], 'Primaquine', 'contra');
+insert into public.study_question_keys (question_id, answer, explanations)
+select q, 0::smallint, array['א','ב','ג','ד'] from unnest(array['d6200000-0000-4000-8000-000000000001', 'd6200000-0000-4000-8000-000000000002',
+                                                               'd6200000-0000-4000-8000-000000000003', 'd6200000-0000-4000-8000-000000000004']::uuid[]) q;
+update public.study_questions set created_at = now() - interval '1 hour' where id = 'd6200000-0000-4000-8000-000000000002';  -- the key of 0.2 is the older one
+
+-- ═════════ GS1 · the plan: set up once, changed by anyone, with names ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000001';   -- רונית
+select id as gp, version as gv from public.study_group_plan_save(null, null, :'ggid', 'מבחן בלוק פתוגן-מאכסן', current_date + 30,
+  array[:'gl1'::uuid, :'gl2'::uuid, :'gl1'::uuid]) \gset
+select set_config('t.gp', :'gp', false) is not null as g \gset
+select gtest.is_('GS1. the plan from the exam alone: shared from, leave from, minutes, rounds, lectures once each',
+                 (shared_from - current_date) || ', ' || (leave_from - current_date) || ', ' || shared_minutes || '/' || leave_minutes || ', '
+                 || rounds || ', ' || cardinality(lecture_ids), '9, 16, 180/600, 3, 2')
+  from public.study_group_plans where id = :'gp';
+do $$ begin perform public.study_group_plan_save(null, null, current_setting('t.ggid')::uuid, 'עבר', current_date - 1, array[current_setting('t.gl1')::uuid]);
+  raise notice 'GS1b. FAIL: an exam in the past';
+exception when others then raise notice 'GS1b. %: an exam in the past (%)', case when sqlerrm = 'bad date' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_group_plan_save(null, null, current_setting('t.ggid')::uuid, 'בלי הרצאות', current_date + 20, '{}'::uuid[]);
+  raise notice 'GS1f. FAIL: a plan with no lectures';
+exception when others then raise notice 'GS1f. %: a plan needs a lecture (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_group_plan_save(null, null, current_setting('t.ggid')::uuid, 'זר', current_date + 20, array[gen_random_uuid()]);
+  raise notice 'GS1g. FAIL: a lecture of nobody''s';
+exception when others then raise notice 'GS1g. %: only the group''s lectures (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000002';   -- נוי changes it
+select gtest.is_('GS1c. Noy changed it', version::text, '2')
+  from public.study_group_plan_save(:'gp', :'gv', :'ggid', 'מבחן בלוק פתוגן-מאכסן', current_date + 30, array[:'gl1'::uuid, :'gl2'::uuid],
+                                    null, null, 180, 600, 3, '09:00');
+select gtest.is_('GS1d. the last change carries her name ("שינוי אחרון: נוי")', (updated_by = auth.uid())::text, 'true') from public.study_group_plans where id = :'gp';
+do $$ begin perform public.study_group_plan_save(current_setting('t.gp')::uuid, 1, current_setting('t.ggid')::uuid,
+  'ישן', current_date + 30, array[current_setting('t.gl1')::uuid]); raise notice 'GS1e. FAIL: a stale version saved';
+exception when others then raise notice 'GS1e. %: a stale version (%)', case when sqlerrm = 'conflict' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000009';   -- not a member
+do $$ begin perform public.study_group_plan_save(null, null, current_setting('t.ggid')::uuid, 'זר', current_date + 20, array[current_setting('t.gl1')::uuid]);
+  raise notice 'GS1h. FAIL: a stranger made a plan';
+exception when others then raise notice 'GS1h. %: a stranger (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select gtest.is_('GS1i. a stranger reads no plan', count(*)::text, '0') from public.study_group_plans where group_id = :'ggid';
+
+-- ═════════ GS2 · a day of the group lane is a marathon of the plan ═════════
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000001';
+select id as gd, version as gdv from public.study_group_plan_day(:'gp', current_date + 9, null, 'יום 1 · סבב משותף',
+  (current_date + 9) + time '09:00', 180, array[:'gl1'::uuid],
+  jsonb_build_array(jsonb_build_object('k', 'intro', 'min', 5, 'title', 'פתיחה: 3 לקפה'),
+                    jsonb_build_object('k', 'read', 'l', :'gl1', 'from', 0, 'to', 0, 'min', 50),
+                    jsonb_build_object('k', 'quiz', 'l', :'gl1', 'n', 5, 'min', 10),
+                    jsonb_build_object('k', 'break', 'min', 10),
+                    jsonb_build_object('k', 'read', 'l', :'gl1', 'from', 1, 'to', 1, 'min', 60, 'moved', true))) \gset
+select gtest.is_('GS2. the day is a marathon of the plan: day, steps, moved ones',
+                 (plan_day - current_date) || ', ' || jsonb_array_length(agenda) || ', '
+                 || (select count(*) from jsonb_array_elements(agenda) s where s ->> 'moved' = 'true'), '9, 5, 1')
+  from public.study_marathons where id = :'gd';
+select gtest.is_('GS2b. the same day again: the same marathon, its next version', version || ', ' || (id = :'gd'), '2, true')
+  from public.study_group_plan_day(:'gp', current_date + 9, :'gdv', 'יום 1 · סבב משותף', (current_date + 9) + time '09:00', 240,
+                                   array[:'gl1'::uuid], '[]'::jsonb);
+do $$ begin perform public.study_group_plan_day(current_setting('t.gp')::uuid, current_date + 9, 1,
+  'ישן', (current_date + 9) + time '09:00', 180, array[current_setting('t.gl1')::uuid], '[]'::jsonb); raise notice 'GS2c. FAIL: a day someone edited was overwritten';
+exception when others then raise notice 'GS2c. %: a day someone edited stays (%)', case when sqlerrm = 'conflict' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_group_plan_day(current_setting('t.gp')::uuid, current_date + 40, null,
+  'אחרי', (current_date + 40) + time '09:00', 180, array[current_setting('t.gl1')::uuid], '[]'::jsonb); raise notice 'GS2d. FAIL: a day after the exam';
+exception when others then raise notice 'GS2d. %: a day after the exam (%)', case when sqlerrm = 'bad date' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000003';
+select gtest.is_('GS2e. every member sees the day and who made it', count(*)::text || ', ' || bool_and(created_by = 'd6000000-0000-4000-8000-000000000001'),
+                 '1, true') from public.study_marathons where plan_id = :'gp';
+
+-- ═════════ GS3 · the price of a day that slipped, with a name ═════════
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000002';
+select public.study_group_plan_slip(:'gp', current_date + 10, 'longer', current_date + 14) as sv \gset
+select gtest.is_('GS3. slipped: version, by whom, the price, until',
+                 :'sv' || ', ' || ((slips -> -1 ->> 'by') = auth.uid()::text) || ', ' || (slips -> -1 ->> 'choice') || ' +' || ((slips -> -1 ->> 'until')::date - current_date),
+                 '3, true, longer +14')
+  from public.study_group_plans where id = :'gp';
+do $$ begin perform public.study_group_plan_slip(current_setting('t.gp')::uuid, current_date + 10, 'later', null);
+  raise notice 'GS3b. FAIL: a third price';
+exception when others then raise notice 'GS3b. %: the price is one of two (%)', case when sqlerrm = 'bad choice' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_group_plan_slip(current_setting('t.gp')::uuid, current_date + 10, 'longer', current_date + 40);
+  raise notice 'GS3c. FAIL: longer past the exam';
+exception when others then raise notice 'GS3c. %: "עד" before the exam (%)', case when sqlerrm = 'bad date' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ GS4 · the private relearning rounds ═════════
+-- Noy read L1 four days ago; its three key questions (one per paragraph: the
+-- older of the two on 0.2) she answered right three and two days ago: round 2 is done.
+reset role;
+insert into public.study_reads (lecture_id, user_id, read_at) values (:'gl1', :'gnoa', now() - interval '4 days');
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values
+ (:'gnoa', 'd6200000-0000-4000-8000-000000000001', 0, true, 'lecture', now() - interval '3 days'),
+ (:'gnoa', 'd6200000-0000-4000-8000-000000000002', 0, true, 'lecture', now() - interval '2 days'),
+ (:'gnoa', 'd6200000-0000-4000-8000-000000000003', 0, true, 'lecture', now() - interval '2 days');
+set role authenticated;
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000002';
+select gtest.is_('GS4. Noy''s rounds: L1 rounds, keys, left, next (days); L2',
+                 string_agg(case when lecture_id = :'gl1' then 'L1' else 'L2' end || ' ' || rounds || ' ' || key_total || ' ' || key_left || ' '
+                            || coalesce((next_day - ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date)::text, '-'), '; ' order by lecture_id),
+                 'L1 2 3 3 1; L2 0 0 0 -')
+  from public.study_my_relearning(:'gp');
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000003';
+select gtest.is_('GS4b. May''s own rounds, not Noy''s', string_agg(rounds::text, ',' order by lecture_id), '0,0') from public.study_my_relearning(:'gp');
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000009';
+do $$ begin perform public.study_my_relearning(current_setting('t.gp')::uuid); raise notice 'GS4c. FAIL: a stranger read rounds';
+exception when others then raise notice 'GS4c. %: a stranger (%)', case when sqlerrm = 'plan not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ GS5 · "זה למבחן" from the recording's notes ═════════
+reset role;
+insert into public.study_recordings (lecture_id, source, status, consented, created_by) values (:'gl1', 'file', 'ready', true, :'gron');
+insert into public.study_recording_notes (lecture_id, part_idx, status, items) values
+ (:'gl1', 0, 'ready', '[{"anchor":2,"quote":"Primaquine אחרי","at_s":2470,"text":"זה יופיע במבחן: G6PD לפני Primaquine","kind":"exam"},
+                        {"anchor":1,"quote":"Hypnozoite","at_s":2100,"text":"הוסבר שוב","kind":"said"}]');
+select enabled as g_rec_was from study_private.features where name = 'recordings' \gset
+update study_private.features set enabled = false where name = 'recordings';
+set role authenticated;
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000001';
+select gtest.is_('GS5. exam marks with recordings off', count(*)::text, '0') from public.study_exam_marks(:'gl1');
+reset role;
+update study_private.features set enabled = true where name = 'recordings';
+set role authenticated;
+select gtest.is_('GS5b. with recordings on: only the "exam" item', string_agg(part_idx || '.' || anchor || ' @' || at_s, ' '), '0.2 @2470') from public.study_exam_marks(:'gl1');
+reset role;
+update study_private.features set enabled = :'g_rec_was' where name = 'recordings';
+
+-- ═════════ GS6 · decision 3: the plan's meter, from real counts, from 3 members ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000001';
+reset role;
+delete from public.study_answers where user_id in (:'gron', :'gnoa', :'gmay', :'gtal', :'gout');
+set role authenticated;
+select gtest.is_('GS6. nothing practised: each lecture says how far (answers, short, people short, bucket)',
+                 string_agg(answers || '/' || answers_short || '/' || members_short || '/' || coalesce(bucket, '-'), '; '), '0/20/3/-; 0/20/3/-')
+  from public.study_group_plan_meter(:'gp');
+-- Ronit and Noy practise L1 on four study days before today's: 3 questions a day each = 24 first
+-- answers (mostly wrong). G 2: the meter counts up to the start of today's study day (04:00), so
+-- every answer below sits an hour or more before that cut-off.
+reset role;
+select set_config('t.gcut', study_private.pulse_cutoff(now())::text, false) is not null as g_cut \gset
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at)
+select u, q, 1, (d = 0 and q = 'd6200000-0000-4000-8000-000000000001'), 'lecture',
+       current_setting('t.gcut')::timestamptz - interval '1 hour' - make_interval(days => d)
+  from unnest(array[:'gron', :'gnoa']::uuid[]) u,
+       unnest(array['d6200000-0000-4000-8000-000000000001', 'd6200000-0000-4000-8000-000000000002', 'd6200000-0000-4000-8000-000000000003']::uuid[]) q,
+       generate_series(0, 3) d;
+-- Not counted: a second answer the same day, a stranger's answer, an answer older than the window.
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values
+ (:'gron', 'd6200000-0000-4000-8000-000000000001', 0, true, 'lecture', current_setting('t.gcut')::timestamptz - interval '30 minutes'),
+ (:'gout', 'd6200000-0000-4000-8000-000000000001', 0, true, 'lecture', current_setting('t.gcut')::timestamptz - interval '1 hour'),
+ (:'gmay', 'd6200000-0000-4000-8000-000000000001', 0, true, 'lecture', now() - interval '40 days');
+set role authenticated;
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000004';   -- טל, who never practised, reads the same meter
+select gtest.is_('GS6b. 24 answers from two people: L1 waits for one more person, no bucket yet',
+                 string_agg(answers || '/' || answers_short || '/' || members_short || '/' || coalesce(bucket, '-'), '; '), '24/0/1/-; 0/20/3/-')
+  from public.study_group_plan_meter(:'gp');
+-- Review G-METER-PNOW (G 2): practice done today changes nothing anyone sees until tomorrow.
+-- May answers L1 now, twice a second apart: the meter Tal reads is the same before and after each.
+select string_agg(answers || '/' || members_short, '; ') as g_before from public.study_group_plan_meter(:'gp') \gset
+reset role;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values
+ (:'gmay', 'd6200000-0000-4000-8000-000000000002', 0, true, 'lecture', now());
+set role authenticated;
+select string_agg(answers || '/' || members_short, '; ') as g_mid from public.study_group_plan_meter(:'gp') \gset
+reset role;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values
+ (:'gmay', 'd6200000-0000-4000-8000-000000000003', 1, false, 'lecture', now() + interval '1 second');
+set role authenticated;
+select gtest.is_('GS6b2. an answer today moves no number until the next study day (before · after one · after two)',
+                 :'g_before' || ' · ' || :'g_mid' || ' · ' || string_agg(answers || '/' || members_short, '; '),
+                 '24/1; 0/3 · 24/1; 0/3 · 24/1; 0/3')
+  from public.study_group_plan_meter(:'gp');
+select gtest.is_('GS6b3. the caller passes no time: one form, (p_plan) alone',
+                 count(*)::text || ' ' || string_agg(pg_get_function_identity_arguments(oid), ' | '), '1 p_plan uuid')
+  from pg_proc where proname = 'study_group_plan_meter' and pronamespace = 'public'::regnamespace;
+reset role;
+delete from public.study_answers where user_id = :'gmay' and answered_at >= current_setting('t.gcut')::timestamptz;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values
+ (:'gmay', 'd6200000-0000-4000-8000-000000000002', 0, true, 'lecture', current_setting('t.gcut')::timestamptz - interval '2 hours');
+set role authenticated;
+select gtest.is_('GS6c. a third person: L1 has data, and it is hot (3 of 25 right)',
+                 string_agg(answers || '/' || answers_short || '/' || members_short || '/' || coalesce(bucket, '-'), '; '), '25/0/0/hot; 0/20/3/-')
+  from public.study_group_plan_meter(:'gp');
+select gtest.is_('GS6d. the meter names nobody: its columns', array_to_string(proargnames, ','),
+                 'p_plan,lecture_id,answers,answers_short,members_short,bucket')
+  from pg_proc where proname = 'study_group_plan_meter' and pronamespace = 'public'::regnamespace;
+set request.jwt.claim.sub = 'd6000000-0000-4000-8000-000000000009';
+do $$ begin perform public.study_group_plan_meter(current_setting('t.gp')::uuid); raise notice 'GS6e. FAIL: a stranger read the meter';
+exception when others then raise notice 'GS6e. %: a stranger (%)', case when sqlerrm = 'plan not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ GS7 · grants, what is published, the thresholds, the registry ═════════
+reset role;
+set role anon;
+do $$ begin perform public.study_group_plan_meter(current_setting('t.gp')::uuid); raise notice 'GS7. FAIL: anon called the meter';
+exception when insufficient_privilege then raise notice 'GS7. ok: anon may not call it (%)', sqlerrm;
+          when others then raise notice 'GS7. FAIL: (%)', sqlerrm; end $$;
+reset role;
+select gtest.is_('GS7b. members write plans only through the functions',
+                 (has_table_privilege('authenticated', 'public.study_group_plans', 'insert') or has_table_privilege('authenticated', 'public.study_group_plans', 'update'))::text,
+                 'false');
+select gtest.is_('GS7c. the plan is published (its edits reach every phone); the meter''s thresholds',
+                 (exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'study_group_plans'))::text || '; '
+                 || study_private.plan_lecture_answers() || ', ' || study_private.plan_floor() || ', ' || study_private.plan_window_days() || ', '
+                 || study_private.plan_hot_below() || ', ' || study_private.plan_ok_from(), 'true; 20, 3, 28, 60, 80');
+select gtest.is_('GS-reg. the registry (G 2: the meter counts to the study day''s start)', public.study_schema() ->> 'G', '2');
+
+-- The fixtures go: the plan and its days, the recording, the lectures, the users.
+delete from public.study_marathons where plan_id = :'gp';
+delete from public.study_group_plans where group_id = :'ggid' and created_by in (:'gron', :'gnoa');
+delete from public.study_lectures where id in (:'gl1', :'gl2');
+delete from public.study_members where user_id in (:'gron', :'gnoa', :'gmay', :'gtal');
+delete from auth.users where id in (:'gron', :'gnoa', :'gmay', :'gtal', :'gout');
+drop schema gtest cascade;
+select set_config('request.jwt.claim.sub', :'g_sub0', false) is not null as g \gset
+select 'GS8. the fixtures are gone: ' || case when not exists (select 1 from public.study_group_plans where title = 'מבחן בלוק פתוגן-מאכסן')
+                                and not exists (select 1 from public.study_members where user_id::text like 'd6000000%') then 'ok' else 'FAIL' end;
+-- ════ END SECTION G ════
+
+-- ════ BEGIN SECTION E · phase-3 extras (package E) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION E checks · a member's own trap (P11) and the blank table's
+--  tables (P10)   (package E; spec §12.6.E: ES1-ES6, ES5a, ES5b, ES-reg,
+--  with this branch's additions). Fixtures of their own (three members, a
+--  lecture with a table on slide 7), removed at the end. Every line says ok
+--  or FAIL by itself. The unmask is checked through section Z's own final
+--  reveal (study_quiz__score), not only by calling the hook.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+reset request.jwt.claim.sub;
+\set key 'k-0123456789abcdef0123456789abcdef'
+select set_config('t.key', :'key', false) is not null as have_key \gset
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', :'key')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+select id as egid from public.study_groups order by created_at limit 1 \gset
+select set_config('t.egid', :'egid', false) is not null as g \gset
+\set el 'e5100000-0000-4000-8000-000000000001'
+\set rony 'e5000000-0000-4000-8000-000000000001'
+\set maya 'e5000000-0000-4000-8000-000000000002'
+\set adi 'e5000000-0000-4000-8000-000000000003'
+select set_config('t.el', :'el', false) is not null as l \gset
+create schema if not exists etest;
+create or replace function etest.is_(p_label text, p_got text, p_want text) returns text language sql immutable as $$
+  select p_label || case when p_got is not distinct from p_want then '. ok: ' || coalesce(p_got, 'null')
+                         else '. FAIL: ' || coalesce(p_got, 'null') || ' (expect ' || coalesce(p_want, 'null') || ')' end $$;
+revoke all on schema etest from public;
+grant usage on schema etest to authenticated, anon;
+grant execute on function etest.is_(text, text, text) to authenticated, anon;
+insert into auth.users (id, raw_user_meta_data) values
+ (:'rony', '{"app":"study","full_name":"רוני"}'), (:'maya', '{"app":"study","full_name":"מאיה"}'), (:'adi', '{"app":"study","full_name":"עדי"}');
+insert into public.study_members (group_id, user_id, name) values (:'egid', :'rony', 'רוני'), (:'egid', :'maya', 'מאיה'), (:'egid', :'adi', 'עדי');
+-- Twenty slides; slide 7 holds a 4×3 table (a header and three rows), slide 9 a one-row table and a broken one.
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'el', :'egid', 'פתוגן מאכסן', 'Malaria (extras)', 'pptx',
+  (select jsonb_agg(jsonb_build_object('n', n, 'title', 'שקף ' || n, 'lines', jsonb_build_array('עובדה ' || n), 'notes', '', 'figures', '[]'::jsonb,
+          'tables', case n when 7 then '[[["תרופה","כבד","דם"],["Primaquine","כן","—"],["Chloroquine","—","כן"],["Atovaquone-proguanil","כן","כן"]]]'::jsonb
+                           when 9 then '[[["רק","שורה"]], "not a table"]'::jsonb
+                           else '[]'::jsonb end) order by n) from generate_series(1, 20) n),
+  'ready', :'maya');
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, kind, question, options, slides)
+values ('e5200000-0000-4000-8000-000000000001', :'egid', :'el', 'ai', 0, 'mcq', 'שאלה של Claude?', array['א','ב','ג','ד'], array[7]);
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ (:'el', 0, 'טיפול', 1, 10, 'ready', E'## טיפול\n\nלפני Primaquine בודקים G6PD. [ש'' 7]\n\nChloroquine מצטברת בוואקואולה. [ש'' 15]'),
+ (:'el', 1, 'מנגנון', 11, 20, 'ready', E'## מנגנון\n\nChloroquine מצטברת בוואקואולה. [ש'' 15]');
+
+-- ═════════ ES1 · the draft's shape: a lead-in that asks, distinct options, the lecture's slides ═════════
+set role authenticated;
+set request.jwt.claim.sub = :'rony';
+do $$ begin perform public.study_trap_submit(null, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine', array['G6PD','ECG','CBC','LFT'], 0, '', array[7]);
+  raise notice 'ES1. FAIL: a lead-in without a question mark';
+exception when others then raise notice 'ES1. %: (%)', case when sqlerrm = 'bad question' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_trap_submit(null, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','g6pd ','LFT'], 0, '', array[7]);
+  raise notice 'ES1b. FAIL: the same option twice';
+exception when others then raise notice 'ES1b. %: (%)', case when sqlerrm = 'bad options' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_trap_submit(null, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','CBC','LFT'], 0, '', array[99]);
+  raise notice 'ES1c. FAIL: a slide not in the lecture';
+exception when others then raise notice 'ES1c. %: (%)', case when sqlerrm = 'bad source' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_trap_submit(null, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','CBC'], 0, '', array[7]);
+  raise notice 'ES1d. FAIL: three options';
+exception when others then raise notice 'ES1d. %: 4 or 5 options (%)', case when sqlerrm = 'bad options' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_trap_submit(null, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','CBC','LFT'], 4, '', array[7]);
+  raise notice 'ES1e. FAIL: the key past the options';
+exception when others then raise notice 'ES1e. %: (%)', case when sqlerrm = 'bad answer' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_trap_submit(null, current_setting('t.el')::uuid, 5, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','CBC','LFT'], 0, '', array[7]);
+  raise notice 'ES1f. FAIL: a part the lecture does not have';
+exception when others then raise notice 'ES1f. %: (%)', case when sqlerrm = 'bad parts' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_trap_submit(null, :'el', 0, 1, 'לפני Primaquine בודקים G6PD', 'מטייל חזר עם P. vivax.', 'מה חייבים לבדוק לפני Primaquine?',
+  array['G6PD', 'ECG', 'ספירת דם', 'תפקודי כבד', 'בדיקת היריון'], 0, 'רוב האנשים בוחרים ECG', array[7]) as dr \gset
+select set_config('t.dr', :'dr', false) is not null as x \gset
+select etest.is_('ES1g. Rony''s draft, hers alone', state || ' · ' || cardinality(options) || ' · ' || (user_id = :'rony')::text, 'draft · 5 · true')
+  from public.study_trap_drafts where id = :'dr';
+
+-- ═════════ ES2 · nobody else sees or checks a draft ═════════
+set request.jwt.claim.sub = :'maya';
+select etest.is_('ES2. Maya sees Rony''s drafts', count(*)::text, '0') from public.study_trap_drafts;
+do $$ begin perform public.study_trap_checked(current_setting('t.dr')::uuid, true, '', '{}', '{}', '', '', '', current_setting('t.key'));
+  raise notice 'ES2b. FAIL: Maya checked Rony''s draft';
+exception when others then raise notice 'ES2b. %: only the author''s call (%)', case when sqlerrm = 'draft not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_trap_submit(current_setting('t.dr')::uuid, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','CBC','LFT'], 1, '', array[7]);
+  raise notice 'ES2c. FAIL: Maya rewrote Rony''s draft';
+exception when others then raise notice 'ES2c. %: (%)', case when sqlerrm = 'draft not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- ═════════ ES3 · the verdict needs the server key ═════════
+set request.jwt.claim.sub = :'rony';
+do $$ begin perform public.study_trap_checked(current_setting('t.dr')::uuid, true, '', '{}', '{}', '', '', '', null); raise notice 'ES3. FAIL: no key';
+exception when others then raise notice 'ES3. %: the op holds the key (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_trap_checked(current_setting('t.dr')::uuid, true, '', array['a','b'], '{}', '', '', '', current_setting('t.key'));
+  raise notice 'ES3b. FAIL: two explanations for five options';
+exception when others then raise notice 'ES3b. %: (%)', case when sqlerrm = 'explanations do not match options' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select etest.is_('ES3c. a refused verdict leaves the draft as it was', state, 'draft') from public.study_trap_drafts where id = :'dr';
+
+-- ═════════ ES4 · it passes: in everyone's bank, shuffled, with no author ═════════
+select public.study_trap_checked(:'dr', true, '', array['נכון: G6PD [ש'' 7]', 'ECG לא נדרש כאן [ש'' 7]', 'לא נדרש [ש'' 7]', 'לא נדרש [ש'' 7]', 'לא נדרש [ש'' 7]'],
+  array['', 'מתי כן: Pentostam', '', '', 'מתי כן: Miltefosine'], 'לפני Primaquine בודקים G6PD [ש'' 7]', 'Primaquine', 'contra', :'key') as tq \gset
+select set_config('t.tq', :'tq', false) is not null as x \gset
+select etest.is_('ES4. the draft is ok and points at its question', state || ' · ' || (question_id = :'tq')::text || ' · ' || problem, 'ok · true · ')
+  from public.study_trap_drafts where id = :'dr';
+set request.jwt.claim.sub = :'maya';
+select etest.is_('ES4a. in everyone''s bank',
+                 source || ', author ' || coalesce(author_id::text, 'hidden') || ', created_by ' || coalesce(created_by::text, 'none') || ', anchor ' || anchor
+                 || ', kind ' || kind || ', model ' || model || ', aspect ' || aspect,
+                 'member, author hidden, created_by none, anchor 1, kind case, model member, aspect contra')
+  from public.study_questions where id = :'tq';
+select etest.is_('ES4b. the author''s options, as written (the order is the server''s)',
+                 (select string_agg(o, '|' order by o) from unnest(options) o), (select string_agg(o, '|' order by o) from unnest(array['G6PD', 'ECG', 'ספירת דם', 'תפקודי כבד', 'בדיקת היריון']) o))
+  from public.study_questions where id = :'tq';
+select array_position(options, 'G6PD') - 1 as g6 from public.study_questions where id = :'tq' \gset
+select array_position(options, 'ECG') - 1 as ecg from public.study_questions where id = :'tq' \gset
+select etest.is_('ES4c. answered in practice by Maya: right, the key''s explanation and "מתי כן" moved with their options',
+                 correct::text || ' · ' || explanations[:'g6'::int + 1] || ' · ' || whens[:'ecg'::int + 1] || ' · ' || whens[:'g6'::int + 1] || '.',
+                 'true · נכון: G6PD [ש'' 7] · מתי כן: Pentostam · .')
+  from public.study_answer_question(:'tq', :'g6'::int, 'lecture', null, 3);
+select etest.is_('ES4d. after practice the author is still hidden', coalesce(author_id::text, 'hidden'), 'hidden') from public.study_questions where id = :'tq';
+set request.jwt.claim.sub = :'rony';
+do $$ begin perform public.study_trap_checked(current_setting('t.dr')::uuid, true, '', array['a','b','c','d','e'], '{}', '', '', '', current_setting('t.key'));
+  raise notice 'ES4e. FAIL: checked twice';
+exception when others then raise notice 'ES4e. %: (%)', case when sqlerrm = 'checked' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_trap_submit(current_setting('t.dr')::uuid, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','CBC','LFT'], 1, '', array[7]);
+  raise notice 'ES4f. FAIL: a passed trap was rewritten';
+exception when others then raise notice 'ES4f. %: a passed trap is the bank''s now (%)', case when sqlerrm = 'draft not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- Adi passes eight traps, each with its key first: the bank's order is the server's, and each key stays on its text.
+set request.jwt.claim.sub = :'adi';
+select count(public.study_trap_checked(public.study_trap_submit(null, :'el', 0, 1, '', '', 'שאלת ערבוב מספר ' || i || '?',
+         array['נכונה ' || i, 'שגויה א', 'שגויה ב', 'שגויה ג'], 0, '', array[7]),
+         true, '', array['כי נכונה [ש'' 7]', 'לא [ש'' 7]', 'לא [ש'' 7]', 'לא [ש'' 7]'], '{}', 'נכונה [ש'' 7]', '', '', :'key')) as mixed
+  from generate_series(1, 8) i \gset
+reset role;
+select etest.is_('ES4g. eight traps written key-first: every key on its text, not all in one place',
+                 (count(*) filter (where k.answer = array_position(q.options, 'נכונה ' || substring(q.question from '[0-9]+')) - 1
+                                     and k.explanations[k.answer + 1] = 'כי נכונה [ש'' 7]'))::text || ' · ' || (count(distinct k.answer) > 1)::text,
+                 '8 · true')
+  from public.study_questions q join public.study_question_keys k on k.question_id = q.id
+ where q.lecture_id = :'el' and q.question like 'שאלת ערבוב%';
+set role authenticated;
+
+-- ═════════ ES5 · practice never unmasks; a live quiz's reveal does ═════════
+set request.jwt.claim.sub = :'adi';
+do $$ begin perform public.study_answer_question(current_setting('t.tq')::uuid, 1, 'quiz', null, 2);
+  raise notice 'ES5a. FAIL: a member wrote a "quiz" answer from practice';
+exception when others then raise notice 'ES5a. %: only a live quiz writes quiz answers (%)', case when sqlerrm = 'bad mode' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select etest.is_('ES5b. after the refused "quiz" answer (review SEC-7)', coalesce(author_id::text, 'hidden'), 'hidden') from public.study_questions where id = :'tq';
+do $$ begin perform public.study_quiz__revealed(null, current_setting('t.tq')::uuid); raise notice 'ES5c. FAIL: a member called the hook';
+exception when insufficient_privilege then raise notice 'ES5c. ok: the hook is section Z''s alone (%)', sqlerrm;
+          when others then raise notice 'ES5c. FAIL: (%)', sqlerrm; end $$;
+do $$ begin update public.study_questions set author_id = auth.uid(), unmasked_at = now() where id = current_setting('t.tq')::uuid;
+  raise notice 'ES5d. %', case when (select author_id from public.study_questions where id = current_setting('t.tq')::uuid) is null then 'ok: a member cannot name an author' else 'FAIL: a member named the author' end;
+exception when insufficient_privilege then raise notice 'ES5d. ok: a member cannot name an author (%)', sqlerrm; end $$;
+reset role;
+-- A live quiz on the lecture: Adi answers the trap in round 0, and section Z's final reveal scores it.
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, state, idx, n_total, created_at)
+values ('e5500000-0000-4000-8000-000000000001', :'egid', 'coop', 'מלכודות', array[:'el']::uuid[], 1, 60, 'question', 0, 1, now());
+insert into public.study_quiz_players (quiz_id, user_id) values ('e5500000-0000-4000-8000-000000000001', :'adi');
+insert into public.study_quiz_rounds (id, quiz_id, idx, question_id, seconds, opens_at, closes_at)
+values ('e5510000-0000-4000-8000-000000000001', 'e5500000-0000-4000-8000-000000000001', 0, :'tq', 60, now() - interval '30 seconds', now() + interval '30 seconds');
+insert into public.study_quiz_answers (round_id, user_id, choice, ms, answered_at, vote, bet)
+values ('e5510000-0000-4000-8000-000000000001', :'adi', :'ecg'::smallint, 4000, now() - interval '20 seconds', 1, 2);
+select etest.is_('ES5e. before the reveal', coalesce(author_id::text, 'hidden') || ' · ' || (unmasked_at is null)::text, 'hidden · true')
+  from public.study_questions where id = :'tq';
+select public.study_quiz__score('e5500000-0000-4000-8000-000000000001', 'e5510000-0000-4000-8000-000000000001',
+                                (select answer from public.study_question_keys where question_id = :'tq'), 'explain', now()) is null as scored \gset
+set role authenticated;
+set request.jwt.claim.sub = :'maya';
+select etest.is_('ES5. after the live quiz''s reveal: "נכתבה ע״י רוני · נבדקה מול השקפים"',
+                 (author_id = :'rony')::text || ', unmasked ' || (unmasked_at is not null)::text
+                 || ', name ' || (select m.name from public.study_members m where m.user_id = q.author_id and m.group_id = q.group_id),
+                 'true, unmasked true, name רוני')
+  from public.study_questions q where id = :'tq';
+reset role;
+select ttime as first_unmask from (select unmasked_at::text as ttime from public.study_questions where id = :'tq') x \gset
+select public.study_quiz__revealed(null, :'tq') is null as again \gset
+select etest.is_('ES5f. a second reveal keeps the first moment', (unmasked_at::text = :'first_unmask')::text, 'true') from public.study_questions where id = :'tq';
+do $$ begin update public.study_questions set author_id = 'e5000000-0000-4000-8000-000000000002', unmasked_at = now()
+   where id = 'e5200000-0000-4000-8000-000000000001';
+  raise notice 'ES5g. FAIL: an author on a question of Claude''s';
+exception when check_violation then raise notice 'ES5g. ok: only a member''s trap has an author (%)', sqlerrm; end $$;
+
+-- ═════════ ES6 · not right by the slides: the problem, for the author to fix ═════════
+set role authenticated;
+set request.jwt.claim.sub = :'rony';
+select public.study_trap_submit(null, :'el', 1, 0, '', '', 'איפה Chloroquine מצטברת?', array['בוואקואולה', 'בגרעין', 'בכבד', 'בכליה'], 1, '', array[15]) as dr2 \gset
+select coalesce(public.study_trap_checked(:'dr2', false, 'לפי ש׳ 15 היא מצטברת בוואקואולה, לא בגרעין', '{}', '{}', '', '', '', :'key')::text, 'not saved') as es6 \gset
+select etest.is_('ES6. not right by the slides', :'es6' || ', ' || state || ' · ' || problem || ' · ' || coalesce(question_id::text, 'no question'),
+                 'not saved, rejected · לפי ש׳ 15 היא מצטברת בוואקואולה, לא בגרעין · no question')
+  from public.study_trap_drafts where id = :'dr2';
+select public.study_trap_submit(:'dr2', :'el', 1, 0, '', '', 'איפה Chloroquine מצטברת?', array['בוואקואולה', 'בגרעין', 'בכבד', 'בכליה'], 0, '', array[15]) as dr2b \gset
+select etest.is_('ES6b. "לתקן": the same draft, back to a draft, the problem cleared', (id = :'dr2')::text || ' · ' || state || ' · ' || answer || '.' || problem,
+                 'true · draft · 0.') from public.study_trap_drafts where id = :'dr2b';
+select etest.is_('ES6c. Rony''s own traps: one in the bank, unmasked; one draft', string_agg(state || ':' || (q.unmasked_at is not null)::text, ' ' order by state), 'draft:false ok:true')
+  from public.study_trap_drafts d left join public.study_questions q on q.id = d.question_id;
+
+-- ═════════ ES7 · ten new drafts a day ═════════
+reset role;
+insert into public.study_trap_drafts (user_id, group_id, lecture_id, part_idx, question, options, answer, slides)
+select :'adi', :'egid', :'el', 0, 'שאלת בדיקה מספר ' || i || '?', array['א','ב','ג','ד'], 0, array[7] from generate_series(1, 10) i;
+set role authenticated;
+set request.jwt.claim.sub = :'adi';
+do $$ begin perform public.study_trap_submit(null, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','CBC','LFT'], 0, '', array[7]);
+  raise notice 'ES7. FAIL: an eleventh draft today';
+exception when others then raise notice 'ES7. %: (%)', case when sqlerrm = 'daily_limit' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select etest.is_('ES7b. a draft of her own is still fixed on the eleventh',
+                 (public.study_trap_submit((select id from public.study_trap_drafts where state <> 'ok' order by created_at limit 1), :'el', 0, 1, '', '', 'מה בודקים לפני Primaquine?',
+                   array['G6PD','ECG','CBC','LFT'], 0, '', array[7]) is not null)::text, 'true');
+
+-- ═════════ ES8 · P10's meter: the tables the group's slides hold, by shape ═════════
+set request.jwt.claim.sub = :'maya';
+select etest.is_('ES8. the lecture''s tables (slide.table rows×cols, longest cell)',
+                 string_agg(slide || '.' || tbl || ' ' || n_rows || '×' || n_cols || ' ' || max_cell, ', ' order by slide, tbl), '7.0 4×3 20, 9.0 1×2 4')
+  from public.study_slide_tables(:'egid') where lecture_id = :'el';
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+select etest.is_('ES8b. a stranger sees no table', count(*)::text, '0') from public.study_slide_tables(:'egid');
+select etest.is_('ES8c. a stranger sees no trap, no draft', (select count(*) from public.study_questions where source = 'member')::text || ' · '
+                 || (select count(*) from public.study_trap_drafts)::text, '0 · 0');
+do $$ begin perform public.study_trap_submit(null, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','CBC','LFT'], 0, '', array[7]);
+  raise notice 'ES8d. FAIL: a stranger wrote a trap';
+exception when others then raise notice 'ES8d. %: (%)', case when sqlerrm = 'lecture not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+set role anon;
+do $$ begin perform public.study_trap_submit(null, current_setting('t.el')::uuid, 0, 1, '', '', 'מה בודקים לפני Primaquine?', array['G6PD','ECG','CBC','LFT'], 0, '', array[7]);
+  raise notice 'ES8e. FAIL: anon called study_trap_submit';
+exception when insufficient_privilege then raise notice 'ES8e. ok: anon may not call it (%)', sqlerrm;
+          when others then raise notice 'ES8e. FAIL: (%)', sqlerrm; end $$;
+reset role;
+select etest.is_('ES8f. the drafts are never published, no member writes them',
+                 (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'study_trap_drafts')::text
+                 || ' · ' || has_table_privilege('authenticated', 'public.study_trap_drafts', 'insert')::text
+                 || ' · ' || has_table_privilege('authenticated', 'public.study_trap_drafts', 'update')::text, '0 · false · false');
+select etest.is_('ES-reg. the registry', public.study_schema() ->> 'E', '1');
+
+-- The fixtures go: the quiz, the lecture (its traps, drafts and answers), the members.
+delete from public.study_quizzes where id = 'e5500000-0000-4000-8000-000000000001';
+delete from public.study_lectures where id = :'el';
+delete from public.study_members where user_id in (:'rony', :'maya', :'adi');
+delete from auth.users where id in (:'rony', :'maya', :'adi');
+drop schema etest cascade;
+select 'ES9. the fixtures are gone: ' || case when not exists (select 1 from public.study_questions where source = 'member' and lecture_id = :'el')
+              and not exists (select 1 from public.study_trap_drafts) and not exists (select 1 from public.study_members where user_id::text like 'e5000000%')
+         then 'ok' else 'FAIL' end;
+-- ════ END SECTION E ════
+
+-- ════ BEGIN SECTION T · Today (package T) ════
+-- ════════════════════════════════════════════════════════════════════════
+--  SECTION T checks · Today (package T, T-1; spec §12.4.T: T1-T3, T5, T6,
+--  T-reg, on fixtures of their own, removed at the end). T4 ("הקבוצה צריכה
+--  אותך") is T-2's, the section's end (T 2; decision 3: usable early, with
+--  the member's own meter). Section P's danger list and
+--  reading log are looked up at run time: where P is not loaded these checks
+--  stand in for them for a moment (and drop the stand-ins), where it is
+--  loaded they read P's own. Every line says ok or FAIL by itself.
+-- ════════════════════════════════════════════════════════════════════════
+reset role;
+select id as tgid from public.study_groups order by created_at limit 1 \gset
+select set_config('t.tgid', :'tgid', false) is not null as g \gset
+\set tl 'd5100000-0000-4000-8000-000000000001'
+\set noga 'd5000000-0000-4000-8000-000000000001'
+\set amit 'd5000000-0000-4000-8000-000000000002'
+\set raz 'd5000000-0000-4000-8000-000000000003'
+\set tq1 'd5200000-0000-4000-8000-000000000001'
+\set tq2 'd5200000-0000-4000-8000-000000000002'
+\set tq3 'd5200000-0000-4000-8000-000000000003'
+select study_private.day_of(now())::text as t_today, (study_private.day_of(now()) - 3)::text as t_d3 \gset
+create schema if not exists ttest;
+create or replace function ttest.is_(p_label text, p_got text, p_want text) returns text language sql immutable as $$
+  select p_label || case when p_got is not distinct from p_want then '. ok: ' || coalesce(p_got, 'null')
+                         else '. FAIL: ' || coalesce(p_got, 'null') || ' (expect ' || coalesce(p_want, 'null') || ')' end $$;
+revoke all on schema ttest from public;
+grant usage on schema ttest to authenticated;
+grant execute on function ttest.is_(text, text, text) to authenticated;
+insert into auth.users (id, raw_user_meta_data) values
+ (:'noga', '{"app":"study","full_name":"נגה"}'), (:'amit', '{"app":"study","full_name":"עמית"}'), (:'raz', '{"app":"study","full_name":"רז"}');
+insert into public.study_members (group_id, user_id, name) values (:'tgid', :'noga', 'נגה'), (:'tgid', :'amit', 'עמית'), (:'tgid', :'raz', 'רז');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'tl', :'tgid', 'פתוגן מאכסן', 'Leishmaniasis (היום)', 'pptx', (select jsonb_agg(jsonb_build_object('n', n)) from generate_series(1, 20) n), 'ready', :'amit');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ (:'tl', 0, 'טיפול', 1, 20, 'ready', E'## טיפול\n\nMiltefosine טרטוגנית. [ש'' 16]\n\nPentostam דורשת ECG. [ש'' 18]');
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, anchor, quote, kind, question, options, slides, topic, aspect) values
+ (:'tq1', :'tgid', :'tl', 'ai', 0, 1, 'Miltefosine טרטוגנית', 'mcq', 'Miltefosine: עד מתי אמצעי מניעה?', array['חודש','5 חודשים','שנה','אין צורך'], array[16], 'Miltefosine', 'contra'),
+ (:'tq2', :'tgid', :'tl', 'ai', 0, 1, 'Miltefosine טרטוגנית', 'mcq', 'כמה זמן אחרי Miltefosine נמנעים מהיריון?', array['חודש','5 חודשים','שנה','אין צורך'], array[16], 'Miltefosine', 'contra'),
+ (:'tq3', :'tgid', :'tl', 'ai', 0, 2, 'Pentostam דורשת', 'mcq', 'למה Pentostam דורשת ECG?', array['QTc','כבד','כליה','שיער'], array[18], 'Pentostam', 'adverse');
+insert into public.study_question_keys (question_id, answer, explanations, takeaway)
+select q, 1::smallint, array['הסבר הסוד א','הסבר הסוד ב','ג','ד'], 'הסוד לזכור' from unnest(array[:'tq1', :'tq2']::uuid[]) q
+union all select :'tq3'::uuid, 0::smallint, array['הסבר הסוד א','ב','ג','ד'], 'הסוד לזכור';
+-- Noga's live quiz yesterday: a wrong first vote "על בטוח" on tq1, right on the second vote.
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, state, idx, n_total, created_at, ended_at)
+values ('d5500000-0000-4000-8000-000000000001', :'tgid', 'coop', 'היום', array[:'tl']::uuid[], 1, 60, 'ended', 0, 1, now() - interval '1 day', now() - interval '1 day');
+insert into public.study_quiz_players (quiz_id, user_id) values ('d5500000-0000-4000-8000-000000000001', :'noga');
+insert into public.study_quiz_rounds (id, quiz_id, idx, question_id, seconds, revealed_at, answer)
+values ('d5510000-0000-4000-8000-000000000001', 'd5500000-0000-4000-8000-000000000001', 0, :'tq1', 60, now() - interval '1 day', 1);
+select set_config('t.t0', (now() - interval '1 day')::text, false) is not null as t \gset
+insert into public.study_quiz_answers (round_id, user_id, choice, ms, answered_at, correct, vote, bet) values
+ ('d5510000-0000-4000-8000-000000000001', :'noga', 0, 1000, current_setting('t.t0')::timestamptz, false, 1, 3),
+ ('d5510000-0000-4000-8000-000000000001', :'noga', 1, 1000, current_setting('t.t0')::timestamptz + interval '20 seconds', true, 2, null);
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at, confidence)
+values (:'noga', :'tq1', 0, false, 'quiz', current_setting('t.t0')::timestamptz, 3);
+-- Yesterday's meeting on the lecture: Noga was there and tapped "לא ברור" on ¶2.
+insert into public.study_meetings (id, group_id, day, starts_at, lecture_id, part_from, part_to, started_at, read_part, reader_id, created_by)
+values ('d5600000-0000-4000-8000-000000000001', :'tgid', study_private.day_of(now()) - 1, now() - interval '1 day', :'tl', 0, 0, now() - interval '1 day', 0, :'amit', :'amit');
+insert into public.study_meeting_presence (meeting_id, user_id, first_at, last_at)
+values ('d5600000-0000-4000-8000-000000000001', :'noga', now() - interval '1 day', now() - interval '23 hours');
+insert into public.study_meeting_taps (meeting_id, user_id, lecture_id, part_idx, anchor, quote, created_at)
+values ('d5600000-0000-4000-8000-000000000001', :'noga', :'tl', 0, 2, 'Pentostam דורשת', now() - interval '1 day' + interval '5 minutes');
+-- Amit's open question on ¶1, three hours ago.
+insert into public.study_comments (id, lecture_id, part_idx, anchor, quote, kind, body, author_id, created_at)
+values ('d5700000-0000-4000-8000-000000000001', :'tl', 0, 1, 'Miltefosine טרטוגנית', 'question', 'למה דווקא 5 חודשים?', :'amit', now() - interval '3 hours');
+
+-- ═════════ T1 · the flame: private, lit from 4 of the last 7 days ═════════
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at)
+select :'amit', :'tq3', 0, true, 'lecture', now() - make_interval(days => d) from unnest(array[0, 1, 2, 4, 9]) d;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values (:'raz', :'tq3', 0, true, 'lecture', now());
+set role authenticated;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000002';
+select ttest.is_('T1. Amit''s flame (days 0, 1, 2, 4 and 9 ago)', (f ->> 'days') || '/7, lit ' || (f ->> 'lit'), '4/7, lit true') from (select public.study_my_flame(:'tgid') as f) x;
+select ttest.is_('T1a. it never resets on a missed day: day 3 was empty', (public.study_my_flame(:'tgid') -> 'list' ? :'t_d3')::text, 'false');
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000003';
+select ttest.is_('T1b. Raz''s own, never anyone else''s', (f ->> 'days') || '/7, lit ' || (f ->> 'lit'), '1/7, lit false') from (select public.study_my_flame(:'tgid') as f) x;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000001';
+select ttest.is_('T1c. Noga''s: the quiz yesterday, the meeting and her tap', (f ->> 'days') || '/7', '1/7') from (select public.study_my_flame(:'tgid') as f) x;
+-- A part read (section P's log, or a stand-in for it here) lights its day.
+reset role;
+select to_regclass('public.study_read_parts') is null as t_make_reads \gset
+\if :t_make_reads
+create table public.study_read_parts (user_id uuid not null, lecture_id uuid not null, part_idx int not null, done_at timestamptz not null default now(),
+                                      seconds int not null default 0, primary key (user_id, lecture_id, part_idx));
+\endif
+insert into public.study_read_parts (user_id, lecture_id, part_idx, done_at) values (:'raz', :'tl', 0, now() - interval '2 days');
+set role authenticated;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000003';
+select ttest.is_('T1d. Raz read a part two days ago', (public.study_my_flame(:'tgid') ->> 'days') || '/7', '2/7');
+reset role;
+delete from public.study_read_parts where user_id = :'raz';
+\if :t_make_reads
+drop table public.study_read_parts;
+\endif
+
+-- ═════════ T2 · quiz returns: the next study day, then the third ═════════
+set role authenticated;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000001';
+select ttest.is_('T2. due the day after the quiz: step, bet, "הבנתי בדיון"',
+                 string_agg(step || ', ' || bet || ', ' || fixed_in_discussion, ';'), '1, 3, true')
+  from public.study_my_quiz_returns(:'tgid') where question_id = :'tq1';
+reset role;
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at) values (:'noga', :'tq1', 1, true, 'mistakes', now());
+set role authenticated;
+select ttest.is_('T2b. answered today: nothing due until the third day', count(*)::text, '0') from public.study_my_quiz_returns(:'tgid') where question_id = :'tq1';
+reset role;
+update public.study_answers set answered_at = answered_at - interval '2 days' where user_id = :'noga' and question_id = :'tq1';
+update public.study_quiz_answers set answered_at = answered_at - interval '2 days' where user_id = :'noga' and round_id = 'd5510000-0000-4000-8000-000000000001';
+set role authenticated;
+select ttest.is_('T2c. three days on', string_agg(step::text, ','), '2') from public.study_my_quiz_returns(:'tgid') where question_id = :'tq1';
+reset role;
+update public.study_questions set hidden_at = now() where id = :'tq1';
+set role authenticated;
+select ttest.is_('T2d. a question two flags hid never returns', count(*)::text, '0') from public.study_my_quiz_returns(:'tgid') where question_id = :'tq1';
+reset role;
+update public.study_questions set hidden_at = null where id = :'tq1';
+set role authenticated;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000002';
+select ttest.is_('T2e. Noga''s returns are hers alone: Amit''s', count(*)::text, '0') from public.study_my_quiz_returns(:'tgid');
+
+-- ═════════ T3 · the danger row is the danger list's first due row (review F-9) ═════════
+reset role;
+select to_regprocedure('public.study_my_danger_list(uuid, timestamptz)') is null as t_make_danger \gset
+\if :t_make_danger
+set role authenticated;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000001';
+select ttest.is_('T3a. without section P there is no danger row', count(*)::text, '0') from public.study_my_danger(:'tgid');
+reset role;
+-- A stand-in with the list's columns: two due rows (the older first) and one due tomorrow.
+create function public.study_my_danger_list(p_group uuid, p_now timestamptz default now())
+returns table (question_id uuid, lecture_id uuid, wrong_at timestamptz, chosen text, right_text text, slides int[], rights int, due_day date, ask_id uuid)
+language sql stable security definer set search_path = public as $$
+  select * from (values
+    ('d5200000-0000-4000-8000-000000000003'::uuid, 'd5100000-0000-4000-8000-000000000001'::uuid, now() - interval '1 day', 'כבד', 'QTc', array[18], 0, study_private.day_of(now()) + 1, 'd5200000-0000-4000-8000-000000000003'::uuid),
+    ('d5200000-0000-4000-8000-000000000001'::uuid, 'd5100000-0000-4000-8000-000000000001'::uuid, now() - interval '3 days', 'חודש', '5 חודשים', array[16], 0, study_private.day_of(now()), 'd5200000-0000-4000-8000-000000000002'::uuid),
+    ('d5200000-0000-4000-8000-000000000003'::uuid, 'd5100000-0000-4000-8000-000000000001'::uuid, now() - interval '2 days', 'כבד', 'QTc', array[18], 1, study_private.day_of(now()), null::uuid)
+  ) v (question_id, lecture_id, wrong_at, chosen, right_text, slides, rights, due_day, ask_id)
+  where auth.uid() = 'd5000000-0000-4000-8000-000000000001'::uuid $$;
+grant execute on function public.study_my_danger_list(uuid, timestamptz) to authenticated;
+\endif
+set role authenticated;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000001';
+select ttest.is_('T3. the "על בטוח" row equals the list''s first due row, in another wording when it has one',
+                 coalesce(string_agg((d.question_id = l.question_id and d.ask_id = coalesce(l.ask_id, l.question_id)
+                                      and d.other_wording = (coalesce(l.ask_id, l.question_id) <> l.question_id))::text, ','), 'none'),
+                 case when :'t_make_danger' then 'true' else coalesce(string_agg('true', ','), 'none') end)
+  from public.study_my_danger(:'tgid') d
+  full join lateral (select x.* from public.study_my_danger_list(:'tgid') x where x.due_day <= :'t_today'::date
+                      order by x.due_day, x.wrong_at limit 1) l on true;
+\if :t_make_danger
+select ttest.is_('T3b. the stand-in''s first due row: the older of the two due today, asked in its other wording',
+                 string_agg(question_id::text || ' as ' || ask_id::text || ', ' || other_wording, ';'),
+                 'd5200000-0000-4000-8000-000000000001 as d5200000-0000-4000-8000-000000000002, true')
+  from public.study_my_danger(:'tgid');
+select ttest.is_('T3c. Today carries its stem and slides, never the key',
+                 (t -> 'danger' -> 0 ->> 'question') || ' · ' || (t -> 'danger' -> 0 -> 'slides')::text || ' · ' || (t::text like '%הסוד%')::text,
+                 'כמה זמן אחרי Miltefosine נמנעים מהיריון? · [16] · false')
+  from (select public.study_today(:'tgid') as t) x;
+reset role;
+drop function public.study_my_danger_list(uuid, timestamptz);
+\endif
+
+-- ═════════ T4 · T-2: "הקבוצה צריכה אותך": opt-in, the question to one who mastered its topic ═════════
+-- Off by default. Raz masters Miltefosine (3 of 3 right); Noga answered it once.
+-- Amit asked about ¶1 three hours ago, and proposed a correction that waits.
+reset role;
+insert into public.study_questions (id, group_id, lecture_id, source, part_idx, anchor, quote, kind, question, options, slides, topic, aspect, created_by) values
+ ('d5200000-0000-4000-8000-000000000004', :'tgid', :'tl', 'ai', 0, 1, 'Miltefosine טרטוגנית', 'mcq', 'Miltefosine: מה הבעיה בהיריון?', array['טרטוגנית','אין','כבד','כליה'], array[16], 'Miltefosine', 'contra', null);
+insert into public.study_question_keys (question_id, answer, explanations) values ('d5200000-0000-4000-8000-000000000004', 0, array['א','ב','ג','ד']);
+insert into public.study_answers (user_id, question_id, choice, correct, mode, answered_at)
+select :'raz', q, 1, true, 'lecture', now() - interval '1 hour'
+  from unnest(array[:'tq1', :'tq2', 'd5200000-0000-4000-8000-000000000004']::uuid[]) q;
+insert into public.study_edit_proposals (id, lecture_id, part_idx, anchor, gen, base_rev, kind, before_text, after_text, note, source_kind, proposed_by)
+values ('d5800000-0000-4000-8000-000000000001', :'tl', 0, 1, 0, 0, 'paragraph', 'Miltefosine טרטוגנית.', 'Miltefosine טרטוגנית (5 חודשים).', 'מהשקף', 'slide', :'amit');
+set role authenticated;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000003';
+select ttest.is_('T4. off by default: Raz before opting in', public.study_needs_me(:'tgid')::text || ', on ' || (public.study_needs_me_meter(:'tgid') ->> 'on'), '[], on false');
+select public.study_set_needs_me(:'tgid', true) is null as o \gset
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000001';
+select public.study_set_needs_me(:'tgid', true) is null as o \gset
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000002';
+select public.study_set_needs_me(:'tgid', true) is null as o \gset
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000003';
+select ttest.is_('T4b. Raz (opted in, mastered it): the kinds; Amit''s question; why, hers alone; the approval is Amit''s',
+                 string_agg(e ->> 'kind', ', ' order by e ->> 'kind') || '; ' || coalesce(max(e ->> 'body'), '-') || '; '
+                 || coalesce(max((e ->> 'topic') || ' ' || (e ->> 'right') || '/' || (e ->> 'of')), '-') || '; ' || coalesce(max(e ->> 'by'), '-'),
+                 'approval, question; למה דווקא 5 חודשים?; Miltefosine 3/3; עמית')
+  from jsonb_array_elements(public.study_needs_me(:'tgid')) e;
+-- Review UI-3 (T 3): Today shows that question once, under "הקבוצה צריכה אותך", not again in "בקבוצה".
+select ttest.is_('T4b2. Raz''s Today: the question in needs_me, and "בקבוצה" is another one (or none)',
+                 (select count(*) from jsonb_array_elements(t -> 'needs_me') e where e ->> 'comment_id' = 'd5700000-0000-4000-8000-000000000001')::text
+                 || ', ' || coalesce((t -> 'open_question' ->> 'id') = 'd5700000-0000-4000-8000-000000000001', false)::text,
+                 '1, false')
+  from (select public.study_today(:'tgid') as t) x;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000001';
+select ttest.is_('T4c. Noga (opted in, not mastered): only the approval', coalesce(string_agg(e ->> 'kind', ', '), 'none'), 'approval')
+  from jsonb_array_elements(public.study_needs_me(:'tgid')) e;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000002';
+select ttest.is_('T4d. Amit: never his own question, never his own correction', coalesce(string_agg(e ->> 'kind', ', '), 'none'), 'none')
+  from jsonb_array_elements(public.study_needs_me(:'tgid')) e;
+-- Decision 3: the meter, her own counts only.
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000001';
+select ttest.is_('T4e. Noga''s meter: on, topics mastered, her nearest topic and how many more, the group''s open questions',
+                 (m ->> 'on') || ', ' || (m ->> 'topics') || ', ' || coalesce((m -> 'next' ->> 'topic') || ' ' || (m -> 'next' ->> 'short'), '-') || ', ' || (m ->> 'open'),
+                 'true, 0, Miltefosine 2, ' || (select count(*) from public.study_comments c join public.study_lectures l on l.id = c.lecture_id and l.group_id = :'tgid'
+                                                  where c.kind = 'question' and c.parent_id is null and not c.resolved and c.author_id <> auth.uid()
+                                                    and c.created_at > now() - interval '14 days' and l.deleted_at is null))
+  from (select public.study_needs_me_meter(:'tgid') as m) x;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000003';
+select ttest.is_('T4f. Raz''s meter: one topic mastered, Pentostam next',
+                 (m ->> 'topics') || ', ' || coalesce((m -> 'next' ->> 'topic') || ' ' || (m -> 'next' ->> 'short'), '-'), '1, Pentostam 2')
+  from (select public.study_needs_me_meter(:'tgid') as m) x;
+reset role;
+update public.study_comments set created_at = now() - interval '1 hour' where id = 'd5700000-0000-4000-8000-000000000001';
+set role authenticated;
+select ttest.is_('T4g. a question younger than 2 hours waits for the group first', coalesce(string_agg(e ->> 'kind', ', '), 'none'), 'approval')
+  from jsonb_array_elements(public.study_needs_me(:'tgid')) e;
+reset role;
+update public.study_comments set created_at = now() - interval '3 hours' where id = 'd5700000-0000-4000-8000-000000000001';
+set role authenticated;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000001';
+select ttest.is_('T4h. prefs are their owner''s: Noga reads her own row only', count(*)::text, '1') from public.study_member_prefs;
+select public.study_set_needs_me(:'tgid', false) is null as o \gset
+select ttest.is_('T4i. off again: nothing', public.study_needs_me(:'tgid')::text, '[]');
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_needs_me_meter(current_setting('t.tgid')::uuid); raise notice 'T4j. FAIL: a stranger read a meter';
+exception when others then raise notice 'T4j. %: a stranger (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_set_needs_me(current_setting('t.tgid')::uuid, true); raise notice 'T4k. FAIL: a stranger opted in';
+exception when others then raise notice 'T4k. %: (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+select ttest.is_('T4l. the thresholds', study_private.needs_me_min_answers() || ', ' || study_private.needs_me_master_pct() || ', '
+                 || study_private.needs_me_window_days() || ', ' || study_private.needs_me_wait_hours(), '3, 80, 14, 2');
+delete from public.study_member_prefs where user_id in (:'noga', :'amit', :'raz');
+delete from public.study_edit_proposals where id = 'd5800000-0000-4000-8000-000000000001';
+delete from public.study_answers where user_id = :'raz' and mode = 'lecture' and answered_at < now() - interval '30 minutes';
+
+-- ═════════ T5 · one call, every source, for her alone ═════════
+reset role;
+update public.study_answers set answered_at = answered_at + interval '2 days' where user_id = :'noga' and question_id = :'tq1' and mode = 'quiz';
+update public.study_quiz_answers set answered_at = answered_at + interval '2 days' where user_id = :'noga' and round_id = 'd5510000-0000-4000-8000-000000000001';
+delete from public.study_answers where user_id = :'noga' and question_id = :'tq1' and mode = 'mistakes';
+set role authenticated;
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000001';
+select ttest.is_('T5. Noga''s Today has every source',
+                 (public.study_today(:'tgid') ?& array['quiz_returns', 'danger', 'unclear', 'updates', 'loot', 'missed', 'needs_me', 'open_question', 'flame', 'day'])::text, 'true');
+select ttest.is_('T5a. the quiz return with its stem, slides and lecture, no key',
+                 (t -> 'quiz_returns' -> 0 ->> 'question') || ' · ' || (t -> 'quiz_returns' -> 0 -> 'slides')::text || ' · ' || (t -> 'quiz_returns' -> 0 ->> 'lecture_title')
+                 || ' · step ' || (t -> 'quiz_returns' -> 0 ->> 'step') || ' · key shown ' || (t::text like '%הסוד%')::text,
+                 'Miltefosine: עד מתי אמצעי מניעה? · [16] · Leishmaniasis (היום) · step 1 · key shown false')
+  from (select public.study_today(:'tgid') as t) x;
+select ttest.is_('T5b. her "לא ברור" from yesterday''s meeting', (t -> 'unclear' -> 0 ->> 'quote') || ' · ' || jsonb_array_length(t -> 'unclear'), 'Pentostam דורשת · 1')
+  from (select public.study_today(:'tgid') as t) x;
+select ttest.is_('T5c. "בקבוצה": the newest open question of another member', t -> 'open_question' ->> 'body', 'למה דווקא 5 חודשים?')
+  from (select public.study_today(:'tgid') as t) x;
+select ttest.is_('T5d. Noga turned T-2 off: nobody asks her (needs_me)', (public.study_today(:'tgid') -> 'needs_me')::text, '[]');
+select ttest.is_('T5e. without section H there is no loot', (public.study_today(:'tgid') -> 'loot')::text,
+                 case when to_regprocedure('public.study_my_loot(uuid)') is null then '[]' else (public.study_today(:'tgid') -> 'loot')::text end);
+set request.jwt.claim.sub = 'd5000000-0000-4000-8000-000000000002';
+select ttest.is_('T5f. Amit sees no question of his own in "בקבוצה", and none of Noga''s rows',
+                 coalesce((t -> 'open_question' ->> 'id') = 'd5700000-0000-4000-8000-000000000001', false)::text || ', ' || jsonb_array_length(t -> 'quiz_returns') || ', ' || jsonb_array_length(t -> 'unclear'),
+                 'false, 0, 0')
+  from (select public.study_today(:'tgid') as t) x;
+
+-- ═════════ T6 · strangers, grants, nothing published, the registry ═════════
+set request.jwt.claim.sub = 'dddddddd-0000-4000-8000-000000000004';
+do $$ begin perform public.study_today(current_setting('t.tgid')::uuid); raise notice 'T6. FAIL: a stranger read a Today';
+exception when others then raise notice 'T6. %: a stranger is refused (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_my_flame(current_setting('t.tgid')::uuid); raise notice 'T6a. FAIL: a stranger read a flame';
+exception when others then raise notice 'T6a. %: (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_my_danger(current_setting('t.tgid')::uuid); raise notice 'T6b. FAIL: a stranger read a danger row';
+exception when others then raise notice 'T6b. %: (%)', case when sqlerrm = 'group not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select ttest.is_('T6c. a stranger''s quiz returns', count(*)::text, '0') from public.study_my_quiz_returns(:'tgid');
+reset role;
+set role anon;
+do $$ begin perform public.study_today(current_setting('t.tgid')::uuid); raise notice 'T6d. FAIL: anon called study_today';
+exception when insufficient_privilege then raise notice 'T6d. ok: anon may not call it (%)', sqlerrm;
+          when others then raise notice 'T6d. FAIL: (%)', sqlerrm; end $$;
+reset role;
+select ttest.is_('T6e. section T publishes nothing; its one table, T-2''s prefs, stays unpublished and owner-only',
+                 (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and (tablename like 'study_today%' or tablename = 'study_member_prefs'))::text
+                 || ', ' || (to_regclass('public.study_member_prefs') is not null)::text
+                 || ', ' || (select string_agg(policyname || ':' || cmd || ':' || qual, ';') from pg_policies where tablename = 'study_member_prefs')
+                 || ', ' || (has_table_privilege('authenticated', 'public.study_member_prefs', 'insert') or has_table_privilege('authenticated', 'public.study_member_prefs', 'update'))::text,
+                 '0, true, study member prefs own:SELECT:(user_id = auth.uid()), false');
+select ttest.is_('T-reg. the registry (T-2 is T 2; one question once is T 3)', public.study_schema() ->> 'T', '3');
+
+-- The fixtures go: the users (their answers, taps, presence, comments), the lecture, the quiz.
+delete from public.study_quizzes where id = 'd5500000-0000-4000-8000-000000000001';
+delete from public.study_meetings where id = 'd5600000-0000-4000-8000-000000000001';
+delete from public.study_lectures where id = :'tl';
+delete from public.study_members where user_id in (:'noga', :'amit', :'raz');
+delete from auth.users where id in (:'noga', :'amit', :'raz');
+drop schema ttest cascade;
+select ttest_gone || '' from (select 'T7. the fixtures are gone: ' || case when not exists (select 1 from public.study_questions where id::text like 'd52%')
+                                and not exists (select 1 from public.study_members where user_id::text like 'd5000000%') then 'ok' else 'FAIL' end as ttest_gone) x;
+-- ════ END SECTION T ════

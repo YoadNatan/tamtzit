@@ -1,0 +1,265 @@
+/* ── תמצית's design tokens: the playful look ──
+   The one place the app's colours, type, radii, spacing, shadows and frame
+   sizes are defined, in light and dark (docs/study/design-system.md).
+
+   The look: tactile and game-like. A fresh indigo-violet primary and four
+   friendly lane colours (me, group, fun, ok) on a soft lavender-white page;
+   chunky "pressable" controls whose bottom edge sinks on a tap; big rounded
+   cards; one rounded variable face (Rubik, font.css). The excitement lives in
+   the chrome, Today, practice, the quiz, the cards and progress; the
+   reader's long text stays calm.
+
+   Two kinds of colour per lane:
+     --group, --fun, --ok, --bad, --accent  deep enough to be TEXT (4.5:1 on
+                                            the page, the surface and their
+                                            own -soft tint, both themes)
+     --*-pop                                bright, for fills, rings, edges,
+                                            bars and tiles only: never text,
+                                            and text on them is --pop-ink.
+   --faint is for rules and placeholders only, never for text that must be
+   read. --field-line is a control's boundary: 3:1 on the surface. */
+
+:root {
+  /* ── colour ── */
+  --paper: #f6f4fd; /* the page: lavender-white */
+  --surface: #ffffff; /* cards, sheets, fields */
+  --surface-2: #f1eefc; /* a well inside a card, a pressed tile */
+  --ink: #1c1838; /* text: deep indigo-ink */
+  --muted: #57537a; /* secondary text: 6.6:1 on paper */
+  --faint: #9a96b8; /* rules and placeholders only */
+  --line: #e4e0f5; /* borders, dividers, the plain chip and tag */
+  --edge: #d3cdee; /* the bottom edge of a raised card or a secondary button */
+  --field-line: #8a84b0; /* a field's and a control's boundary: 3.5:1 on white */
+  --btn-line: var(--edge); /* a secondary button's outline (its edge stays --edge) */
+  --accent: #5235e8; /* the primary: indigo-violet, 6.4:1 on paper */
+  --accent-ink: #ffffff; /* text on --accent: 6.9:1 */
+  --accent-soft: #ebe6ff;
+  --accent-edge: #3720b8; /* the bottom edge of a primary button */
+  --accent-2: #8a5cff; /* the primary's light end, for rings and bars */
+  /* The primary as a FILL (a primary button, the current tab's tile, a chosen
+     segment): in light it is --accent itself; in dark it stays a deep, strong
+     violet with white text while --accent (text, links) goes light. */
+  --accent-fill: var(--accent);
+  --accent-fill-ink: #ffffff; /* text on --accent-fill: 6.9:1 light, 5.1:1 dark */
+  --extra-bg: #e8f1ff; /* "הרחבה": knowledge from outside the slides */
+  --extra-line: #4f86dc; /* a strip: 3:1 on its tint and on the surface */
+  --warn-bg: #fff4d1; /* "שימו לב", an open question */
+  --warn-line: #b88200; /* 3:1 on --warn-bg and the surface */
+  --lecturer-bg: #ffeaf2; /* the lecturer's words, the recording */
+  --lecturer-line: #d6528a; /* 3:1 on --lecturer-bg and the surface */
+  --ok: #15803d;
+  --bad: #c41e23;
+  /* The loop's lanes (the proposal's legend): what is only yours, what the
+     group does together, the fun layer; and "got it". */
+  --me-soft: var(--accent-soft);
+  --me-pop: #7c5cff;
+  --group: #c2410c;
+  --group-soft: #ffedd9;
+  --group-pop: #ff8a3d;
+  --fun: #be185d;
+  --fun-soft: #ffe4ef;
+  --fun-pop: #ff5fa2;
+  --ok-soft: #dcf5e6;
+  --ok-pop: #2fd17a;
+  --bad-pop: #ff6b6b;
+  --sun-pop: #ffb020; /* the streak's flame, the celebration's sparks */
+  /* A lane's strip down the start of a note or a hint (the wall's hint, the
+     quiz's notes): the bright colour deepened just enough for 3:1 on its
+     tint and on the surface. In dark the bright colour already has it. */
+  --fun-strip: #e5418a;
+  --group-strip: #d95f1f;
+  --pop-ink: #1c1838; /* text and icons on any --*-pop fill, both themes */
+  /* A card in a lane (a group card on Today, the museum's, the plan's day):
+     its border is the lane's bright colour softened toward --line, so a
+     lane reads at a glance without a heavy dark frame. Decoration: the
+     card's words say what it is. */
+  --me-line: color-mix(in srgb, var(--me-pop) 60%, var(--line));
+  --group-line: color-mix(in srgb, var(--group-pop) 72%, var(--line));
+  --fun-line: color-mix(in srgb, var(--fun-pop) 66%, var(--line));
+  --ok-line: color-mix(in srgb, var(--ok-pop) 66%, var(--line));
+  /* A filled state colour always takes its ink. */
+  --ok-ink: #ffffff;
+  --bad-ink: #ffffff;
+  --ok-bg: color-mix(in srgb, var(--ok) 12%, var(--surface));
+  --bad-bg: color-mix(in srgb, var(--bad) 10%, var(--surface));
+  /* Text on a tint: the lane colours, darkened just enough for 4.5:1. */
+  --chip-ink: color-mix(in srgb, var(--muted) 85%, var(--ink));
+  --ok-text: color-mix(in srgb, var(--ok) 85%, var(--ink));
+  --group-text: color-mix(in srgb, var(--group) 90%, var(--ink));
+  /* The count on "שאלות" in the reader. */
+  --badge-bg: #ffb020;
+  --badge-ink: #1c1838;
+  /* Members' avatars (white letters on each, 5:1 or more), and their rings. */
+  --avatar-1: #5235e8;
+  --avatar-2: #c2410c;
+  --avatar-3: #be185d;
+  --avatar-4: #15803d;
+  --avatar-5: #1d64c8;
+  --avatar-6: #8a2fc9;
+  --avatar-ring-1: #b7a8ff;
+  --avatar-ring-2: #ffc08f;
+  --avatar-ring-3: #ffa8cb;
+  --avatar-ring-4: #8fe6b4;
+  --avatar-ring-5: #9cc4ff;
+  --avatar-ring-6: #dcaaff;
+  --track: #e9e5f8; /* a bar's and a ring's empty part */
+  --glass: rgba(246, 244, 253, 0.9); /* the sticky bars over scrolling text (solid --paper without backdrop-filter) */
+  --scrim: rgba(28, 24, 56, 0.4); /* behind a sheet */
+
+  /* ── type ── one rounded variable face for everything (font.css). Display
+     is the same face, heavier. */
+  /* Right after Rubik comes the platform's own UI face: every glyph Rubik's
+     two subsets lack (⁺ ⁻ ₂ ₃ ← → ≤ ≥ α β) is drawn by one predictable
+     fallback, never by whichever stray font happens to be installed. */
+  --font-display: "Rubik Variable", system-ui, "Arial Hebrew", sans-serif;
+  --font-body: "Rubik Variable", system-ui, "Arial Hebrew", sans-serif;
+  --read-weight: 380; /* the reader's long text: a touch under regular */
+  --read-ink: var(--ink);
+  --display-weight: 800; /* a screen's title, a block's title */
+  --text-h1: 1.625rem; /* 26 px display 800: a screen's own big title (a-h1) */
+  --text-h2: 1.1875rem; /* 19 px display 700: a block's title, a sheet's title (a-h2) */
+  --text-sec: 1.125rem; /* 18 px display 800: a section's header (a-sec) */
+  --text-title: 1.0625rem; /* 17 px 700: the title in the top bar (ph-head) */
+  --text-body: 1rem; /* 16 px */
+  --text-para: 0.96875rem; /* 15.5 px: a paragraph in a card (a-para) */
+  --text-btn: 0.9375rem; /* 15 px 600 */
+  --text-small: 0.84375rem; /* 13.5 px: meta lines (a-small) */
+  --text-chip: 0.8125rem; /* 13 px 700 */
+  --text-tag: 0.75rem; /* 12 px 700: a slide tag, at least (it grows with the reading size) */
+  --text-tab: 0.75rem; /* 12 px 600: the tab bar's labels */
+  --reading-size: 17px; /* the reader's text: 15, 17, 19 or 21 px, the member's choice ("שלי") */
+  --leading: 1.5;
+  --leading-read: 1.75;
+  --leading-tight: 1.25;
+
+  /* ── radii: big and friendly ── */
+  --r-xs: 7px; /* a slide tag */
+  --r-sm: 10px; /* a marked paragraph, a picture */
+  --r-md: 14px; /* buttons, options, fields, callouts */
+  --r-lg: 20px; /* cards and lists */
+  --r-xl: 28px; /* the flash card, a sheet's top corners */
+  --r-pill: 999px; /* chips, the toast */
+
+  /* ── spacing: --sp-N is N × 2 px ── */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 10px; /* between the blocks of a screen (the kit's 8 px) */
+  --sp-6: 12px;
+  --sp-7: 14px;
+  --sp-8: 16px;
+  --sp-10: 20px;
+  --sp-12: 24px;
+  --sp-16: 32px;
+
+  /* ── depth: the pressable edge ── a control stands --press tall on its
+     bottom edge and sinks to --press-down while pressed. */
+  --press: 4px;
+  --press-down: 1px;
+  --b: 2px; /* the chunky border of a card, a button, a field */
+
+  /* ── shadows ── */
+  --shadow-card: 0 1px 2px rgba(55, 32, 184, 0.06), 0 8px 22px -18px rgba(55, 32, 184, 0.4); /* a card that is not a control: it rests, it does not stand */
+  --shadow-soft: 0 14px 32px -16px rgba(55, 32, 184, 0.42); /* a hero card's glow */
+  --hi: 0 0 0 transparent; /* a pressable thing's top highlight: only dark needs one */
+  --shadow-sheet: 0 -14px 40px -14px rgba(28, 24, 56, 0.35); /* a sheet over the screen */
+  --shadow-pop: 0 12px 30px -10px rgba(28, 24, 56, 0.35); /* a menu, the toast */
+
+  /* ── motion: decorative only, and off under prefers-reduced-motion ── */
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --t-press: 90ms;
+
+  /* ── the frame ── */
+  --gutter: 16px; /* the screen's side margin, or the safe area where it is larger: */
+  --gutter-left: max(var(--gutter), env(safe-area-inset-left, 0px));
+  --gutter-right: max(var(--gutter), env(safe-area-inset-right, 0px));
+  --measure: 760px; /* the widest a screen gets (tablets) */
+  --hit: 44px; /* every control's smallest hit area */
+  --head-h: 56px; /* the top bar */
+  --tabbar-h: 60px; /* the tab bar, without the safe area */
+  --z-bar: 5; /* a screen's sticky top and bottom bars */
+  --z-stack: 8; /* the live banner */
+  --z-tabs: 15; /* the tab bar */
+  --z-layer: 18; /* a full-screen layer ("עיון בכרטיסיות") */
+  --z-sheet: 20; /* a sheet and its scrim */
+  --z-toast: 30; /* the toast, over everything */
+
+  color-scheme: light;
+}
+
+/* Dark: a deep indigo night, not an inverted day. Surfaces step up in
+   lightness; the lanes glow (their text colours are the light ends); the
+   edge is a lighter indigo step than the page (near black on near black
+   would vanish), with a 1 px highlight on each pressable thing's top; the
+   primary FILL stays a deep, strong violet with white words while the
+   primary TEXT colour goes light. Warm tints are deep and saturated, never
+   muddy brown. */
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    --paper: #121022;
+    --surface: #201c38;
+    --surface-2: #2a2548;
+    --ink: #f1effc;
+    --muted: #b0abd0;
+    --faint: #7d77a3;
+    --line: #3d3766;
+    --edge: #2a2452; /* lighter than the page and darker than a face: the step reads */
+    --field-line: #7a73a8;
+    --btn-line: var(--line);
+    --accent: #a99bff;
+    --accent-ink: #140b45; /* text on the light --accent (a chat bubble) */
+    --accent-soft: #2e2760;
+    --accent-edge: #3a22b0;
+    --accent-fill: #6c4cff;
+    --accent-fill-ink: #ffffff;
+    --accent-2: #d3a6ff;
+    --extra-bg: #172440;
+    --extra-line: #4f7fd0;
+    --warn-bg: #33270a;
+    --warn-line: #c99a1c;
+    --lecturer-bg: #33182a;
+    --lecturer-line: #b8517f;
+    --ok: #62e09c;
+    --bad: #ff8a85;
+    --me-pop: #8f7bff;
+    --group: #ffa45e;
+    --group-soft: #3b1d10;
+    --group-pop: #ff8a3d;
+    --fun: #ff8cc0;
+    --fun-soft: #3d1530;
+    --fun-pop: #ff5fa2;
+    --ok-soft: #15372a;
+    --ok-pop: #2fd17a;
+    --bad-pop: #ff6b6b;
+    --sun-pop: #ffbf47;
+    --fun-strip: var(--fun-pop);
+    --group-strip: var(--group-pop);
+    --ok-ink: #0b1d14;
+    --bad-ink: #2a0b0a;
+    --ok-bg: color-mix(in srgb, var(--ok) 14%, var(--surface));
+    --bad-bg: color-mix(in srgb, var(--bad) 13%, var(--surface));
+    --chip-ink: var(--muted);
+    --ok-text: var(--ok);
+    --group-text: var(--group);
+    --badge-bg: #ffbf47;
+    --badge-ink: #140b45;
+    --avatar-ring-1: #5a43d6;
+    --avatar-ring-2: #a3480f;
+    --avatar-ring-3: #a3245e;
+    --avatar-ring-4: #1f7a45;
+    --avatar-ring-5: #2c5ea8;
+    --avatar-ring-6: #7a35b0;
+    --track: #322c58;
+    --read-weight: 360; /* light text on a dark page blooms: a little lighter */
+    --read-ink: #e2def3;
+    --glass: rgba(18, 16, 34, 0.9);
+    --scrim: rgba(4, 3, 12, 0.62);
+    --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 24px -16px rgba(0, 0, 0, 0.7);
+    --shadow-soft: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 34px -14px rgba(108, 76, 255, 0.4);
+    --hi: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    --shadow-sheet: 0 -14px 40px -14px rgba(0, 0, 0, 0.75);
+    --shadow-pop: 0 12px 30px -10px rgba(0, 0, 0, 0.75);
+    color-scheme: dark;
+  }
+}

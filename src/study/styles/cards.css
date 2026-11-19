@@ -1,0 +1,652 @@
+/* ── Flashcards (package C; spec §5.8, design-cards §4.2) ──
+   The approved cards screens (docs/study/proposal/mockups/cards.html) in the
+   kit (styles/kit.css): this file only places the kit's pieces. A card's
+   text follows the app's text size (--reading-size, review UX-15). Tap
+   targets ≥ 44 px, no horizontal scroll at 360 px, state never by colour
+   alone. */
+
+/* ── K1: the cards of the day ── */
+.today-box {
+  gap: var(--sp-6);
+}
+.today-nums {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-16);
+}
+.today-num {
+  display: grid;
+}
+.today-num b {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.today-num span {
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+.nudge {
+  display: grid;
+  gap: var(--sp-4);
+}
+.deck-row {
+  align-items: center;
+}
+.deck-link {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-1);
+  align-content: center;
+  min-height: 48px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.deck-link b {
+  overflow-wrap: anywhere;
+}
+
+/* ── K2: a lecture's deck ── */
+.empty-deck {
+  gap: var(--sp-5);
+}
+.deck-count {
+  gap: var(--sp-2);
+}
+.deck-links {
+  gap: var(--sp-1) var(--sp-8);
+}
+/* C's end: the deck page (cards.html s3): the member's ring, a row per
+   part ("להוסיף" or "{x} בחפיסה ✓"; its name opens its cards), the group's
+   latest fix, the deck's name in Anki. */
+.deck-ring {
+  flex-wrap: nowrap;
+  gap: var(--sp-6);
+  align-items: center;
+}
+.deck-ring > div:last-child {
+  flex: 1;
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.deck-parts > .deck-part {
+  min-width: 0;
+}
+.deck-part > .a-li {
+  align-items: center;
+}
+.part-toggle {
+  flex: 1;
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  min-height: var(--hit);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.part-toggle b {
+  overflow-wrap: anywhere;
+}
+.part-toggle[aria-expanded="true"] b {
+  color: var(--accent);
+}
+.more-parts > .part-toggle {
+  padding: var(--sp-4) 0;
+}
+.part-cards {
+  display: grid;
+  margin: 0 0 var(--sp-4);
+  padding: 0 0 0 0;
+  list-style: none;
+  border-top: 1px dashed var(--line);
+}
+.part-cards > li + li {
+  border-top: 1px solid var(--line);
+}
+.deck-fix,
+.card-source,
+.next-mine {
+  gap: var(--sp-3);
+}
+.anki-path {
+  overflow-wrap: anywhere;
+}
+.stale-line {
+  display: grid;
+  gap: var(--sp-3);
+}
+.deck-actions .a-btn.primary {
+  gap: var(--sp-3);
+}
+
+/* K3: a round being written, part by part. */
+.gen {
+  gap: var(--sp-4);
+}
+.gen-parts {
+  padding-block: 0;
+  font-size: var(--text-small);
+}
+.gen-parts li {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3) 0;
+}
+.gen-parts .why {
+  color: var(--muted);
+}
+.ok-mark {
+  color: var(--ok-text);
+  font-weight: 700;
+}
+/* The list: a card's front and chips; a tap opens its answer and actions. */
+.card-row-main {
+  display: grid;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 48px;
+  padding: var(--sp-5) 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(var(--reading-size) * 0.95);
+  text-align: start;
+  cursor: pointer;
+}
+.card-row-main .front {
+  overflow-wrap: anywhere;
+}
+.card-row.hidden-mine .front {
+  color: var(--muted);
+}
+.card-row-body {
+  display: grid;
+  gap: var(--sp-4);
+  padding: 0 0 var(--sp-6);
+}
+.deleted-cards {
+  display: grid;
+  gap: var(--sp-4);
+}
+.deleted-cards summary {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ── A card's faces (K2's open row, K4, browsing): the kit's flash card ── */
+.card-face {
+  display: grid;
+  gap: var(--sp-5);
+  font-size: var(--reading-size);
+  line-height: 1.6;
+}
+.card-lecture {
+  color: var(--muted);
+  font-size: 0.8em;
+}
+.card-front {
+  font-family: var(--font-display);
+  font-size: 1.2em;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+/* With the answer showing, the front stays in the display face, a size
+   smaller (the approved review screen). */
+.card-face.revealed .card-front {
+  font-size: 1.1em;
+}
+.card-back {
+  font-size: 1.1em;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.card-extra {
+  color: var(--muted);
+}
+.cloze-blank {
+  display: inline-block;
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.cloze-hit {
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.card-divider {
+  height: 1px;
+  background: var(--line);
+}
+.card-figure {
+  margin: 0;
+}
+.card-figure img {
+  display: block;
+  max-width: 100%;
+  max-height: 34vh;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: #fff;
+  object-fit: contain;
+}
+.card-figure button {
+  display: block;
+  /* 44 px to the finger while the picture is still loading */
+  min-width: var(--hit);
+  min-height: var(--hit);
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.card-figure.zoomed img {
+  max-height: none;
+}
+.card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2) var(--sp-5);
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.card-row-body .card-foot {
+  justify-content: flex-start;
+}
+
+/* ── K4: a review session, and "עיון בכרטיסיות" (one card, the grades or
+   one action in the bottom bar) ── */
+main.review {
+  padding-bottom: 0;
+}
+.review-tools {
+  justify-content: space-between;
+}
+.review-counts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-5);
+  font-size: var(--text-small);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ph-head > .review-counts.a-chip {
+  flex: none;
+}
+.cnt-new {
+  color: var(--accent);
+}
+.cnt-learn {
+  color: var(--bad);
+}
+.cnt-review {
+  color: var(--ok-text);
+}
+.review-top > .a-bar {
+  margin: 0 var(--gutter-right) var(--sp-4) var(--gutter-left);
+}
+.review-top > .offline-line {
+  margin: 0 var(--gutter-right) var(--sp-4) var(--gutter-left);
+}
+.review-menu {
+  position: relative;
+}
+.review-menu ul {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 100%;
+  z-index: 7;
+  min-width: 210px;
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-3);
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  list-style: none;
+}
+.review-menu li button,
+.review-menu li a {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--hit);
+  padding: 0 var(--sp-5);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink);
+  font: 600 var(--text-btn) var(--font-body);
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+.review-menu li button.danger-text {
+  color: var(--bad);
+}
+.offline-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+}
+/* The card under the progress bar, as the approved review screen has it. */
+.card-stage {
+  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: var(--sp-4);
+  padding: var(--sp-2) 0 var(--sp-8);
+}
+/* The swipe area spans the screen, so a drag from its very edge reaches it
+   and is left to the system's back gesture (review UX-27). */
+.card-stage.swipe-area {
+  margin-inline: calc(-1 * var(--gutter));
+  padding-inline: var(--gutter);
+  touch-action: pan-y;
+}
+.card-panel {
+  position: relative;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow-wrap: anywhere;
+}
+.card-panel.front-side {
+  cursor: pointer;
+}
+.card-panel.dragging {
+  transition: none;
+}
+.card-panel.settle {
+  transition: transform 0.25s ease-out;
+}
+.card-panel .a-chip {
+  justify-self: center;
+}
+.card-swipe-label {
+  position: absolute;
+  top: var(--sp-6);
+  inset-inline-start: var(--sp-6);
+  padding: var(--sp-2) var(--sp-7);
+  border-radius: var(--r-pill);
+  font-weight: 800;
+  pointer-events: none;
+}
+.card-swipe-label.again {
+  background: var(--bad);
+  color: var(--bad-ink);
+}
+.card-swipe-label.good {
+  inset-inline-start: auto;
+  inset-inline-end: var(--sp-6);
+  background: var(--ok);
+  color: var(--ok-ink);
+}
+.hint-line {
+  color: var(--muted);
+  font-size: var(--text-small);
+  text-align: center;
+}
+.card-gone {
+  justify-items: center;
+}
+/* The four grades: the kit's a-grade, right to left as Anki's. */
+.card-buttons {
+  flex: 1;
+  direction: rtl;
+}
+.card-btn {
+  cursor: pointer;
+}
+.card-btn > span:first-child {
+  font-size: var(--text-btn);
+}
+.card-btn .ivl {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.review .ph-foot .a-btn.wide {
+  min-height: 52px;
+}
+/* C's end on the review screen (cards.html s1, s2): the card's chip row,
+   "מאיפה זה?" under the answer, the next private card, what is left. */
+.review-top .ph-head .review-tools {
+  flex: none;
+  gap: var(--sp-1);
+}
+.review-top > .ph-sub {
+  margin: 0 var(--gutter-right) var(--sp-3) var(--gutter-left);
+}
+.card-top {
+  justify-content: space-between;
+  text-align: start;
+}
+.card-panel .card-top .a-chip {
+  justify-self: auto;
+}
+.card-source,
+.next-mine {
+  text-align: start;
+}
+.next-mine b {
+  overflow-wrap: anywhere;
+}
+.review-left {
+  justify-content: flex-start;
+}
+/* The card keeps its own height; what is under it takes the rest, so the
+   bottom bar stays at the bottom. */
+main.review > .card-stage {
+  flex: none;
+  padding-bottom: var(--sp-2);
+}
+.review-below {
+  flex: 1;
+  align-content: start;
+  padding-bottom: var(--sp-8);
+}
+
+/* K5: the end of a session. */
+.review-end {
+  gap: var(--sp-4);
+  margin-top: var(--sp-8);
+}
+
+/* "עיון בכרטיסיות": the deck, one card at a time, over the deck.
+   Under the sheets (20) and the toast (30), over the tab bar (15). */
+.browse-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-layer);
+  background: var(--paper);
+}
+.browse {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-layer) + 1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 0 var(--gutter-right) 0 var(--gutter-left);
+  background: var(--paper);
+  overflow-y: auto;
+}
+.browse:focus {
+  outline: none;
+}
+.browse > .ph-head {
+  top: 0;
+}
+
+/* ── The deck's sheets: edit, history, export, settings, generate ── */
+.card-sheet .note-line + .note-line {
+  margin-top: calc(-1 * var(--sp-2));
+}
+.card-kind {
+  justify-self: start;
+  grid-auto-columns: auto;
+}
+.card-sheet .a-input {
+  background: var(--paper);
+  unicode-bidi: plaintext;
+}
+.card-sheet .preview {
+  font-weight: 400;
+}
+.newer p {
+  margin-top: var(--sp-2);
+}
+.thumb img {
+  width: 72px;
+  height: 54px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: #fff;
+  object-fit: contain;
+}
+.history-list {
+  padding-block: 0;
+}
+.history-list .a-li > div {
+  gap: var(--sp-2);
+}
+.history-list .before {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.choice-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.choice-list legend {
+  margin: var(--sp-2) 0;
+  padding: 0;
+  font-weight: 700;
+}
+.howto summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--hit);
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+.howto ul {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding-inline-start: 1.1em;
+  font-size: var(--text-small);
+}
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-5);
+}
+.stepper output {
+  min-width: 3ch;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-panel.settle {
+    transition: none;
+  }
+}
+
+/* ── the playful look on cards (tokens.css) ──
+   The four grades are four lane-coloured tiles, each with its word (never
+   colour alone): שוב the bad lane, קשה the group's, טוב "got it", קל mine.
+   The day's numbers are big and coloured; a finished review throws
+   confetti. */
+.card-btn {
+  --lane: var(--edge);
+  border-color: var(--lane);
+  box-shadow: 0 var(--press) 0 var(--lane);
+}
+.card-btn:not(:disabled):active {
+  box-shadow: 0 var(--press-down) 0 var(--lane);
+}
+.card-btn.again {
+  --lane: color-mix(in srgb, var(--bad-pop) 70%, var(--edge));
+  background: var(--bad-bg);
+}
+.card-btn.hard {
+  --lane: color-mix(in srgb, var(--group-pop) 70%, var(--edge));
+  background: var(--group-soft);
+}
+.card-btn.good {
+  --lane: color-mix(in srgb, var(--ok-pop) 75%, var(--edge));
+  background: var(--ok-soft);
+}
+.card-btn.easy {
+  --lane: color-mix(in srgb, var(--me-pop) 70%, var(--edge));
+  background: var(--accent-soft);
+}
+.card-btn .ivl {
+  color: var(--chip-ink);
+}
+.today-num b {
+  color: var(--accent);
+  font-size: 2.25rem;
+  font-weight: 900;
+}
+.review-end {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .review-end {
+    padding-top: calc(var(--sp-6) + 30px);
+  }
+  .review-end::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: var(--sp-3) var(--sp-6) auto;
+    height: 28px;
+    background: var(--confetti);
+    pointer-events: none;
+    animation: a-burst-in 0.7s ease-out 0.05s 1 backwards;
+  }
+}
+/* "חזרה על כרטיסים" opens the settings list: the list's row rhythm above it. */
+.a-list > .review-home {
+  padding-block: var(--sp-5) var(--sp-3);
+}
+/* The card under review feels like a physical card: tall enough to hold in
+   the hand, its question in the middle of it. */
+main.review .card-panel:not(.card-gone) {
+  min-height: clamp(220px, 30dvh, 300px);
+  align-content: center;
+}

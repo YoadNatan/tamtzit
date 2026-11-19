@@ -1,0 +1,797 @@
+<title>תרגול 2.0</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&display=swap">
+<style>
+/* ── Tamtzit proposal: page + phone kit ──
+   Layout: a long reading page (max 1120px); each feature is a two-column
+   article (words | phone screens) that stacks on a phone. The phone screens
+   reuse the live app's own tokens (src/study/study.css), so they look like
+   the real app in both themes. */
+
+:root {
+  /* the app's palette (study.css) */
+  --paper: #f6f4ef;
+  --surface: #ffffff;
+  --ink: #1d2128;
+  --muted: #5d6573;
+  --faint: #8b93a1;
+  --line: #e2ded4;
+  --accent: #0d5c63;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcecec;
+  --extra-bg: #eaf1fb;
+  --extra-line: #9db8e0;
+  --warn-bg: #fdf3dc;
+  --warn-line: #e0b252;
+  --lecturer-bg: #fbe9ec;
+  --lecturer-line: #d98a99;
+  --ok: #1f7a4d;
+  --bad: #b3261e;
+  --shadow: 0 1px 2px rgba(29, 33, 40, 0.06), 0 6px 20px -10px rgba(29, 33, 40, 0.18);
+  /* proposal-only: the two lanes of the loop, and the phone body */
+  --me: #0d5c63;
+  --me-soft: #dcecec;
+  --group: #a3541b;
+  --group-soft: #f7e6d6;
+  --fun: #7a3b8f;
+  --fun-soft: #f1e4f5;
+  --bezel: #1d2128;
+  --glass: rgba(246, 244, 239, 0.9);
+  --scrim: rgba(29, 33, 40, 0.32);
+  --font-display: "Frank Ruhl Libre", "David Libre", "Times New Roman", serif;
+  --font-body: "IBM Plex Sans Hebrew", "Assistant", "Heebo", "Arial Hebrew", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #14171c; --surface: #1b1f26; --ink: #e7e9ee; --muted: #a3abb8; --faint: #737b89; --line: #2c323c;
+    --accent: #5fb7bd; --accent-ink: #0b1418; --accent-soft: #19343a; --extra-bg: #172235; --extra-line: #3e5f91;
+    --warn-bg: #2b2414; --warn-line: #a07d2a; --lecturer-bg: #2c1a20; --lecturer-line: #9b5565; --ok: #5cc28f; --bad: #ff8a80;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px -10px rgba(0, 0, 0, 0.6);
+    --me: #5fb7bd; --me-soft: #19343a; --group: #e3a067; --group-soft: #36261a; --fun: #c99ad6; --fun-soft: #2c2132;
+    --bezel: #050608; --glass: rgba(20, 23, 28, 0.9); --scrim: rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #14171c; --surface: #1b1f26; --ink: #e7e9ee; --muted: #a3abb8; --faint: #737b89; --line: #2c323c;
+  --accent: #5fb7bd; --accent-ink: #0b1418; --accent-soft: #19343a; --extra-bg: #172235; --extra-line: #3e5f91;
+  --warn-bg: #2b2414; --warn-line: #a07d2a; --lecturer-bg: #2c1a20; --lecturer-line: #9b5565; --ok: #5cc28f; --bad: #ff8a80;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px -10px rgba(0, 0, 0, 0.6);
+  --me: #5fb7bd; --me-soft: #19343a; --group: #e3a067; --group-soft: #36261a; --fun: #c99ad6; --fun-soft: #2c2132;
+  --bezel: #050608; --glass: rgba(20, 23, 28, 0.9); --scrim: rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 8px 72px;
+}
+h1, h2, h3, h4 { font-family: var(--font-display); line-height: 1.2; text-wrap: balance; margin: 0; }
+p { margin: 0; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.muted { color: var(--muted); }
+bdi { unicode-bidi: isolate; }
+
+/* ── page chrome ── */
+.topnav {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  margin-inline: calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
+  padding: 8px max(16px, env(safe-area-inset-right, 0px));
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--glass); }
+.topnav a {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topnav a:hover { background: var(--line); color: var(--ink); }
+
+.hero { padding-block: 40px 28px; display: grid; gap: 18px; max-width: 760px; scroll-margin-top: 64px; }
+.hero .kicker { font-weight: 700; color: var(--accent); font-size: 0.95rem; letter-spacing: 0.02em; }
+.hero h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); font-weight: 900; }
+.hero .lead { font-size: 1.2rem; color: var(--ink); max-width: 62ch; }
+.howto { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 0.95rem; align-items: center; }
+.legend { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot.me { background: var(--me); }
+.dot.group { background: var(--group); }
+.dot.fun { background: var(--fun); }
+
+section.block { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top: 64px; }
+section.block > header { display: grid; gap: 8px; max-width: 760px; }
+section.block > header h2 { font-size: clamp(1.7rem, 4vw, 2.3rem); font-weight: 900; }
+section.block > header p { color: var(--muted); font-size: 1.05rem; }
+.eyebrow { font-size: 0.82rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
+.eyebrow.me { color: var(--me); }
+.eyebrow.group { color: var(--group); }
+.eyebrow.fun { color: var(--fun); }
+
+/* ── the loop ── */
+.loop { display: grid; gap: 14px; }
+.lanes {
+  display: grid;
+  grid-template-columns: auto repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+.lane-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-weight: 800;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  display: grid;
+  place-items: center;
+  padding: 6px 2px;
+  border-radius: 10px;
+}
+.lane-label.group { color: var(--group); background: var(--group-soft); }
+.lane-label.me { color: var(--me); background: var(--me-soft); }
+.col-head { font-weight: 700; font-size: 0.9rem; color: var(--muted); padding: 0 4px; }
+.cell {
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  font-size: 0.92rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  min-width: 0;
+}
+.cell.group { border-top: 3px solid var(--group); }
+.cell.me { border-top: 3px solid var(--me); }
+.cell b { font-weight: 700; }
+.bridge-row { display: contents; }
+.bridge {
+  font-size: 0.82rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 10px;
+  justify-self: center;
+  text-align: center;
+  line-height: 1.35;
+}
+.bridge.down { color: var(--group); background: var(--group-soft); }
+.bridge.up { color: var(--me); background: var(--me-soft); }
+.bridges { display: grid; gap: 4px; justify-items: center; align-content: center; }
+@media (max-width: 760px) {
+  .lanes { grid-template-columns: minmax(0, 1fr); }
+  .lane-label { writing-mode: horizontal-tb; transform: none; justify-self: start; padding: 4px 12px; }
+  .col-head { padding-top: 10px; font-size: 1rem; color: var(--ink); }
+  .spacer { display: none; }
+}
+
+/* ── a day ── */
+.day { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.moment { border-radius: 14px; padding: 16px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 8px; align-content: start; min-width: 0; }
+.moment .when { font-family: var(--font-display); font-size: 1.25rem; font-weight: 900; }
+.moment .where { font-size: 0.8rem; font-weight: 700; }
+.moment .where.me { color: var(--me); }
+.moment .where.group { color: var(--group); }
+.moment ul { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: 0.93rem; }
+@media (max-width: 900px) { .day { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .day { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── feature articles ── */
+.group-head { padding-top: 28px; display: grid; gap: 6px; max-width: 760px; scroll-margin-top: 64px; }
+.group-head h3 { font-size: 1.6rem; font-weight: 900; }
+.feat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 28px;
+  align-items: start;
+  padding: 26px 0;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 64px;
+}
+.feat-text { display: grid; gap: 12px; min-width: 0; max-width: 560px; }
+.feat-text h4 { font-size: 1.55rem; font-weight: 900; }
+.feat-text .tagline { font-size: 1.08rem; }
+.facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 0.95rem; }
+.facts li { display: grid; grid-template-columns: 7.2em minmax(0, 1fr); gap: 10px; }
+.facts li > span:first-child { font-weight: 700; color: var(--muted); font-size: 0.85rem; padding-top: 2px; }
+.facts .to-me { color: var(--me); }
+.facts .to-group { color: var(--group); }
+.asked { font-size: 0.92rem; color: var(--muted); border-inline-start: 3px solid var(--warn-line); padding-inline-start: 10px; }
+.asked q { color: var(--ink); quotes: "״" "״"; }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge { font-size: 0.78rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--line); color: var(--muted); }
+.badge.me { background: var(--me-soft); color: var(--me); }
+.badge.group { background: var(--group-soft); color: var(--group); }
+.badge.fun { background: var(--fun-soft); color: var(--fun); }
+.badge.new { background: var(--warn-bg); color: var(--ink); border: 1px solid var(--warn-line); }
+.feat-phones { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; min-width: 0; }
+@media (max-width: 860px) {
+  .feat { grid-template-columns: minmax(0, 1fr); }
+  .feat-text { max-width: none; }
+  .feat-phones { justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 8px; scroll-snap-type: x mandatory; }
+  .feat-phones > figure { scroll-snap-align: start; }
+}
+@media (max-width: 1040px) { .feat { grid-template-columns: minmax(0, 1fr); } .feat-phones { justify-content: flex-start; } }
+.feat > .vote { max-width: 560px; }
+@media (min-width: 1041px) { .feat:not(.stack) > .feat-phones { grid-column: 2; grid-row: 1 / span 2; } .feat:not(.stack) > .vote { grid-column: 1; } }
+
+/* ── voting ── */
+.vote { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+.vote-q { font-size: 0.85rem; font-weight: 700; color: var(--muted); }
+.vote-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.vote-opts button {
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-height: 38px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.vote-opts button[aria-pressed="true"][data-v="build"] { background: var(--ok); border-color: var(--ok); color: var(--accent-ink); }
+.vote-opts button[aria-pressed="true"][data-v="talk"] { background: var(--warn-line); border-color: var(--warn-line); color: #0b1418; }
+.vote-opts button[aria-pressed="true"][data-v="skip"] { background: var(--muted); border-color: var(--muted); color: var(--accent-ink); }
+.vote-opts button:disabled { opacity: 0.55; cursor: default; }
+.vote textarea {
+  font: inherit;
+  font-size: 16px;
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+.vote-tally { font-size: 0.82rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.vote-tally b { color: var(--ink); }
+.vote-status { font-size: 0.9rem; color: var(--muted); }
+.vote-msg { font-size: 0.82rem; color: var(--muted); }
+.vote-msg:empty { display: none; }
+
+/* ── summary table, cut list, decisions, phases ── */
+.table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { padding: 10px 12px; text-align: start; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 0.82rem; color: var(--muted); font-weight: 700; background: var(--paper); }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; font-weight: 700; }
+.phases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.phase { border-radius: 14px; padding: 16px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 8px; align-content: start; min-width: 0; }
+.phase h3 { font-size: 1.3rem; font-weight: 900; }
+.phase .when { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.phase ul { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: 0.93rem; }
+@media (max-width: 760px) { .phases { grid-template-columns: minmax(0, 1fr); } }
+.cutlist, .decisions { display: grid; gap: 10px; }
+.cutlist li, .decisions li { list-style: none; }
+.cutlist, .decisions { margin: 0; padding: 0; }
+.cut, .decision { border-radius: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 4px; }
+.decision .def { font-size: 0.9rem; color: var(--muted); }
+.decision .def b { color: var(--ok); }
+
+/* ═════════════ the phone kit ═════════════
+   Everything inside .phone mimics the live app. Screen size: 300 × 620.
+   Use only these classes inside phones (plus inline <bdi dir="ltr"> for
+   English runs inside Hebrew). */
+figure.mock { margin: 0; display: grid; gap: 8px; justify-items: center; flex: none; }
+figure.mock figcaption { font-size: 0.82rem; color: var(--muted); max-width: 300px; text-align: center; }
+.phone {
+  width: 300px;
+  height: 620px;
+  border-radius: 40px;
+  border: 9px solid var(--bezel);
+  background: var(--paper);
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 24px 50px -24px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+}
+.phone::before { /* the camera island */
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 84px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--bezel);
+  z-index: 5;
+}
+.ph-status { flex: none; height: 34px; display: flex; justify-content: space-between; align-items: center; padding: 6px 22px 0; font-size: 11px; font-weight: 700; }
+.ph-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.ph-head .t { font-weight: 700; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.ph-head .back { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+.ph-sub { flex: none; display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.ph-body { flex: 1; overflow: hidden; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.ph-foot { flex: none; padding: 8px 12px 10px; border-top: 1px solid var(--line); background: var(--paper); display: flex; gap: 6px; }
+.ph-tabs { flex: none; display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 4px 14px; border-top: 1px solid var(--line); background: var(--paper); }
+.ph-tab { display: grid; justify-items: center; gap: 1px; font-size: 9.5px; color: var(--faint); font-weight: 600; }
+.ph-tab svg { width: 18px; height: 18px; }
+.ph-tab.on { color: var(--accent); }
+
+/* app pieces */
+.a-h1 { font-family: var(--font-display); font-size: 20px; font-weight: 900; line-height: 1.2; }
+.a-h2 { font-family: var(--font-display); font-size: 15.5px; font-weight: 700; line-height: 1.3; }
+.a-muted { color: var(--muted); }
+.a-small { font-size: 11px; }
+.a-row { display: flex; align-items: center; gap: 6px; }
+.a-row.between { justify-content: space-between; }
+.a-wrap { display: flex; flex-wrap: wrap; gap: 4px; }
+.a-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-height: 30px; padding: 4px 10px; border-radius: 9px; border: 1px solid var(--line);
+  background: var(--surface); font-weight: 600; font-size: 12px; color: var(--ink); white-space: nowrap;
+}
+.a-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.a-btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.a-btn.wide { flex: 1; min-height: 36px; font-size: 13px; }
+.a-chip { font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--line); color: var(--muted); white-space: nowrap; }
+.a-chip.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.a-chip.busy { background: var(--accent-soft); color: var(--accent); }
+.a-chip.warn { background: var(--warn-bg); color: var(--ink); border: 1px solid var(--warn-line); }
+.a-chip.bad { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+.a-chip.group { background: var(--group-soft); color: var(--group); }
+.a-chip.fun { background: var(--fun-soft); color: var(--fun); }
+.a-card { border-radius: 11px; border: 1px solid var(--line); background: var(--surface); padding: 9px 10px; display: grid; gap: 4px; box-shadow: var(--shadow); }
+.a-card.flat { box-shadow: none; }
+.a-tag { display: inline-flex; font-size: 9.5px; font-weight: 700; padding: 0 5px; border-radius: 5px; background: var(--line); color: var(--muted); vertical-align: 1px; white-space: nowrap; }
+.a-bar { height: 5px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.a-bar > i { display: block; height: 100%; background: var(--accent); }
+.a-bar.group > i { background: var(--group); }
+.a-callout { border-radius: 9px; padding: 7px 9px; font-size: 12px; border-inline-start: 3px solid var(--extra-line); background: var(--extra-bg); }
+.a-callout.warn { border-color: var(--warn-line); background: var(--warn-bg); }
+.a-callout.rec { border-color: var(--lecturer-line); background: var(--lecturer-bg); }
+.a-callout b { font-weight: 700; }
+.a-para { font-size: 12.5px; line-height: 1.65; }
+.a-para.marked { background: var(--accent-soft); border-radius: 6px; box-shadow: -3px 0 0 var(--accent); padding: 2px 4px; }
+.a-avatar { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 10.5px; font-weight: 700; color: #fff; flex: none; }
+.a-avatar.c1 { background: #0d5c63; } .a-avatar.c2 { background: #a3541b; } .a-avatar.c3 { background: #7a3b8f; }
+.a-avatar.c4 { background: #1f7a4d; } .a-avatar.c5 { background: #2f5d9e; } .a-avatar.c6 { background: #9e2f4d; }
+/* answer options */
+.a-q { font-size: 13px; font-weight: 600; line-height: 1.55; }
+.a-opts { display: grid; gap: 5px; }
+.a-opt { border-radius: 10px; border: 1px solid var(--line); background: var(--surface); padding: 6px 8px; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 7px; align-items: start; font-size: 12px; }
+.a-opt > .l { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; background: var(--line); color: var(--muted); }
+.a-opt > .x { grid-column: 2; font-size: 11px; color: var(--muted); line-height: 1.5; }
+.a-opt.correct { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--surface)); }
+.a-opt.correct > .l { background: var(--ok); color: var(--accent-ink); }
+.a-opt.wrong { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 7%, var(--surface)); }
+.a-opt.wrong > .l { background: var(--bad); color: var(--accent-ink); }
+.a-opt.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* votes, leaderboard, timer, cards */
+.a-up { display: inline-grid; justify-items: center; min-width: 30px; padding: 2px 4px; border-radius: 8px; border: 1px solid var(--line); font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--paper); line-height: 1.2; }
+.a-up.on { border-color: var(--fun); color: var(--fun); background: var(--fun-soft); }
+.a-lead { display: grid; grid-template-columns: 18px 22px minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 5px 6px; border-radius: 9px; font-size: 12px; }
+.a-lead.me { background: var(--accent-soft); }
+.a-lead .r { font-weight: 800; color: var(--muted); text-align: center; }
+.a-lead .s { font-weight: 800; font-variant-numeric: tabular-nums; }
+.a-timer { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.a-timer > i { display: block; height: 100%; background: var(--group); }
+.a-flash { border-radius: 14px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); padding: 14px; display: grid; gap: 8px; align-content: center; text-align: center; min-height: 170px; }
+.a-flash .front { font-family: var(--font-display); font-size: 16px; font-weight: 700; }
+.a-grade { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.a-grade span { border-radius: 9px; padding: 5px 2px; text-align: center; font-size: 10.5px; font-weight: 700; border: 1px solid var(--line); background: var(--surface); }
+.a-grade span small { display: block; font-weight: 600; color: var(--muted); font-size: 9px; }
+.a-input { border-radius: 10px; border: 1px solid var(--line); background: var(--surface); padding: 7px 9px; color: var(--faint); font-size: 12px; }
+.a-bubble { border-radius: 12px; padding: 7px 9px; font-size: 12px; line-height: 1.55; max-width: 88%; }
+.a-bubble.me { background: var(--accent); color: var(--accent-ink); justify-self: start; border-bottom-right-radius: 4px; }
+.a-bubble.bot { background: var(--surface); border: 1px solid var(--line); justify-self: end; border-bottom-left-radius: 4px; }
+.a-stack { display: grid; gap: 6px; }
+.a-sheet { position: absolute; inset: auto 0 0 0; background: var(--surface); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; padding: 10px 12px 16px; display: grid; gap: 6px; box-shadow: 0 -10px 30px -12px rgba(0, 0, 0, 0.35); z-index: 3; }
+.a-scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 2; }
+.a-ring { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; background: conic-gradient(var(--accent) var(--p, 60%), var(--line) 0); position: relative; }
+.a-ring::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); }
+.a-ring > span { position: relative; z-index: 1; }
+.a-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.a-divider { height: 1px; background: var(--line); }
+/* lists, tables, toasts, sections, later-phase marks */
+.a-sec { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 2px; }
+.a-sec > b { font-family: var(--font-display); font-size: 14.5px; font-weight: 700; }
+.a-list { border-radius: 11px; border: 1px solid var(--line); background: var(--surface); padding: 0 10px; display: grid; }
+.a-li { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.a-li:last-child { border-bottom: 0; }
+.a-li > div { min-width: 0; display: grid; gap: 1px; }
+.a-li > div > b { font-size: 12.5px; font-weight: 700; line-height: 1.4; }
+.a-li .m { font-size: 11px; color: var(--muted); line-height: 1.45; }
+.a-li > .a-chip, .a-li > .a-btn { flex: none; margin-top: 1px; }
+.a-table { width: 100%; border-collapse: collapse; font-size: 10.5px; line-height: 1.35; }
+.a-table th, .a-table td { padding: 4px 3px; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top; }
+.a-table th { font-size: 9.5px; color: var(--muted); font-weight: 700; background: transparent; }
+.a-toast { align-self: center; background: var(--ink); color: var(--paper); border-radius: 999px; padding: 5px 12px; font-size: 11.5px; font-weight: 600; text-align: center; }
+.a-later { position: relative; outline: 1.5px dashed var(--warn-line); outline-offset: 2px; border-radius: 10px; }
+.a-later::after { content: attr(data-later); position: absolute; top: -8px; inset-inline-end: 6px; font-size: 9px; font-weight: 700; color: var(--ink); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 999px; padding: 0 6px; line-height: 1.5; }
+.a-meter { display: grid; gap: 3px; }
+.a-bars { display: grid; gap: 4px; }
+.a-bars .r { display: grid; grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) 1.6em; gap: 6px; align-items: center; font-size: 11px; }
+.a-bars .r > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-bars .r > b { text-align: end; font-variant-numeric: tabular-nums; }
+.a-bars .a-bar { height: 8px; }
+.a-bars .r.ok { color: var(--ok); font-weight: 700; }
+.a-bars .r.ok .a-bar > i { background: var(--ok); }
+
+
+.swim { display: grid; gap: 8px; max-width: 860px; }
+.swim-head { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 52px); z-index: 2; background: var(--paper); padding-block: 4px; }
+.lane-tag { font-family: var(--font-display); font-weight: 900; font-size: 1.1rem; padding: 6px 12px; border-radius: 10px; text-align: center; }
+.lane-tag.group { color: var(--group); background: var(--group-soft); }
+.lane-tag.me { color: var(--me); background: var(--me-soft); }
+.loop-step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); width: calc(50% - 5px); }
+.loop-step p { color: var(--muted); font-size: 0.93rem; }
+.loop-step .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: var(--accent-ink); background: var(--faint); }
+.loop-step.g { justify-self: start; border-top: 3px solid var(--group); }
+.loop-step.g .n { background: var(--group); }
+.loop-step.p { justify-self: end; border-top: 3px solid var(--me); }
+.loop-step.p .n { background: var(--me); }
+.loop-step.b { width: 100%; border-top: 3px solid var(--fun); background: linear-gradient(90deg, var(--me-soft), var(--surface) 40%, var(--surface) 60%, var(--group-soft)); }
+.loop-step.b .n { background: var(--fun); }
+.loop-bridge { display: grid; justify-items: center; }
+@media (max-width: 560px) { .loop-step { width: 88%; } }
+.navtabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.navtab { display: grid; gap: 4px; align-content: start; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); color: var(--accent); }
+.navtab b { color: var(--ink); }
+.navtab .muted { font-size: 0.88rem; }
+.day { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.feat.stack { grid-template-columns: minmax(0, 1fr); }
+.feat.stack .feat-text { max-width: 760px; }
+.feat.stack .feat-phones { justify-content: flex-start; }
+@media (max-width: 900px) { .day { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .day { grid-template-columns: minmax(0, 1fr); } }
+.phases { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.phase p { font-size: 0.93rem; }
+.phase.blocked { border-style: dashed; background: transparent; }
+.objs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+.obj { display: grid; gap: 4px; align-content: start; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 0.93rem; }
+.obj b { font-family: var(--font-display); font-size: 1.15rem; font-weight: 900; }
+.obj .where { font-size: 0.8rem; font-weight: 700; justify-self: start; padding: 1px 10px; border-radius: 999px; }
+.obj.group { border-top: 3px solid var(--group); } .obj.group .where { color: var(--group); background: var(--group-soft); }
+.obj.me { border-top: 3px solid var(--me); } .obj.me .where { color: var(--me); background: var(--me-soft); }
+.obj.both { border-top: 3px solid var(--fun); } .obj.both .where { color: var(--fun); background: var(--fun-soft); }
+.rules { margin: 0; padding-inline-start: 20px; display: grid; gap: 6px; max-width: 760px; }
+.dec-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.dec-n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 0.85rem; background: var(--line); color: var(--ink); }
+.decision .def { padding-inline-start: 36px; }
+.budget td.num { white-space: nowrap; }
+.budget tfoot td { font-weight: 800; background: var(--paper); }
+.budget tfoot td:last-child { white-space: normal; }
+.nw { white-space: nowrap; }
+#votes th:not(:first-child), #votes td.num { width: 1%; white-space: nowrap; text-align: center; padding-inline: 6px; }
+#votes .table-wrap { max-width: 760px; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.stat { padding: 6px 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-weight: 700; font-size: 0.92rem; }
+
+
+.wrong { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.card h3 { margin: 0; font-family: var(--font-display); font-size: 1.08rem; }
+.card p { margin: 0; line-height: 1.6; }
+.card .take { font-size: 0.92rem; border-inline-start: 3px solid var(--accent); padding-inline-start: 10px; }
+.pair { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; justify-content: flex-start; }
+.shot { margin: 0; display: grid; gap: 8px; width: min(282px, 100%); }
+.shot img { width: 100%; height: auto; border-radius: 30px; border: 9px solid var(--bezel); max-width: 100%; box-shadow: var(--shadow); }
+.shot figcaption { font-size: 0.88rem; color: var(--muted); line-height: 1.5; }
+.tag-now { display: inline-block; font-size: 0.78rem; font-weight: 800; padding: 1px 9px; border-radius: 999px; background: var(--warn-bg); border: 1px solid var(--warn-line); }
+.tag-ok { display: inline-block; font-size: 0.78rem; font-weight: 800; padding: 1px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.steps3 { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-width: 860px; counter-reset: s; }
+.steps3 li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; counter-increment: s; }
+.steps3 li::before { content: counter(s); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: var(--accent); color: var(--accent-ink); }
+.steps3 h3 { margin: 0 0 3px; font-family: var(--font-display); font-size: 1.04rem; }
+.steps3 p { margin: 0; }
+.feat-phones.wrapgrid { display: flex; flex-wrap: wrap; gap: 22px; }
+
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
+    <symbol id="i-cards" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></symbol>
+    <symbol id="i-award" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></symbol>
+    <symbol id="i-smile" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></symbol>
+  </defs>
+</svg>
+
+<div class="page" dir="rtl" lang="he">
+  <nav class="topnav" aria-label="ניווט בעמוד">
+    <a href="#wrong">מה לא עבד</a><a href="#refs">איך אחרים עושים</a><a href="#screens">המסכים</a><a href="#count">הכמות</a><a href="#look">המראה</a><a href="#order">הסדר</a><a href="#decisions">החלטות</a>
+  </nav>
+
+  <header class="hero" id="top">
+    <span class="kicker">הצעה לפני בנייה · אחרי המשוב על שחרור 1</span>
+    <h1>תרגול 2.0</h1>
+    <p class="lead">יצירת שאלות שאפשר לשלוט בה, כמות שנקבעת לפי החומר, ומראה שתואם את המסכים שאישרת. שום דבר מזה לא נבנה עדיין: מחכה לאישור שלך.</p>
+  </header>
+
+  <section class="block" id="wrong">
+    <header><span class="eyebrow">המשוב שלך</span><h2>מה לא עבד בשחרור 1</h2></header>
+    <ul class="wrong">
+<li class="card"><h3>אין בחירה</h3><p>יש כפתור אחד, ׳ליצור׳. אי אפשר לבחור כמה שאלות, על אילו חלקים, באיזה סגנון או באיזו רמה, ואי אפשר לתת דוגמה.</p></li>
+<li class="card"><h3>הכמות לפי שקפים</h3><p>הכלל היום הוא בערך שאלה לכל 2.5 שקפים, ולפחות 6. לכן הרצאה קצרה מקבלת 6, גם כשיש בה הרבה מה לדעת.</p></li>
+<li class="card"><h3>המראה לא מה שאושר</h3><p>המסכים שעלו נבנו לפי המפרט הטכני שנכתב לפני ההצעה. חסרים בהם הימור הביטחון, סדר ההסברים, ׳מתי כן׳ ו׳לפסקה׳, והם לא נראים כמו המסכים שאישרת.</p></li>
+    </ul>
+    <div class="pair">
+      <figure class="shot"><img src="img/now-sheet.jpg" width="390" height="844" alt="מסך יצירת השאלות היום"><figcaption><span class="tag-now">היום</span> יצירת שאלות: כפתור אחד, בלי שום בחירה.</figcaption></figure>
+      <figure class="shot"><img src="img/now-question.jpg" width="390" height="844" alt="מסך שאלה היום"><figcaption><span class="tag-now">היום</span> שאלה: בלי הימור, בלי סדר ההסברים שאושר.</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="block" id="refs">
+    <header><span class="eyebrow">השראה</span><h2>איך אפליקציות אחרות עושות את זה טוב</h2></header>
+    <div class="wrong">
+<article class="card"><h3><a href="https://9to5google.com/2025/09/08/notebooklm-flashcards-quizzes/" target="_blank" rel="noopener"><bdi dir="ltr">NotebookLM</bdi></a></h3><p>ביצירת מבחן: כמה שאלות (פחות · רגיל · יותר), רמה (קל · בינוני · קשה), שדה ׳על מה להתמקד׳, ובחירה מאילו מקורות.</p><p class="take"><b>מה לוקחים:</b> שלוש רמות כמות, רמה, ושדה מיקוד.</p></article>
+<article class="card"><h3><a href="https://support.amboss.com/hc/en-us/articles/360032477132" target="_blank" rel="noopener"><bdi dir="ltr">AMBOSS</bdi></a></h3><p>בונים סבב תרגול עם מסננים: נושא, רמה, ומצב השאלה (עוד לא נענו, טעויות, מסומנות), מספר שאלות, ומצב לימוד או מבחן.</p><p class="take"><b>מה לוקחים:</b> המסך ׳סבב חדש׳: מאיפה, על מה, כמה, ותרגול או מבחן.</p></article>
+<article class="card"><h3><a href="https://www.scriptbyai.com/best-free-ai-quiz-generators/" target="_blank" rel="noopener"><bdi dir="ltr">Quizgecko</bdi></a></h3><p>סוגי שאלות, רמות קושי או רמה שנקבעת לפי מורכבות החומר, מסיחים שנשמעים נכונים, ושאלות בסגנון של מבחן.</p><p class="take"><b>מה לוקחים:</b> סגנונות לבחירה, ׳כמו במבחן׳, ודוגמה לסגנון.</p></article>
+    </div>
+  </section>
+
+  <section class="block" id="screens">
+    <header><span class="eyebrow">המסכים המוצעים</span><h2>ארבעה מסכים: מה ליצור, דוגמה ומיקוד, הבנק נבנה, סבב חדש</h2>
+    <p>המספרים במסכים הם דוגמה על ההרצאה על תרופות נגד טפילים.</p></header>
+    <div class="feat-phones wrapgrid">
+<figure class="mock" id="m-setup">
+  <div class="phone">
+    <div class="ph-status"><span>20:14</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להרצאה</span><span class="t">שאלות חדשות · <bdi dir="ltr">Anti parasite</bdi></span></div>
+    <div class="ph-sub"><span>38 שקפים · 46 נקודות שצריך לדעת</span></div>
+    <div class="ph-body">
+      <div class="a-sec"><b>כמה שאלות</b><span class="a-small a-muted">לפי החומר</span></div>
+      <div class="a-grade">
+        <span>ממוקד<small>12</small></span>
+        <span style="border-color: var(--accent); background: var(--accent-soft); color: var(--accent)">מלא<small>24</small></span>
+        <span>מקיף<small>40</small></span>
+        <span>משלי<small>…</small></span>
+      </div>
+      <p class="a-small a-muted">מלא: כל נקודה שצריך לדעת מופיעה לפחות פעם. דגלים אדומים תמיד בפנים.</p>
+      <div class="a-sec"><b>על מה</b><span class="a-small a-muted">46 נקודות</span></div>
+      <div class="a-wrap">
+        <span class="a-chip busy">✓ אמבות · 6</span>
+        <span class="a-chip busy">✓ לישמניה · 9</span>
+        <span class="a-chip busy">✓ מלריה · 22</span>
+        <span class="a-chip busy">✓ תולעים · 9</span>
+      </div>
+      <div class="a-sec"><b>סגנונות</b><span class="a-small a-muted">אפשר כמה</span></div>
+      <div class="a-wrap">
+        <span class="a-chip busy">✓ מקרה קליני</span>
+        <span class="a-chip busy">✓ מנגנון</span>
+        <span class="a-chip busy">✓ תרופה לבחירה</span>
+        <span class="a-chip busy">✓ תופעות והתוויות נגד</span>
+        <span class="a-chip">השוואה</span>
+        <span class="a-chip">׳מה לא נכון׳</span>
+        <span class="a-chip">טבלה ריקה</span>
+      </div>
+      <div class="a-sec"><b>רמה</b></div>
+      <div class="a-grid2" style="grid-template-columns: repeat(3, 1fr)">
+        <span class="a-btn">קל</span>
+        <span class="a-btn" style="border-color: var(--accent); color: var(--accent)">כמו במבחן</span>
+        <span class="a-btn">קשה</span>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide">המשך: דוגמה ומיקוד</span></div>
+  </div>
+  <figcaption><b>מה ליצור</b>. כמה שאלות, לפי כמות החומר. על אילו חלקים, באילו סגנונות, ובאיזו רמה.</figcaption>
+</figure>
+<figure class="mock" id="m-example">
+  <div class="phone">
+    <div class="ph-status"><span>20:15</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ מה ליצור</span><span class="t">דוגמה ומיקוד</span></div>
+    <div class="ph-body">
+      <div class="a-sec"><b>דוגמה לסגנון</b><span class="a-small a-muted">רשות</span></div>
+      <div class="a-card flat">
+        <p class="a-small">אישה בת 28 חוזרת מטיול בהודו עם חום כל 48 שעות. במשטח: <bdi dir="ltr">P. vivax</bdi>. מה הצעד הבא לפני מתן הטיפול?</p>
+        <p class="a-small a-muted">א. … ב. … ג. … ד. … ה. …</p>
+        <div class="a-row"><span class="a-chip">הודבק ממבחן 2025</span><span class="a-btn ghost"><svg width="14" height="14"><use href="#i-image"/></svg>או לצלם</span></div>
+      </div>
+      <div class="a-callout"><b>ככה השאלות ייכתבו:</b> מקרה של 2-3 שורות עם גיל, מין ונסיעה, חמש אפשרויות, ושאלה על הצעד הבא. בעברית, עם המונחים באנגלית.</div>
+      <div class="a-sec"><b>על מה להתמקד</b><span class="a-small a-muted">רשות</span></div>
+      <div class="a-input">למשל: מלריה בהריון, ומה בודקים לפני טיפול</div>
+      <div class="a-card flat">
+        <div class="a-row between"><b class="a-small">24 שאלות · כמו במבחן</b><span class="a-chip">כ-$0.60</span></div>
+        <p class="a-small a-muted">כל שאלה נבדקת בידי פותר עיוור לפני שהיא נכנסת לבנק. נשמרות לכל הקבוצה.</p>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide">ליצור 24 שאלות</span></div>
+  </div>
+  <figcaption><b>דוגמה ומיקוד</b>. מדביקים שאלה ממבחן קודם, או מצלמים אותה, והשאלות נכתבות באותו סגנון. אפשר גם לכתוב על מה להתמקד.</figcaption>
+</figure>
+<figure class="mock" id="m-curate">
+  <div class="phone">
+    <div class="ph-status"><span>20:16</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להרצאה</span><span class="t">הבנק נבנה</span><span class="a-chip busy">17/24</span></div>
+    <div class="ph-body">
+      <div class="a-bars">
+        <div class="r ok" style="grid-template-columns: minmax(0,5.5em) minmax(0,1fr) 3em"><span>אמבות</span><span class="a-bar"><i style="width: 100%"></i></span><b>6/6</b></div>
+        <div class="r" style="grid-template-columns: minmax(0,5.5em) minmax(0,1fr) 3em"><span>לישמניה</span><span class="a-bar"><i style="width: 78%"></i></span><b>7/9</b></div>
+        <div class="r" style="grid-template-columns: minmax(0,5.5em) minmax(0,1fr) 3em"><span>מלריה</span><span class="a-bar"><i style="width: 45%"></i></span><b>10/22</b></div>
+        <div class="r" style="grid-template-columns: minmax(0,5.5em) minmax(0,1fr) 3em"><span>תולעים</span><span class="a-bar"><i style="width: 0%"></i></span><b>0/9</b></div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-chip">מקרה קליני</span><span class="a-row"><span class="a-chip ok">נבדקה ✓</span><span class="a-tag">ש׳ 38</span></span></div>
+        <p class="a-small"><b>מטייל חזר מניגריה עם חום, ובמשטח <bdi dir="ltr">P. falciparum</bdi>. מה האבחנה?</b></p>
+        <div class="a-row"><span class="a-btn">✓ להשאיר</span><span class="a-btn">↻ לנסח מחדש</span><span class="a-btn ghost">✕</span></div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-chip">מנגנון</span><span class="a-row"><span class="a-chip ok">נבדקה ✓</span><span class="a-tag">ש׳ 17</span></span></div>
+        <p class="a-small"><b>איך <bdi dir="ltr">Sodium stibogluconate</bdi> הופכת לפעילה בתוך הטפיל?</b></p>
+        <div class="a-row"><span class="a-btn">✓ להשאיר</span><span class="a-btn">↻ לנסח מחדש</span><span class="a-btn ghost">✕</span></div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><span class="a-chip">׳מה לא נכון׳</span><span class="a-row"><span class="a-chip warn">הפותר טעה</span><span class="a-tag">ש׳ 27</span></span></div>
+        <p class="a-small"><b>איזו מהבאות אינה תופעת לוואי של <bdi dir="ltr">Quinine</bdi>?</b></p>
+        <p class="a-small a-muted">נכתבת מחדש אוטומטית.</p>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn wide">עוד 7 נכתבות…</span><span class="a-btn primary wide">להוסיף 17 לבנק</span></div>
+  </div>
+  <figcaption><b>הבנק נבנה</b>. השאלות נכתבות לפי חלקים, עם כיסוי של הנקודות. כל שאלה נבדקת, ואפשר להשאיר, לנסח מחדש או להוריד לפני שהיא נכנסת לבנק.</figcaption>
+</figure>
+<figure class="mock" id="m-session">
+  <div class="phone">
+    <div class="ph-status"><span>21:40</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ לתרגול</span><span class="t">סבב חדש · <bdi dir="ltr">Anti parasite</bdi></span></div>
+    <div class="ph-body">
+      <div class="a-sec"><b>מאיפה</b></div>
+      <div class="a-wrap">
+        <span class="a-chip busy">✓ לא נענו · 9</span>
+        <span class="a-chip busy">✓ טעיתי · 4</span>
+        <span class="a-chip">סימנתי · 2</span>
+        <span class="a-chip">הכול · 24</span>
+      </div>
+      <div class="a-sec"><b>על מה</b></div>
+      <div class="a-wrap">
+        <span class="a-chip busy">✓ מלריה</span>
+        <span class="a-chip">אמבות</span>
+        <span class="a-chip">לישמניה</span>
+        <span class="a-chip">תולעים</span>
+      </div>
+      <div class="a-sec"><b>סגנון</b></div>
+      <div class="a-wrap">
+        <span class="a-chip busy">✓ הכול</span>
+        <span class="a-chip">רק מקרים קליניים</span>
+      </div>
+      <div class="a-sec"><b>כמה</b></div>
+      <div class="a-grid2" style="grid-template-columns: repeat(3, 1fr)">
+        <span class="a-btn">5</span>
+        <span class="a-btn" style="border-color: var(--accent); color: var(--accent)">10</span>
+        <span class="a-btn">13 · הכול</span>
+      </div>
+      <div class="a-sec"><b>איך</b></div>
+      <div class="a-stack">
+        <div class="a-opt picked"><span class="l">◉</span><span><b>תרגול</b> · הסבר אחרי כל שאלה</span></div>
+        <div class="a-opt"><span class="l">○</span><span><b>מצב מבחן</b> · עם שעון, ההסברים בסוף</span></div>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide">להתחיל · 10 שאלות</span></div>
+  </div>
+  <figcaption><b>סבב חדש</b>. כמו ב-<bdi dir="ltr">AMBOSS</bdi>: בוחרים מאיפה (לא נענו, טעויות, סימונים), על מה, איזה סגנון, כמה, ותרגול או מבחן.</figcaption>
+</figure>
+
+    </div>
+  </section>
+
+  <section class="block" id="count">
+    <header><span class="eyebrow">כמה שאלות</span><h2>הכמות לפי מה שצריך לדעת, לא לפי מספר השקפים</h2>
+    <p>קודם מחלצים מהסיכום את הנקודות שצריך לדעת: תרופה, מנגנון, התוויה, תופעת לוואי, התוויית נגד, ומספר שכדאי לזכור. הכמות נגזרת מהן. בהרצאה לדוגמה יש 46 נקודות.</p></header>
+    <div class="table-wrap"><table class="budget">
+      <thead><tr><th>רמה</th><th>מה נכנס</th><th>בדוגמה</th><th>עלות</th></tr></thead>
+      <tbody>
+<tr><td><b>ממוקד</b></td><td>רק הנקודות החשובות ביותר: דגלים אדומים, התוויות נגד, תרופות לבחירה (בערך שאלה ל-4 נקודות)</td><td class="num">12</td><td class="num">כ-<bdi dir="ltr" class="nw">$0.30</bdi></td></tr>
+<tr><td><b>מלא</b></td><td>כל נקודה שצריך לדעת מופיעה לפחות פעם (בערך שאלה ל-2 נקודות)</td><td class="num">24</td><td class="num">כ-<bdi dir="ltr" class="nw">$0.60</bdi></td></tr>
+<tr><td><b>מקיף</b></td><td>כל נקודה מכמה כיוונים: מקרה, מנגנון, השוואה (בערך שאלה לנקודה)</td><td class="num">40</td><td class="num">כ-<bdi dir="ltr" class="nw">$1.00</bdi></td></tr>
+<tr><td><b>משלי</b></td><td>מספר שבוחרים</td><td class="num">…</td><td class="num">לפי המספר</td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted">העלויות במחיר מלא. במצב החסכוני (<bdi dir="ltr">Batch API</bdi>) בערך חצי. כל שאלה כוללת בדיקה של פותר עיוור, שעונה בלי לראות את המפתח כדי לתפוס מפתח שגוי.</p>
+  </section>
+
+  <section class="block" id="look">
+    <header><span class="eyebrow">המראה</span><h2>מה עלה, מול מה שאישרת</h2>
+    <p>קודם המסך שעלה, ואחריו המסך שאושר בהצעה. התרגול והכרטיסיות יעברו למראה המאושר, וכל מסך חדש ייבנה בו.</p></header>
+    <div class="pair">
+      <figure class="shot"><img src="img/now-question.jpg" width="390" height="844" alt="השאלה שעלתה"><figcaption><span class="tag-now">עלה</span> שאלה בשחרור 1.</figcaption></figure>
+      <div class="feat-phones"><figure class="mock">
+  <div class="phone">
+    <div class="ph-status"><span>21:47</span><span>100%</span></div>
+    <div class="ph-head"><span class="back">→ להרצאה</span><span class="t">תרגול · <bdi dir="ltr">Anti parasite</bdi></span><span class="a-chip busy">4/15</span></div>
+    <div class="ph-body">
+      <div class="a-bar"><i style="width: 27%"></i></div>
+      <div class="a-row between"><span class="a-chip">מקרה קליני</span><span class="a-small a-muted">מבוסס על ש׳ 38</span></div>
+      <p class="a-q">מטייל חזר מתאילנד עם חום, ובמשטח <bdi dir="ltr">P. vivax</bdi>. אחרי <bdi dir="ltr">Chloroquine</bdi> החום ירד. מה עוד חייבים לעשות לפני השחרור?</p>
+      <div class="a-opts">
+        <div class="a-opt"><span class="l">א</span><span>לאשפז ולתת <bdi dir="ltr">Artesunate IV</bdi></span></div>
+        <div class="a-opt"><span class="l">ב</span><span>לבדוק <bdi dir="ltr">G6PD</bdi> ולתת <bdi dir="ltr">Primaquine</bdi></span></div>
+        <div class="a-opt picked"><span class="l">ג</span><span>לתת <bdi dir="ltr">Mefloquine</bdi> פעם בשבוע</span></div>
+        <div class="a-opt"><span class="l">ד</span><span>לתת <bdi dir="ltr">Doxycycline</bdi> כמניעה</span></div>
+        <div class="a-opt"><span class="l">ה</span><span>לשחרר, החום כבר ירד</span></div>
+      </div>
+      <div class="a-card flat">
+        <div class="a-row between"><b class="a-small">הימור ביטחון, לפני הבדיקה</b><span class="a-chip">רק לך</span></div>
+        <div class="a-row"><span class="a-btn wide">ניחוש</span><span class="a-btn wide" style="border-color: var(--accent); color: var(--accent)">נראה לי</span><span class="a-btn wide">על בטוח</span></div>
+        <p class="a-small a-muted">טעות ׳על בטוח׳ נכנסת לרשימת הסכנה. התשובה וההימור נשמרים רק אצלך.</p>
+      </div>
+    </div>
+    <div class="ph-foot"><span class="a-btn primary wide">לבדוק</span></div>
+  </div>
+  <figcaption><b>שאלה, לפני תשובה</b>. שאלת מקרה מהשקפים, עם הימור ביטחון בלחיצה אחת לפני הבדיקה.</figcaption>
+</figure></div>
+    </div>
+  </section>
+
+  <section class="block" id="order">
+    <header><span class="eyebrow">מה ייבנה</span><h2>בסדר הזה</h2></header>
+    <ol class="steps3">
+<li><div><h3>מראה אחד לכל האפליקציה</h3><p>העיצוב של המסכים שאישרת הופך לעיצוב של האפליקציה עצמה: גופנים, כרטיסים, צ׳יפים, כותרות ולשוניות. התרגול והכרטיסיות שכבר עלו עוברים אליו, כולל הימור הביטחון, סדר ההסברים, ׳מתי כן׳ ו׳לפסקה׳.</p></div></li>
+<li><div><h3>יצירת שאלות חדשה</h3><p>ארבעת המסכים כאן: מה ליצור, דוגמה ומיקוד, הבנק נבנה עם בדיקה של כל שאלה, וסבב חדש. הכמות נקבעת לפי הנקודות שצריך לדעת, לא לפי מספר השקפים.</p></div></li>
+<li><div><h3>המבחן הקבוצתי וכתיבה בשרת</h3><p>שניהם כבר בבנייה. המבחן ייצא ישר במראה החדש.</p></div></li>
+    </ol>
+  </section>
+
+  <section class="block" id="decisions">
+    <header><span class="eyebrow">רק אתה יכול להחליט</span><h2>שלוש החלטות קטנות</h2>
+    <p>אם ההמלצות מתאימות, מספיק לכתוב ׳מאשר׳ בצ׳אט. אם לא, לכתוב מה לשנות.</p></header>
+    <ul class="decisions">
+<li class="decision"><div class="dec-head"><span class="dec-n">1</span><b>ברירת המחדל לכמות</b><span class="badge">יועד</span></div><p class="def">ההמלצה: ׳מלא׳: כל נקודה לפחות פעם. ב-20 הרצאות בחודש זה כ-<bdi dir="ltr" class="nw">$12</bdi> במחיר מלא (היום כ-<bdi dir="ltr" class="nw">$7.60</bdi>), וחצי מזה במצב החסכוני.</p></li>
+<li class="decision"><div class="dec-head"><span class="dec-n">2</span><b>מי יוצר שאלות</b><span class="badge">יועד</span></div><p class="def">ההמלצה: כל אחד בקבוצה, והבנק משותף. מי שיוצר רואה את הבנק נבנה ומאשר; לכל השאר הוא פשוט מופיע.</p></li>
+<li class="decision"><div class="dec-head"><span class="dec-n">3</span><b>לעבור על השאלות לפני שהן נכנסות?</b><span class="badge">יועד</span></div><p class="def">ההמלצה: כן, עם כפתור ׳להוסיף הכול׳ למי שלא רוצה לעבור אחת אחת. שאלה שהפותר העיוור טעה בה נכתבת מחדש אוטומטית.</p></li>
+    </ul>
+  </section>
+</div>
