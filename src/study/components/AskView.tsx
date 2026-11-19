@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { tidy } from "../../../shared/study/blocks";
 import { blockSources, citedSlides } from "../../../shared/study/edits";
 import { getLecture, getSections, listLectures, type Lecture, type LectureRow, type Section } from "../lib/api";
@@ -8,7 +8,7 @@ import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import type { Ctx, LectureCtx, ScreenProps, Spot } from "../features/types";
 import { Icon } from "./Icon";
-import { BackLink, Head, Sheet, StickyActions } from "./Shell";
+import { BackLink, Head, Loading, Sheet, StickyActions } from "./Shell";
 import SummaryView, { isolateLatin } from "./SummaryView";
 
 /* ── "לשאול" (spec §4.8, §12.3.K; ask.html s1) ──
@@ -509,8 +509,21 @@ function Composer({ s, lectureId }: { s: AskState; lectureId: string | null }) {
 
 const leftLine = (left: number | null) => (left !== null ? `נשארו היום ${left} שאלות · השאלות נשמרות רק במכשיר הזה` : "השאלות נשמרות רק במכשיר הזה");
 
-/** ?v=ask: a lecture (from its chip or a paragraph) or the library. */
-export default function AskView({ route, ctx }: ScreenProps<"ask">) {
+/** "לשאול על כל הקורס" (?v=ask&c=<course id>; sources.md, phase 1): its own chunk. */
+const CourseAsk = lazy(() => import("./CourseAsk"));
+
+/** ?v=ask: a lecture (from its chip or a paragraph), the library, or a whole course. */
+export default function AskView(p: ScreenProps<"ask">) {
+  if (p.route.c)
+    return (
+      <Suspense fallback={<Loading />}>
+        <CourseAsk key={p.route.c} route={p.route} ctx={p.ctx} />
+      </Suspense>
+    );
+  return <LectureAsk {...p} />;
+}
+
+function LectureAsk({ route, ctx }: ScreenProps<"ask">) {
   const [lecture, setLecture] = useState<Lecture | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
   useEffect(() => {
