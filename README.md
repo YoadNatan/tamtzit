@@ -320,9 +320,12 @@ All local: no real Supabase project, no live site, no API key.
   360 px). Build again with a flag set's `VITE_STUDY_*` flags and run with
   `E2E_FLAGS=<set>`: `off`, `rel1`, `w4`, `w5`, `w5x`, `guide`, `guide1`,
   `prod`, `s1` (production's set with `VITE_STUDY_COURSES`:
-  `e2e/study/courses.cjs`) and the others `e2e/study/mock.cjs` lists. The fixtures in
-  `e2e/study/fixtures/` are made for the tests (a synthetic lecture); the
-  group's own lectures never go into git.
+  `e2e/study/courses.cjs`), `s2` (`s1` with `VITE_STUDY_EXAMS`:
+  `e2e/study/exams.cjs`, past exams and the simulation) and the others
+  `e2e/study/mock.cjs` lists. The fixtures in `e2e/study/fixtures/` are made
+  for the tests (a synthetic lecture, and a synthetic 12-page exam that
+  `fixtures/make-exam.cjs` prints into a PDF and photographs at test time);
+  the group's own lectures and exams never go into git.
 
 ## Limits
 
