@@ -32,6 +32,7 @@ import {
   ASK_SYSTEM,
   askTurnText,
   askUserText,
+  COURSE_ASK_NOTE,
   clockOf,
   correctionsBlock,
   NO_RECORDING,
@@ -89,6 +90,7 @@ const USER = "33333333-0000-4000-8000-000000000003";
 const LECTURE_A = "aaaaaaaa-0000-4000-8000-00000000000a";
 const LECTURE_B = "bbbbbbbb-0000-4000-8000-00000000000b";
 const LECTURE_C = "cccccccc-0000-4000-8000-00000000000c";
+const COURSE = "c0c0c0c0-0000-4000-8000-0000000000c0";
 
 const slide = (n: number, title: string, lines: string[], extra: Partial<StoredSlide> = {}): StoredSlide => ({
   n,
@@ -660,6 +662,11 @@ const db = {
   reserve: [] as Array<{ status: number; body: unknown }>,
   nextId: 41,
   uses: 3,
+  // Courses (sources.md B6.9): the course rows the member can read, the switch, B's parts and the points.
+  courses: [] as Array<{ id: string; group_id: string; name: string; name_key: string; deleted_at: string | null }>,
+  coursesOn: true,
+  sectionsB: [] as SectionRow[],
+  points: [] as Array<{ lecture_id: string; part_idx: number; subject: string; text: string }>,
 };
 const anthropicReplies: Array<{ sse?: Ev[]; json?: object }> = [];
 
@@ -697,8 +704,19 @@ const rest = createServer(async (req, res) => {
     const course = eq(q, "course");
     const rows = db.lectures
       .filter((l) => l.group_id === eq(q, "group_id") && (!course || l.course === course))
-      .map((l) => ({ id: l.id, title: l.title, course: l.course, lecture_date: l.lecture_date, outline: db.outlines[l.id] ?? null }));
+      .map((l) => ({ id: l.id, title: l.title, course: l.course, lecture_date: l.lecture_date, created_at: "2026-11-01T00:00:00Z", outline: db.outlines[l.id] ?? null }));
     return send(res, 200, rows);
+  }
+  if (p === "/rest/v1/rpc/study_feature_on") return send(res, 200, JSON.parse(body).p_name === "courses" ? db.coursesOn : true);
+  if (p === "/rest/v1/study_courses") {
+    const rows = db.courses.filter((c) => c.id === eq(q, "id") && c.group_id === GROUP && (q.get("deleted_at") !== "is.null" || c.deleted_at === null));
+    return send(res, 200, rows);
+  }
+  const inList = (k: string) => q.get(k)?.match(/^in\.\((.*)\)$/)?.[1].split(",").map((x) => x.replace(/"/g, ""));
+  if (p === "/rest/v1/study_points") return send(res, 200, db.points.filter((x) => inList("lecture_id")?.includes(x.lecture_id)));
+  if (p === "/rest/v1/study_sections" && inList("lecture_id")) {
+    const all = [...db.sections.map((x) => ({ ...x, lecture_id: LECTURE_A })), ...db.sectionsB.map((x) => ({ ...x, lecture_id: LECTURE_B }))];
+    return send(res, 200, all.filter((x) => inList("lecture_id")!.includes(x.lecture_id) && (!eq(q, "status") || x.status === eq(q, "status"))));
   }
   if (p === "/rest/v1/study_sections") {
     const idx = eq(q, "idx");
@@ -769,6 +787,10 @@ beforeEach(() => {
   db.members = [{ group_id: GROUP }];
   db.reserve = [];
   db.uses = 3;
+  db.courses = [{ id: COURSE, group_id: GROUP, name: "פרמקולוגיה לדוגמה", name_key: "פרמקולוגיה לדוגמה", deleted_at: null }];
+  db.coursesOn = true;
+  db.sectionsB = [{ idx: 0, title: "Examplazole", gen: 1, markdown: "## Examplazole\n\nExamplazole מעכב Fakease. [ש' 1]\n\n- כאבי ראש. [ש' 2]", status: "ready" }];
+  db.points = [];
   anthropicReplies.length = 0;
 });
 
@@ -1116,4 +1138,139 @@ test("op: a lecture of another group (or hidden) is 404 lecture not found", asyn
   const res = await ask({ lectureId: "dddddddd-0000-4000-8000-00000000000d", question: QUESTION });
   assert.deepEqual([res.status, await res.json()], [404, { error: "lecture not found" }]);
   assert.equal(restCalls("/rest/v1/rpc/study_reserve").length, 0);
+});
+
+// ── 4. "לשאול על כל הקורס" (sources.md B6.9): scope "course" ──
+
+const COURSE_ANSWER =
+  "Fabrimycin אסורה עם אלכוהול: היא גורמת לתגובה דמוית Disulfiram, עד 72 שעות אחרי המנה האחרונה. [הרצאה 1 · ש׳ 7]\n\nבהרצאה 2 מופיע רק Examplazole. [הרצאה 2 · ש׳ 9]";
+const askCourse = (body: Record<string, unknown> = {}) => ask({ scope: "course", courseId: COURSE, question: QUESTION, history: [], ...body });
+/** Every section, with K's end and section S at 1. */
+const SCHEMA_S1 = { ...SCHEMA_K2, S: 1 };
+
+test("op, course: without section S (or with the switch off) nothing is read, reserved or asked", async () => {
+  // First, before any passing check of the same needs is remembered.
+  db.schema = { ...SCHEMA_K2 };
+  const res = await askCourse();
+  assert.deepEqual([res.status, await res.json()], [503, { error: "schema" }]);
+  db.schema = { ...SCHEMA_S1 };
+  db.coursesOn = false;
+  const off = await askCourse();
+  assert.deepEqual([off.status, await off.json()], [403, { error: "off" }]);
+  assert.equal(restCalls("/rest/v1/rpc/study_reserve").length, 0);
+  assert.equal(restCalls("/rest/v1/study_sections").length, 0);
+  assert.equal(modelCalls().length, 0);
+});
+
+test("op, course: the body's scope is checked before anything is read", async () => {
+  db.schema = { ...SCHEMA_S1 };
+  for (const bad of [
+    { courseId: "not-an-id" },
+    { courseId: null },
+    { lectureId: LECTURE_A },
+    { course: "פרמקולוגיה לדוגמה" },
+    { focus: { part: 0, anchor: 1 } },
+    { scope: "library" },
+  ]) {
+    log = [];
+    const res = await askCourse(bad);
+    assert.deepEqual([res.status, await res.json()], [400, { error: "bad scope" }], JSON.stringify(bad));
+    assert.equal(log.filter((l) => l.path !== "/rest/v1/rpc/study_schema").length, 0);
+  }
+});
+
+test("op, course: no route call; the context line first, then one answer reserved (ask/answer, no lecture) and settled", async () => {
+  db.schema = { ...SCHEMA_S1 };
+  anthropicReplies.push(answerReply(COURSE_ANSWER));
+  const res = await askCourse();
+  assert.equal(res.status, 200);
+  const { lines, error } = await readStream(res);
+  assert.equal(error, null);
+  // The cut: lecture A is 1 (1 Nov), B is 2 (8 Nov); C is another course's.
+  const ctx = lines[0];
+  assert.equal(ctx.t, "context");
+  assert.equal(ctx.total, 6, "A's four paragraphs and B's two, headings left out");
+  assert.ok(ctx.chosen >= 1 && ctx.chosen <= 12);
+  assert.deepEqual(ctx.lectures[0], { n: 1, id: LECTURE_A, title: lectureA.title });
+  assert.ok(ctx.lectures.length <= 4 && ctx.lectures.every((l: { id: string }) => l.id !== LECTURE_C));
+  assert.ok(
+    ctx.paragraphs.some((p: { lecture: number; part: number; slides: number[] }) => p.lecture === 1 && p.part === 0 && p.slides.includes(7)),
+    "the paragraph on Disulfiram and alcohol is chosen",
+  );
+  const u = QUESTION.trim();
+  assert.deepEqual(lines[1], { t: "turn", u }, "no recording line: a course has none");
+  assert.equal(
+    lines
+      .filter((l) => l.t === "a")
+      .map((l) => l.d)
+      .join(""),
+    COURSE_ANSWER,
+  );
+  assert.deepEqual(lines[lines.length - 1], {
+    t: "done",
+    stop: "end_turn",
+    badTags: [],
+    badCites: ["2·9"],
+    model: MODEL,
+    left: DAILY_ASKS - 3,
+    sig: hex(`course:${COURSE}`, u, COURSE_ANSWER),
+    unsettled: 0,
+  });
+  // One model call, no routing: reserve, model, settle.
+  const order = log
+    .filter((l) => l.who === "anthropic" || l.path === "/rest/v1/rpc/study_reserve" || l.path === "/rest/v1/rpc/study_settle")
+    .map((l) => (l.who === "anthropic" ? "model" : l.path.split("_").pop()));
+  assert.deepEqual(order, ["reserve", "model", "settle"]);
+  const r = JSON.parse(restCalls("/rest/v1/rpc/study_reserve")[0].body);
+  assert.deepEqual([r.p_group, r.p_lecture, r.p_kind, r.p_ref, r.p_daily, r.p_key], [GROUP, null, "ask", "answer", 20, KEY]);
+  assert.ok(r.p_estimate > 0.05 && r.p_estimate < 1, String(r.p_estimate));
+  const settled = JSON.parse(restCalls("/rest/v1/rpc/study_settle")[0].body);
+  assert.deepEqual([typeof settled.p_id, settled.p_model, settled.p_key], ["number", MODEL, KEY]);
+  // What the model read: the frozen prompt, the course note, the paragraphs with their addresses; no deck.
+  const b = sentBody();
+  assert.equal(b.system.length, 3);
+  assert.equal(b.system[0].text, ASK_SYSTEM);
+  assert.equal(b.system[1].text, COURSE_ASK_NOTE);
+  assert.match(b.system[2].text, /^The course «פרמקולוגיה לדוגמה»: .* \(\d+ of 6\)\./);
+  assert.ok(b.system[2].text.includes(`[הרצאה 1 · «${lectureA.title}» · «Fabrimycin: מנגנון ותופעות לוואי»]`));
+  assert.ok(!b.system.some((x: { text: string }) => x.text === lectureBlock(lectureA)), "no slides");
+  assert.deepEqual(b.messages, [{ role: "user", content: u }]);
+  // The question goes to no REST call.
+  assert.ok(!log.some((l) => l.who === "rest" && (l.body.includes("ואלכוהול") || decodeURIComponent(l.query.toString()).includes("ואלכוהול"))));
+});
+
+test("op, course: a follow-up keeps only turns signed for this course, and chooses with them", async () => {
+  db.schema = { ...SCHEMA_S1 };
+  anthropicReplies.push(answerReply(COURSE_ANSWER));
+  const u0 = "מה נאמר על Examplazole?";
+  const mine = { u: u0, a: "Examplazole מעכב Fakease. [הרצאה 2 · ש׳ 1]", sig: hex(`course:${COURSE}`, u0, "Examplazole מעכב Fakease. [הרצאה 2 · ש׳ 1]") };
+  const lectures = { u: "x", a: "y", sig: hex(LECTURE_A, "x", "y") };
+  await readStream(await askCourse({ question: "ולמה?", history: [lectures, mine] }));
+  const b = sentBody();
+  assert.deepEqual(
+    b.messages.map((m: { role: string; content: string }) => m.content),
+    [mine.u, mine.a, "ולמה?"],
+    "the lecture's turn is dropped",
+  );
+  assert.ok(b.system[2].text.includes("Examplazole מעכב Fakease"), "the earlier question chose B's paragraph");
+});
+
+test("op, course: another group's (or a merged) course is 404; no lectures 404; no summary yet 409; the budget's refusal before the stream", async () => {
+  db.schema = { ...SCHEMA_S1 };
+  db.courses = [];
+  const gone = await askCourse();
+  assert.deepEqual([gone.status, await gone.json()], [404, { error: "course not found" }]);
+  db.courses = [{ id: COURSE, group_id: GROUP, name: "אין כזה", name_key: "אין כזה", deleted_at: null }];
+  const empty = await askCourse();
+  assert.deepEqual([empty.status, await empty.json()], [404, { error: "no lectures" }]);
+  db.courses = [{ id: COURSE, group_id: GROUP, name: "פרמקולוגיה לדוגמה", name_key: "פרמקולוגיה לדוגמה", deleted_at: null }];
+  db.sections = db.sections.map((x) => ({ ...x, status: "writing" }));
+  db.sectionsB = [];
+  const unready = await askCourse();
+  assert.deepEqual([unready.status, await unready.json()], [409, { error: "no summaries" }]);
+  db.sectionsB = [{ idx: 0, title: "Examplazole", gen: 1, markdown: "Examplazole מעכב Fakease. [ש' 1]", status: "ready" }];
+  db.reserve = [pgError("daily_limit")];
+  const limited = await askCourse();
+  assert.deepEqual([limited.status, await limited.json()], [429, { error: "daily_limit" }]);
+  assert.equal(modelCalls().length, 0);
 });

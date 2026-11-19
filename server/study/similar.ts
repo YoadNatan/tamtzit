@@ -33,3 +33,16 @@ export function similarity(a: string, b: string): number {
   for (const x of A) if (B.has(x)) inter++;
   return inter / (A.size + B.size - inter);
 }
+
+/** How much of `query` is in `text`: the share of the query's character
+ *  trigrams that the text has, 0 to 1. A short question against a long
+ *  paragraph or a part's headings, where Jaccard would be small for every
+ *  text (the course ask's context, sources.md B6.9). */
+export function coverage(query: string, text: string): number {
+  const Q = trigrams(query);
+  if (!Q.size) return 0;
+  const T = trigrams(text);
+  let inter = 0;
+  for (const x of Q) if (T.has(x)) inter++;
+  return inter / Q.size;
+}

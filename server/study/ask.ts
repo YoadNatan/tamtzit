@@ -3,6 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod/v4";
 import { blockSources, citedSlides } from "../../shared/study/edits.js";
+import { badCites, contextBlock, selectContext, type CourseContext, type CourseRow } from "./context.js";
 import { costUsd, estimateUsd, floorUsage, reserve, type UsageLike } from "./budget.js";
 import { cleanSchema, settleFor, streamText, type Ledger } from "./claude.js";
 import {
@@ -20,6 +21,8 @@ import type { Op } from "./ops/types.js";
 import {
   ASK_SYSTEM,
   askTurnText,
+  askUserText,
+  COURSE_ASK_NOTE,
   correctionsBlock,
   recordingNotesBlock,
   ROUTE_SYSTEM,
@@ -31,6 +34,7 @@ import {
 } from "./prompts/collab.js";
 import {
   anthropic,
+  assertSchema,
   HttpError,
   json,
   lectureBlock,
@@ -116,6 +120,9 @@ export type Turn = { u: string; a: string; sig?: string };
 export type AskInput = {
   lectureId: string | null;
   course: string | null;
+  /** scope "course" (sources.md B6.9): the course's id; every other field
+   *  of the scope is null then. */
+  courseId: string | null;
   question: string;
   focus: { part: number; anchor: number } | null;
   history: Turn[];
@@ -140,11 +147,26 @@ export function checkAskInput(question: unknown, history: unknown): string | nul
 }
 
 /** The body of op "ask", checked: 400 "question required" / "too long" /
- *  "bad history" / "bad scope" (a focus needs a lecture). */
+ *  "bad history" / "bad scope" (a focus needs a lecture; scope "course"
+ *  needs a course id and nothing else). */
 export function readAskInput(body: Record<string, unknown>): AskInput {
   const history = body.history ?? [];
   const bad = checkAskInput(body.question, history);
   if (bad) throw new HttpError(400, bad);
+  if (body.scope !== undefined && body.scope !== null && body.scope !== "course") throw new HttpError(400, "bad scope");
+  if (body.scope === "course") {
+    const id = body.courseId;
+    const other = [body.lectureId, body.course, body.focus].some((x) => x !== undefined && x !== null);
+    if (typeof id !== "string" || !UUID.test(id) || other) throw new HttpError(400, "bad scope");
+    return {
+      lectureId: null,
+      course: null,
+      courseId: id.toLowerCase(),
+      question: body.question as string,
+      focus: null,
+      history: (history as Turn[]).map((t) => ({ u: t.u, a: t.a, sig: typeof t.sig === "string" ? t.sig : undefined })),
+    };
+  }
   const lectureId = body.lectureId ?? null;
   if (lectureId !== null && (typeof lectureId !== "string" || !UUID.test(lectureId))) throw new HttpError(400, "bad scope");
   const course = body.course ?? null;
@@ -160,6 +182,7 @@ export function readAskInput(body: Record<string, unknown>): AskInput {
   return {
     lectureId: lectureId === null ? null : (lectureId as string).toLowerCase(),
     course: course ? (course as string) : null,
+    courseId: null,
     question: body.question as string,
     focus,
     history: (history as Turn[]).map((t) => ({ u: t.u, a: t.a, sig: typeof t.sig === "string" ? t.sig : undefined })),
@@ -676,6 +699,113 @@ export async function shareOp(req: Request, raw: unknown): Promise<Response> {
   return json(200, { id: data });
 }
 
+// ── "לשאול על כל הקורס" (sources.md B6.9) ──
+//
+// scope "course": no routing call. selectContext() picks at most 12
+// paragraphs from at most 4 of the course's lectures ($0), and one answer
+// reads them after ASK_SYSTEM and COURSE_ASK_NOTE, citing [הרצאה 7 · ש׳ 14].
+// One reservation, kind "ask" ref "answer", as a lecture's answer. Its
+// stream starts with the cut the phone shows ("נבחרו 12 מתוך 340 פסקאות"):
+//   {"t":"context","chosen","total","lectures":[{n,id,title}],"paragraphs":[{lecture,part,anchor,slides}]}
+// then "turn", "a" and "done" as for a lecture ("badCites" for tags that
+// name a lecture or slide the paragraphs do not have; "badTags" stays []).
+// The history's turns are signed for "course:<id>".
+
+/** What a course-scope turn is signed for (never a lecture's id). */
+export const courseSigScope = (courseId: string) => `course:${courseId}`;
+
+/** The system blocks of a course question: the frozen prompt, the course
+ *  note, then the chosen paragraphs (they change with every question). */
+export function courseAskSystem(courseName: string, ctx: CourseContext): Anthropic.Beta.BetaTextBlockParam[] {
+  return [
+    { type: "text", text: ASK_SYSTEM },
+    { type: "text", text: COURSE_ASK_NOTE },
+    { type: "text", text: contextBlock(courseName, ctx) },
+  ];
+}
+
+/** The context line: what was chosen, and where each paragraph is. */
+export function contextLine(ctx: CourseContext): string {
+  return (
+    JSON.stringify({
+      t: "context",
+      chosen: ctx.chosen,
+      total: ctx.total,
+      lectures: ctx.lectures.map((l) => ({ n: l.n, id: l.id, title: l.title })),
+      paragraphs: ctx.paragraphs.map((p) => ({ lecture: p.lecture, part: p.part, anchor: p.anchor, slides: p.slides })),
+    }) + "\n"
+  );
+}
+
+/** The course, read with the member's client (RLS: her group's), not deleted. */
+async function loadCourse(sb: SupabaseClient, id: string): Promise<CourseRow> {
+  const { data, error } = await sb.from("study_courses").select("id, group_id, name, name_key").eq("id", id).is("deleted_at", null).maybeSingle();
+  if (error) throw new HttpError(500, error.message);
+  if (!data) throw new HttpError(404, "course not found");
+  return data as CourseRow;
+}
+
+/** op "ask" with scope "course": 404 "course not found" / "no lectures",
+ *  409 "no summaries" (no ready part yet), 403 "off" (the switch `courses`),
+ *  503 "schema" without section S. */
+async function courseAsk(o: {
+  req: Request;
+  sb: SupabaseClient;
+  key: string;
+  input: AskInput & { courseId: string };
+  started: number;
+  safe: (write: (s: string) => void) => (line: string) => void;
+}): Promise<Response> {
+  const { sb, key, input } = o;
+  await assertSchema(sb, "ask_course");
+  const course = await loadCourse(sb, input.courseId);
+  const on = await sb.rpc("study_feature_on", { p_name: "courses" });
+  if (on.error) throw new HttpError(500, on.error.message);
+  if (on.data === false) throw new HttpError(403, "off");
+  const scope = courseSigScope(course.id);
+  const history = await verifiedHistory(key, scope, input.history);
+  // A follow-up ("ולמה?") is chosen for together with the turns before it.
+  const query = [...history.map((t) => t.u), input.question].join("\n");
+  const ctx = await selectContext(sb, course, query);
+  if (!ctx.all.length) throw new HttpError(404, "no lectures");
+  if (!ctx.total) throw new HttpError(409, "no summaries");
+  const userText = askUserText(input.question, null);
+  const system = courseAskSystem(course.name, ctx);
+  const messages = askMessages(history, userText);
+  const inputChars =
+    system.reduce((n, b) => n + b.text.length, 0) + history.reduce((n, t) => n + t.u.length + t.a.length, 0) + userText.length;
+  const reservation = await reserve(sb, {
+    groupId: course.group_id,
+    lectureId: null,
+    kind: "ask",
+    ref: "answer",
+    estimateUsd: estimateUsd(MODEL, inputChars, ASK_MAX_TOKENS),
+  });
+  const client = anthropic();
+  const unsettled = { n: 0 };
+  return textStream(async (raw) => {
+    const write = o.safe(raw);
+    write(contextLine(ctx));
+    write(JSON.stringify({ t: "turn", u: userText }) + "\n");
+    const res = await streamAnswer({
+      client,
+      system,
+      messages,
+      stopAt: o.started + COLLAB_TIME_LIMIT_MS,
+      write,
+      signal: o.req.signal,
+      ledger: settleFor(sb, reservation, () => {
+        unsettled.n += 1;
+      }),
+    });
+    if (res.stop === "refusal") throw new HttpError(502, "refusal");
+    const [left, sig] = await Promise.all([usesLeft(sb, course.group_id, "ask", "answer", DAILY_ASKS), signTurn(key, scope, userText, res.text)]);
+    write(
+      JSON.stringify({ t: "done", stop: res.stop, badTags: [], badCites: badCites(res.text, ctx), model: res.model, left, sig, unsettled: unsettled.n }) + "\n",
+    );
+  });
+}
+
 // ── The op ──
 
 type ScopeLecture = { id: string; title: string; course: string; lecture_date: string | null; outline: unknown };
@@ -705,17 +835,14 @@ const partHeadings = (outline: unknown): string[] =>
     : [];
 
 /** POST /api/study/ai { op: "ask", lectureId | null, course, question, focus, history }
- *  (or { op: "ask", share }: the share path above). */
+ *  (or { op: "ask", scope: "course", courseId, question, history }: the
+ *  course above; or { op: "ask", share }: the share path above). */
 export const askOp: Op = async (req, body, started) => {
   if (body.share !== undefined) return shareOp(req, body.share);
   const input = readAskInput(body);
   const { sb, userId } = await memberClient(req);
   await assertCollabSchema(sb);
-  const client = anthropic();
   const key = serverKey();
-  const stopAt = started + COLLAB_TIME_LIMIT_MS;
-  const signal = req.signal;
-  const unsettled = { n: 0 };
   // A phone that closed the stream stops reading; the call is still settled.
   const safe = (write: (s: string) => void) => (line: string) => {
     try {
@@ -724,6 +851,11 @@ export const askOp: Op = async (req, body, started) => {
       /* the stream is gone */
     }
   };
+  if (input.courseId) return courseAsk({ req, sb, key, input: input as AskInput & { courseId: string }, started, safe });
+  const client = anthropic();
+  const stopAt = started + COLLAB_TIME_LIMIT_MS;
+  const signal = req.signal;
+  const unsettled = { n: 0 };
 
   if (input.lectureId) {
     const lecture = await loadLecture(sb, input.lectureId);

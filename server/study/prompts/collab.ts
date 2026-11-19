@@ -160,3 +160,14 @@ export function fixCheckRequest(o: { before: string; after: string; slides: stri
     `The cited slides:\n<<<\n${o.slides}\n>>>`,
   ].join("\n\n");
 }
+
+/** "לשאול על כל הקורס" (sources.md B6.9): after ASK_SYSTEM, which stays as
+ *  the spec wrote it, this block changes what the sources are and how they
+ *  are cited. Then the chosen paragraphs (context.ts's contextBlock). */
+export const COURSE_ASK_NOTE = `THIS QUESTION IS ABOUT A WHOLE COURSE
+The question is about a course of several lectures, not one lecture. Instead of one lecture's slides and summary, you get paragraphs chosen for this question from the group's summaries of the course's lectures, each under its address. Everything above applies to these paragraphs as it applies to the slides and the summary, with these changes:
+- Cite each fact as [הרצאה 7 · ש׳ 14]: the lecture's number from the address of the paragraph that states it, and a slide that paragraph's [ש' n] tags name. [הרצאה 7 · ש׳ 14-15] for a range, one lecture per tag, two tags when a sentence uses two lectures. Never a plain [ש' 14].
+- If the paragraphs do not cover the question, the first sentence is exactly: "הפסקאות שנבחרו מהקורס לא עוסקות בזה." If they cover only part of it, begin with exactly "הפסקאות שנבחרו עוסקות בזה רק בחלקו:" and give what they do say.
+- Only some paragraphs were chosen. Never say that the course or a lecture does not mention something; say only what the chosen paragraphs say.
+- When two lectures say different things, give both, each with its tag.
+- There is no recording here: never add the sentence about the recording.`;
