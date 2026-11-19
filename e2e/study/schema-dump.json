@@ -875,6 +875,14 @@
     "required": 1
    }
   ],
+  "study_exam_key_confirm": [
+   {
+    "args": [
+     "p_question"
+    ],
+    "required": 1
+   }
+  ],
   "study_exam_key_undo": [
    {
     "args": [
@@ -887,6 +895,14 @@
    {
     "args": [
      "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_exam_page_writable": [
+   {
+    "args": [
+     "p_name"
     ],
     "required": 1
    }
