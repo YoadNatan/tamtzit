@@ -1,14 +1,15 @@
-import type { Box, FigureGeo } from "../../../shared/study/figureGeo";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { createLecture, type Group, type Lecture } from "../lib/api";
 import { BankAfterUpload } from "../features/bank";
+import { UploadManyScreen } from "../features/courses";
 import { afterUpload, uploadNote } from "../features/writing";
 import type { Ctx } from "../features/types";
-import { BackLink, Head } from "./Shell";
+import { BackLink, Head, Loading, RouteLink } from "./Shell";
+import { flags } from "../lib/flags";
 import { guideMark } from "../lib/guideMark";
-import { mimeFor, shrinkImage } from "../lib/images";
-import { readPdf, ReadError, type PdfDeck } from "../lib/pdf";
-import { readPptx, type Deck, type Slide } from "../lib/pptx";
+import { ReadError } from "../lib/pdf";
+import { baseName, figuresOf, fileProblem, readDeck, type Parsed } from "../lib/readDeck";
+import type { Route } from "../lib/route";
 import { pickerDir } from "../lib/bidi";
 
 /* ── Adding a lecture ──
@@ -24,13 +25,8 @@ type Props = {
   group: Group;
   courses: string[];
   ctx: Ctx;
+  route?: Extract<Route, { v: "upload" }>;
 };
-
-type Parsed =
-  | { kind: "pptx"; name: string; deck: Deck; slides: Slide[] }
-  | { kind: "pdf"; name: string; deck: PdfDeck; slides: Slide[] };
-
-const MAX_BYTES = 80 * 1024 * 1024;
 
 /** The build, the file and the error, in one line a screenshot can carry. */
 function readDetail(e: unknown, file: File | null): string {
@@ -42,7 +38,18 @@ function readDetail(e: unknown, file: File | null): string {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function Upload({ group, courses, ctx }: Props) {
+export default function Upload(p: Props) {
+  // "העלאה של כמה קבצים" (sources.md, phase 1): its own screen, lazily (allowed() keeps it to the course pages' flag).
+  if (p.route?.many)
+    return (
+      <Suspense fallback={<Loading />}>
+        <UploadManyScreen ctx={p.ctx} courses={p.courses} courseId={p.route.c ?? null} />
+      </Suspense>
+    );
+  return <UploadOne {...p} />;
+}
+
+function UploadOne({ group, courses, ctx }: Props) {
   const [parsed, setParsed] = useState<Parsed | null>(null);
   const [reading, setReading] = useState(false);
   const [title, setTitle] = useState("");
@@ -60,27 +67,13 @@ export default function Upload({ group, courses, ctx }: Props) {
     setError("");
     setDetail("");
     setParsed(null);
-    if (file.size > MAX_BYTES) return setError("הקובץ גדול מדי (יותר מ-80MB).");
-    const lower = file.name.toLowerCase();
-    if (lower.endsWith(".ppt")) return setError("זה קובץ PowerPoint ישן (.ppt). צריך לשמור אותו כ-.pptx או לייצא ל-PDF ולהעלות שוב.");
-    if (!lower.endsWith(".pptx") && !lower.endsWith(".pdf")) return setError("אפשר להעלות מצגת PowerPoint (.pptx) או PDF.");
+    const problem = fileProblem(file);
+    if (problem) return setError(problem);
     setReading(true);
     try {
-      const buf = await file.arrayBuffer().catch((e: unknown) => {
-        throw new ReadError("file", e);
-      });
-      const base = file.name.replace(/\.(pptx|pdf)$/i, "");
-      if (lower.endsWith(".pptx")) {
-        const deck = await readPptx(buf);
-        if (!deck.slides.length) throw new Error("empty");
-        setParsed({ kind: "pptx", name: file.name, deck, slides: deck.slides });
-        setTitle(deck.slides[0]?.title || base);
-      } else {
-        const deck = await readPdf(buf);
-        if (!deck.slides.length) throw new Error("empty");
-        setParsed({ kind: "pdf", name: file.name, deck, slides: deck.slides });
-        setTitle(base);
-      }
+      const deck = await readDeck(file);
+      setParsed(deck);
+      setTitle((deck.kind === "pptx" && deck.slides[0]?.title) || baseName(file.name));
     } catch (e) {
       setError("לא הצלחנו לקרוא את הקובץ. אם הוא נפתח כרגיל במחשב, אפשר לייצא אותו ל-PDF ולנסות שוב.");
       setDetail(readDetail(e, file));
@@ -95,27 +88,7 @@ export default function Upload({ group, courses, ctx }: Props) {
     setDetail("");
     setProgress({ done: 0, total: parsed.slides.length });
     try {
-      const figures =
-        parsed.kind === "pptx"
-          ? async (s: Slide) => {
-              const out: Array<{ k: number; blob: Blob; width: number; height: number; geo?: FigureGeo; crop?: Box }> = [];
-              for (const [i, path] of s.images.entries()) {
-                try {
-                  const bytes = await parsed.deck.image(path);
-                  if (!bytes) continue;
-                  const img = await shrinkImage(bytes, mimeFor(path));
-                  if (img.width < 40 || img.height < 40) continue; // bullets and icons
-                  const geo = s.geo?.[i];
-                  const crop = s.crops?.[i];
-                  // The labels' geometry and the slide's crop of the picture (question types).
-                  out.push({ k: i + 1, ...img, ...(geo ? { geo } : {}), ...(crop ? { crop } : {}) });
-                } catch {
-                  // A picture the browser cannot decode (old EMF/WMF art) is skipped, not fatal.
-                }
-              }
-              return out;
-            }
-          : async (s: Slide) => [{ k: 0, ...(await parsed.deck.pageImage(s.n)) }];
+      const figures = figuresOf(parsed);
       const { id, lecture, figurePaths } = await createLecture(
         {
           groupId: group.id,
@@ -173,6 +146,13 @@ export default function Upload({ group, courses, ctx }: Props) {
           </span>
         )}
       </label>
+      {flags.courses && !parsed && !reading ? (
+        <p className="a-small up-many">
+          <RouteLink to={{ v: "upload", many: true }} go={ctx.go} className="a-link">
+            להעלות כמה קבצים יחד
+          </RouteLink>
+        </p>
+      ) : null}
       {saved ? (
         // The finished form is replaced in history: Back from the lecture goes where Upload came from.
         <BankAfterUpload ctx={ctx} lecture={saved} onDone={() => ctx.go({ v: "lecture", l: saved.id }, { replace: true })} />

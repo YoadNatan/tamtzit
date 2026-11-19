@@ -258,7 +258,7 @@ function renderRoute(route: Route, ctx: Ctx, courses: string[]) {
     case "today":
       return <TodayScreen route={route} ctx={ctx} />;
     case "upload":
-      return <UploadScreen group={ctx.group} courses={courses} ctx={ctx} />;
+      return <UploadScreen key={route.many ? "many" : "one"} group={ctx.group} courses={courses} ctx={ctx} route={route} />;
     case "lecture":
       return <LectureView key={route.l} route={route} ctx={ctx} />;
     case "help":

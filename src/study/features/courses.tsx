@@ -12,9 +12,15 @@ import type { Ctx, ScreenProps } from "./types";
  * when the flag is on, never by the entry chunk. */
 
 const CourseView = lazy(() => import("../components/CourseScreen"));
+const UploadMany = lazy(() => import("../components/UploadMany"));
 
 export function CourseScreen(p: ScreenProps<"course">) {
   return <CourseView key={p.route.c} {...p} />;
+}
+
+/** "העלאה של כמה קבצים" (Upload.tsx renders it for ?v=upload&many=1). */
+export function UploadManyScreen(p: { ctx: Ctx; courses: string[]; courseId: string | null }) {
+  return <UploadMany {...p} />;
 }
 
 /** The library's course headings as links to their pages: the course's id
@@ -50,5 +56,34 @@ export function CourseHeading({ ctx, course, id }: { ctx: Ctx; course: string; i
         </span>
       </RouteLink>
     </h2>
+  );
+}
+
+/** The library's line for a batch upload that stopped half way (the tab was
+ *  closed): "הועלו 3. נשארו 11 קבצים" with a way back to it. */
+export function BatchResumeLine({ ctx }: { ctx: Ctx }) {
+  const [line, setLine] = useState<{ text: string; courseId: string | null } | null>(null);
+  const groupId = ctx.group.id;
+  useEffect(() => {
+    if (!flags.courses) return;
+    let alive = true;
+    import("../lib/batch")
+      .then(({ readBatch, remaining, resumeLine }) => {
+        const b = readBatch(groupId);
+        if (alive && b && remaining(b).length) setLine({ text: resumeLine(b), courseId: b.courseId });
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [groupId]);
+  if (!line) return null;
+  return (
+    <p className="a-callout quiet lib-batch">
+      <span>העלאה של כמה קבצים נעצרה באמצע. {line.text}.</span>{" "}
+      <RouteLink to={line.courseId ? { v: "upload", many: true, c: line.courseId } : { v: "upload", many: true }} go={ctx.go} className="a-link">
+        להמשיך
+      </RouteLink>
+    </p>
   );
 }

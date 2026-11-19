@@ -758,6 +758,9 @@ export type NewLecture = {
   slides: Slide[];
   /** The pictures to store for one slide: k = 0 is the whole page, k ≥ 1 embedded pictures. */
   figures: (slide: Slide) => Promise<Array<{ k: number; blob: Blob; width: number; height: number; geo?: FigureGeo; crop?: Box }>>;
+  /** The new lecture's id, when the caller made it first (the batch upload
+   *  writes it in its resume list before the insert); else a new one. */
+  id?: string;
 };
 
 /** Saves a new lecture's pictures and slides. Returns the lecture as saved and
@@ -768,7 +771,7 @@ export async function createLecture(
   onProgress: (done: number, total: number) => void,
 ): Promise<{ id: string; lecture: Lecture; figurePaths: string[] }> {
   const c = client();
-  const id = crypto.randomUUID();
+  const id = input.id ?? crypto.randomUUID();
   const stored: StoredSlide[] = [];
   const total = input.slides.length;
   let done = 0;

@@ -18,7 +18,7 @@ import { flags } from "../lib/flags";
 import { hueOf } from "../lib/hue";
 import { AccountBanners } from "../features/account";
 import { useCardsChip } from "../features/cards";
-import { CourseHeading, useCourseLinks } from "../features/courses";
+import { BatchResumeLine, CourseHeading, useCourseLinks } from "../features/courses";
 import { GuideHome } from "../features/guide";
 import { useAsksLeft, useEditsChip } from "../features/collab";
 import { usePracticeChip } from "../features/practice";
@@ -231,6 +231,7 @@ export default function Library({ ctx }: { ctx: Ctx }) {
       ) : null}
 
       <AccountBanners ctx={ctx} />
+      <BatchResumeLine ctx={ctx} />
 
       {error ? <p className="a-error">{error}</p> : null}
 
