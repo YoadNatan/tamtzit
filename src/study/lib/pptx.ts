@@ -1,7 +1,7 @@
 import JSZip from "jszip";
-import type { FigureGeo } from "../../../shared/study/figureGeo";
+import type { Box, FigureGeo } from "../../../shared/study/figureGeo";
 import { hasWords, metafileText } from "./metafile";
-import { picturesGeo, slideSize } from "./pptxGeo";
+import { picturesCrop, picturesGeo, slideSize } from "./pptxGeo";
 
 /* ── Reading a PowerPoint deck ──
  *
@@ -42,6 +42,8 @@ export type Slide = {
   /** Question types: each picture's label geometry (aligned with images),
    *  null where it has none (pptxGeo.ts). PPTX only; never in the summary. */
   geo?: (FigureGeo | null)[];
+  /** Each picture's crop (its srcRect), aligned with images; null where it is shown whole. */
+  crops?: (Box | null)[];
 };
 
 export type Deck = {
@@ -155,11 +157,13 @@ export async function readPptx(data: ArrayBuffer | Uint8Array | Blob): Promise<D
       notes = paragraphs(notesXml).join(" ");
     }
     const geoAll = picturesGeo(xml, sldSz, s.imageRels);
+    const cropAll = picturesCrop(xml, sldSz, s.imageRels);
     const kept = s.imageRels
-      .map((id, i) => ({ path: rels[id] && resolvePath(path, rels[id].target), geo: geoAll[i] ?? null }))
-      .filter((x): x is { path: string; geo: FigureGeo | null } => Boolean(x.path) && /\.(png|jpe?g|gif|bmp|webp)$/i.test(x.path));
+      .map((id, i) => ({ path: rels[id] && resolvePath(path, rels[id].target), geo: geoAll[i] ?? null, crop: cropAll[i] ?? null }))
+      .filter((x): x is { path: string; geo: FigureGeo | null; crop: Box | null } => Boolean(x.path) && /\.(png|jpe?g|gif|bmp|webp)$/i.test(x.path));
     const images = kept.map((x) => x.path);
     const geo = kept.map((x) => x.geo);
+    const crops = kept.map((x) => x.crop);
     const lines = [...s.lines];
     const drawings = Object.values(rels).filter((r) => r.type.endsWith("/image") && /\.(wmf|emf)$/i.test(r.target));
     for (const d of drawings) {
@@ -167,7 +171,7 @@ export async function readPptx(data: ArrayBuffer | Uint8Array | Blob): Promise<D
       const labels = bytes ? metafileText(bytes).map(cleanText).filter(Boolean) : [];
       if (hasWords(labels)) lines.push(`${DRAWING_PREFIX} ${labels.join(" | ")}`);
     }
-    slides.push({ n, title: s.title, lines, tables: s.tables, images, notes, ...(geo.some(Boolean) ? { geo } : {}) });
+    slides.push({ n, title: s.title, lines, tables: s.tables, images, notes, ...(geo.some(Boolean) ? { geo } : {}), ...(crops.some(Boolean) ? { crops } : {}) });
   }
 
   return {

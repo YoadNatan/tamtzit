@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { figureGeo, picturesGeo, slideGeometry, slideSize } from "./pptxGeo";
+import { figureGeo, picturesCrop, picturesGeo, slideGeometry, slideSize } from "./pptxGeo";
 
 /* A PPTX picture's labels from the slide's shapes (docs/study/question-types.md):
  * groups composed through chOff/chExt, the srcRect crop, labels joined by
@@ -97,6 +97,14 @@ test("picturesGeo: aligned with the slide's pictures; slideSize reads p:sldSz", 
   assert.equal(list[1], null, "an icon without labels");
   assert.deepEqual(picturesGeo("<not xml", SZ, ["rId9"]), [null]);
   assert.deepEqual(slideSize(`<p:presentation><p:sldSz cx="12192000" cy="6858000"/></p:presentation>`), { cx: 12192000, cy: 6858000 });
+});
+
+test("picturesCrop: each picture's srcRect as a box of the stored picture; whole or padded pictures have none (review QT-6)", () => {
+  const xml = slide(
+    pic("rId2", 0, 0, 400000, 400000, `<a:srcRect l="10000" t="25000" r="0" b="25000"/>`) + pic("rId3", 500000, 0, 100000, 100000) + pic("rId4", 0, 500000, 100000, 100000, `<a:srcRect l="-5000"/>`),
+  );
+  assert.deepEqual(picturesCrop(xml, SZ, ["rId2", "rId3", "rId4", "rId9"]), [{ x: 0.1, y: 0.25, w: 0.9, h: 0.5 }, null, null, null]);
+  assert.deepEqual(picturesCrop("<not xml", SZ, ["rId2"]), [null]);
 });
 
 test("the e2e fixture deck: slide 3's nephron has its 5 labels, and no other slide any", async () => {

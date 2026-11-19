@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod/v4";
-import { estimateUsd } from "./budget.js";
+import { estimateUsd, imageTokens } from "./budget.js";
 import { cleanSchema, generateItems, type Ledger } from "./claude.js";
 import { SOLVER_SYSTEM, solverRequest, type SolverText } from "./prompts/solver.js";
 import { type Lecture, lectureBlock, MODEL } from "./study.js";
@@ -43,7 +43,7 @@ export type SolverItem = SolverText & { answer: number | null; seq?: readonly nu
 /** The solver's reply to one question: its choice (-1: none, or out of
  *  range), whether it found another option defensible, and whether that
  *  keeps the question; for a set question the order it gave. */
-export type Verdict = { choice: number; ambiguous: boolean; ok: boolean; seq?: number[] };
+export type Verdict = { choice: number; ambiguous: boolean; ok: boolean; seq?: number[]; blind?: boolean };
 
 type TextBlock = Anthropic.Beta.BetaTextBlockParam;
 export type SolverRequest = {
@@ -56,33 +56,58 @@ export type SolverRequest = {
 /** The one request of the solver: [SOLVER_SYSTEM, the lecture (cached)] and
  *  the questions as q1 … qN, without their keys. */
 export function solverCall(o: { lecture: Pick<Lecture, "lecturer" | "slides">; items: readonly SolverText[] }): SolverRequest {
-  // Only the public text travels: whatever else an item carries stays here.
+  // Only the public text travels (and an image item's picture): whatever else an item carries stays here.
   const items = o.items.map((it) => ({
     vignette: it.vignette,
     question: it.question,
     options: [...it.options],
     ...(it.form ? { form: it.form } : {}),
     ...(it.prompts ? { prompts: [...it.prompts] } : {}),
-    ...(it.caption ? { caption: it.caption } : {}),
+    ...(it.image ? { image: it.image } : {}),
+    ...(it.withoutPicture ? { withoutPicture: true } : {}),
   }));
+  const pictures: Anthropic.Beta.BetaContentBlockParam[] = items.flatMap((it, i) =>
+    it.image
+      ? [
+          { type: "text" as const, text: `q${i + 1}:` },
+          { type: "image" as const, source: { type: "url" as const, url: it.image } },
+        ]
+      : [],
+  );
   return {
     system: [
       { type: "text", text: SOLVER_SYSTEM },
       { type: "text", text: lectureBlock(o.lecture), cache_control: { type: "ephemeral" } },
     ],
-    messages: [{ role: "user", content: [{ type: "text", text: solverRequest(items) }] }],
+    messages: [{ role: "user", content: [{ type: "text", text: solverRequest(items) }, ...pictures] }],
     max_tokens: solverMaxTokens(items.length),
     output_config: { effort: SOLVER_EFFORT, format: { type: "json_schema", schema: SOLVER_SCHEMA } },
   };
 }
 
-/** The call's worst case, which its reservation holds. */
+/** The call's worst case, which its reservation holds (an image item is
+ *  asked twice, with and without its picture, and a picture is at most
+ *  MAX_PICTURE_SIDE square). */
 export function solverEstimate(lecture: Pick<Lecture, "lecturer" | "slides">, items: readonly SolverText[]): number {
-  const c = solverCall({ lecture, items });
+  const c = solverCall({ lecture, items: withTwins(items).all });
   const chars =
     c.system.reduce((n, b) => n + b.text.length, 0) +
     c.messages.reduce((n, m) => n + (Array.isArray(m.content) ? m.content.reduce((k, b) => k + ("text" in b ? b.text.length : 0), 0) : 0), 0);
-  return estimateUsd(MODEL, chars, c.max_tokens);
+  return estimateUsd(MODEL, chars, c.max_tokens, items.filter((it) => it.image).length * imageTokens());
+}
+
+/** The items as asked: each, then (after all of them, so q1 … qN stay the
+ *  items) every image item again without its picture. `twin[i]` is the
+ *  index of item i's twin. */
+export function withTwins<T extends SolverText>(items: readonly T[]): { all: T[]; twin: Map<number, number> } {
+  const all = [...items];
+  const twin = new Map<number, number>();
+  items.forEach((it, i) => {
+    if (!it.image) return;
+    twin.set(i, all.length);
+    all.push({ ...it, image: undefined, withoutPicture: true } as T);
+  });
+  return { all, twin };
 }
 
 /** The verdict on each item, from the solver's answers (labels matched in
@@ -126,7 +151,8 @@ export async function solveQuestions<T extends SolverItem>(o: {
   ref?: string | null;
 }): Promise<{ verdicts: Array<Verdict | null>; kept: T[]; rejected: number; costUsd: number }> {
   if (!o.items.length) return { verdicts: [], kept: [], rejected: 0, costUsd: 0 };
-  const call = solverCall({ lecture: o.lecture, items: o.items });
+  const { all, twin } = withTwins(o.items);
+  const call = solverCall({ lecture: o.lecture, items: all });
   const answers: SolverAnswer[] = [];
   let costUsd = 0;
   const res = await generateItems({
@@ -147,7 +173,17 @@ export async function solveQuestions<T extends SolverItem>(o: {
     },
   });
   const complete = !res.timedOut && res.stop !== "refusal" && res.stop !== "aborted" && res.stop !== "max_tokens";
-  const verdicts = verdictsOf(o.items, answers, complete);
+  const asked = verdictsOf(all, answers, complete);
+  const verdicts = o.items.map((it, i): Verdict | null => {
+    // An image item whose picture could not be signed is not judged ("unchecked"), never passed blind.
+    if (it.withoutPicture) return null;
+    const v = asked[i];
+    const t = twin.has(i) ? asked[twin.get(i)!] : null;
+    if (!v) return null;
+    // Solved without the picture, the key and nothing else: the picture adds nothing.
+    if (v.ok && t && t.choice === it.answer && !t.ambiguous) return { ...v, ok: false, blind: true };
+    return v;
+  });
   return {
     verdicts,
     kept: o.items.filter((_, i) => verdicts[i]?.ok),

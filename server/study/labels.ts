@@ -1,5 +1,5 @@
 import type { Box, FigureGeo } from "../../shared/study/figureGeo.js";
-import { normLabel } from "../../shared/study/figureGeo.js";
+import { isFigureGeo, isLabelText, normLabel } from "../../shared/study/figureGeo.js";
 import type { LabelLayout, Pin } from "../../shared/study/forms.js";
 import type { StoredSlide } from "./study.js";
 
@@ -11,7 +11,8 @@ import type { StoredSlide } from "./study.js";
  * the lead-in and the per-pin explanations and the masks, all
  * deterministically. The layout never carries a label's text: the screen
  * learns the names only from the options (name mode) or after the answer.
- * docs/study/question-types.md. */
+ * (A member's own client does hold the lecture's geometry, label texts
+ * included: an accepted risk, docs/study/question-types.md.) */
 
 export type LabelledFigure = { id: string; slide: number; caption: string; geo: FigureGeo; labels: Array<{ n: number; text: string }> };
 
@@ -22,7 +23,8 @@ export function labelledFigures(slides: readonly StoredSlide[], from: number, to
   for (const s of slides) {
     if (s.n < from || s.n > to) continue;
     for (const f of s.figures ?? []) {
-      if (!f.geo || !Array.isArray(f.geo.labels) || f.geo.labels.length < 3) continue;
+      // The geometry comes from a member's phone: a figure whose geometry is not the stored shape (an older client, a bug) is skipped, never thrown on.
+      if (!isFigureGeo(f.geo)) continue;
       const id = `fig:${s.n}-${f.k}`;
       out.push({ id, slide: s.n, caption: captions.get(id) ?? "", geo: f.geo, labels: f.geo.labels.map((l, i) => ({ n: i + 1, text: l.t })) });
     }
@@ -53,6 +55,31 @@ export const modeFor = (itemIndex: number, labelCount: number): "name" | "tap" =
 const r4 = (v: number) => Math.round(v * 10000) / 10000;
 const pinAt = (n: number, b: Box): Pin => ({ n, x: r4(center(b).x), y: r4(center(b).y) });
 
+/** Two pins closer than this (a share of the stage's shorter side) would
+ *  cover each other on a phone: a 16:9 stage drawn 358 px wide has a shorter
+ *  side of about 200 px, and a pin is 26 px. Closer labels stay grey dots. */
+export const PIN_GAP = 0.12;
+
+/** Whether two labels' centres are far enough apart for two pins. */
+export function pinsApart(stage: FigureGeo["stage"], a: Box, b: Box): boolean {
+  const W = stage.w;
+  const H = stage.h;
+  const ca = center(a);
+  const cb = center(b);
+  return Math.hypot((ca.x - cb.x) * W, (ca.y - cb.y) * H) >= PIN_GAP * Math.min(W, H);
+}
+
+/** Up to `max` labels for pins, in the candidates' order, each far enough
+ *  from every one already chosen (the first, the target, always). */
+export function spreadPins(geo: Pick<FigureGeo, "stage">, boxes: readonly Box[], candidates: readonly number[], max: number): number[] {
+  const out: number[] = [];
+  for (const i of candidates) {
+    if (out.length >= max) break;
+    if (out.every((j) => pinsApart(geo.stage, boxes[i], boxes[j]))) out.push(i);
+  }
+  return out;
+}
+
 export type LabelBuilt = {
   form: "one" | "tap";
   question: string;
@@ -62,13 +89,20 @@ export type LabelBuilt = {
   layout: LabelLayout;
 };
 
-/** The item of a label question. `target` is the label asked about (its
- *  index in the geometry), `options` the checked options with their whys
- *  (the key first is not assumed), `optionCount` the request's.
- *  Name mode: up to 12 pins (the target and its nearest labels), "מה מסומן
- *  במספר n בשרטוט?", the names as options in `order`. Tap mode: the target
- *  and up to 5 nearest labels, preferring the writer's distractors, as pins
- *  1…m, "באיזה מספר מסומן X?", options '1'…'m', each explained by its label. */
+/** The item of a label question, or null when the target cannot have at
+ *  least two neighbours far enough apart to be pins (they would cover each
+ *  other on a phone). `target` is the label asked about (its index in the
+ *  geometry), `options` the checked options with their whys (the key first
+ *  is not assumed). Only labels that name something (isLabelText: not a
+ *  panel letter, "Fig. 2" or a source line) become pins; every other label
+ *  is a grey dot.
+ *  Name mode: up to 12 pins (the target and its nearest labels, spread
+ *  out), "מה מסומן במספר n בשרטוט?", the names as options in `order`; a
+ *  wrong option that is a pinned label says its number ("מסומן במספר 2
+ *  בשרטוט."), so the whole drawing is named after the answer. Tap mode: the
+ *  target and up to 5 nearest labels, preferring the writer's distractors,
+ *  as pins 1…m, "באיזה מספר מסומן X?", options '1'…'m', each explained by
+ *  its label. */
 export function buildLabelItem(o: {
   fig: string;
   geo: FigureGeo;
@@ -78,41 +112,56 @@ export function buildLabelItem(o: {
   options: ReadonlyArray<{ text: string; correct: boolean; why: string }>;
   /** The writer's distractors that are labels of the picture (geometry indexes), preferred as pins in tap mode. */
   prefer?: readonly number[];
-}): LabelBuilt {
+}): LabelBuilt | null {
   const { geo } = o;
   const boxes = geo.labels.map((l) => l.b);
   const dist = (i: number) => Math.hypot(center(boxes[i]).x - center(boxes[o.target]).x, center(boxes[i]).y - center(boxes[o.target]).y);
-  const byNear = boxes.map((_, i) => i).filter((i) => i !== o.target).sort((a, b) => dist(a) - dist(b) || a - b);
+  const named = (i: number) => isLabelText(geo.labels[i].t);
+  const byNear = boxes
+    .map((_, i) => i)
+    .filter((i) => i !== o.target && named(i))
+    .sort((a, b) => dist(a) - dist(b) || a - b);
   const masks = geo.baked ? boxes.map((b) => ({ x: r4(b.x), y: r4(b.y), w: r4(b.w), h: r4(b.h) })) : [];
   const base = { kind: "label" as const, fig: o.fig, stage: geo.stage, img: geo.img, ...(geo.clip ? { clip: geo.clip } : {}), lines: geo.lines, baked: geo.baked, masks };
+  const dotsBut = (chosen: readonly number[]) =>
+    boxes
+      .map((b, i) => ({ b, i }))
+      .filter((x) => !chosen.includes(x.i))
+      .map((x) => ({ x: r4(center(x.b).x), y: r4(center(x.b).y) }));
   const key = o.options.find((x) => x.correct);
   if (o.mode === "name") {
-    const chosen = [o.target, ...byNear].slice(0, 12);
+    const chosen = spreadPins(geo, boxes, [o.target, ...byNear], 12);
+    if (chosen.length < 3) return null;
     const order = pinOrder(chosen.map((i) => boxes[i]));
     const pins = order.map((k, j) => pinAt(j + 1, boxes[chosen[k]]));
-    const ask = order.findIndex((k) => chosen[k] === o.target) + 1;
+    const numberOf = (i: number) => order.findIndex((k) => chosen[k] === i) + 1; // 0: not a pin
+    const ask = numberOf(o.target);
+    const dots = dotsBut(chosen);
     return {
       form: "one",
       question: `מה מסומן במספר ${ask} בשרטוט?`,
       options: o.options.map((x) => x.text),
       answer: o.options.findIndex((x) => x.correct),
-      explanations: o.options.map((x) => x.why),
-      layout: { ...base, mode: "name", pins, ask },
+      explanations: o.options.map((x) => {
+        if (x.correct) return x.why;
+        const i = labelIndex(geo, x.text);
+        const n = i >= 0 ? numberOf(i) : 0;
+        return n > 0 ? `${PINNED(n)} ${x.why}`.trim() : x.why;
+      }),
+      layout: { ...base, mode: "name", pins, ask, ...(dots.length ? { dots } : {}) },
     };
   }
   const want = Math.min(6, boxes.length);
-  const prefer = (o.prefer ?? []).filter((i) => i !== o.target && i >= 0 && i < boxes.length);
+  const prefer = (o.prefer ?? []).filter((i) => i !== o.target && i >= 0 && i < boxes.length && named(i));
   const rest = byNear.filter((i) => !prefer.includes(i));
-  const chosen = [o.target, ...prefer, ...rest].slice(0, Math.max(3, want));
+  const chosen = spreadPins(geo, boxes, [o.target, ...prefer, ...rest], Math.max(3, want));
+  if (chosen.length < 3) return null;
   const order = pinOrder(chosen.map((i) => boxes[i]));
   const pins = order.map((k, j) => pinAt(j + 1, boxes[chosen[k]]));
   const labelAt = order.map((k) => chosen[k]);
   const answer = labelAt.indexOf(o.target);
   const target = geo.labels[o.target].t;
-  const dots = boxes
-    .map((b, i) => ({ b, i }))
-    .filter((x) => !chosen.includes(x.i))
-    .map((x) => ({ x: r4(center(x.b).x), y: r4(center(x.b).y) }));
+  const dots = dotsBut(chosen);
   return {
     form: "tap",
     question: `באיזה מספר מסומן ${target}?`,
@@ -125,6 +174,10 @@ export function buildLabelItem(o: {
     layout: { ...base, mode: "tap", pins, ...(dots.length ? { dots } : {}) },
   };
 }
+
+/** Name mode: the sentence a pinned wrong option's why starts with (the
+ *  screen reads the number back, so it names that pin after the answer). */
+export const PINNED = (n: number) => `מסומן במספר ${n} בשרטוט.`;
 
 /** The geometry index of the label a text names (normalised), or -1; -2 when two labels match. */
 export function labelIndex(geo: FigureGeo, text: string): number {

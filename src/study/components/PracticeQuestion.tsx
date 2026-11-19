@@ -5,7 +5,7 @@ import { flags as buildFlags } from "../lib/flags";
 import type { Feedback, Flag, PublicQuestion } from "../lib/practice";
 import { autopsyOrder, betLabel, BETS, type Bet } from "../lib/practiceSession";
 import { richText, slideTag } from "../lib/rich";
-import { flagLine, LETTERS } from "../lib/questionText";
+import { flagLine, LETTERS, pinNames } from "../lib/questionText";
 
 /* The question types' pieces load with the first question that needs them. */
 const QuestionFigure = lazy(() => import("./QuestionTypes").then((m) => ({ default: m.QuestionFigure })));
@@ -68,6 +68,8 @@ export type PracticeQuestionProps = {
   dangerList?: boolean;
   /** No bet (a question timed out, or one reviewed at the end). */
   noBet?: boolean;
+  /** A picture question whose picture does not load: "לדלג" moves on without counting it. */
+  onSkip?: () => void;
   autoFocus?: boolean;
 };
 
@@ -92,12 +94,12 @@ export function verdictOf(chosen: number | number[] | null | undefined, fb: Feed
   return { text: `${right ? "✓ נכון" : "✗ טעות"}${part}${b ? ` · ׳${b}׳` : ""}`, tone: right ? "ok" : "bad" };
 }
 
-/** A tap item's pin names, read from its explanations after the answer ("3 הוא Loop of Henle. …"). */
-const pinNames = (fb: Feedback): string[] => fb.explanations.map((e) => /^\d+ הוא (.+?)\.(?:\s|$)/.exec(e.trim())?.[1] ?? "");
 
 export default function PracticeQuestion(p: PracticeQuestionProps) {
   const { q, feedback: fb } = p;
   const [showFlags, setShowFlags] = useState(false);
+  // A picture question waits for its picture: nothing can be picked, bet or answered before it shows.
+  const [figState, setFigState] = useState<"loading" | "ok" | "error">("loading");
   const head = useRef<HTMLHeadingElement>(null);
   const options = useRef<HTMLDivElement>(null);
   const flags = q.study_question_flags ?? [];
@@ -111,7 +113,10 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
     head.current.focus({ preventScroll: true });
     window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
   }, [revealed, autoFocus, q.id]);
-  useEffect(() => setShowFlags(false), [q.id]);
+  useEffect(() => {
+    setShowFlags(false);
+    setFigState("loading");
+  }, [q.id]);
 
   const onClick = (e: MouseEvent<HTMLElement>) => {
     const slides = slideTag(e.target);
@@ -139,6 +144,8 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
   const tap = form === "tap";
   const steps = q.layout?.kind === "steps" ? q.layout : null;
   const picture = buildFlags.qtypes && (q.layout?.kind === "label" || q.layout?.kind === "image" || (q.style === "image" && Boolean(q.figure)));
+  const waiting = picture && figState !== "ok";
+  const busy = p.busy || (!revealed && waiting);
   const meta = (
     <div className="a-row between pq-meta">
       <span className="a-row pq-chips">
@@ -203,6 +210,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
           answered={answered}
           disabled={p.busy}
           labelledBy={`lead-${q.id}`}
+          onState={setFigState}
         />
       </Suspense>
     ) : null;
@@ -224,7 +232,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
               prompts={prompts}
               value={p.pickedSet ?? q.options.map(() => null)}
               onChange={p.onPickSet}
-              disabled={p.busy}
+              disabled={busy}
             />
           </Suspense>
         ) : (
@@ -237,7 +245,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
               aria-checked={p.picked === i}
               tabIndex={p.picked === i || (p.picked == null && i === 0) ? 0 : -1}
               className={`a-opt${p.picked === i ? " picked" : ""}`}
-              disabled={p.busy}
+              disabled={busy}
               onClick={() => p.onPick?.(i)}
             >
               <span className="l">{LETTERS[i]}</span>
@@ -252,24 +260,34 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
           <section className="a-card flat pq-bet" aria-labelledby={`bet-${q.id}`}>
             <div className="a-row between">
               <b className="a-small" id={`bet-${q.id}`}>
-                הימור ביטחון, לפני הבדיקה
+                כמה בטוחים? לפני הבדיקה
               </b>
               <span className="a-chip">רק לך</span>
             </div>
             <div className="a-seg pq-bets" role="radiogroup" aria-labelledby={`bet-${q.id}`}>
               {BETS.map((b) => (
-                <button key={b.bet} type="button" role="radio" className="a-btn" aria-checked={p.bet === b.bet} disabled={p.busy} onClick={() => p.onBet?.(b.bet)}>
+                <button key={b.bet} type="button" role="radio" className="a-btn" aria-checked={p.bet === b.bet} disabled={busy} onClick={() => p.onBet?.(b.bet)}>
                   {b.label}
                 </button>
               ))}
             </div>
             <p className="a-small a-muted">
-              {p.dangerList ? "טעות ׳על בטוח׳ חוזרת אליך בניסוח אחר. " : ""}התשובה וההימור נשמרים רק אצלך.
+              {p.dangerList ? "טעות ׳על בטוח׳ חוזרת אליך בניסוח אחר. " : ""}התשובה ומה שסימנת נשמרים רק אצלך.
             </p>
           </section>
         )}
+        {picture && figState === "error" ? (
+          <p className="a-callout warn pq-nopic" role="status">
+            בלי התמונה אי אפשר לענות על השאלה הזו.{" "}
+            {p.onSkip ? (
+              <button type="button" className="a-link" onClick={p.onSkip}>
+                לדלג, בלי שזה ייספר
+              </button>
+            ) : null}
+          </p>
+        ) : null}
         {p.onDontKnow ? (
-          <button type="button" className="a-link pq-dont-know" disabled={p.busy} onClick={p.onDontKnow}>
+          <button type="button" className="a-link pq-dont-know" disabled={busy} onClick={p.onDontKnow}>
             לא יודעים
           </button>
         ) : null}
@@ -324,7 +342,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
       </div>
       {meta}
       {stem}
-      {figure({ right: fb.answer, chosen: one, names: tap ? pinNames(fb) : undefined })}
+      {figure({ right: fb.answer, chosen: one, names: q.layout?.kind === "label" ? pinNames(q, fb) : undefined })}
       <ol className="a-opts pq-autopsy" aria-label="התשובות וההסברים">
         {order.map((i) => {
           const right = i === fb.answer;

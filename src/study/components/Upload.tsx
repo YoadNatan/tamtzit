@@ -1,4 +1,4 @@
-import type { FigureGeo } from "../../../shared/study/figureGeo";
+import type { Box, FigureGeo } from "../../../shared/study/figureGeo";
 import { useState } from "react";
 import { createLecture, type Group, type Lecture } from "../lib/api";
 import { BankAfterUpload } from "../features/bank";
@@ -87,7 +87,7 @@ export default function Upload({ group, courses, ctx }: Props) {
         setTitle(base);
       }
     } catch (e) {
-      setError("לא הצלחתי לקרוא את הקובץ. אם הוא נפתח כרגיל במחשב, אפשר לייצא אותו ל-PDF ולנסות שוב.");
+      setError("לא הצלחנו לקרוא את הקובץ. אם הוא נפתח כרגיל במחשב, אפשר לייצא אותו ל-PDF ולנסות שוב.");
       setDetail(readDetail(e, file));
     } finally {
       setReading(false);
@@ -103,7 +103,7 @@ export default function Upload({ group, courses, ctx }: Props) {
       const figures =
         parsed.kind === "pptx"
           ? async (s: Slide) => {
-              const out: Array<{ k: number; blob: Blob; width: number; height: number; geo?: FigureGeo }> = [];
+              const out: Array<{ k: number; blob: Blob; width: number; height: number; geo?: FigureGeo; crop?: Box }> = [];
               for (const [i, path] of s.images.entries()) {
                 try {
                   const bytes = await parsed.deck.image(path);
@@ -111,7 +111,9 @@ export default function Upload({ group, courses, ctx }: Props) {
                   const img = await shrinkImage(bytes, mimeFor(path));
                   if (img.width < 40 || img.height < 40) continue; // bullets and icons
                   const geo = s.geo?.[i];
-                  out.push({ k: i + 1, ...img, ...(geo ? { geo } : {}) }); // the labels' geometry (question types)
+                  const crop = s.crops?.[i];
+                  // The labels' geometry and the slide's crop of the picture (question types).
+                  out.push({ k: i + 1, ...img, ...(geo ? { geo } : {}), ...(crop ? { crop } : {}) });
                 } catch {
                   // A picture the browser cannot decode (old EMF/WMF art) is skipped, not fatal.
                 }
@@ -220,7 +222,7 @@ export default function Upload({ group, courses, ctx }: Props) {
               list="study-courses"
               dir="auto"
               maxLength={120}
-              placeholder="למשל: פתוגן מאחסן"
+              placeholder="למשל: פתוגן-מאכסן"
             />
             <datalist id="study-courses">
               {courses.map((c) => (

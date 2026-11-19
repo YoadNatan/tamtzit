@@ -1,5 +1,5 @@
 /// <reference path="./env.d.ts" />
-import type { FigureGeo } from "../../shared/study/figureGeo.js";
+import type { Box, FigureGeo } from "../../shared/study/figureGeo.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { flagsFrom, requiredSchema } from "../../shared/study/flags.js";
@@ -21,8 +21,9 @@ import { flagsFrom, requiredSchema } from "../../shared/study/flags.js";
 
 export const MODEL = "claude-opus-5-5";
 
-/** geo: the picture's label geometry, when the upload (or the backfill) found labels (question types). */
-export type SlideFigure = { k: number; path: string; w: number; h: number; geo?: FigureGeo };
+/** geo: the picture's label geometry, when the upload (or the backfill) found labels (question types);
+ *  crop: a PPTX picture's visible frame (its srcRect), 0..1 of the stored, uncropped picture. */
+export type SlideFigure = { k: number; path: string; w: number; h: number; geo?: FigureGeo; crop?: Box };
 export type StoredSlide = {
   n: number;
   title: string;

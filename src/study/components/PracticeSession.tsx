@@ -533,6 +533,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         onPick={read ? undefined : setPicked}
         onBet={read ? undefined : setBet}
         onDontKnow={read ? undefined : () => void choose(null, null)}
+        onSkip={read ? undefined : goNext}
         onSlide={(n) => openSlide(n, l)}
         chips={
           <>

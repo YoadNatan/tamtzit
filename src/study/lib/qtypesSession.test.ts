@@ -50,10 +50,20 @@ test("pickQueue: a lecture's session asks a staged case's steps one after the ot
   assert.ok(at >= 0 && ids[at + 1] === "c2", ids.join(","));
 });
 
-test("a set question keeps its stored order; its answer goes back in stored order; feedback maps through", () => {
-  assert.deepEqual(orderFor({ options: ["x", "y", "z"], form: "tf" }), [0, 1, 2]);
-  assert.deepEqual(orderFor({ options: ["1", "2", "3"], form: "tap" }), [0, 1, 2]);
-  const s = startSession({ key: `l.${L}`, timed: false, queue: [{ id: "t", vignette: "", question: "?", options: ["s1", "s2", "s3"], form: "tf" }], now: 0 });
+test("a set question is shuffled for each showing (review QT-11); its answer goes back in stored order; feedback maps through", () => {
+  // A fixed "random" that reverses three items (Fisher-Yates from the end, always the first slot).
+  const first = () => 0;
+  for (const form of ["tf", "match", "order"]) assert.deepEqual(orderFor({ options: ["x", "y", "z"], form }, first), [1, 2, 0], form);
+  assert.deepEqual(orderFor({ options: ["1", "2", "3"], form: "tap" }, first), [0, 1, 2], "a tap item's pins keep their numbers");
+  const seen = new Set<string>();
+  for (let k = 0; k < 40; k++) seen.add(orderFor({ options: ["a", "b", "c", "d"], form: "order" }).join(""));
+  assert.ok(seen.size > 1, "a new order on another showing");
+  // A shuffled showing: the shown choices go back to the stored order, and the feedback comes back shown.
+  const order = [2, 0, 1];
+  assert.deepEqual(toShown(order, { answer: -1, seq: [1, 1, 0], explanations: ["a", "b", "c"], takeaway: "" }, "tf").seq, [0, 1, 1]);
+  assert.deepEqual(toShown(order, { answer: -1, seq: [1, 1, 0], explanations: ["a", "b", "c"], takeaway: "" }, "tf").explanations, ["c", "a", "b"]);
+  assert.deepEqual(toShown(order, { answer: -1, seq: [2, 0, 1], explanations: ["a", "b", "c"], takeaway: "" }, "order").seq, [0, 1, 2], "the stored right order, as shown places");
+  const s = startSession({ key: `l.${L}`, timed: false, queue: [{ id: "t", vignette: "", question: "?", options: ["s1", "s2", "s3"], form: "tf" }], now: 0, random: () => 0.999 });
   assert.equal(s.v, 2);
   const args = setArgs(s, "tf", [1, 0, 1], 2500, 2);
   assert.deepEqual(args, { p_question: "t", p_choices: [1, 0, 1], p_mode: "lecture", p_ms: 2500, p_confidence: 2 });

@@ -344,7 +344,10 @@ export function cryptoRandom(): number {
 /** The order a question is shown in: a set question and a pin number to tap
  *  keep the stored order (the server shuffled them once); every other a fresh one. */
 export function orderFor(q: Pick<SessionQuestion, "options" | "form">, random: () => number = cryptoRandom): number[] {
-  if (q.form && q.form !== "one") return q.options.map((_, i) => i);
+  // A tap item's options are its pin numbers, in pin order. Every other form is shuffled for each
+  // showing, set questions too (tf's statements, match's answers, order's steps), so a question
+  // that comes back is not answered by remembering where things were (review QT-11).
+  if (q.form === "tap") return q.options.map((_, i) => i);
   return showOrder(q.options, random);
 }
 

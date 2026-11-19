@@ -90,7 +90,7 @@ function DraftBody({ d, groupId }: { d: DraftRow; groupId: string }) {
  * many of its points to know the drafts cover ("מלריה 10/22"), from
  * study_request_progress, live on every phone (Realtime on the drafts and
  * batches). Each draft shows its style, the blind solver's verdict ("נבדקה
- * ✓", "בבדיקה…", "הפותר טעה" while the server rewrites it, "לא נבדקה" when
+ * ✓", "בבדיקה…", "הבדיקה ענתה אחרת" while the server rewrites it, "לא נבדקה" when
  * the solver could not run) and its slide, with "✓ להשאיר", "↻ לנסח מחדש"
  * (a sheet with an optional note and its cost) and "✕". Only a kept draft is
  * a question of the bank (decision 3); "להוסיף N לבנק" keeps every draft the
@@ -109,7 +109,7 @@ const slidesText = (slides: readonly number[]) => {
 function verdict(d: DraftRow, now: number): { text: string; tone: string } {
   if (leased(d, now)) return { text: "מנוסחת מחדש…", tone: "busy" };
   if (d.check_state === "ok") return { text: "נבדקה ✓", tone: "ok" };
-  if (d.check_state === "failed") return { text: "הפותר טעה", tone: "warn" };
+  if (d.check_state === "failed") return { text: "הבדיקה ענתה אחרת", tone: "warn" };
   if (d.check_state === "unchecked") return { text: "לא נבדקה", tone: "warn" };
   return { text: "בבדיקה…", tone: "" };
 }
@@ -172,6 +172,8 @@ export default function PracticeBank({ route, ctx }: ScreenProps<"practice">) {
   const pending = useMemo(() => drafts.filter((d) => d.status === "pending"), [drafts]);
   const kept = drafts.filter((d) => d.status === "kept").length;
   const toKeep = pending.filter((d) => keepable(d) && !leased(d, now));
+  // A staged case is 2-3 rows and one card: counted once, as the SQL's progress counts it (coalesce(series, id)).
+  const keepCount = new Set(toKeep.map((d) => (d as { series?: string | null }).series ?? d.id)).size;
   const made = progress.reduce((n, p) => n + p.made, 0);
   const wanted = progress.reduce((n, p) => n + p.wanted, 0) || batches.reduce((n, b) => n + b.wanted, 0);
   const openBatches = batches.filter((b) => b.status === "pending" || b.status === "writing");
@@ -281,9 +283,9 @@ export default function PracticeBank({ route, ctx }: ScreenProps<"practice">) {
           );
         })}
         {d.check_state === "failed" ? (
-          <p className="a-small a-muted">{rewriting ? "נכתבת מחדש אוטומטית." : "הפותר העיוור ענה אחרת מהמפתח. אפשר לנסח אותה מחדש או להוריד."}</p>
+          <p className="a-small a-muted">{rewriting ? "נכתבת מחדש אוטומטית." : <>בבדיקה, <bdi dir="ltr">Claude</bdi> ענה אחרת מהמפתח. אפשר לנסח אותה מחדש או להוריד.</>}</p>
         ) : d.check_state === "unchecked" ? (
-          <p className="a-small a-muted">הפותר העיוור לא הספיק לבדוק אותה. אפשר להשאיר אותה בכל זאת.</p>
+          <p className="a-small a-muted">הבדיקה לא הספיקה לבדוק אותה. אפשר להשאיר אותה בכל זאת.</p>
         ) : null}
         {rewriting ? null : (
           <div className="a-row pb-actions">
@@ -359,8 +361,8 @@ export default function PracticeBank({ route, ctx }: ScreenProps<"practice">) {
           </span>
         ) : null}
         {toKeep.length || pending.length || openBatches.length || !flags.practice ? (
-          <button type="button" className="a-btn primary wide pb-keep-all" disabled={!toKeep.length || busy.has("all")} onClick={() => void act("all", () => keepAll(requestId), toKeep.length === 1 ? "שאלה אחת נוספה לבנק." : `${toKeep.length} שאלות נוספו לבנק.`)}>
-            {toKeep.length ? `להוסיף ${toKeep.length} לבנק` : "להוסיף לבנק"}
+          <button type="button" className="a-btn primary wide pb-keep-all" disabled={!toKeep.length || busy.has("all")} onClick={() => void act("all", () => keepAll(requestId), keepCount === 1 ? "שאלה אחת נוספה לבנק." : `${keepCount} שאלות נוספו לבנק.`)}>
+            {keepCount ? `להוסיף ${keepCount} לבנק` : "להוסיף לבנק"}
           </button>
         ) : (
           <RouteLink to={{ v: "practice", l: lectureId, x: "round" }} go={ctx.go} className="a-btn primary wide">
@@ -388,7 +390,7 @@ function RewordSheet({ draft, lectureId, cost, onClose, onDone }: { draft: Draft
             <textarea className="a-input" rows={3} maxLength={200} dir="rtl" placeholder="למשל: שאלה על המנגנון ולא על השם" value={note} onChange={(e) => setNote(e.target.value)} />
           </label>
           <p className="a-small a-muted">
-            אותה נקודה ואותו מפתח, בניסוח חדש, והפותר העיוור בודק אותה שוב. כ-<bdi dir="ltr">{cost}</bdi>.
+            אותה נקודה ואותו מפתח, בניסוח חדש, ונבדקת שוב. כ-<bdi dir="ltr">{cost}</bdi>.
           </p>
           <div className="a-row sheet-actions">
             <button

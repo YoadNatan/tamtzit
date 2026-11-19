@@ -148,6 +148,7 @@ function TodayQuestion({ ctx, item, onDone }: { ctx: Ctx; item: QueueItem; onDon
         onPick={(k) => !fb && setPicked(k)}
         onBet={(b) => !fb && setBet(b)}
         onDontKnow={fb ? undefined : () => void check(null)}
+        onSkip={fb ? undefined : onDone}
         onSlide={openSlide}
         dangerList={flags.progress}
       />

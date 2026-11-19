@@ -137,6 +137,8 @@ const norm = (s) => String(s).replace(/[‎‏⁦-⁩]/g, "").replace(/\s+/g, " 
       );
       await page.locator(".qfig img, .qfig svg").first().waitFor({ timeout: 10000 });
       await shot(page, "qtypes-02-bank", { primary: PRIMARY });
+      const keepWords = (await page.locator(".pb-keep-all").innerText()).trim();
+      check("1c2 the bank's button counts cards, a staged case once (review QT-10)", keepWords === `להוסיף ${cards.length} לבנק`, `${keepWords} · ${cards.length} cards`);
       await page.locator(".pb-keep-all").click();
       await until(async () => P.drafts.filter((d) => d.status === "pending").length === 0, 15000, "keep all");
       const kept = P.questions.filter((q) => q.series);
@@ -200,7 +202,16 @@ const norm = (s) => String(s).replace(/[‎‏⁦-⁩]/g, "").replace(/\s+/g, " 
       await round(page, "סידור");
       await page.locator(".qt-order").waitFor({ timeout: 10000 });
       for (const t of ["Glomerulus", "Loop of Henle", "Proximal tubule", "Collecting duct"]) await page.locator(".qt-order .qt-bank .qt-chip", { hasText: t }).click();
+      const focusOf = () => page.evaluate(() => document.activeElement?.getAttribute("data-f") ?? document.activeElement?.tagName ?? "");
+      const afterAdd = await focusOf();
       await page.getByRole("button", { name: "להזיז למעלה: Proximal tubule" }).click();
+      const afterUp = await focusOf();
+      const orderLive = norm(await page.locator(".qt-order [aria-live]").innerText());
+      check(
+        "4k focus stays on the list (review F2): the pool's last step added → its ✕; ↑ → the same step's ↑ at its new place; a live line says it",
+        /^out-\d+$/.test(afterAdd) && /^up-\d+$/.test(afterUp) && orderLive === "Proximal tubule הוזז למקום 2",
+        JSON.stringify({ afterAdd, afterUp, orderLive }),
+      );
       const order = (await page.locator(".qt-placed .qt-step .qt-text").allInnerTexts()).map(norm);
       check("4a steps added by taps, one moved up", order.join(",") === "Glomerulus,Proximal tubule,Loop of Henle,Collecting duct", JSON.stringify(order));
       await shot(page, "qtypes-06-order", { primary: PRIMARY });
@@ -220,6 +231,14 @@ const norm = (s) => String(s).replace(/[‎‏⁦-⁩]/g, "").replace(/\s+/g, " 
       await bet(page, "על בטוח");
       await page.locator(PRIMARY).click();
       await verdict(page);
+      const legend6 = (await page.locator(".qf-legend li").allInnerTexts()).map(norm);
+      const named6 = plugin.pinsOf(GEO).filter((p) => ["Glomerulus", "Loop of Henle", "Collecting duct", "Proximal tubule"].includes(p.label));
+      check(
+        "6b after the answer the drawing is named under it (review QT-5): every option that is a pin, by its number; no floating name chips",
+        legend6.length === 5 && named6.every((p) => legend6[p.n - 1].includes(p.label)) && (await page.locator(".qf-name").count()) === 0,
+        JSON.stringify(legend6),
+      );
+      await shot(page, "qtypes-07b-label-name-answered", { primary: ".pq-next" });
       await next(page);
       // 5. tap mode: no other label's name anywhere before the answer; pins are radios; "מספר N" too.
       await page.locator(".qfig .qf-pins[role=radiogroup]").waitFor({ timeout: 10000 });
@@ -235,8 +254,12 @@ const norm = (s) => String(s).replace(/[‎‏⁦-⁩]/g, "").replace(/\s+/g, " 
       await bet(page, "נראה לי");
       await page.locator(PRIMARY).click();
       const v5 = await verdict(page);
-      const names = await page.locator(".qf-name").allInnerTexts();
-      check("5b a pin tapped by its place is the answer; after it the pins show their names", norm(picked).includes(`מספר ${target}`) && v5 === "✓ נכון · ׳נראה לי׳" && names.includes("Loop of Henle"), JSON.stringify({ picked, v5, names }));
+      const names = (await page.locator(".qf-legend li").allInnerTexts()).map(norm);
+      check(
+        "5b a pin tapped by its place is the answer; after it every pin's name is a numbered list under the picture",
+        norm(picked).includes(`מספר ${target}`) && v5 === "✓ נכון · ׳נראה לי׳" && names.length === 5 && plugin.pinsOf(GEO).every((p) => names[p.n - 1].startsWith(`${p.n}`) && names[p.n - 1].includes(p.label)),
+        JSON.stringify({ picked, v5, names }),
+      );
       await shot(page, "qtypes-09-label-tap-answered", { primary: ".pq-next" });
       await next(page);
       // 7. a picture question: the <img> loads from the signed URL.
@@ -245,6 +268,61 @@ const norm = (s) => String(s).replace(/[‎‏⁦-⁩]/g, "").replace(/\s+/g, " 
       const src = await page.locator(".qf-photo img").getAttribute("src");
       check("7 the picture question's <img> loads from the signed URL", /\/object\/sign\/study\/.*s3-1\.jpg/.test(src ?? ""), src);
       await shot(page, "qtypes-10-image", { primary: PRIMARY });
+
+      /* ── 7b. a picture that does not load (review QT-2): said, nothing answerable, "לדלג"; "לנסות שוב" loads it ── */
+      const picPath = `${mock.GROUP.id}/${L}/s3-1.jpg`;
+      const picBytes = db.files.get(picPath);
+      db.files.delete(picPath);
+      await round(page, "שאלות על תמונה");
+      await page.locator(".qf-fail").first().waitFor({ timeout: 15000 });
+      const failText = norm(await page.locator(".qf-fail").first().innerText());
+      const optsOff = await page.locator(".pq-options button.a-opt").evaluateAll((b) => b.every((x) => x.disabled));
+      const betsOff = await page.locator(".pq-bets button").evaluateAll((b) => b.every((x) => x.disabled));
+      const skip = await page.getByRole("button", { name: "לדלג, בלי שזה ייספר" }).count();
+      check("7b a missing picture: \"התמונה לא נטענה\" with \"לנסות שוב\"; no option or bet can be chosen; \"לדלג\" is offered", failText === "התמונה לא נטענה. לנסות שוב" && optsOff && betsOff && skip === 1, JSON.stringify({ failText, optsOff, betsOff, skip }));
+      await shot(page, "qtypes-10b-picture-failed", { primary: PRIMARY });
+      db.files.set(picPath, picBytes);
+      await page.locator(".qf-fail button", { hasText: "לנסות שוב" }).first().click();
+      await page.locator(".qfig svg image, .qf-photo img").first().waitFor({ timeout: 10000 });
+      const optsOn = await page.locator(".pq-options button.a-opt").evaluateAll((b) => b.some((x) => !x.disabled));
+      check("7c \"לנסות שוב\" signs it again and the question opens", optsOn && (await page.locator(".qf-fail").count()) === 0, String(optsOn));
+      const answeredBefore = P.answers.length;
+      db.files.delete(picPath);
+      await round(page, "שאלות על תמונה");
+      await page.getByRole("button", { name: "לדלג, בלי שזה ייספר" }).waitFor({ timeout: 15000 });
+      const leadBefore = norm(await page.locator(".pq-lead").first().innerText());
+      await page.getByRole("button", { name: "לדלג, בלי שזה ייספר" }).click();
+      await page.waitForTimeout(600);
+      const leadAfter = (await page.locator(".pq-lead").count()) ? norm(await page.locator(".pq-lead").first().innerText()) : "(the session's end)";
+      check("7d \"לדלג\" moves on and nothing is counted", P.answers.length === answeredBefore && leadAfter !== leadBefore, JSON.stringify({ counted: P.answers.length - answeredBefore, leadBefore, leadAfter }));
+      db.files.set(picPath, picBytes);
+
+      /* ── 7e. pins close together (review QT-1): the stage starts wider in its own scroll box, the pins 32 px apart or more ── */
+      // A new label item (never answered, so the round asks it) whose pins stand in a tight column.
+      const denseId = "9c000000-0000-4000-8000-0000000000d1";
+      const nameQ = P.questions.find((q) => q.id === ids.labelName);
+      P.questions.push({ ...nameQ, id: denseId, layout: { ...nameQ.layout, stage: { w: 960, h: 540 }, pins: nameQ.layout.pins.map((p, i) => ({ ...p, x: 0.82, y: 0.2 + 0.07 * i })) } });
+      P.keys.set(denseId, { ...P.keys.get(ids.labelName) });
+      await page.setViewportSize({ width: 360, height: 740 });
+      await round(page, "שאלות על תמונה");
+      // The round may start with the picture question: "לא יודעים" until the label item is on screen.
+      for (let k = 0; k < 4 && !(await page.locator(".qf-dense").count()); k++) {
+        await page.locator(".qfig svg image, .qf-photo img").first().waitFor({ timeout: 10000 });
+        if (await page.locator(".qf-dense").count()) break;
+        await page.locator(".pq-dont-know").click();
+        await next(page);
+      }
+      await page.locator(".qf-dense .qf-pin").first().waitFor({ timeout: 15000 });
+      const gap = await page.locator(".qf-dense .qf-pin").evaluateAll((els) => {
+        const c = els.map((e) => e.getBoundingClientRect()).map((r) => [r.x + r.width / 2, r.y + r.height / 2]);
+        let m = Infinity;
+        for (let i = 0; i < c.length; i++) for (let j = i + 1; j < c.length; j++) m = Math.min(m, Math.hypot(c[i][0] - c[j][0], c[i][1] - c[j][1]));
+        return Math.round(m);
+      });
+      const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+      check("7e crowded pins at 360 px: the stage starts zoomed in a scrollable box, pins at least 31 px apart, no sideways page scroll", gap >= 31 && sw <= 360, JSON.stringify({ gap, sw }));
+      await shot(page, "qtypes-10c-dense", { primary: PRIMARY });
+      await page.setViewportSize({ width: 390, height: 844 });
 
       /* ── 8. a staged case ── */
       await round(page, "מקרה בשלבים");

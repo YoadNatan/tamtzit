@@ -1,4 +1,4 @@
-import type { FigureGeo } from "../../../shared/study/figureGeo";
+import type { Box, FigureGeo } from "../../../shared/study/figureGeo";
 import { createClient, type RealtimeChannel, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import { REQUIRED_SCHEMA } from "./flags";
 import type { Slide } from "./pptx";
@@ -44,8 +44,9 @@ function fail(error: { message?: string }): never {
 
 export type Group = { id: string; name: string };
 export type Member = { user_id: string; name: string };
-/** geo: the picture's label geometry (question types: "סימון על תמונה"), when the upload found labels. */
-export type Figure = { k: number; path: string; w: number; h: number; geo?: FigureGeo };
+/** geo: the picture's label geometry (question types: "סימון על תמונה"), when the upload found labels;
+ *  crop: a PPTX picture's visible frame (its srcRect), 0..1 of the stored picture. */
+export type Figure = { k: number; path: string; w: number; h: number; geo?: FigureGeo; crop?: Box };
 export type StoredSlide = Omit<Slide, "images"> & { figures: Figure[] };
 export type LectureStatus = "new" | "outlining" | "writing" | "ready" | "failed";
 export type LectureRow = {
@@ -756,7 +757,7 @@ export type NewLecture = {
   kind: "pptx" | "pdf";
   slides: Slide[];
   /** The pictures to store for one slide: k = 0 is the whole page, k ≥ 1 embedded pictures. */
-  figures: (slide: Slide) => Promise<Array<{ k: number; blob: Blob; width: number; height: number; geo?: FigureGeo }>>;
+  figures: (slide: Slide) => Promise<Array<{ k: number; blob: Blob; width: number; height: number; geo?: FigureGeo; crop?: Box }>>;
 };
 
 /** Saves a new lecture's pictures and slides. Returns the lecture as saved and
@@ -780,9 +781,9 @@ export async function createLecture(
         const path = `${input.groupId}/${id}/s${s.n}-${f.k}.jpg`;
         const up = await c.storage.from("study").upload(path, f.blob, { contentType: "image/jpeg", upsert: true });
         if (up.error) throw up.error;
-        saved.push({ k: f.k, path, w: f.width, h: f.height, ...(f.geo ? { geo: f.geo } : {}) });
+        saved.push({ k: f.k, path, w: f.width, h: f.height, ...(f.geo ? { geo: f.geo } : {}), ...(f.crop ? { crop: f.crop } : {}) });
       }
-      const { images: _images, geo: _geo, ...rest } = s;
+      const { images: _images, geo: _geo, crops: _crops, ...rest } = s;
       stored.push({ ...rest, figures: saved });
       onProgress(++done, total);
     }

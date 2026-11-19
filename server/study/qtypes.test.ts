@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FigureGeo } from "../../shared/study/figureGeo.js";
-import { buildLabelItem, labelledFigures, labelIndex, modeFor, pageCrop, pinOrder } from "./labels.js";
+import { buildLabelItem, labelledFigures, labelIndex, modeFor, pageCrop, PIN_GAP, PINNED, pinOrder, pinsApart } from "./labels.js";
 import { checkCall, maxTokensFor, solverFree, solverItemOf, typesCtx } from "./practice.js";
 import { partFacts } from "./practice2.js";
 import { questionsRequest } from "./prompts/questions.js";
-import { checkQuestion, type Ctx, MATCH_LEAD, ORDER_LEAD, type Question, stripOrdinal, TF_LEAD } from "./questions.js";
+import { checkQuestion, type Ctx, MATCH_LEAD, ORDER_LEAD, pptxCrop, type Question, scriptOf, stripOrdinal, TF_LEAD } from "./questions.js";
+import { isLabelText } from "../../shared/study/figureGeo.js";
 import type { StoredSlide } from "./study.js";
 
 /* Question types (docs/study/question-types.md): each checker's accept and
@@ -228,13 +229,77 @@ test("labels.ts: reading order top to bottom, right to left within a row; tap pi
   assert.deepEqual(pinOrder(boxes), [1, 0, 2]);
   assert.equal(modeFor(1, 3), "name", "3 labels: name mode only");
   assert.equal(modeFor(1, 4), "tap");
-  const t = buildLabelItem({ fig: "fig:3-1", geo: GEO, target: 2, mode: "tap", options: [], prefer: [4] });
+  const t = buildLabelItem({ fig: "fig:3-1", geo: GEO, target: 2, mode: "tap", options: [], prefer: [4] })!;
   assert.ok(t.layout.pins.length >= 3 && t.layout.pins.length <= 6);
   assert.equal(t.options.length, t.layout.pins.length);
   assert.equal(labelIndex(GEO, " loop of henle "), 2);
   const pdf = pageCrop({ ...GEO, src: "pdf", baked: true, img: { x: -0.25, y: -0.5, w: 2, h: 2 } });
   assert.deepEqual(pdf.crop, { x: 0.125, y: 0.25, w: 0.5, h: 0.5 });
   assert.equal(pdf.masks.length, 5);
+});
+
+// A column of labels 0.085 of the stage's height apart on a 16:9 stage (review QT-1's geometry).
+const DENSE: FigureGeo = {
+  ...GEO,
+  stage: { w: 960, h: 540 },
+  labels: ["Aorta", "Pulmonary trunk", "Left atrium", "Right atrium", "Left ventricle", "Right ventricle", "Interventricular septum", "Apex", "Mitral valve", "Tricuspid valve"].map((t, i) => ({
+    t,
+    b: { x: 0.8, y: 0.05 + 0.085 * i, w: 0.15, h: 0.04 },
+  })),
+};
+
+test("labels.ts: pins are spread out (a dense column keeps every other label, the rest grey dots); too crowded is rejected (review QT-1)", () => {
+  const near = (i: number, j: number) => pinsApart(DENSE.stage, DENSE.labels[i].b, DENSE.labels[j].b);
+  assert.ok(!near(0, 1) && near(0, 2), `0.085 × 540 is under ${PIN_GAP} × 540; twice that is not`);
+  for (const mode of ["name", "tap"] as const) {
+    const b = buildLabelItem({ fig: "fig:3-1", geo: DENSE, target: 4, mode, options: [{ text: "Left ventricle", correct: true, why: "x" }] })!;
+    const ys = b.layout.pins.map((p) => p.y).sort((a, c) => a - c);
+    assert.ok(ys.every((y, k) => k === 0 || (y - ys[k - 1]) * 540 >= PIN_GAP * 540 - 1e-6), `${mode}: no two pins closer than the gap (${ys.join(", ")})`);
+    assert.ok((b.layout.dots ?? []).length >= 4, `${mode}: the dropped labels are dots`);
+    assert.ok(b.layout.pins.some((p) => Math.abs(p.y - (0.05 + 0.085 * 4 + 0.02)) < 1e-4), `${mode}: the target is always a pin`);
+  }
+  // Three labels stacked on one another: no room for two neighbours, rejected (and a tap item falls back to name mode first).
+  const stacked: FigureGeo = { ...GEO, labels: GEO.labels.slice(0, 3).map((l, i) => ({ ...l, b: { x: 0.5, y: 0.5 + 0.01 * i, w: 0.1, h: 0.04 } })) };
+  assert.equal(buildLabelItem({ fig: "fig:3-1", geo: stacked, target: 0, mode: "name", options: [] }), null);
+  const r = checkQuestion({ ...LABEL, options: [opt("Glomerulus", "x [ש' 3]", true), opt("Proximal tubule", "x [ש' 3]"), opt("Loop of Henle", "x [ש' 3]"), opt("Collecting duct", "x [ש' 3]")] }, ctx(["label"], { labelled: new Map([["fig:3-1", { geo: stacked }]]) }));
+  assert.ok(!r.ok && /too close together/.test(r.reasons[0]), r.ok ? "accepted" : r.reasons[0]);
+});
+
+test("label: name mode numbers a wrong option that is a pin, so the whole drawing is named after the answer (review QT-5)", () => {
+  const r = checkQuestion(LABEL, ctx(["label"], { labelIndex: 0 }));
+  assert.ok(r.ok && r.item.layout?.kind === "label");
+  const lay = r.item.layout;
+  const at = (name: string) => lay.pins.findIndex((p) => {
+    const b = GEO.labels.find((l) => l.t === name)!.b;
+    return Math.abs(p.x - (b.x + b.w / 2)) < 1e-4 && Math.abs(p.y - (b.y + b.h / 2)) < 1e-4;
+  }) + 1;
+  const i = r.item.options.indexOf("Proximal tubule");
+  assert.ok(r.item.explanations[i].startsWith(PINNED(at("Proximal tubule"))), r.item.explanations[i]);
+  const bowman = r.item.options.indexOf("Bowman capsule");
+  assert.ok(!/^מסומן במספר/.test(r.item.explanations[bowman]), "an option that is not a pin says nothing of a number");
+  assert.ok(!/^מסומן במספר/.test(r.item.explanations[r.item.answer!]), "the key's why is the writer's");
+});
+
+test("label: a structure's name only, one script for all options (review QT-7, QT-8)", () => {
+  for (const t of ["A", "B)", "IV", "Fig. 2", "Figure 3", "© Elsevier", "Netter", "Source: atlas", "שימו לב"]) assert.equal(isLabelText(t), false, t);
+  for (const t of ["Loop of Henle", "N. vagus", "Lig. teres", "לולאת הנלה", "CA1"]) assert.equal(isLabelText(t), true, t);
+  const lettered: FigureGeo = { ...GEO, labels: [{ t: "B", b: { x: 0.3, y: 0.4, w: 0.05, h: 0.05 } }, ...GEO.labels] };
+  const key = checkQuestion({ ...LABEL, options: [opt("B", "x [ש' 3]", true), ...LABEL.options.slice(1)] }, ctx(["label"], { labelled: new Map([["fig:3-1", { geo: lettered }]]) }));
+  assert.ok(!key.ok && /structure's name/.test(key.reasons[0]));
+  const built = buildLabelItem({ fig: "fig:3-1", geo: lettered, target: 3, mode: "tap", options: [] })!;
+  assert.equal(built.layout.pins.length + (built.layout.dots ?? []).length, 6);
+  assert.ok(!built.explanations.some((e) => / הוא B\.$/.test(e)), "a panel letter is never a pin");
+  assert.deepEqual([scriptOf("Loop of Henle"), scriptOf("לולאת הנלה"), scriptOf("ה-Loop"), scriptOf("12")], ["latin", "he", "mixed", "none"]);
+  const mixed = checkQuestion({ ...LABEL, options: [...LABEL.options.slice(0, 3), opt("צינורית מאספת", "x [ש' 3]")] }, ctx(["label"], { lectureText: GEO.labels.map((l) => l.t).join(" ").toLowerCase() + " צינורית מאספת" }));
+  assert.ok(!mixed.ok && /two scripts/.test(mixed.reasons[0]), mixed.ok ? "accepted" : mixed.reasons[0]);
+});
+
+test("labels.ts: geometry from a phone that is not the stored shape is skipped, never thrown on (review F4)", () => {
+  const bad = { ...GEO, labels: [...GEO.labels.slice(0, 2), { t: "Loop", b: { x: "0.1" } }] } as unknown as FigureGeo;
+  const slides: StoredSlide[] = [
+    { n: 3, title: "", lines: [], tables: [], notes: "", figures: [{ k: 1, path: "p", w: 4, h: 3, geo: bad }, { k: 2, path: "q", w: 4, h: 3, geo: GEO }] },
+  ];
+  assert.deepEqual(labelledFigures(slides, 1, 10).map((f) => f.id), ["fig:3-2"]);
 });
 
 // ── image ──
@@ -256,6 +321,21 @@ test("image: needs a captioned picture of the part; on a PDF page without geomet
   assert.ok(!leak.ok && /printed on the page/.test(leak.reasons[0]));
   const masked = checkQuestion(IMAGE, ctx(["image"], { pdf: true, labelled: new Map([["fig:3-1", { geo: { ...GEO, src: "pdf", baked: true } }]]) }));
   assert.ok(masked.ok && masked.item.layout?.kind === "image" && masked.item.layout.masks?.length === 5);
+});
+
+test("image: a PPTX picture is shown as the slide crops it (review QT-6)", () => {
+  // The label geometry's clip, relative to the whole stored picture.
+  const clipped: FigureGeo = { ...GEO, img: { x: 0, y: 0, w: 1, h: 1 }, clip: { x: 0.1, y: 0.2, w: 0.5, h: 0.6 } };
+  const a = checkQuestion(IMAGE, ctx(["image"], { labelled: new Map([["fig:3-1", { geo: clipped }]]) }));
+  assert.ok(a.ok && a.item.layout?.kind === "image");
+  assert.deepEqual(a.item.layout.crop, { x: 0.1, y: 0.2, w: 0.5, h: 0.6 });
+  // A picture without labels: the crop the upload kept (its srcRect).
+  const b = checkQuestion(IMAGE, ctx(["image"], { labelled: new Map(), crops: new Map([["fig:3-1", { x: 0, y: 0.25, w: 1, h: 0.5 }]]) }));
+  assert.ok(b.ok && b.item.layout?.kind === "image");
+  assert.deepEqual(b.item.layout.crop, { x: 0, y: 0.25, w: 1, h: 0.5 });
+  assert.deepEqual(pptxCrop("fig:3-1", undefined, new Map([["fig:3-1", { x: 0, y: 0, w: 1, h: 1 }]])), {}, "a whole picture has no crop");
+  const lec = { source_kind: "pptx" as const, slides: [{ n: 3, title: "", lines: [], tables: [], notes: "", figures: [{ k: 1, path: "p", w: 4, h: 3, crop: { x: 0, y: 0.25, w: 1, h: 0.5 } }] }] };
+  assert.deepEqual(typesCtx(lec, undefined).crops?.get("fig:3-1"), { x: 0, y: 0.25, w: 1, h: 0.5 });
 });
 
 // ── steps ──
@@ -306,7 +386,7 @@ test("a release-1 round takes none of the new types", () => {
   }
 });
 
-test("the solver's view: a set's form and prompts, an image's caption; a label is never solved; the check call by form", () => {
+test("the solver's view: a set's form and prompts, an image's picture (never its caption); a label is never solved; the check call by form", () => {
   const m = checkQuestion(MATCH, ctx(["match"]));
   assert.ok(m.ok);
   const s = solverItemOf(m.item, new Map());
@@ -314,7 +394,10 @@ test("the solver's view: a set's form and prompts, an image's caption; a label i
   assert.deepEqual(s.prompts, m.item.layout?.kind === "match" ? m.item.layout.prompts : null);
   const i = checkQuestion(IMAGE, ctx(["image"], { labelled: new Map() }));
   assert.ok(i.ok);
-  assert.equal(solverItemOf(i.item, new Map([["fig:3-1", "חתך של נפרון"]])).caption, "חתך של נפרון");
+  const seen = solverItemOf(i.item, new Map([["fig:3-1", { id: "fig:3-1", slide: 3, url: "https://x.test/s3-1.jpg?token=t", w: 800, h: 600 }]]));
+  assert.equal(seen.image, "https://x.test/s3-1.jpg?token=t");
+  assert.ok(!("caption" in seen) && !seen.withoutPicture, "the solver looks at the picture, not at its caption (review QT-3)");
+  assert.equal(solverItemOf(i.item, new Map()).withoutPicture, true, "no signed picture: not judged");
   assert.ok(solverFree({ style: "label" }) && !solverFree({ style: "tf" }));
   assert.equal(checkCall("d", { form: "tf" }, { choice: -1, ambiguous: false, ok: true, seq: [1, 0, 1] }).fn, "study_draft_check_set");
   assert.deepEqual(checkCall("d", { form: "order" }, null).args, { p_draft: "d", p_seq: null, p_ambiguous: null });

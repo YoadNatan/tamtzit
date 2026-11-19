@@ -68,10 +68,10 @@ QUESTION STYLES
 - compare (השוואה): what tells apart two drugs, organisms or stages that the slides compare, or what they share; the options are statements of the same form.
 - not_true (׳מה לא נכון׳): a negative lead-in over a list the slides give, the negative word bold; exactly one option is false according to the slides, and it is the correct option; each "why" says why its option is true or false.
 - blank_table (טבלה ריקה): only on a table the slides show. The vignette is that table, its header and each row on a line of their own as "| … | … |", with exactly one cell written as "___"; the lead-in asks what belongs in that cell, the options are values of its column, and "case" is false.
-- image (שאלה על תמונה): a question about what a picture of the list shows (a structure, a stage, a finding), answered from its caption and the slides; "figure" is that picture's id. Never quote a label of the picture that gives the answer away.
-- label (סימון על תמונה): choose a picture from LABELLED PICTURES and one of its labels that names a structure, region or stage (not a number, an arrow word or a sentence). The correct option is that label exactly as listed; the wrong options are other labels of the same picture or structures of this lecture. "figure" is the picture's id. Write any lead-in: the server writes the real one ("מה מסומן במספר 3 בשרטוט?" or "באיזה מספר מסומן X?").
+- image (שאלה על תמונה): a question that can be answered only by looking at a picture of the list (the pictures themselves follow the request, each after its id): what it shows (a structure, a stage, a finding, a pattern), where something is in it, or what a visible feature means. Ask only about something clearly visible in the picture as it is, even on a phone screen. The lead-in and the vignette never name or describe the answer, so that without the picture no option can be chosen. If the picture prints the answer (a label, a caption or a legend in the pixels), choose another picture or another style. "figure" is that picture's id.
+- label (סימון על תמונה): choose a picture from LABELLED PICTURES and one of its labels that names a structure, region or stage (not a number, an arrow word or a sentence). The correct option is that label exactly as listed; the wrong options are other labels of the same picture, exactly as listed. Only when the picture has fewer labels than the wrong options needed, add a structure of this lecture, written the way the labels are written (the same language and script: an English option never stands among Hebrew ones, or the reverse). "figure" is the picture's id. Write any lead-in: the server writes the real one ("מה מסומן במספר 3 בשרטוט?" or "באיזה מספר מסומן X?").
 - steps (מקרה קליני בשלבים): one clinical case answered in 2-3 dependent steps, for example diagnosis, then mechanism or test, then treatment. The vignette, lead-in and options are step 1; "resolved" states step 1's answer as a fact of the case. Each later step in "stages" adds "update" (what happens next, without the step's answer), its own lead-in and options, and "resolved" (its answer as a fact). Each step must be answerable from the case so far, and no step's story may contain its own answer. "case" is true.
-- tf (נכון / לא נכון): 3-5 statements about one topic, some true and some false according to the slides. Each option is a statement; "correct" is true for each true statement. Each "why" says why the statement is true or false. The lead-in may be "אילו מהמשפטים נכונים?".
+- tf (נכון / לא נכון): 3-5 statements about one topic, some true and some false according to the slides. Each option is a statement; "correct" is true for each true statement. A false statement changes one fact that the slides state (the wrong drug, target, stage, organism, number or direction), and its "why" names the slide's fact it contradicts; never write a statement that is false only because the slides do not mention it, or one that is true in medicine but missing from the slides. Each "why" says why the statement is true or false. The lead-in may be "אילו מהמשפטים נכונים?".
 - match (התאמה): 3-5 pairs of the same kind (a drug and its target, a structure and its function, a finding and its disease). Each option is the answer side; its "left" is the item it matches. At most one more option with "left" "" as a distractor. Every "why" says why the pair matches.
 - order (סידור): 3-6 steps of one process (a pathway, a life cycle, the segments of the nephron in order, the steps of management), written in their correct order, first step first, with no numbers or ordinal words. "correct" is true for every step; each "why" says why the step sits where it does.
 
@@ -92,7 +92,7 @@ TAGS
 - "points": the numbers of the request's points to know that the question tests, its main point first (one to three); [] when the request lists none.
 - "slides": every slide number the question, its answer and its explanations rely on.
 - "tag": the drug, organism, stage or test the option names, in English exactly as the lecture writes it; "" when it names none.
-- "figure": one picture id from the list, only when the question asks about what that picture shows and its labels do not give the answer away; "" otherwise.
+- "figure": one picture id from the list, only when the question asks about what that picture shows and nothing printed in it gives the answer away; "" otherwise.
 
 LANGUAGE (the style sheet of the group's summaries)
 - Hebrew in the voice of a careful exam writer: plain and exact, no exclamation marks, no rhetorical questions, no emoji, no nikud, no Markdown except bold for a negative word. Binomial names are plain text, without asterisks.
@@ -256,6 +256,8 @@ export type RewriteItem = {
   /** The solver's choice, or null; ambiguous when it found another option defensible. */
   chose: number | null;
   ambiguous: boolean;
+  /** An image item the solver answered without its picture: the picture adds nothing. */
+  blind?: boolean;
 };
 
 const LETTERS = ["א", "ב", "ג", "ד", "ה", "ו"];
@@ -302,7 +304,9 @@ export function rewriteRequest(
       `The fact it tests: ${it.takeaway}`,
       ...(o.reason === "solver"
         ? [
-            it.ambiguous
+            it.blind
+              ? "The student chose the key without seeing the picture, so the question does not need it. Ask about something that only the picture shows."
+              : it.ambiguous
               ? "The student found more than one option defensible from the slides."
               : it.chose !== null && it.chose >= 0 && it.chose < it.options.length
                 ? `The student chose ${LETTERS[it.chose]}.`

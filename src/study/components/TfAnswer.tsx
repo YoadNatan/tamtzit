@@ -1,9 +1,12 @@
+import type { KeyboardEvent } from "react";
 import type { Feedback } from "../lib/practice";
 import { richText } from "../lib/rich";
 
 /* ── "נכון / לא נכון": a mark per statement (docs/study/question-types.md) ──
  * Each statement is a row with two buttons, "נכון" and "לא נכון", a radio
- * group labelled by the statement (44 px targets). "לבדוק" waits until every
+ * group labelled by the statement (44 px targets), with the radio group's
+ * keyboard: one Tab stop per row (the checked button, else "נכון"), and the
+ * arrows switch the mark and move focus with it. "לבדוק" waits until every
  * row is marked. After the answer each row says in words whether the mark
  * was right ("✓ צדקת: המשפט נכון" / "✗ סימנת נכון, אבל המשפט לא נכון"), with
  * its explanation and slide tags. */
@@ -52,6 +55,18 @@ export default function TfAnswer(p: SetProps) {
       </ol>
     );
   }
+  const mark = (i: number, v: number) => p.onChange?.(p.value.map((x, k) => (k === i ? v : x)));
+  // Arrows inside a row's pair: the other mark, checked and focused (a radio group's keys).
+  const onKey = (i: number) => (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key) || p.disabled) return;
+    const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button[role=radio]")];
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (at < 0) return;
+    e.preventDefault();
+    const next = (at + 1) % buttons.length;
+    buttons[next].focus();
+    mark(i, Number(buttons[next].dataset.v));
+  };
   return (
     <ol className="qt-tf" aria-label="המשפטים">
       {p.options.map((text, i) => {
@@ -61,16 +76,18 @@ export default function TfAnswer(p: SetProps) {
             <p className="qt-text" id={id} dir="rtl">
               {richText(text, `s${i}-`)}
             </p>
-            <div className="a-seg qt-two" role="radiogroup" aria-labelledby={id}>
+            <div className="a-seg qt-two" role="radiogroup" aria-labelledby={id} onKeyDown={onKey(i)}>
               {[1, 0].map((v) => (
                 <button
                   key={v}
                   type="button"
                   role="radio"
                   className="a-btn"
+                  data-v={v}
                   aria-checked={p.value[i] === v}
+                  tabIndex={p.value[i] === v || (p.value[i] == null && v === 1) ? 0 : -1}
                   disabled={p.disabled}
-                  onClick={() => p.onChange?.(p.value.map((x, k) => (k === i ? v : x)))}
+                  onClick={() => mark(i, v)}
                 >
                   {TRUE_FALSE[v]}
                 </button>

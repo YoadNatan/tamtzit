@@ -8,7 +8,9 @@ import type { SetProps } from "./TfAnswer";
  * moves to the next empty slot); or tap a chip first and it waits for a
  * slot. A placed chip leaves the bank; ✕ in its slot gives it back. Every
  * control is a native button, so the keyboard works (Tab and Enter), and a
- * live line says what was placed. After the answer each row says ✓ or ✗,
+ * live line says what was placed. Focus never falls off the page: after a
+ * placement it goes to the next empty slot, or to the slot just filled when
+ * none is empty; after ✕, to that slot. After the answer each row says ✓ or ✗,
  * the right match and why. value[i] is the option placed at prompt i. */
 
 export default function MatchAnswer(p: SetProps) {
@@ -17,6 +19,14 @@ export default function MatchAnswer(p: SetProps) {
   const [held, setHeld] = useState<number | null>(null);
   const [said, setSaid] = useState("");
   const slots = useRef<Array<HTMLButtonElement | null>>([]);
+  // The slot to focus once the rows are drawn again (the chip or ✕ that was pressed is gone by then).
+  const focusSlot = useRef<number | null>(null);
+  useEffect(() => {
+    const at = focusSlot.current;
+    if (at === null) return;
+    focusSlot.current = null;
+    slots.current[at]?.focus();
+  });
   useEffect(() => {
     setSlot(null);
     setHeld(null);
@@ -57,7 +67,7 @@ export default function MatchAnswer(p: SetProps) {
     setSlot(null);
     setHeld(null);
     const empty = next.findIndex((v, k) => v === null && k !== at);
-    if (empty >= 0) slots.current[empty]?.focus();
+    focusSlot.current = empty >= 0 ? empty : at;
   };
   const placed = new Set(p.value.filter((v): v is number => v !== null));
   return (
@@ -91,6 +101,7 @@ export default function MatchAnswer(p: SetProps) {
                     onClick={() => {
                       p.onChange?.(p.value.map((x, k) => (k === i ? null : x)));
                       setSaid(`${p.options[v]} חזר לרשימה`);
+                      focusSlot.current = i;
                     }}
                   >
                     ✕

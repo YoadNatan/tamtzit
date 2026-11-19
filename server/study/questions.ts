@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 import type { NumberedBlock } from "../../shared/study/blocks.js";
-import type { FigureGeo } from "../../shared/study/figureGeo.js";
-import { normLabel } from "../../shared/study/figureGeo.js";
+import type { Box, FigureGeo } from "../../shared/study/figureGeo.js";
+import { isLabelText, normLabel, relTo, roundBox } from "../../shared/study/figureGeo.js";
 import { type Form, isNewStyle, type Layout } from "../../shared/study/forms.js";
 import { type DraftOnLine, STYLES, type Style } from "../../shared/study/practice2.js";
 import { buildLabelItem, labelIndex, modeFor, pageCrop } from "./labels.js";
@@ -229,6 +229,8 @@ export type Ctx = {
   slideText?: ReadonlyMap<number, string>;
   /** The lecture is a PDF (each picture is its whole page). */
   pdf?: boolean;
+  /** A PPTX picture's visible frame (the lecturer's crop), 0..1 of the stored, uncropped picture, by figure id. */
+  crops?: ReadonlyMap<string, Box>;
   /** How many label items this batch made before this one (name and tap alternate). */
   labelIndex?: number;
   /** A staged case's series id (tests pass a fixed one). */
@@ -989,9 +991,31 @@ export function checkImage(q: Question, ctx: Ctx): Checked {
     const page = normalize(ctx.slideText?.get(n) ?? "");
     if (key.length >= 3 && page.includes(key)) return { ok: false, reasons: ["the answer is printed on the page"] };
   }
-  const layout: Layout = { kind: "image", fig, ...(ctx.pdf && lab ? pageCrop(lab.geo) : {}) };
+  // The picture as the slide shows it: a PDF page cut to its diagram with its labels masked; a PPTX
+  // picture cut to the lecturer's crop (a cropped-away legend or source line can give the answer).
+  const crop = ctx.pdf && lab ? pageCrop(lab.geo) : pptxCrop(fig, lab?.geo, ctx.crops);
+  const layout: Layout = { kind: "image", fig, ...crop };
   return { ...r, item: { ...r.item, layout } };
 }
+
+/** A PPTX picture's crop as an image layout's: the label geometry's clip
+ *  relative to the stored picture, else the crop the upload kept; none when
+ *  the picture is shown whole. */
+export function pptxCrop(fig: string, geo: FigureGeo | undefined, crops: ReadonlyMap<string, Box> | undefined): { crop?: Box } {
+  const c = geo?.clip ? roundBox(relTo(geo.clip, geo.img)) : crops?.get(fig);
+  if (!c || !(c.w > 0) || !(c.h > 0)) return {};
+  if (c.x <= 0.001 && c.y <= 0.001 && c.w >= 0.999 && c.h >= 0.999) return {};
+  return { crop: c };
+}
+
+/** The script an option is written in: Hebrew, Latin, or both (a Hebrew word with an English term). */
+export function scriptOf(t: string): "he" | "latin" | "mixed" | "none" {
+  const he = /[א-ת]/.test(t);
+  const la = /[A-Za-z]/.test(t);
+  return he && la ? "mixed" : he ? "he" : la ? "latin" : "none";
+}
+/** A Hebrew option with an English term matches either; Hebrew and Latin alone do not match each other. */
+const sameScript = (a: ReturnType<typeof scriptOf>, b: ReturnType<typeof scriptOf>) => a === b || a === "mixed" || b === "mixed" || a === "none" || b === "none";
 
 /** סימון על תמונה: the picture must have label geometry, the key must be
  *  exactly one of its labels, every distractor a label of the picture or a
@@ -1004,6 +1028,11 @@ export function checkLabel(q: Question, ctx: Ctx): Checked {
   const keyOpt = q.options.find((o) => o.correct);
   const target = keyOpt ? labelIndex(lab.geo, tidy(keyOpt.text)) : -1;
   if (target < 0) return { ok: false, reasons: [target === -2 ? "the key matches two labels" : "the key is not a label of the picture"] };
+  // The key must name a structure: not a panel letter, "Fig. 2" or a source line (older geometry may hold them).
+  if (!isLabelText(lab.geo.labels[target].t)) return { ok: false, reasons: ["the key is not a structure's name"] };
+  // One script for every option: a single English option among Hebrew ones (or the reverse) gives the answer away.
+  const keyScript = scriptOf(lab.geo.labels[target].t);
+  if (q.options.some((o) => !o.correct && !sameScript(scriptOf(tidy(o.text)), keyScript))) return { ok: false, reasons: ["the options are written in two scripts"] };
   const text = ctx.lectureText ?? "";
   const prefer: number[] = [];
   for (const o of q.options) {
@@ -1020,15 +1049,16 @@ export function checkLabel(q: Question, ctx: Ctx): Checked {
     (k) => normLabel(k.question).includes(keyName) && /^באיזה מספר מסומן/.test(k.question) || (/^מה מסומן במספר/.test(k.question) && k.options.some((x) => normLabel(x) === keyName) && duplicateSet(r.item.options, [k], DUP_OPTIONS)),
   );
   if (dup) return { ok: false, reasons: [`duplicate of ${dup.id}`] };
-  const mode = modeFor(ctx.labelIndex ?? 0, lab.geo.labels.length);
-  const built = buildLabelItem({
-    fig,
-    geo: lab.geo,
-    target,
-    mode,
-    options: r.item.options.map((t, i) => ({ text: t, correct: i === r.item.answer, why: r.item.explanations[i] })),
-    prefer,
-  });
+  const options = r.item.options.map((t, i) => ({ text: t, correct: i === r.item.answer, why: r.item.explanations[i] }));
+  const wanted = modeFor(ctx.labelIndex ?? 0, lab.geo.labels.length);
+  // A tap item whose pins would crowd each other on a phone is asked by name instead; neither: rejected.
+  let mode = wanted;
+  let built = buildLabelItem({ fig, geo: lab.geo, target, mode, options, prefer });
+  if (!built && mode === "tap") {
+    mode = "name";
+    built = buildLabelItem({ fig, geo: lab.geo, target, mode, options, prefer });
+  }
+  if (!built) return { ok: false, reasons: ["the labels are too close together for pins"] };
   return {
     ...r,
     item: {

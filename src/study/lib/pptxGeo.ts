@@ -277,3 +277,27 @@ export function picturesGeo(slideXml: string, sldSz: { cx: number; cy: number },
     return rels.map(() => null); // geometry is optional: the summary never depends on it
   }
 }
+
+/** Each picture's crop (its srcRect: the part of the stored picture the
+ *  slide shows), 0..1 of the uncropped picture, for the pictures of a slide
+ *  in document order; null when it is shown whole (or padded, or unknown).
+ *  An image question shows only that part: a lecturer often crops away a
+ *  textbook figure's legend or labels. */
+export function picturesCrop(slideXml: string, sldSz: { cx: number; cy: number }, rels: readonly string[]): Array<Box | null> {
+  try {
+    const g = slideGeometry(slideXml, sldSz);
+    const taken = new Set<number>();
+    return rels.map((rel) => {
+      const i = g.pics.findIndex((p, k) => p.rel === rel && !taken.has(k));
+      if (i < 0) return null;
+      taken.add(i);
+      const { l, t, r, b } = g.pics[i].crop;
+      if (l < 0 || t < 0 || r < 0 || b < 0 || (l === 0 && t === 0 && r === 0 && b === 0)) return null;
+      const w = 1 - l - r;
+      const h = 1 - t - b;
+      return w > 0.05 && h > 0.05 ? roundBox({ x: l, y: t, w, h }) : null;
+    });
+  } catch {
+    return rels.map(() => null);
+  }
+}

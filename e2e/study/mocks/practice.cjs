@@ -371,7 +371,12 @@ function typedItem(style, geo, k = 0) {
         kind: "mcq", form: "one", figure: "fig:3-1", vignette: "", question: `מה מסומן במספר ${target.n} בשרטוט?`,
         layout: { ...labelBase(geo), mode: "name", pins: pins.map(({ n, x, y }) => ({ n, x, y })), ask: target.n },
         options: names, answer: 1, seq: null,
-        explanations: names.map((nm) => (nm === "Loop of Henle" ? `נכון: זו הלולאה.${tag}` : `${nm} מסומן במספר אחר.${tag}`)),
+        // As server/study/labels.ts writes them: a wrong option that is a pin starts with its number.
+        explanations: names.map((nm) => {
+          if (nm === "Loop of Henle") return `נכון: זו הלולאה.${tag}`;
+          const pin = pins.find((p) => p.label === nm);
+          return `${pin ? `מסומן במספר ${pin.n} בשרטוט. ` : ""}${nm} הוא מקטע אחר של הנפרון.${tag}`;
+        }),
         whens: ["", "", "", ""], takeaway: `Loop of Henle מרכזת את השתן.${tag}`, slides: [s], topic: "Loop of Henle", aspect: "anatomy",
       };
     }

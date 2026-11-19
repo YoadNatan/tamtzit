@@ -153,6 +153,32 @@ after(() => {
   (api as Server).close();
 });
 
+test("an image item is asked twice, with and without its picture: answerable without it, it is rejected (review QT-3)", async () => {
+  const client = new Anthropic({ apiKey: "test-key", baseURL: base, maxRetries: 0 });
+  const items = [
+    { vignette: "", question: "מה מסומן בחץ?", options: ["Aorta", "Vena cava"], answer: 0, image: "https://x.test/a.jpg" },
+    { vignette: "", question: "מה רואים בתמונה?", options: ["Glomerulus", "Tubule"], answer: 1, image: "https://x.test/b.jpg" },
+  ];
+  // q3 and q4 are the twins (no picture): q3 only guesses (ambiguous), q4 chooses the key.
+  reply = JSON.stringify({
+    answers: [
+      { id: "q1", choice: 0, ambiguous: false, seq: [] },
+      { id: "q2", choice: 1, ambiguous: false, seq: [] },
+      { id: "q3", choice: 0, ambiguous: true, seq: [] },
+      { id: "q4", choice: 1, ambiguous: false, seq: [] },
+    ],
+  });
+  stop = "end_turn";
+  const res = await solveQuestions({ client, lecture, items, stopAt: Date.now() + 60_000, ledger: async () => true });
+  assert.deepEqual(res.verdicts.map((v) => [v?.ok, v?.blind ?? false]), [[true, false], [false, true]]);
+  assert.equal(res.rejected, 1);
+  const sent = JSON.parse(lastBody) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> };
+  const ask = sent.messages[0].content[0].text ?? "";
+  assert.ok(ask.includes("Answer these 4 questions") && ask.includes("q3\n(shown with a picture you do not have)"), ask.slice(0, 200));
+  assert.equal(sent.messages[0].content.filter((b) => b.type === "image").length, 2, "two pictures, the twins without");
+  assert.ok(solverEstimate(lecture, items) > solverEstimate(lecture, items.map(({ image: _i, ...it }) => it)), "the pictures are in the estimate");
+});
+
 test("QS-3: one call, settled through the caller's ledger as kind solver; kept, rejected and the cost", async () => {
   const client = new Anthropic({ apiKey: "test-key", baseURL: base, maxRetries: 0 });
   reply = JSON.stringify({ answers: [{ id: "q1", choice: 0, ambiguous: false }, { id: "q2", choice: 1, ambiguous: false }] });
@@ -205,15 +231,20 @@ test("question types: a set question is judged by its order; partly right is wro
   assert.deepEqual(verdictsOf([sets[0]], [], true)[0], { choice: -1, ambiguous: true, ok: false, seq: [] }, "a finished reply without it");
 });
 
-test("question types: the request names a set question's kind, a match's prompts, a picture by its caption; never a key", () => {
+test("question types: the request names a set question's kind, a match's prompts, an image item's attached picture; never a key", () => {
   const text = solverRequest([
     { vignette: "", question: "אילו מהמשפטים נכונים?", options: ["A is B", "C is D", "E is F"], form: "tf" },
     { vignette: "", question: "מה מתאים לכל אחד?", options: ["x1", "x2", "x3"], form: "match", prompts: ["p1", "p2", "p3"] },
-    { vignette: "", question: "מה מראה התמונה?", options: ["n1", "n2"], caption: "חתך של נפרון" },
+    { vignette: "", question: "מה מראה התמונה?", options: ["n1", "n2"], image: "https://x.test/p.jpg" },
+    { vignette: "", question: "מה מראה התמונה?", options: ["n1", "n2"], withoutPicture: true },
   ]);
   assert.ok(text.includes("q1 (TRUE/FALSE)") && text.includes("1) A is B"));
   assert.ok(text.includes("q2 (MATCH)") && text.includes("Prompts:") && text.includes("1) p1") && text.includes("א. x1"));
-  assert.ok(text.includes("(בשאלה מוצגת תמונה: חתך של נפרון)"));
+  assert.ok(text.includes("q3\n(with a picture, attached below as q3)") && text.includes("q4\n(shown with a picture you do not have)"));
+  assert.ok(!text.includes("https://"), "the URL is an image block, never text");
+  const pic = solverCall({ lecture, items: [{ vignette: "", question: "מה מראה התמונה?", options: ["n1", "n2"], image: "https://x.test/p.jpg" }] });
+  const content = pic.messages[0].content as Array<{ type: string; text?: string; source?: { url: string } }>;
+  assert.deepEqual(content.slice(1).map((b) => b.type + ":" + (b.text ?? b.source?.url)), ["text:q1:", "image:https://x.test/p.jpg"]);
   // solverCall passes only the public text (a set's key never travels).
   const call = solverCall({ lecture, items: [{ vignette: "", question: "q?", options: ["a", "b", "c"], form: "order", answer: null, seq: [2, 0, 1] } as never] });
   assert.ok(!JSON.stringify(call.messages).includes("seq") && !/\[2,0,1\]/.test(JSON.stringify(call.messages)));

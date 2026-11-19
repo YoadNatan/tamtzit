@@ -19,7 +19,9 @@ export type FigureGeo = {
   img: Box;
   /** PPTX srcRect: the visible frame of the picture (the rest is cropped away). */
   clip?: Box;
-  /** The labels, each with its box. Never sent to a member before an answer. */
+  /** The labels, each with its box. No screen shows them before an answer;
+   *  the lecture's row (slides) does carry them to members' phones, an
+   *  accepted risk (docs/study/question-types.md). */
   labels: Array<{ t: string; b: Box }>;
   /** Connectors drawn on the slide (PPTX), x1,y1,x2,y2 in the stage. */
   lines: Array<[number, number, number, number]>;
@@ -67,13 +69,21 @@ export const normLabel = (s: string) =>
     .replace(/^[\s\-–—•·.,:;()[\]0-9]+|[\s\-–—•·.,:;()[\]]+$/g, "")
     .trim();
 
+/** Text near a picture that is not a structure's name: a figure number, a
+ *  source or copyright line, a publisher or atlas, a remark to the class. */
+const NOT_A_LABEL = /^(fig\.?|figure|source|from|adapted|courtesy|credit|©|\(c\)|copyright|netter|gray'?s|elsevier|wikipedia|מקור|איור|תמונה|שימו לב)(\b|\s|$|[\s.:])/i;
+
 /** The label candidate rule shared by PPTX and PDF: 1-2 lines, at most 40
- *  characters and 5 words, not only digits or punctuation. */
+ *  characters and 5 words, at least two letters (no panel letter "A" or
+ *  "B)"), no Roman numeral alone, and not a figure number, source or
+ *  remark (NOT_A_LABEL). */
 export function isLabelText(t: string, lines = 1): boolean {
   const s = t.replace(/\s+/g, " ").trim();
   if (!s || lines > 2 || s.length > 40) return false;
   if (s.split(" ").length > 5) return false;
-  if (!/[A-Za-zא-ת]/.test(s)) return false;
+  if ((s.match(/[A-Za-zא-ת]/g) ?? []).length < 2) return false;
+  if (/^\(?[ivxlcdm]{1,6}[.)]?$/i.test(s)) return false;
+  if (NOT_A_LABEL.test(s)) return false;
   return true;
 }
 

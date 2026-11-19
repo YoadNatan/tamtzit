@@ -35,8 +35,13 @@ import {
   knownQuestions,
   checkCall,
   maxTokensFor,
+  type Picture,
+  pictureBlocks,
+  PICTURES_MAX,
+  picturesTokens,
   questionsSystem,
   readPart,
+  signPictures,
   solverFree,
   solverItemOf,
   typesCtx,
@@ -597,7 +602,8 @@ export const rewordAction: Op = async (req, body, started) => {
       lectureId,
       kind: "reword",
       ref: draftId,
-      estimateUsd: estimateUsd(MODEL, questionsSystem(lecture, null).reduce((n, b) => n + b.text.length, 0) + user.length, maxTokensFor(1)),
+      // An image draft is written again looking at up to PICTURES_MAX pictures of the part.
+      estimateUsd: estimateUsd(MODEL, questionsSystem(lecture, null).reduce((n, b) => n + b.text.length, 0) + user.length, maxTokensFor(1), draft.style === "image" ? PICTURES_MAX * imageTokens() : 0),
     });
   } catch (e) {
     await releaseDraft(sb, draftId);
@@ -718,6 +724,11 @@ async function rewordDraft(o: {
   const figures = new Set(o.ctx.part.figures.map((f) => f.id));
   const effort = o.ctx.mode.difficulty === "easy" ? "medium" : "high";
   const pointIds = o.ctx.points.map((p) => p.id);
+  // An image item is written again, and checked, looking at the part's pictures (its own first).
+  const own = o.draft.layout && (o.draft.layout as { kind?: string }).kind === "image" ? String((o.draft.layout as { fig?: string }).fig ?? "") : "";
+  const pictures =
+    o.draft.style === "image" ? await signPictures(o.sb, o.lecture, [...new Set([own, ...o.ctx.part.figures.map((f) => f.id)].filter(Boolean))].slice(0, PICTURES_MAX)) : new Map<string, Picture>();
+  const seen = [...pictures.values()];
   const ledgerFor = (rid: number) => async (s: { costUsd: number } & Parameters<ReturnType<typeof settleFor>>[0]) => {
     out.costUsd += s.costUsd;
     return settleFor(o.sb, rid, () => (out.unsettled += 1))(s);
@@ -731,7 +742,7 @@ async function rewordDraft(o: {
       kind: "reword",
       ref: o.draft.id,
       system,
-      messages: [{ role: "user", content: [{ type: "text", text: user }] }],
+      messages: [{ role: "user", content: [{ type: "text", text: user }, ...pictureBlocks(seen)] }],
       effort,
       maxTokens: maxTokensFor(1),
       stopAt: o.stopAt,
@@ -785,7 +796,6 @@ async function rewordDraft(o: {
     return data;
   };
 
-  const captions = new Map(o.ctx.part.figures.map((f) => [f.id, f.caption]));
   const solveOne = async (id: string, item: SaveItem): Promise<{ v: Verdict | null; state: string }> => {
     // A label item is keyed by the picture's geometry: saved "ok", never solved.
     if (solverFree(item)) {
@@ -794,7 +804,7 @@ async function rewordDraft(o: {
     }
     let v: Verdict | null = null;
     if (o.stopAt - Date.now() >= SOLVER_MIN_MS) {
-      const items = [solverItemOf(item, captions)];
+      const items = [solverItemOf(item, pictures)];
       try {
         const rid = await reserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "solver", ref: id, estimateUsd: solverEstimate(o.lecture, items) });
         const res = await solveQuestions({ client: o.client, lecture: o.lecture, items, ref: id, stopAt: o.stopAt, ledger: ledgerFor(rid) });
@@ -839,7 +849,7 @@ async function rewordDraft(o: {
       };
       const user = rewordUser(o.ctx, asDraft, { ...o.key, answer: first.item.answer, takeaway: first.item.takeaway }, "", check.v ?? { choice: -1, ambiguous: true, ok: false });
       try {
-        const rid = await reserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "reword", ref: id, estimateUsd: estimateUsd(MODEL, system.reduce((n, b) => n + b.text.length, 0) + user.length, maxTokensFor(1)) });
+        const rid = await reserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "reword", ref: id, estimateUsd: estimateUsd(MODEL, system.reduce((n, b) => n + b.text.length, 0) + user.length, maxTokensFor(1), picturesTokens(seen)) });
         again = await writeOne(user, rid);
       } catch (e) {
         console.error(`reword rewrite ${id}: ${errorText(e)}`);

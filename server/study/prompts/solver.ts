@@ -15,24 +15,30 @@ Some questions have several parts, and their answer is "seq" (set "choice" to -1
 - TRUE/FALSE: for each statement in order, 1 when the slides say it is true, 0 when false.
 - MATCH: for each prompt in order, the 0-based index of the option that matches it (each option at most once).
 - ORDER: the 0-based indexes of the steps in the order they happen, first step first.
-For a question with one answer, "seq" is an empty array.`;
+For a question with one answer, "seq" is an empty array.
+
+Some questions come with a picture, attached after the questions under the question's label: answer them from the picture and the slides. A question marked as shown with a picture you do not have: answer it only if the slides alone decide it; if the picture is needed, set "ambiguous" to true.`;
 
 const LETTERS = ["א", "ב", "ג", "ד", "ה", "ו"];
 
 /** One question as the solver sees it: its public text in the stored order.
- *  Question types: a set question's form (and a match's prompts), and the
- *  caption of an image item's picture (the solver reads text only). */
-export type SolverText = { vignette: string; question: string; options: readonly string[]; form?: string; prompts?: readonly string[]; caption?: string };
+ *  Question types: a set question's form (and a match's prompts); an image
+ *  item's picture (`image`, a signed URL, attached after the questions,
+ *  never its caption), or `withoutPicture`: the same image item asked
+ *  without it, to find a question the picture adds nothing to. */
+export type SolverText = { vignette: string; question: string; options: readonly string[]; form?: string; prompts?: readonly string[]; image?: string; withoutPicture?: boolean };
 
 /** The user turn: q1 … qN, each its vignette, lead-in and options as א. … ה.,
  *  and nothing else (no key, no explanation, no takeaway). A set question
- *  says which kind it is; an image item names its picture by its caption. */
+ *  says which kind it is; an image item says its picture is attached (or
+ *  that it is asked without it). */
 export function solverRequest(items: readonly SolverText[]): string {
   const blocks = items.map((it, i) => {
     const head = it.form === "tf" ? "TRUE/FALSE" : it.form === "match" ? "MATCH" : it.form === "order" ? "ORDER" : "";
     return [
       `q${i + 1}${head ? ` (${head})` : ""}`,
-      ...(it.caption ? [`(בשאלה מוצגת תמונה: ${it.caption})`] : []),
+      ...(it.image ? [`(with a picture, attached below as q${i + 1})`] : []),
+      ...(it.withoutPicture ? ["(shown with a picture you do not have)"] : []),
       ...(it.vignette.trim() ? [it.vignette.trim()] : []),
       it.question.trim(),
       ...(it.form === "match" && it.prompts ? ["Prompts:", ...it.prompts.map((p, k) => `${k + 1}) ${p}`), "Options:"] : []),

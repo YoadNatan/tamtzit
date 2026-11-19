@@ -2,9 +2,10 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type NumberedBlock, numberBlocks } from "../../shared/study/blocks.js";
+import { type Box, isBox } from "../../shared/study/figureGeo.js";
 import { isSetForm, weightOf } from "../../shared/study/forms.js";
 import type { Difficulty, Style, WriteLine } from "../../shared/study/practice2.js";
-import { estimateUsd, reserve } from "./budget.js";
+import { estimateUsd, imageTokens, reserve } from "./budget.js";
 import { figureList, type Figure } from "./cards.js";
 import { cleanSchema, type Effort, generateItems, settleFor } from "./claude.js";
 import type { AiBody } from "./ops/types.js";
@@ -297,6 +298,7 @@ export async function partCorrections(sb: SupabaseClient, lectureId: string, cla
 /* ── The request ── */
 
 type TextBlock = Anthropic.Beta.BetaTextBlockParam;
+type ContentBlock = Anthropic.Beta.BetaContentBlockParam;
 
 /** The system: fixed per lecture (and course), so every part of a round reads
  *  one cache entry: QUESTIONS_SYSTEM · [the course's style counts] · the
@@ -323,7 +325,9 @@ export function questionsUser(o: {
   part?: PartView;
   extras?: RequestExtras;
   memberStyle?: { description: string; example: string } | null;
-}): TextBlock[] {
+  /** Image items: the part's pictures, seen by the writer (only when the request asks for one). */
+  pictures?: readonly Picture[];
+}): ContentBlock[] {
   const request = questionsRequest({
     heading: o.claim.heading,
     from: o.claim.slide_from,
@@ -337,10 +341,12 @@ export function questionsUser(o: {
     labelled: o.part?.labelled,
     extras: o.extras,
   });
+  const pictures = o.extras?.styles.includes("image") ? (o.pictures ?? []) : [];
   return [
     ...(o.style?.examples.length ? [{ type: "text" as const, text: styleExamples(o.style.examples) }] : []),
     ...(o.memberStyle ? [{ type: "text" as const, text: styleExampleBlock(o.memberStyle) }] : []),
     { type: "text", text: request },
+    ...pictureBlocks(pictures),
     ...(o.corrections.length ? [{ type: "text" as const, text: correctionsBlock(o.corrections) }] : []),
   ];
 }
@@ -351,10 +357,13 @@ export function questionsUser(o: {
 export const maxTokensFor = (want: number, styles?: readonly string[]): number => 4_000 + Math.ceil(2_500 * Math.max(want, styles ? weightOf(styles) : 0));
 
 /** The blind solver's view of an item: its public text, a set question's
- *  form (and a match's prompts), an image item's caption; the key to judge
- *  by stays on the server. */
-export function solverItemOf(item: SaveItem, captions: ReadonlyMap<string, string>): SolverItem {
+ *  form (and a match's prompts), an image item's picture (its signed URL;
+ *  never the caption, which can name the answer). An image item without a
+ *  URL is marked so: it is not judged. The key to judge by stays on the
+ *  server. */
+export function solverItemOf(item: SaveItem, pictures: ReadonlyMap<string, Picture>): SolverItem {
   const layout = item.layout;
+  const pic = item.style === "image" && item.figure ? pictures.get(item.figure) : undefined;
   return {
     vignette: item.vignette,
     question: item.question,
@@ -362,9 +371,52 @@ export function solverItemOf(item: SaveItem, captions: ReadonlyMap<string, strin
     answer: item.answer,
     ...(isSetForm(item.form) ? { form: item.form, seq: item.seq } : {}),
     ...(layout?.kind === "match" ? { prompts: layout.prompts } : {}),
-    ...(item.style === "image" && item.figure ? { caption: captions.get(item.figure) || "תמונה מהשקף" } : {}),
+    ...(item.style === "image" ? (pic ? { image: pic.url } : { withoutPicture: true }) : {}),
   };
 }
+
+/* ── Image items: the pictures themselves ──
+ * "שאלה על תמונה" is written and checked by looking at the picture: the
+ * writer gets the part's captioned pictures as image blocks after the
+ * request, and the solver gets an image item's picture (and the same item
+ * without it, which must not be answerable). Each is signed for 30 minutes
+ * with the member's token (the bucket is the group's). */
+export type Picture = { id: string; slide: number; url: string; w: number; h: number };
+/** At most this many pictures go with one writer call. */
+export const PICTURES_MAX = 6;
+const PICTURE_SECONDS = 1800;
+
+/** Signs the pictures `ids` names (fig:N-K) of the lecture; a picture that
+ *  cannot be signed is left out. */
+export async function signPictures(sb: SupabaseClient, lecture: Pick<Lecture, "slides">, ids: readonly string[]): Promise<Map<string, Picture>> {
+  const byId = new Map<string, { slide: number; path: string; w: number; h: number }>();
+  for (const s of lecture.slides) for (const f of s.figures ?? []) byId.set(`fig:${s.n}-${f.k}`, { slide: s.n, path: f.path, w: f.w, h: f.h });
+  const want = [...new Set(ids)].map((id) => ({ id, f: byId.get(id) })).filter((x): x is { id: string; f: { slide: number; path: string; w: number; h: number } } => Boolean(x.f?.path));
+  const out = new Map<string, Picture>();
+  if (!want.length) return out;
+  try {
+    const { data } = await sb.storage.from("study").createSignedUrls(want.map((x) => x.f.path), PICTURE_SECONDS);
+    const urls = new Map((data ?? []).filter((d) => d.path && d.signedUrl).map((d) => [d.path as string, d.signedUrl]));
+    for (const x of want) {
+      const url = urls.get(x.f.path);
+      if (url) out.set(x.id, { id: x.id, slide: x.f.slide, url, w: x.f.w, h: x.f.h });
+    }
+  } catch (e) {
+    console.error(`sign pictures: ${errorText(e)}`);
+  }
+  return out;
+}
+
+/** The pictures as content blocks: each picture's id, then the picture. */
+export function pictureBlocks(pictures: readonly Picture[]): ContentBlock[] {
+  return pictures.flatMap((p) => [
+    { type: "text" as const, text: `${p.id} (שקף ${p.slide})` },
+    { type: "image" as const, source: { type: "url" as const, url: p.url } },
+  ]);
+}
+
+/** The pictures' input tokens, for a call's estimate. */
+export const picturesTokens = (pictures: readonly Picture[]): number => pictures.reduce((n, p) => n + imageTokens(p.w, p.h), 0);
 
 /** A label item never goes to the blind solver: the slide's geometry keys it. */
 export const solverFree = (item: Pick<SaveItem, "style">): boolean => item.style === "label";
@@ -377,18 +429,22 @@ export function checkCall(id: string, item: Pick<SaveItem, "form">, v: Verdict |
 }
 
 /** The writer's checks' context for a part: the labelled pictures, the slides' text, whether the lecture is a PDF. */
-export function typesCtx(lecture: Pick<Lecture, "slides" | "source_kind">, part: Pick<PartText, "labelled"> | undefined): Pick<Ctx, "labelled" | "slideText" | "pdf"> {
+export function typesCtx(lecture: Pick<Lecture, "slides" | "source_kind">, part: Pick<PartText, "labelled"> | undefined): Pick<Ctx, "labelled" | "slideText" | "pdf" | "crops"> {
+  const crops = new Map<string, Box>();
+  for (const s of lecture.slides) for (const f of s.figures ?? []) if (f.crop && isBox(f.crop)) crops.set(`fig:${s.n}-${f.k}`, f.crop);
   return {
     labelled: new Map((part?.labelled ?? []).map((f) => [f.id, { geo: f.geo }])),
     slideText: new Map(lecture.slides.map((s) => [s.n, [s.title, ...s.lines].join(" ").toLowerCase()])),
     pdf: lecture.source_kind === "pdf",
+    crops,
   };
 }
 
-/** One call's worst case, which is what it reserves (budget.ts). */
-export function callEstimate(system: TextBlock[], user: TextBlock[], maxTokens: number): number {
-  const chars = [...system, ...user].reduce((n, b) => n + b.text.length, 0);
-  return estimateUsd(MODEL, chars, maxTokens);
+/** One call's worst case, which is what it reserves (budget.ts): its text,
+ *  and the pictures' tokens (image items). */
+export function callEstimate(system: TextBlock[], user: readonly ContentBlock[], maxTokens: number, pictureTokens = 0): number {
+  const chars = [...system, ...user].reduce((n, b) => n + ("text" in b && typeof b.text === "string" ? b.text.length : 0), 0);
+  return estimateUsd(MODEL, chars, maxTokens, pictureTokens);
 }
 
 /** The schema of the questions' format, as sent (cleanSchema of the zod). */
@@ -516,6 +572,8 @@ export async function writeBatch(o: {
   part?: PartText;
   /** A practice 2.0 batch; absent: a release-1 round, into the bank. */
   drafts?: DraftMode;
+  /** Image items: the part's pictures, signed (the writer and the solver see them). */
+  pictures?: ReadonlyMap<string, Picture>;
 }): Promise<BatchResult> {
   const optionCount = o.style?.optionCount ?? 5;
   const system = questionsSystem(o.lecture, o.style);
@@ -524,7 +582,8 @@ export async function writeBatch(o: {
   const blocks: NumberedBlock[] = o.part?.blocks ?? [];
   const part: PartView = { blocks, figures: o.part?.figures ?? [], labelled: o.part?.labelled ?? [] };
   const figures = new Set((o.part?.figures ?? []).map((f) => f.id));
-  const captions = new Map((o.part?.figures ?? []).map((f) => [f.id, f.caption]));
+  const pictures = o.pictures ?? new Map<string, Picture>();
+  const pictureList = [...pictures.values()].slice(0, PICTURES_MAX);
   const types = typesCtx(o.lecture, o.part);
   let labels = 0; // label items made so far (name and tap in turn)
   const d = o.drafts;
@@ -656,7 +715,7 @@ export async function writeBatch(o: {
   const solve = async (fresh: Fresh[]): Promise<Array<Verdict | null>> => {
     if (!fresh.length) return [];
     if (timeLeft() < SOLVER_MIN_MS) return fresh.map(() => null);
-    const items = fresh.map((f) => solverItemOf(f.item, captions));
+    const items = fresh.map((f) => solverItemOf(f.item, pictures));
     const rid = await reserveOr("solver", solverEstimate(o.lecture, items));
     if (rid === null) return fresh.map(() => null);
     try {
@@ -709,6 +768,7 @@ export async function writeBatch(o: {
             takeaway: f.item.takeaway,
             chose: v.choice >= 0 ? v.choice : null,
             ambiguous: v.ambiguous,
+            blind: v.blind,
           })),
           blocks: part.blocks,
           figures: part.figures,
@@ -716,11 +776,14 @@ export async function writeBatch(o: {
         }),
       },
     ];
+    // An image item is written again looking at the pictures, as it was first written.
+    const seen = failed.some(({ f }) => f.item.style === "image") ? pictureList : [];
+    const content: ContentBlock[] = [...user, ...pictureBlocks(seen)];
     const maxTokens = maxTokensFor(
       failed.length,
       failed.map(({ f }) => f.item.style ?? "case"),
     );
-    const rid = await reserveOr("practice", callEstimate(system, user, maxTokens));
+    const rid = await reserveOr("practice", callEstimate(system, content, maxTokens, picturesTokens(seen)));
     if (rid === null) return none;
     for (const { f } of failed) tried.add(f);
     // The originals are not duplicates of their own rewrites.
@@ -734,7 +797,7 @@ export async function writeBatch(o: {
         kind: "practice",
         ref,
         system,
-        messages: [{ role: "user", content: user }],
+        messages: [{ role: "user", content }],
         effort,
         maxTokens,
         stopAt: o.stopAt,
@@ -860,12 +923,13 @@ export async function writeBatch(o: {
         part,
         extras: extras(callStyles),
         memberStyle: d?.memberStyle ?? null,
+        pictures: pictureList,
       });
       const maxTokens = maxTokensFor(want, d ? callStyles : undefined);
       let rid: number;
       if (call === 0 && o.reserved !== undefined) rid = o.reserved;
       else {
-        const r = await reserveOr("practice", callEstimate(system, user, maxTokens));
+        const r = await reserveOr("practice", callEstimate(system, user, maxTokens, callStyles.includes("image") ? picturesTokens(pictureList) : 0));
         if (r === null) break; // a refused second call keeps what the first made
         rid = r;
       }
@@ -1071,6 +1135,7 @@ export async function questionsWriteOp(req: Request, body: AiBody, started: numb
   let part: PartText;
   let drafts: DraftMode | undefined;
   let reserved: number;
+  let pictures = new Map<string, Picture>();
   try {
     let pending: Known[];
     [known, style, part, drafts, pending] = await Promise.all([
@@ -1088,8 +1153,11 @@ export async function questionsWriteOp(req: Request, body: AiBody, started: numb
       await finishBatch(sb, batchId, { status: "ready", rejected: 0, model: null, cost: 0, error: null });
       return textStream(async (write) => write(doneLine({ made: 0, rejected: 0, solverRejected: 0, costUsd: 0, unsettled: 0 })));
     }
+    // Image items: the writer and the solver look at the part's pictures.
+    if (drafts?.styles.includes("image") && part.figures.length) pictures = await signPictures(sb, lecture, part.figures.slice(0, PICTURES_MAX).map((f) => f.id));
     const call = questionsCall({
       lecture,
+      pictures: [...pictures.values()],
       effort: drafts ? effortFor(drafts.difficulty, claim.effort) : claim.effort,
       claim,
       want: claim.wanted,
@@ -1106,7 +1174,7 @@ export async function questionsWriteOp(req: Request, body: AiBody, started: numb
       lectureId,
       kind: "practice",
       ref: batchId,
-      estimateUsd: callEstimate(call.system, call.messages[0].content as TextBlock[], call.maxTokens),
+      estimateUsd: callEstimate(call.system, call.messages[0].content as ContentBlock[], call.maxTokens, drafts?.styles.slice(0, claim.wanted).includes("image") ? picturesTokens([...pictures.values()]) : 0),
     });
   } catch (e) {
     await finishBatch(sb, batchId, { status: "failed", rejected: 0, model: null, cost: 0, error: errorText(e) });
@@ -1129,6 +1197,7 @@ export async function questionsWriteOp(req: Request, body: AiBody, started: numb
       reserved,
       part,
       drafts,
+      pictures,
     });
     write(doneLine(res));
   });
