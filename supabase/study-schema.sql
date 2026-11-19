@@ -12891,6 +12891,16 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 -- is the group's content, and rewriting it would touch every deck's history.
 insert into study_private.schema_sections (section, version) values ('U', 4)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- U 5 (plain copy, docs/study/COPY.md): the cards made before U 4 say it the
+-- new way too. Only the prefix the SQL itself wrote ('המלכודת: ' at the
+-- start of a common-mistake card's extra, source 'trap') is rewritten; the
+-- rest of the card is kept. Idempotent: a card that says 'טעות נפוצה: '
+-- already is not touched again.
+update public.study_cards c
+   set extra = left('טעות נפוצה: ' || substr(c.extra, char_length('המלכודת: ') + 1), 500)
+ where c.source = 'trap' and c.extra like 'המלכודת: %';
+insert into study_private.schema_sections (section, version) values ('U', 5)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION U ════
 
 -- ════ BEGIN SECTION J · the association wall (package J) ════
@@ -15606,23 +15616,45 @@ begin
 end;
 $$;
 
--- A figure's label geometry as stored (src/study/lib/figureGeo.ts's shape):
--- v 1, its source, the stage and picture boxes, 3-40 labels of 1-60
--- characters, at most 40 lines, at most 8 KB.
+-- A figure's label geometry as stored (shared/study/figureGeo.ts's shape,
+-- isFigureGeo, rule for rule; X 2): v 1, its source, the stage's two
+-- positive numbers, the picture's box and the optional clip as boxes, 3-40
+-- labels of 1-60 characters each with a box, 0-40 lines of four numbers,
+-- baked a boolean, at most 8 KB. A box is four numbers: x and y in
+-- -0.5..1.5, w and h in 0..2. The server reads only geometry that passes
+-- the same rule, so a bad box from a member's phone never reaches a writer.
+create or replace function study_private.geo_num_ok(v jsonb, lo numeric, hi numeric)
+returns boolean language sql immutable set search_path = public as $$
+  select case when jsonb_typeof(v) = 'number' then (v #>> '{}')::numeric between lo and hi else false end
+$$;
+create or replace function study_private.geo_box_ok(b jsonb)
+returns boolean language sql immutable set search_path = public as $$
+  select coalesce(jsonb_typeof(b) = 'object'
+    and study_private.geo_num_ok(b -> 'x', -0.5, 1.5) and study_private.geo_num_ok(b -> 'y', -0.5, 1.5)
+    and study_private.geo_num_ok(b -> 'w', 0, 2) and study_private.geo_num_ok(b -> 'h', 0, 2), false)
+$$;
 create or replace function study_private.geo_ok(g jsonb)
 returns boolean language sql immutable set search_path = public as $$
   select coalesce(
     jsonb_typeof(g) = 'object' and g ->> 'v' = '1' and g ->> 'src' in ('pptx', 'pdf')
-    and jsonb_typeof(g -> 'stage') = 'object' and jsonb_typeof(g -> 'img') = 'object'
+    and jsonb_typeof(g -> 'stage') = 'object'
+    and study_private.geo_num_ok(g -> 'stage' -> 'w', 0.000001, 1e9) and study_private.geo_num_ok(g -> 'stage' -> 'h', 0.000001, 1e9)
+    and study_private.geo_box_ok(g -> 'img')
+    and (g -> 'clip' is null or study_private.geo_box_ok(g -> 'clip'))
     and jsonb_typeof(g -> 'labels') = 'array' and jsonb_array_length(g -> 'labels') between 3 and 40
     and not exists (select 1 from jsonb_array_elements(g -> 'labels') x
                      where jsonb_typeof(x) <> 'object' or jsonb_typeof(x -> 't') <> 'string'
-                        or char_length(x ->> 't') not between 1 and 60 or jsonb_typeof(x -> 'b') <> 'object')
-    and (g -> 'lines' is null or (jsonb_typeof(g -> 'lines') = 'array' and jsonb_array_length(g -> 'lines') <= 40))
+                        or char_length(x ->> 't') not between 1 and 60 or btrim(x ->> 't') = ''
+                        or not study_private.geo_box_ok(x -> 'b'))
+    and jsonb_typeof(g -> 'lines') = 'array' and jsonb_array_length(g -> 'lines') <= 40
+    and not exists (select 1 from jsonb_array_elements(g -> 'lines') l
+                     where jsonb_typeof(l) <> 'array' or jsonb_array_length(l) <> 4
+                        or exists (select 1 from jsonb_array_elements(l) v where not study_private.geo_num_ok(v, -0.5, 1.5)))
+    and jsonb_typeof(g -> 'baked') = 'boolean'
     and octet_length(g::text) <= 8000,
     false)
 $$;
-revoke all on function study_private.geo_ok(jsonb) from public;
+revoke all on function study_private.geo_ok(jsonb), study_private.geo_box_ok(jsonb), study_private.geo_num_ok(jsonb, numeric, numeric) from public;
 
 -- "לסמן תוויות בשרטוטים": a member's phone read the lecture's own file again
 -- and sends each picture's label geometry: p_geo = [{ n, k, geo }] (at most
@@ -15677,5 +15709,9 @@ grant execute on function public.study_answer_set(uuid, int[], text, int, int), 
   to authenticated;
 
 insert into study_private.schema_sections (section, version) values ('X', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- X 2: geo_ok checks every number of a figure's geometry (boxes, stage,
+-- lines, baked), as shared/study/figureGeo.ts's isFigureGeo does.
+insert into study_private.schema_sections (section, version) values ('X', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION X ════

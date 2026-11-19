@@ -1761,6 +1761,16 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 -- is the group's content, and rewriting it would touch every deck's history.
 insert into study_private.schema_sections (section, version) values ('U', 4)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- U 5 (plain copy, docs/study/COPY.md): the cards made before U 4 say it the
+-- new way too. Only the prefix the SQL itself wrote ('המלכודת: ' at the
+-- start of a common-mistake card's extra, source 'trap') is rewritten; the
+-- rest of the card is kept. Idempotent: a card that says 'טעות נפוצה: '
+-- already is not touched again.
+update public.study_cards c
+   set extra = left('טעות נפוצה: ' || substr(c.extra, char_length('המלכודת: ') + 1), 500)
+ where c.source = 'trap' and c.extra like 'המלכודת: %';
+insert into study_private.schema_sections (section, version) values ('U', 5)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION U ════
 
 -- ════ BEGIN SECTION J · the association wall (package J) ════

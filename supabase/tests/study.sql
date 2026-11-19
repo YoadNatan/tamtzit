@@ -6068,7 +6068,7 @@ select pg_temp.ux('U5j', 'a member writes no count: ' || not exists (
          select 1 from information_schema.role_table_grants
           where grantee in ('authenticated', 'anon') and table_name like 'study_pulse_%' and table_name <> 'study_pulse_optout'
             and privilege_type in ('INSERT', 'UPDATE', 'DELETE')), 'a member writes no count: true');
-select pg_temp.ux('U-reg', public.study_schema() ->> 'U', '4');   -- U-3 (traps and the museum) raised it to 2; the question types to 3; plain copy to 4
+select pg_temp.ux('U-reg', public.study_schema() ->> 'U', '5');   -- U-3 (traps and the museum) raised it to 2; the question types to 3; plain copy to 4; old cards' prefix to 5
 
 -- ═════════ MU · U-3: traps and the museum (section U at 2; decision 3's meter) ═════════
 -- On the nights above: q6's option 1 (three counted members, 9 days ago) became a trap the night of
@@ -8209,6 +8209,16 @@ select xtest.is_('X1o2. stored on the figure, everything else kept',
   'Loop of Henle · x/s3-1.jpg · 10');
 select xtest.is_('X1o3. two labels are not enough', xtest.err(format('select public.study_lecture_set_geo(%L, %L::jsonb)', :'xl',
   '[{"n":3,"k":1,"geo":{"v":1,"src":"pptx","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"labels":[{"t":"A","b":{}},{"t":"B","b":{}}],"lines":[],"baked":false}}]')), 'bad geometry');
+select xtest.is_('X1o3b. a box whose number is a string (review F4)', xtest.err(format('select public.study_lecture_set_geo(%L, %L::jsonb)', :'xl',
+  '[{"n":3,"k":1,"geo":{"v":1,"src":"pptx","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"labels":[{"t":"Aorta","b":{"x":"0.1","y":0.1,"w":0.1,"h":0.05}},{"t":"Vena","b":{"x":0.5,"y":0.6,"w":0.1,"h":0.05}},{"t":"Atrium","b":{"x":0.8,"y":0.8,"w":0.1,"h":0.05}}],"lines":[],"baked":false}}]')), 'bad geometry');
+select xtest.is_('X1o3c. an empty box, no lines array, a stage of zero (review F4)',
+  xtest.err(format('select public.study_lecture_set_geo(%L, %L::jsonb)', :'xl',
+    '[{"n":3,"k":1,"geo":{"v":1,"src":"pptx","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"labels":[{"t":"Aorta","b":{}},{"t":"Vena","b":{"x":0.5,"y":0.6,"w":0.1,"h":0.05}},{"t":"Atrium","b":{"x":0.8,"y":0.8,"w":0.1,"h":0.05}}],"lines":[],"baked":false}}]')) || ' · '
+  || xtest.err(format('select public.study_lecture_set_geo(%L, %L::jsonb)', :'xl',
+    '[{"n":3,"k":1,"geo":{"v":1,"src":"pptx","stage":{"w":4,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"labels":[{"t":"Aorta","b":{"x":0.1,"y":0.1,"w":0.1,"h":0.05}},{"t":"Vena","b":{"x":0.5,"y":0.6,"w":0.1,"h":0.05}},{"t":"Atrium","b":{"x":0.8,"y":0.8,"w":0.1,"h":0.05}}],"baked":false}}]')) || ' · '
+  || xtest.err(format('select public.study_lecture_set_geo(%L, %L::jsonb)', :'xl',
+    '[{"n":3,"k":1,"geo":{"v":1,"src":"pptx","stage":{"w":0,"h":3},"img":{"x":0,"y":0,"w":1,"h":1},"labels":[{"t":"Aorta","b":{"x":0.1,"y":0.1,"w":0.1,"h":0.05}},{"t":"Vena","b":{"x":0.5,"y":0.6,"w":0.1,"h":0.05}},{"t":"Atrium","b":{"x":0.8,"y":0.8,"w":0.1,"h":0.05}}],"lines":[[0,0,1,"x"]],"baked":false}}]')),
+  'bad geometry · bad geometry · bad geometry');
 select xtest.is_('X1o4. a picture the lecture does not have', xtest.err(format('select public.study_lecture_set_geo(%L, %L::jsonb)', :'xl',
   '[{"n":5,"k":1,"geo":{"v":1,"src":"pptx","stage":{"w":4,"h":3},"img":{},"labels":[{"t":"A","b":{}},{"t":"B","b":{}},{"t":"C","b":{}}],"lines":[],"baked":false}}]')), 'bad geometry');
 set request.jwt.claim.sub = 'e7000000-0000-4000-8000-000000000003';
@@ -8226,9 +8236,9 @@ select xtest.is_('X1p3. the form check by name', xtest.err(format('update public
   'new row for relation "study_questions" violates check constraint "study_questions_form_x"');
 select xtest.is_('X1p4. a step without a series', xtest.err(format('update public.study_questions set step = 1 where id = %L', :'xold')),
   'new row for relation "study_questions" violates check constraint "study_questions_step_x"');
-select xtest.is_('X1-reg. the registry: Q 3, X 1, M and C at 3, and Z, H, U at 4 (plain copy)',
+select xtest.is_('X1-reg. the registry: Q 3, X 2 (the geometry''s numbers), M and C at 3, Z and H at 4 (plain copy), U at 5 (old cards'' prefix)',
   (select string_agg(k || ' ' || (public.study_schema() ->> k), ', ' order by k) from unnest(array['C','H','M','Q','U','X','Z']) k),
-  'C 3, H 4, M 3, Q 3, U 4, X 1, Z 4');
+  'C 3, H 4, M 3, Q 3, U 5, X 2, Z 4');
 
 -- The fixtures go.
 delete from public.study_quizzes where id = 'e7500000-0000-4000-8000-000000000001';
