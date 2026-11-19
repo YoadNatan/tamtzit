@@ -18,6 +18,7 @@ import { flags } from "../lib/flags";
 import { hueOf } from "../lib/hue";
 import { AccountBanners } from "../features/account";
 import { useCardsChip } from "../features/cards";
+import { CourseHeading, useCourseLinks } from "../features/courses";
 import { GuideHome } from "../features/guide";
 import { useAsksLeft, useEditsChip } from "../features/collab";
 import { usePracticeChip } from "../features/practice";
@@ -59,6 +60,10 @@ export default function Library({ ctx }: { ctx: Ctx }) {
   const practiceChip = usePracticeChip(ctx);
   const cardsChip = useCardsChip(ctx);
   const editsChip = useEditsChip(ctx);
+  // The course pages (sources.md): each course heading links to its page. A new course gets its row
+  // from the upload, so the list is read again when the courses on the shelf change.
+  const courseStamp = [...new Set((lectures ?? []).map((l) => l.course.trim().toLowerCase()))].sort().join("|");
+  const courseOf = useCourseLinks(ctx, courseStamp);
 
   useEffect(() => {
     let alive = true;
@@ -248,7 +253,7 @@ export default function Library({ ctx }: { ctx: Ctx }) {
         byCourse.map(([course, list]) => (
           <section key={course} className="a-stack course">
             <div className="a-sec">
-              <h2 dir="auto">{course}</h2>
+              <CourseHeading ctx={ctx} course={course} id={courseOf(course)} />
             </div>
             <ul className="a-stack lecture-list">
               {list.map((l) => {

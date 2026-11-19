@@ -100,7 +100,9 @@ async function scopeQuestions(scope: S.Scope, groupId: string): Promise<PublicQu
       return listLectureQuestions(scope.lecture);
     case "course": {
       const lectures = await listLectures(groupId);
-      return listCourseQuestions(lectures.filter((l) => l.course.trim() === scope.course).map((l) => l.id));
+      // A course's text as section S matches it (lower(btrim())): the course page's "(184)" counts the same lectures.
+      const key = scope.course.trim().toLowerCase();
+      return listCourseQuestions(lectures.filter((l) => l.course.trim().toLowerCase() === key).map((l) => l.id));
     }
     case "topic":
       return listGroupQuestions(groupId);

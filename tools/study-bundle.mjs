@@ -47,6 +47,7 @@ const SLOT = {
   writing: "W", practice: "Q", quiz: "Z", cards: "C", collab: "K", account: "A", progress: "A",
   meeting: "M", anchor: "N", var: "V", today: "T", pulse: "U", wall: "J", boss: "H", bank: "B", plan: "G", extras: "E",
   guide: "D", // the guide (docs/study/guide.md)
+  courses: "S", // courses and past exams (docs/study/sources.md)
 };
 const COMPONENT = {
   Q: ["PracticeHome", "LecturePractice", "PracticeSession", "PracticeQuestion", "PracticeCreate", "PracticeBank", "PracticeRound", "FlagSheet", "FixSheet", "Exams"],
@@ -65,6 +66,7 @@ const COMPONENT = {
   G: ["PlanScreen", "PlanSetup", "LaneDay", "SlipCard"],
   E: ["TrapScreen", "BlankTable", "RoundPicker", "ExtrasCard"],
   D: ["GuideLayer", "GuideSteps", "HowTo", "GuideMe", "TryScreen"],
+  S: ["CourseScreen", "UploadMany", "CourseAsk"],
 };
 const LIB = {
   W: ["generate", "writing", "transcript", "transcribe", "transcribe.worker", "pdf-export"],
@@ -75,8 +77,9 @@ const LIB = {
   A: ["account", "progress", "marathon", "useReadingTracker"],
   M: ["meeting"], N: ["anchor", "anchorTab"], V: ["var"], T: ["today"], U: ["pulse"], J: ["wall", "photo"], H: ["boss"], B: ["bank"], G: ["groupPlan"], E: ["extras"],
   D: ["guide", "guideMark", "guideFacts"],
+  S: ["courses", "batch"],
 };
-const SHARED = { C: ["cloze", "fsrs"], K: ["edits"], T: ["today"], G: ["lane"], E: ["blankTable", "extras"], A: ["estimates", "plan", "agenda"], U: ["pulse"] };
+const SHARED = { C: ["cloze", "fsrs"], K: ["edits"], T: ["today"], G: ["lane"], E: ["blankTable", "extras"], A: ["estimates", "plan", "agenda"], U: ["pulse"], S: ["batch"] };
 const byName = (table) => Object.fromEntries(Object.entries(table).flatMap(([pkg, names]) => names.map((n) => [n, pkg])));
 const COMPONENT_OF = byName(COMPONENT);
 const LIB_OF = byName(LIB);
@@ -139,7 +142,7 @@ for (const [id, m] of Object.entries(entry.modules)) {
   const who = ownerOf(id);
   share[who] = (share[who] ?? 0) + m.renderedLength;
 }
-const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "libraries", "other"];
+const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "S", "libraries", "other"];
 const lines = [...ORDER, ...Object.keys(share).filter((k) => !ORDER.includes(k))]
   .filter((k) => k in share)
   .map((k) => {

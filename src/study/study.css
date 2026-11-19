@@ -240,6 +240,32 @@ main.join {
 .lib-actions .a-btn:not(.wide) {
   flex: none;
 }
+/* A course's heading links to its page (sources.md, VITE_STUDY_COURSES). */
+.lib-course {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-height: var(--hit);
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--me-pop) 60%, transparent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.lib-course-go {
+  color: var(--accent);
+  font-weight: 800;
+}
+.lib-batch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--sp-4);
+  margin: 0;
+}
+.up-many {
+  margin: 0;
+}
 .lecture-list {
   gap: var(--sp-5);
 }

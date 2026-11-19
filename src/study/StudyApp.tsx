@@ -6,6 +6,7 @@ import { allowed, parseRoute, routeUrl, screenKey, type Route } from "./lib/rout
 import { AccountLayer, accountStartup } from "./features/account";
 import { BossScreen } from "./features/boss";
 import { CardsScreen } from "./features/cards";
+import { CourseScreen } from "./features/courses";
 import { AskScreen } from "./features/collab";
 import { TrapScreen } from "./features/extras";
 import { GuideHowTo, TryScreen } from "./features/guide";
@@ -310,6 +311,8 @@ function renderRoute(route: Route, ctx: Ctx, courses: string[]) {
       return <TrapScreen route={route} ctx={ctx} />;
     case "try":
       return <TryScreen route={route} ctx={ctx} />;
+    case "course":
+      return <CourseScreen route={route} ctx={ctx} />;
     case "library":
       return <Library ctx={ctx} />;
     default:
