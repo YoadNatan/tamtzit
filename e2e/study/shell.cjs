@@ -17,7 +17,8 @@
 // And what the F1 reviews found, so it stays fixed: a sheet closed by Back
 // leaves the screen where it is; "לפסקה בסיכום" marks in place, every time,
 // and leaves one entry for the reader; a route that is off never mounts; a
-// sheet closes by ✕, the backdrop, Escape and Back and keeps focus; the back
+// sheet closes by ✕, the backdrop, Escape and Back, keeps focus both ways and
+// covers the tab bar (the cards' export sheet, where the cards are on); the back
 // arrows' words; the members' confirm. The privacy note ("לאן החומר הולך")
 // and every way to it were removed on 19 Nov 2026: nothing shows it.
 //
@@ -417,6 +418,68 @@ const COVERS = (spec, n) =>
     await noaPage.getByRole("button", { name: "לסיים", exact: true }).click();
     await noaPage.close();
 
+    // A sheet over a screen with the tab bar (the cards' "ייצוא ל-Anki", where the cards
+    // are on): it covers the tab bar, its last control scrolled to is not under the tab
+    // bar (390 and 360), and focus goes round in it both ways. Without the cards no
+    // screen with the tab bar opens a sheet, and the slide sheet above has the rest.
+    if (flags.cards) {
+      // One group card for the deck page's export row; it goes again after the check.
+      const card = require("./mocks/cards.cjs").trapCard(db, { lecture_id: L, part_idx: 1, kind: "qa", front: "מה Furosemide עושה?", back: "חוסמת NKCC2.", slides: [3], source: "ai", created_by: noa, opens_at: null });
+      await shoham.evaluate(() => localStorage.setItem("study-cards-home-asked", "1")); // C6's one-time question would open its own sheet
+      await shoham.goto(`${mock.base}/?v=cards`);
+      await shoham.locator(".cards-foot").waitFor({ timeout: 15000 });
+      const tabsShown = await shoham.locator(".ph-tabs .ph-tab").count();
+      await shoham.locator(".cards-foot .a-btn", { hasText: "ייצוא ל-Anki" }).click();
+      const anki = shoham.getByRole("dialog", { name: "ייצוא ל-Anki" });
+      await anki.waitFor({ timeout: 5000 });
+      await shoham.waitForTimeout(400);
+      a11y.push(...(await snap(shoham, out, "shell-6b-sheet-over-tabs")));
+      /** Whether a tap at the centre of an element lands on it. */
+      const hitsItself = (loc) =>
+        loc.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return Boolean(h && (h === el || el.contains(h)));
+        });
+      const cover = [];
+      for (const vp of [{ width: 390, height: 844 }, { width: 360, height: 640 }]) {
+        await shoham.setViewportSize(vp);
+        await shoham.waitForTimeout(150);
+        await anki.evaluate((el) => {
+          for (let n = el; n; n = n.parentElement) n.scrollTop = n.scrollHeight;
+        });
+        await shoham.waitForTimeout(150);
+        // Its last control, marked for the checks below.
+        await anki.evaluate((el) => {
+          document.querySelectorAll("[data-e2e-last]").forEach((x) => x.removeAttribute("data-e2e-last"));
+          const f = [...el.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])')].filter((x) => x.offsetParent !== null);
+          f[f.length - 1].setAttribute("data-e2e-last", "1");
+        });
+        const tabUnder = await shoham.evaluate(() => {
+          const t = document.querySelector(".ph-tabs")?.getBoundingClientRect();
+          if (!t) return null;
+          const h = document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2);
+          return Boolean(h && h.closest(".ph-tabs"));
+        });
+        cover.push({ w: vp.width, lastHits: await hitsItself(shoham.locator("[data-e2e-last]")), tabUnder });
+      }
+      await shoham.setViewportSize({ width: 390, height: 844 });
+      // Focus stays in the sheet: Tab from its last control goes round to ✕, Shift+Tab back.
+      await shoham.locator("[data-e2e-last]").focus();
+      await shoham.keyboard.press("Tab");
+      const afterLastTab = await shoham.evaluate(() => ({ inSheet: Boolean(document.activeElement?.closest('[aria-modal="true"]')), label: document.activeElement?.getAttribute("aria-label") }));
+      await shoham.keyboard.press("Shift+Tab");
+      const backToLast = await shoham.evaluate(() => document.activeElement?.getAttribute("data-e2e-last") === "1");
+      check(
+        "a sheet over the tab bar covers it and keeps focus both ways (390, 360)",
+        tabsShown > 0 && cover.every((c) => c.lastHits && c.tabUnder === false) && afterLastTab.inSheet && afterLastTab.label === "סגירה" && backToLast,
+        JSON.stringify({ tabsShown, cover, afterLastTab, backToLast }),
+      );
+      await shoham.keyboard.press("Escape");
+      await anki.waitFor({ state: "detached", timeout: 5000 });
+      db.cardsMock.cards.splice(db.cardsMock.cards.indexOf(card), 1);
+    }
+
     // "יחד": who reads aloud, and the group's open questions (a tap opens the paragraph; its back arrow says "→ יחד")
     await shoham.goto(`${mock.base}/?v=group`);
     await shoham.getByText("אין הקראה כרגע. פותחים הרצאה ולוחצים ״להקריא לקבוצה״.").waitFor({ timeout: 40000 });
@@ -533,6 +596,17 @@ const COVERS = (spec, n) =>
               .map((el) => ({ t: (el.textContent || el.getAttribute("placeholder") || "").trim().slice(0, 16), r: el.getBoundingClientRect() }))
               .filter(({ r }) => r.width > 0 && (r.left < 0 || r.right > innerWidth))
               .map(({ t, r }) => `${t} ${Math.round(r.left)}-${Math.round(r.right)}`),
+            // Each tab's label inside its tile, with room left to the tile's edges.
+            tabs: [...document.querySelectorAll("main.join .a-seg > .a-btn")]
+              .map((b) => {
+                const r = document.createRange();
+                r.selectNodeContents(b);
+                const t = r.getBoundingClientRect();
+                const box = b.getBoundingClientRect();
+                return { t: b.textContent.trim(), sw: b.scrollWidth, cw: b.clientWidth, room: Math.round(Math.min(t.left - box.left, box.right - t.right)) };
+              })
+              .filter((x) => x.sw > x.cw || x.room < 6)
+              .map((x) => `${x.t} ${x.sw}/${x.cw} room ${x.room}`),
           })),
         );
       }
@@ -540,8 +614,8 @@ const COVERS = (spec, n) =>
     await guest.setViewportSize({ width: 390, height: 844 });
     await guest.getByRole("tab", { name: "יש לי קוד" }).click();
     check(
-      "D3 Join: the code, no privacy link, everything inside the screen (390, 320)",
-      (await guest.locator(".code-input").inputValue()) === "ABC123" && !joinText.includes("מה נשמר ואיפה") && joinFit.every((x) => x.scroll <= 0 && x.out.length === 0),
+      "D3 Join: the code, no privacy link, everything inside the screen and each tab's label inside its tile (390, 320)",
+      (await guest.locator(".code-input").inputValue()) === "ABC123" && !joinText.includes("מה נשמר ואיפה") && joinFit.every((x) => x.scroll <= 0 && x.out.length === 0 && x.tabs.length === 0),
       JSON.stringify({ joinFit, joinText: joinText.slice(0, 200) }),
     );
     a11y.push(...(await snap(guest, out, "shell-10-join")));

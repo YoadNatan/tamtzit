@@ -397,6 +397,17 @@ const SMALL = { width: 360, height: 640 };
       check("the reader's mini-guide leaves the page where it was", Math.abs(y1 - y0) < 2, `${y0} → ${y1}`);
       await page.locator(".guide-chip").click();
       await waitBubble(page, "ההרצאה");
+      // A sheet over the reader (a slide's): the guide hides while it is open (one slot).
+      await page.locator(".src-link").first().click();
+      await page.locator(".slide-sheet").waitFor({ timeout: 8000 });
+      await page.waitForTimeout(400);
+      check("a sheet is open: the guide hides (one slot)", (await page.locator(".g-bubble:not([hidden]), .g-ring:not([hidden])").count()) === 0);
+      await shot(page, "22-sheet-hides-guide");
+      await page.keyboard.press("Escape");
+      await page.locator(".slide-sheet").waitFor({ state: "detached", timeout: 5000 });
+      await page.waitForTimeout(600);
+      const afterSheet = await bubble(page);
+      check("the sheet closed: the guide is back at the same step", afterSheet.startsWith("1 מתוך") && afterSheet.includes("ההרצאה"), afterSheet);
       await page.locator(".head-tools .a-btn", { hasText: "תוכן" }).click(); // the member's own tap: the guide stays
       await page.locator(".g-bubble .g-close").click();
       await noBubble(page);
