@@ -30,7 +30,8 @@
 //           data, and the script asserts none was tried.
 //   s2      production's 27 flags (mock.cjs's "s2"): all of "guide", and the
 //           course pages, past exams and the simulation: the joiner's
-//           "להציץ בעמוד הקורס" ticked by a visit; the "?" of the course page,
+//           "להציץ בעמוד הקורס" ticked by a visit; the course walk on a course
+//           with no past exam (the exam's date, no simulation promised); the "?" of the course page,
 //           the batch upload, the exam upload, one exam's review (an item
 //           opened first by the test), the simulation's setup and the course's
 //           question, each ringed on screen at 360×640 with real data; help's
@@ -328,6 +329,37 @@ const SMALL = { width: 360, height: 640 };
         const tick = page.locator(".a-toast", { hasText: "להציץ בעמוד הקורס" });
         const said = await tick.waitFor({ timeout: 8000 }).then(() => tick.innerText(), () => "");
         check("visiting a course page ticks it: ✓ n מתוך m", new RegExp(`✓ \\d מתוך ${ids.length}: להציץ בעמוד הקורס`).test(said), said);
+        // The course walk on a course with no past exam yet (every course in a new group's first days):
+        // it shows the exam's date on the way, and its last bubble promises no simulation that is not there.
+        await page.goto(`${mock.base}/?v=help`);
+        const hbox = page.locator("#howto input");
+        await hbox.waitFor({ timeout: 15000 });
+        await hbox.fill("תאריך מבחן");
+        await page.waitForTimeout(250);
+        await page.locator(".howto-q", { hasText: "עמוד של קורס" }).click();
+        await page.locator(".howto-a .a-btn", { hasText: "הראו לי" }).click();
+        const total = flags.practice || flags.ask || flags.exams ? 4 : 3;
+        await waitBubble(page, `1 מתוך ${total}`);
+        await tapRing(page);
+        await waitBubble(page, `2 מתוך ${total}`);
+        await tapRing(page);
+        await waitBubble(page, `3 מתוך ${total}`, 15000);
+        const dateSay = await bubble(page);
+        if (total === 4) {
+          await page.locator(".g-bubble .a-btn", { hasText: "הבא" }).click();
+          await waitBubble(page, "4 מתוך 4");
+        }
+        const gEnd = await geometry(page);
+        const lastSay = await bubble(page);
+        const simHere = await page.locator('.course-page .c-actions a[href*="v=mock"]').count();
+        await shot(page, "c2-course-walk-new-course");
+        check(
+          "the course walk on a course with no past exam: the exam's date on the way, and no simulation promised",
+          gEnd.ok && simHere === 0 && /תאריך המבחן/.test(dateSay) && !/כאן הסימולציה/.test(lastSay) && (!flags.exams || /כשיש מבחן קודם מוכן/.test(lastSay)),
+          `${dateSay} | ${lastSay} | ${JSON.stringify(gEnd)}`,
+        );
+        await page.locator(".g-bubble .a-btn", { hasText: "הבנתי" }).click();
+        await noBubble(page);
         check("C2: no write to the group", writes().length === 0, writes().join(" | "));
         await page.goto(`${mock.base}/`);
         await page.locator(".g-steps").waitFor({ timeout: 15000 });
@@ -739,7 +771,7 @@ const SMALL = { width: 360, height: 640 };
           check("the simulation's ?: free, and the clock goes on", /בחינם/.test(all("mock")) && /ממשיך/.test(all("mock")), all("mock"));
           check("the exams' segment ?: the past exams' step", /מבחנים קודמים/.test(all("seg")), all("seg"));
         }
-        if (flags.ask) check("the course question's ?: what counts, and that it stays on this phone", /נשארו היום/.test(all("ask")) && /בטלפון הזה/.test(all("ask")), all("ask"));
+        if (flags.ask) check("the course question's ?: what counts, and that it stays on this phone", /נשארו היום/.test(all("ask")) && /במכשיר הזה/.test(all("ask")), all("ask"));
         // Help: the status line, and "סימולציה" with the course walk to the course page's actions (no STOP on the way).
         await mp.goto(`${mock.base}/?v=help`);
         const box = mp.locator("#howto input");
@@ -759,9 +791,9 @@ const SMALL = { width: 360, height: 640 };
           await status("סימולציה");
           await mp.locator(".howto-q", { hasText: "סימולציה של מבחן" }).click();
           await mp.locator(".howto-a .a-btn", { hasText: "הראו לי" }).click();
-          await waitBubble(mp, "1 מתוך 3");
+          await waitBubble(mp, "1 מתוך 4");
           await tapRing(mp);
-          await waitBubble(mp, "2 מתוך 3");
+          await waitBubble(mp, "2 מתוך 4");
           const g2 = await geometry(mp);
           const onLink = await mp.evaluate(() => {
             const r = document.querySelector(".g-ring:not([hidden])")?.getBoundingClientRect();
@@ -770,7 +802,16 @@ const SMALL = { width: 360, height: 640 };
           });
           check("help ״סימולציה״ → הראו לי: the course link ringed", onLink && g2.ok && (await bubble(mp)).includes("נוגעים בשם הקורס"), `${await bubble(mp)} ${JSON.stringify(g2)}`);
           await tapRing(mp);
-          await waitBubble(mp, "3 מתוך 3", 15000);
+          await waitBubble(mp, "3 מתוך 4", 15000);
+          await settle(mp);
+          const onDate = await mp.evaluate(() => {
+            const r = document.querySelector(".g-ring:not([hidden])")?.getBoundingClientRect();
+            const a = document.querySelector(".course-page .c-exam")?.getBoundingClientRect();
+            return Boolean(r && a && r.left <= a.left + 1 && r.right >= a.right - 1);
+          });
+          check("the course walk shows the exam's date first (S8 promises it)", onDate && (await bubble(mp)).includes("תאריך המבחן ואורכו"), await bubble(mp));
+          await mp.locator(".g-bubble .a-btn", { hasText: "הבא" }).click();
+          await waitBubble(mp, "4 מתוך 4");
           await settle(mp);
           const onActs = await mp.evaluate(() => {
             const r = document.querySelector(".g-ring:not([hidden])")?.getBoundingClientRect();

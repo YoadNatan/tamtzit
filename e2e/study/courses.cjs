@@ -180,7 +180,7 @@ const israelDay = (plus) => {
       // With VITE_STUDY_EXAMS ("s2") the head counts the course's past exams once it has one (none yet: "מבחנים קודמים" says it).
       const head = "2 הרצאות";
       expect(norm(await page.locator(".ph-sub").first().innerText()) === head, `the head: ${head}`);
-      if (flags.exams) expect(norm(await page.locator(".c-sim-none").innerText()).includes("נפתחים אחרי שמעלים מבחן קודם"), "no ready exam: where the simulation comes from");
+      if (flags.exams) expect(norm(await page.locator(".c-sim-none").innerText()).includes("נפתחים אחרי שמבחן קודם מועתק"), "no ready exam: where the simulation comes from (once a past exam is copied)");
       expect(norm(await page.locator(".c-exam").innerText()).includes("עוד אין תאריך"), "no exam date yet");
       const free = page.locator(".c-free");
       expect(norm(await free.innerText()) === "לתרגל מה שכבר יש · 5 שאלות · בחינם", "לתרגל מה שכבר יש · 5 שאלות · בחינם");
@@ -273,7 +273,7 @@ const israelDay = (plus) => {
       expect(norm(await page.locator(".a-sec h2", { hasText: "נבחרו" }).innerText()) === "נבחרו 12 קבצים", "נבחרו 12 קבצים");
       const costText = norm(await page.locator(".u-cost").innerText());
       expect(costText.includes("סיכומים ל-12 הרצאות") && costText.includes("נשארו החודש $1.50"), `the price card: ${costText}`);
-      expect(costText.includes("12 סיכומים יחכו לחודש הבא. ההרצאות עצמן עולות עכשיו, והסיכומים יתחילו מה-1 בחודש, כשהאפליקציה תיפתח בטלפון הזה."), "$1.50 is under what 3 parts reserve: every summary waits for next month (from the 1st, on this phone)");
+      expect(costText.includes("12 סיכומים יחכו לחודש הבא. ההרצאות עצמן עולות עכשיו, והסיכומים יתחילו מה-1 בחודש, כשפותחים את הספרייה בטלפון הזה."), "$1.50 is under what 3 parts reserve: every summary waits for next month (from the 1st, when the library opens on this phone)");
       expect((await page.locator(".u-row", { hasText: "הסיכום יחכה לחודש הבא" }).count()) === 12, "their rows say so");
       expect(!norm(await page.locator(".u-row").first().innerText()).includes("PowerPoint"), "a row says its slides, not its format (PDF only)");
       const queued0 = queues();

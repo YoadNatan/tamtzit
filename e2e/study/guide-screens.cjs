@@ -17,7 +17,13 @@
 // picked (its price and its button), the batch from the library (its course
 // field), the single upload (its link to the batch), the exam upload, one
 // exam's review with an item the test opened, the simulation's setup and
-// the course's question. Then: no "?" while a simulation's clock runs or an
+// the course's question. Then the states a new group meets (the second
+// guidance review): an exam whose upload stopped, an exam of 3 questions
+// opened without its course (no "סימולציה מהמבחן" named), an exam with
+// suggested answers and items without one (their filters' steps, and the
+// line that those items are not practised), an item opened 300 ms before
+// the "?" (the ring stays on its target), the batch once its files are up,
+// and no "?" on ?v=exams&new=1 without a course. Then: no "?" while a simulation's clock runs or an
 // exam is replayed. Any set without VITE_STUDY_GUIDE and VITE_STUDY_COURSES:
 // the course page has no "?" (nothing else to check).
 const fs = require("fs");
@@ -71,6 +77,23 @@ const SIZES = [
       const crow = db.coursesMock.rows.find((r) => !r.deleted_at);
       const cid = crow.id;
       const exam = flags.exams ? db.examsMock.seed({ course: crow.name, title: "מועד א׳ 2025", n: 30, minutes: 60 }) : null;
+      // The states a member meets first (the second review): an upload that stopped, an exam under 5
+      // questions opened without its course, and one with suggested answers and items with none.
+      // Older than the 30-question exam, which stays the simulation's default.
+      const older = new Date(Date.now() - 10 * 86_400_000).toISOString();
+      const stalled = flags.exams ? db.examsMock.seed({ course: crow.name, title: "מועד ב׳ 2025", n: 0, created_at: older }) : null;
+      if (stalled) stalled.status = "uploading";
+      const small = flags.exams ? db.examsMock.seed({ course: crow.name, title: "מועד א׳ 2024", year: 2024, n: 3, minutes: 10, created_at: older }) : null;
+      const open = flags.exams ? db.examsMock.seed({ course: crow.name, title: "מועד א׳ 2023", year: 2023, n: 8, minutes: 20, created_at: older }) : null;
+      if (open) {
+        const items = db.practice.questions.filter((q) => q.exam_id === open.id);
+        for (const q of items.slice(0, 3)) Object.assign(db.practice.keys.get(q.id), { origin: "solved", conf: 3 });
+        for (const q of items.slice(3, 5)) {
+          Object.assign(db.practice.keys.get(q.id), { answer: null, origin: null });
+          q.has_key = false;
+        }
+      }
+      const extra = [];
       await first.ctx.close();
       const deck = path.join(out, "deck.pptx");
       await makePptx(deck);
@@ -112,9 +135,46 @@ const SIZES = [
                 min: 3,
               },
               { key: "mock", url: `/?v=mock&c=${cid}`, must: [/בוחרים מבחן קודם/, /ממשיך/, /בחינם/], min: 4 },
+              // An item opened a moment before the "?": its own smooth scroll must not leave the ring on the wrong element.
+              {
+                key: "exam-review-quick",
+                url: `/?v=exams&e=${exam.id}&c=${cid}`,
+                before: async (page) => {
+                  await page.locator(".r-head").nth(3).click();
+                  await page.waitForTimeout(300);
+                },
+                wait: 1600,
+                must: [/״לתרגל את המבחן״/],
+                min: 3,
+              },
+              { key: "exam-stalled", url: `/?v=exams&e=${stalled.id}&c=${cid}`, must: [/ההעלאה נעצרה/], min: 1 },
+              { key: "exam-small", url: `/?v=exams&e=${small.id}`, must: [/״לתרגל את המבחן״/], never: [/סימולציה מהמבחן/], min: 2 },
+              {
+                key: "exam-open",
+                url: `/?v=exams&e=${open.id}&c=${cid}`,
+                before: async (page) => {
+                  await page.locator(".r-sum").waitFor({ timeout: 10000 });
+                  const t = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+                  if (!t.includes("2 שאלות בלי תשובה לא נכנסות לתרגול")) extra.push(`exam-open: no line for the items without an answer (${t.slice(0, 200)})`);
+                },
+                must: [/״תשובה מוצעת״: האפליקציה פתרה/, /״בלי תשובה״/, /״לבדיקה״/],
+                min: 4,
+              },
             ]
           : []),
-        ...(flags.ask ? [{ key: "course-ask", url: `/?v=ask&c=${cid}`, must: [/נשארו היום/, /14 יום/], min: 2 }] : []),
+        ...(flags.ask ? [{ key: "course-ask", url: `/?v=ask&c=${cid}`, must: [/נשארו היום/, /14 יום/, /בתקציב החודשי/], min: 2 }] : []),
+        // The batch once its files are up: the steps of the picking are gone, the progress card has its own.
+        {
+          key: "many-done",
+          url: `/?v=upload&many=1&c=${cid}`,
+          before: async (page) => {
+            await page.locator('input[type="file"]').setInputFiles(two);
+            await page.getByRole("button", { name: "העלאה (2 קבצים)" }).click();
+            await page.locator(".x-big", { hasText: "הועלו 2 קבצים" }).waitFor({ timeout: 120000 });
+          },
+          must: [/כאן רואים כמה קבצים כבר עלו/],
+          min: 1,
+        },
       ];
 
       for (const scheme of ["light", "dark"]) {
@@ -138,7 +198,7 @@ const SIZES = [
             const said = [];
             for (let i = 0; i < 10; i++) {
               await page.locator(".g-bubble:not([hidden])").waitFor({ timeout: 5000 });
-              await page.waitForTimeout(450);
+              await page.waitForTimeout(i === 0 && s.wait ? s.wait : 450);
               const text = (await page.locator(".g-bubble .g-say").innerText()).trim();
               said.push(text);
               const geo = await page.evaluate(() => {
@@ -150,7 +210,9 @@ const SIZES = [
                 const tabs = document.querySelector(".ph-tabs")?.getBoundingClientRect();
                 const overTabs = Boolean(tabs && b.bottom > tabs.top + 0.5);
                 const overlap = !(b.bottom <= r.top || b.top >= r.bottom || b.right <= r.left || b.left >= r.right);
-                const ringOn = r.bottom > 0 && r.top < innerHeight;
+                // On screen and drawn (a ring clipped away under the top bar is hidden, and fails here).
+                const ringEl = document.querySelector(".g-ring:not([hidden])");
+                const ringOn = r.bottom > 0 && r.top < innerHeight && r.height > 8 && getComputedStyle(ringEl).visibility !== "hidden";
                 const side = document.documentElement.scrollWidth - document.documentElement.clientWidth;
                 return { ok: inside && !overTabs && !overlap && ringOn && side <= 1, inside, overTabs, overlap, ringOn, side };
               });
@@ -176,10 +238,19 @@ const SIZES = [
             if (Math.abs(y1 - y0) > 1) bad.push(`${s.key} ${tag}: scrollY ${y0} → ${y1}`);
             steps[`said ${s.key}`] = said;
           }
-          check(`${tag}: every new "?" finds every step, ringed on screen, the bubble clear of it, the page put back`, bad.length === 0, bad.join(" ; "));
+          check(`${tag}: every new "?" finds every step, ringed on screen, the bubble clear of it, the page put back`, bad.length === 0 && extra.length === 0, [...bad, ...extra.splice(0)].join(" ; "));
           check(`${tag}: no write to the group`, writes().length === 0, writes().join(" | "));
           await ctx.close();
         }
+      }
+
+      // ?v=exams&new=1 without a course is the bare list on screen: no "?" there (the second review's G3).
+      if (flags.exams) {
+        const { page, ctx } = await mock.open(browser, "נועה", { path: "/?v=exams&new=1" });
+        await page.locator("main").first().waitFor({ timeout: 15000 });
+        await page.waitForTimeout(1200);
+        check("?v=exams&new=1 without a course: the list, and no \"?\"", (await page.locator("main .guide-btn").count()) === 0 && (await page.locator("main.exam-new").count()) === 0);
+        await ctx.close();
       }
 
       // Escape and ✕ close a new screen's mini-guide.

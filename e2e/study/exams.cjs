@@ -154,7 +154,8 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       const text = norm(await main.innerText());
       for (const said of ["לאן", "נשמר", "לא יוצא", "פרטיות", "Claude"]) expect(!text.includes(said), `no sentence about where the exam goes (${said})`);
       // The guidance pass's lines: the price and the timing only (decision 1).
-      expect(norm(await page.locator(".x-cost-note").innerText()).includes("המחיר נספר בתקציב החודשי של הקבוצה") && text.includes("10–20 דקות"), "above the button: what it costs and how long it takes");
+      const costNote = norm(await page.locator(".x-cost-note").innerText());
+      expect(costNote.includes("המחיר יופיע על הכפתור אחרי שבוחרים קובץ") && costNote.includes("בתקציב החודשי של הקבוצה") && costNote.includes("לכל מי שבקבוצה בנפרד") && text.includes("10–20 דקות"), `above the button: when the price comes, what it costs, whose limit, how long (${costNote})`);
       expect(text.includes("התשובה מוקפת או מסומנת על הדף.") && text.includes("דף תשובות בקובץ או בתמונות משלו."), "each answer option says what it means");
       await page.locator("#x-pdf").setInputFiles(files.pdf);
       await page.locator(".x-picked", { hasText: "12 דפים" }).waitFor({ timeout: 60000 });
