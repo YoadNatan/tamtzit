@@ -129,7 +129,7 @@ export default function MatchAnswer(p: SetProps) {
         )}
       </div>
       <p className="a-small a-muted" aria-live="polite">
-        {said || (slot === null && held === null ? "לגעת במקום ואז בתשובה, או בתשובה ואז במקום." : held !== null ? "עכשיו לגעת במקום." : "עכשיו לגעת בתשובה.")}
+        {said || (slot === null && held === null ? "נוגעים במקום ואז בתשובה, או בתשובה ואז במקום." : held !== null ? "עכשיו נוגעים במקום." : "עכשיו נוגעים בתשובה.")}
       </p>
     </div>
   );

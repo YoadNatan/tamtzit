@@ -141,10 +141,19 @@ export function backTarget(fallback: Route, label?: string): { label: string; in
   return { label: label ?? BACK_LABEL[key] ?? (key === "lecture" ? "→ להרצאה" : inApp ? "→ חזרה" : "→ לספרייה"), inApp };
 }
 
-export function BackLink({ go, fallback = { v: "library" }, label, disabled }: { go: Go; fallback?: Route; label?: string; disabled?: boolean }) {
+export function BackLink({ go, fallback = { v: "library" }, label, disabled, onLeave }: { go: Go; fallback?: Route; label?: string; disabled?: boolean; /** Said or done as the member leaves (a running simulation: "השעון ממשיך"). */ onLeave?: () => void }) {
   const { label: words, inApp } = backTarget(fallback, label);
   return (
-    <button type="button" className="back" disabled={disabled} onClick={() => (inApp ? history.back() : go(fallback, { replace: true }))}>
+    <button
+      type="button"
+      className="back"
+      disabled={disabled}
+      onClick={() => {
+        onLeave?.();
+        if (inApp) history.back();
+        else go(fallback, { replace: true });
+      }}
+    >
       {words}
     </button>
   );

@@ -387,6 +387,10 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
               )}
             </label>
           ) : null}
+          {/* What each file becomes, before the files are picked and above them after. */}
+          <p className="a-small a-muted u-what">
+            כל קובץ נהיה הרצאה בקורס, בשם של הקובץ ובלי מרצה ותאריך, לפי סדר השמות. את השם אי אפשר לשנות אחר כך, אז כדאי לתת לקבצים שמות ברורים לפני שבוחרים. כל הקבוצה רואה אותן בספרייה.
+          </p>
         </>
       ) : null}
 
@@ -474,7 +478,9 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
           ) : null}
           {cost && money && cost.waiting ? (
             <p className="a-callout warn">
-              {cost.waiting === 1 ? "סיכום אחד יחכה לחודש הבא." : `${cost.waiting} סיכומים יחכו לחודש הבא.`} ההרצאות עצמן עולות עכשיו.
+              {cost.waiting === 1
+                ? "סיכום אחד יחכה לחודש הבא. ההרצאות עצמן עולות עכשיו, והסיכום יתחיל מה-1 בחודש, כשהאפליקציה תיפתח בטלפון הזה."
+                : `${cost.waiting} סיכומים יחכו לחודש הבא. ההרצאות עצמן עולות עכשיו, והסיכומים יתחילו מה-1 בחודש, כשהאפליקציה תיפתח בטלפון הזה.`}
             </p>
           ) : null}
         </section>

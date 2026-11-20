@@ -617,7 +617,7 @@ export const BACK_LABEL: Record<string, string> = {
   wall: "→ לקיר",
   library: "→ לספרייה",
   course: "→ לקורס",
-  exams: "→ למבחן הקודם",
+  exams: "→ למבחן",
   mock: "→ לסימולציה",
   group: "→ יחד",
   me: "→ שלי",

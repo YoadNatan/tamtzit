@@ -205,6 +205,10 @@ test("the grid and the submit line; the result's words", () => {
   assert.equal(X.scoreLines({ right: 5, counted: 5, suggested: 0, not_counted: 0 }).note, "");
   assert.equal(X.wrongLine({ form: "one", choice: 0, choices: null, answer: 2 }), "בחרת א׳, הנכונה ג׳");
   assert.equal(X.wrongLine({ form: "one", choice: null, choices: null, answer: 2 }), "לא ענית. הנכונה ג׳");
+  // A suggested answer (the app solved it; no member confirmed it) is "המוצעת", never "הנכונה".
+  assert.equal(X.wrongLine({ form: "one", choice: 1, choices: null, answer: 0, origin: "solved" }), "בחרת ב׳, המוצעת א׳");
+  assert.equal(X.wrongLine({ form: "one", choice: null, choices: null, answer: 0, origin: "solved" }), "לא ענית. המוצעת א׳");
+  assert.equal(X.wrongLine({ form: "one", choice: 1, choices: null, answer: 0, origin: "member" }), "בחרת ב׳, הנכונה א׳");
   assert.equal(X.usedLine("2026-11-19T10:00:00Z", "2026-11-19T12:41:00Z", 180), "זמן: שעתיים ו-41 דקות מתוך 3 שעות");
   assert.equal(X.usedLine("2026-11-19T10:00:00Z", "2026-11-19T10:12:00Z", 36), "זמן: 12 דקות מתוך 36 דקות");
   assert.equal(X.usedLine("2026-11-19T10:00:00Z", "2026-11-19T10:00:20Z", 30), "זמן: פחות מדקה מתוך 30 דקות");

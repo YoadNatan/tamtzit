@@ -470,3 +470,15 @@
 .pq-sofar[open] .pq-vignette {
   color: var(--muted);
 }
+/* Its chevron: down while folded, up while open. */
+.pq-sofar-chev {
+  width: 8px;
+  height: 8px;
+  margin-inline-start: var(--sp-3);
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+.pq-sofar[open] .pq-sofar-chev {
+  transform: translateY(2px) rotate(-135deg);
+}

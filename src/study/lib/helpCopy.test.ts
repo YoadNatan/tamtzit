@@ -53,6 +53,11 @@ const R7 = [...R6, "ACCOUNT"];
 const R8 = [...R7, "PROGRESS", "CARDS_REVIEW", "TODAY", "GUESS", "PULSE"];
 const R9 = [...R8, "MARATHONS", "GROUP_PLAN", "BOSS", "MUSEUM", "TRAPS", "BLANK_TABLE", "NEEDS_ME", "EVE"];
 const R12 = [...R9, "PDF", "RECORDINGS", "EXAMS"];
+/** Production's 27 flags (sources.md, phases 1 and 2): the course pages and past exams on, so the exams' row is read. */
+const S2 = [
+  "ANCHOR", "ASK", "BLANK_TABLE", "BOSS", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "COURSES", "EVE", "EXAMS", "GROUP_PLAN", "GUESS", "GUIDE", "MARATHONS",
+  "MEETING", "MUSEUM", "NEEDS_ME", "PRACTICE", "PROGRESS", "PULSE", "QTYPES", "QUESTIONS", "QUIZ", "TODAY", "TRAPS", "VAR", "WALL",
+];
 /** The guide on top of a release's set (docs/study/guide.md). */
 const G1 = ["QUESTIONS", "PRACTICE", "CARDS", "GUIDE"];
 const RELEASES: Array<[string, string[]]> = [
@@ -69,6 +74,8 @@ const RELEASES: Array<[string, string[]]> = [
   ["production with the question types", [...R9, "GUIDE", "QTYPES"]],
   ["production with the courses (sources.md, phase 1)", [...R9, "GUIDE", "QTYPES", "COURSES"]],
   ["the courses alone", ["COURSES"]],
+  // Production now (mock.cjs's "s2"): R12's EXAMS alone leaves f.exams off (flags.ts: practice && COURSES && EXAMS).
+  ["production (27 flags, s2)", [...S2]],
 ];
 const flagSet = (names: string[]): Flags => flagsFrom(Object.fromEntries(names.map((n) => [`VITE_STUDY_${n}`, "1"])));
 const W = { serverWrites: false, devicePrint: false };
@@ -322,7 +329,7 @@ test("question types: help says which types there are and where to choose and fi
   const row = helpRows(f, W, ALL_ENDS).find((r) => r.title === "סוגי שאלות");
   assert.equal(
     row?.text,
-    "יש כמה סוגים: אמריקאית, שאלה על תמונה, סימון על תמונה (מה מסומן במספר, או באיזה מספר מסומן מבנה), התאמה, סידור, מקרה קליני בשלבים ונכון / לא נכון. בוחרים סוגים ב״שאלות חדשות״, ובתרגול אפשר לסנן לפי סוג.",
+    "יש כמה סוגים: אמריקאית, שאלה על תמונה, סימון על תמונה, התאמה, סידור, מקרה קליני בשלבים ונכון / לא נכון. איך עונים: בנכון / לא נכון מסמנים כל משפט; בהתאמה נוגעים במקום ואז בתשובה; בסידור נוגעים בשלבים מהראשון לאחרון, ו-↑ ↓ מזיזים; בסימון על תמונה בוחרים מה מסומן במספר, או נוגעים במספר שבשרטוט; במקרה בשלבים כל שלב הוא שאלה, והמקרה ממשיך. ב״סבב חדש״ בוחרים ״סוג שאלה״. סוגים חדשים נכתבים ב״שאלות חדשות״, מהתקציב של הקבוצה.",
   );
   assert.ok(!helpRows(flagSet(R9), W, ALL_ENDS).some((r) => r.title === "סוגי שאלות"), "not without the flag");
 });
@@ -331,8 +338,16 @@ test("courses (sources.md, phase 1): help says what the course page does, with e
   const row = (names: string[]) => helpRows(flagSet(names), W, ALL_ENDS).find((r) => r.title === "קורסים")?.text ?? "";
   assert.equal(row([...R9]), "", "no row without VITE_STUDY_COURSES");
   const all = row([...R9, "COURSES"]);
-  for (const words of ["עמוד הקורס", "״לתרגל מה שכבר יש״", "״לשאול על כל הקורס״", "״נבחרו 12 מתוך 340 פסקאות״", "״העלאה של כמה קבצים״", "מחכים לחודש הבא", "בוחרים שוב את אותם קבצים"])
+  for (const words of ["עמוד הקורס", "״לתרגל מה שכבר יש״", "״לשאול על כל הקורס״", "״נבחרו 12 מתוך 340 פסקאות״", "״העלאה של כמה קבצים״", "מחכים לחודש הבא", "בוחרים שוב את אותם קבצים", "בשם של הקובץ", "ממתין לכתיבה", "לכל הקבוצה"])
     assert.ok(all.includes(words), words);
   const alone = row(["COURSES"]);
   assert.ok(!alone.includes("לתרגל") && !alone.includes("לשאול"), "without practice and ask, neither is promised");
+});
+
+test("past exams (sources.md, phase 2): help's row names where things are, what they cost and who sees a change", () => {
+  const row = (names: string[]) => helpRows(flagSet(names), W, ALL_ENDS).find((r) => r.title === "מבחנים קודמים")?.text ?? "";
+  assert.equal(row(R12), "", "EXAMS without COURSES: no past exams (flags.ts), no row");
+  const text = row(S2);
+  for (const words of ["״מבחנים קודמים״ ←", "״לבדיקה״", "״רק הטעויות״", "בתקציב החודשי", "לכל הקבוצה", "״סימולציה״"]) assert.ok(text.includes(words), words);
+  for (const bad of ["מישהו", "השרת"]) assert.ok(!text.includes(bad), bad);
 });

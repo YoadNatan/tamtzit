@@ -100,6 +100,8 @@ export function verdictOf(chosen: number | number[] | null | undefined, fb: Feed
 export default function PracticeQuestion(p: PracticeQuestionProps) {
   const { q, feedback: fb } = p;
   const [showFlags, setShowFlags] = useState(false);
+  // A staged case's story so far: whether it is folded now (its summary says "(להראות)" while it is).
+  const [sofarOpen, setSofarOpen] = useState(!p.stepFolded);
   // A picture question waits for its picture: nothing can be picked, bet or answered before it shows.
   const [figState, setFigState] = useState<"loading" | "ok" | "error">("loading");
   const head = useRef<HTMLHeadingElement>(null);
@@ -182,8 +184,11 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
   const stem = (
     <>
       {lead > 0 ? (
-        <details className="pq-sofar" open={!p.stepFolded}>
-          <summary className="a-small">המקרה עד כאן</summary>
+        <details className="pq-sofar" open={!p.stepFolded} onToggle={(e) => setSofarOpen(e.currentTarget.open)}>
+          <summary className="a-small">
+            {sofarOpen ? "המקרה עד כאן" : "המקרה עד כאן (להראות)"}
+            <span className="pq-sofar-chev" aria-hidden="true" />
+          </summary>
           <p className="a-para pq-vignette" dir="rtl">
             {richText(q.vignette.slice(0, lead).trim(), "v0")}
           </p>

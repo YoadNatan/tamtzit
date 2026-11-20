@@ -20,6 +20,8 @@ export type SetProps = {
   /** After the answer: the key and the choices, in the shown order. */
   feedback?: Feedback | null;
   prompts?: string[];
+  /** No "לבדוק" on this screen (a simulation checks at the end): the instruction says only how to mark. */
+  noCheck?: boolean;
 };
 
 const TRUE_FALSE = ["לא נכון", "נכון"];
@@ -67,7 +69,11 @@ export default function TfAnswer(p: SetProps) {
     buttons[next].focus();
     mark(i, Number(buttons[next].dataset.v));
   };
+  // Until every row is marked: what to do, and why "לבדוק" waits.
+  const unmarked = !p.disabled && p.value.some((v) => v === null || v === undefined);
   return (
+    <>
+      {unmarked ? <p className="a-small a-muted qt-how">{p.noCheck ? "מסמנים כל משפט: נכון או לא נכון." : "מסמנים כל משפט: נכון או לא נכון. ״לבדוק״ נפתח כשכולם מסומנים."}</p> : null}
     <ol className="qt-tf" aria-label="המשפטים">
       {p.options.map((text, i) => {
         const id = `tf-${p.qid}-${i}`;
@@ -97,5 +103,6 @@ export default function TfAnswer(p: SetProps) {
         );
       })}
     </ol>
+    </>
   );
 }

@@ -513,11 +513,13 @@ export function byTopic(items: readonly MockScoreItem[]): Array<{ topic: string;
   return [...m].map(([topic, r]) => ({ topic, ...r })).sort((a, b) => a.right / a.of - b.right / b.of || b.of - a.of || (a.topic < b.topic ? -1 : 1));
 }
 
-/** A wrong item's line: "בחרת א׳, הנכונה ג׳" · "לא ענית. הנכונה ג׳" · a set item: "לא הכל נכון". */
-export function wrongLine(it: Pick<MockScoreItem, "form" | "choice" | "choices" | "answer">): string {
+/** A wrong item's line: "בחרת א׳, הנכונה ג׳" · "לא ענית. הנכונה ג׳" · a set item: "לא הכל נכון".
+ *  A suggested answer (the app solved it, no member confirmed it yet) is "המוצעת", never "הנכונה". */
+export function wrongLine(it: Pick<MockScoreItem, "form" | "choice" | "choices" | "answer"> & { origin?: MockScoreItem["origin"] }): string {
   if (it.form !== "one") return it.choices ? "לא הכל נכון" : "לא ענית";
-  if (it.choice === null) return `לא ענית. הנכונה ${letter(it.answer)}`;
-  return `בחרת ${letter(it.choice)}, הנכונה ${letter(it.answer)}`;
+  const key = it.origin === "solved" ? "המוצעת" : "הנכונה";
+  if (it.choice === null) return `לא ענית. ${key} ${letter(it.answer)}`;
+  return `בחרת ${letter(it.choice)}, ${key} ${letter(it.answer)}`;
 }
 
 /** "זמן: 12 דקות מתוך 36 דקות", "זמן: שעתיים ו-41 דקות מתוך 3 שעות", "זמן: פחות מדקה מתוך 30 דקות" (words, not h:mm beside "דקות"). */

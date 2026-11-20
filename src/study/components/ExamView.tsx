@@ -52,6 +52,8 @@ import "../styles/exams.css";
  * list under it. "לא לכלול בחישוב הנושאים" at the end. */
 
 const POLL_MS = 4_000;
+/** What reading pages again costs ("לקרוא שוב את עמוד N", a unit's "לנסות שוב"). */
+const REREAD_COST = "קריאה חוזרת נספרת בתקציב החודשי של הקבוצה, עד 3 פעמים ביום לכל מבחן.";
 type Filter = "all" | "look" | "suggested" | "nokey";
 
 const STATE_CHIP: Record<ItemState, { label: string; cls: string }> = {
@@ -226,7 +228,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
               </span>
             </div>
             {l.state === "failed" ? (
-              <button type="button" className="a-btn small" disabled={busy} onClick={() => void retryAll(null)}>
+              <button type="button" className="a-btn small x-retry" disabled={busy} onClick={() => void retryAll(null)}>
                 לנסות שוב
               </button>
             ) : (
@@ -236,6 +238,8 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
         ))}
       </ul>
     ) : null;
+  // "לנסות שוב" reads the pages again: its cost, once under the rows.
+  const retryNote = unitList && failed.length ? <p className="a-small a-muted x-retry-note">{REREAD_COST}</p> : null;
 
   if (!review || reading) {
     return (
@@ -244,6 +248,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
         {sub}
         {progress}
         {unitList}
+        {retryNote}
         {!reading && status.status === "failed" ? (
           <p className="a-error" role="alert">
             {failText(status.error ?? "", "exam") || "לא נמצאו שאלות במבחן הזה."}
@@ -254,7 +259,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
             <div className="a-sec">
               <h2>כשזה נגמר</h2>
             </div>
-            <p className="a-small a-muted">יופיע כאן כמה שאלות נמצאו, ואפשר יהיה לבדוק אותן ולתרגל.</p>
+            <p className="a-small a-muted">לרוב 10–20 דקות. בסוף יופיע כאן כמה שאלות נמצאו, והמבחן יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול.</p>
           </>
         ) : null}
       </main>
@@ -272,7 +277,14 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
       setReview={setReview}
       head={head}
       sub={sub}
-      unitList={unitList}
+      unitList={
+        unitList ? (
+          <>
+            {unitList}
+            {retryNote}
+          </>
+        ) : null
+      }
       reload={load}
       retry={retryAll}
       busy={busy}
@@ -408,7 +420,7 @@ function ExamReviewBody(p: {
       <label className="a-card flat r-hide">
         <span className="a-stack">
           <span>לא לכלול בחישוב הנושאים</span>
-          <span className="a-small a-muted">המבחן נשאר לתרגול. הוא לא ייכנס לחישוב הנושאים של הקורס, ולא ישמש כדוגמה לסגנון של שאלות חדשות.</span>
+          <span className="a-small a-muted">המבחן נשאר לתרגול. לכל הקבוצה: הוא לא ייכנס לחישוב הנושאים של הקורס, ולא ישמש כדוגמה לסגנון של שאלות חדשות.</span>
         </span>
         <input
           type="checkbox"
@@ -547,7 +559,7 @@ function ItemCard(p: {
               ))}
             </ol>
           ) : null}
-          {mode === "pick" ? <p className="a-small r-pickhint">לבחור את התשובה הנכונה:</p> : null}
+          {mode === "pick" ? <p className="a-small r-pickhint">בוחרים את התשובה הנכונה. היא תשתנה לכל הקבוצה:</p> : null}
           <ol className="a-opts r-opts" aria-label="התשובות">
             {q.options.map((o, i) => {
               const key = one && q.answer === i;
@@ -595,7 +607,7 @@ function ItemCard(p: {
           </button>
           {/* A page read again would not change an item someone fixed or answered: "לתקן טקסט" does. */}
           {q.page && st === "unclear" && !q.fixed && !q.answered ? (
-            <button type="button" className="a-btn small" disabled={sending || p.busy} onClick={() => void p.retry([q.page!])}>
+            <button type="button" className="a-btn small r-reread" disabled={sending || p.busy} onClick={() => void p.retry([q.page!])}>
               לקרוא שוב את עמוד {q.page}
             </button>
           ) : null}
@@ -605,6 +617,13 @@ function ItemCard(p: {
           ביטול
         </button>
       ) : null}
+      {/* What a tap here does: the answer changes for the whole group, with the member's name, and can be undone. */}
+      {mode === "view" && st === "suggested" ? (
+        <p className="a-small a-muted r-group">האפליקציה הציעה את התשובה הזו. ״לאשר״ או ״לסמן תשובה אחרת״ משנים אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.</p>
+      ) : mode === "view" && one ? (
+        <p className="a-small a-muted r-group">סימון תשובה משנה אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.</p>
+      ) : null}
+      {mode === "view" && q.page && st === "unclear" && !q.fixed && !q.answered ? <p className="a-small a-muted r-reread-note">{`${REREAD_COST} אם רק מילה שגויה, ״לתקן טקסט״ בחינם.`}</p> : null}
       {mode === "view" && !one && st === "nokey" ? <p className="a-small a-muted">בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד.</p> : null}
       {keyByLine(q) || undo ? (
         <p className="r-who a-small">
@@ -634,7 +653,7 @@ function ItemCard(p: {
 
 /** A change of an item's answer, in the log's words: "נועה: ג׳ במקום א׳" · "נועה: אישור של ב׳" · "נועה: ביטול". */
 function logLine(l: KeyLog): string {
-  const who = l.by || "מישהו מהקבוצה";
+  const who = l.by || "חבר או חברה מהקבוצה";
   if (l.undo_of !== null)
     return `${who}: ביטול (${l.origin_new === "solved" && l.new === null ? "חזרה לתשובה המוצעת" : l.new === null ? "בלי תשובה" : `חזרה ל-${letter(l.new)}`})`;
   // A confirmation: the same key, now a member's (a true/false or match item's has no letter).

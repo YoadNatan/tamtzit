@@ -701,7 +701,7 @@ test("Back's words name where it goes, in the spec's or the approved screens' wo
   assert.equal(BACK_LABEL.me, "→ שלי");
   assert.equal(screenKey({ v: "course", c: ID }), "course");
   assert.equal(BACK_LABEL.course, "→ לקורס", "the course page (sources.md's mockups)");
-  assert.equal(BACK_LABEL.exams, "→ למבחן הקודם", "one past exam (sources.md, phase 2)");
+  assert.equal(BACK_LABEL.exams, "→ למבחן", "one past exam (sources.md, phase 2; shorter in the guidance pass, COPY.md)");
   assert.equal(BACK_LABEL.mock, "→ לסימולציה", "the simulation's setup");
   const s6 = spec.slice(spec.indexOf("## 6. The Hebrew copy deck"), spec.indexOf("## 7. Work packages"));
   const s51 = spec.slice(spec.indexOf("### 5.1 The shell"), spec.indexOf("### 5.2 Routes"));

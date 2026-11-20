@@ -51,6 +51,8 @@ const MatchAnswer = lazy(() => import("./QuestionTypes").then((m) => ({ default:
  * "רק הטעויות" (a practice session of them, w.<attempt>) and "סימולציה חדשה". */
 
 const codeOf = (e: unknown) => (e instanceof Error ? e.message : String(e ?? ""));
+/** "→ יציאה" with time left: the toast. */
+const LEAVE_LINE = "השעון ממשיך. חוזרים מ״סימולציה״ בעמוד הקורס.";
 
 export default function MockRun({ ctx, attemptId }: { ctx: ScreenProps<"practice">["ctx"]; attemptId: string }) {
   const [a, setA] = useState<MockAttempt | null>(null);
@@ -209,7 +211,8 @@ export default function MockRun({ ctx, attemptId }: { ctx: ScreenProps<"practice
   const answered = cells.filter((c) => c.answered).length;
   const empty = total - answered;
   const isFlagged = flagged.includes(pos);
-  const back = <BackLink go={ctx.go} fallback={a.course_id ? { v: "course", c: a.course_id } : { v: "library" }} label="→ יציאה" />;
+  // Leaving with time left: the clock goes on, and the toast says where to come back from.
+  const back = <BackLink go={ctx.go} fallback={a.course_id ? { v: "course", c: a.course_id } : { v: "library" }} label="→ יציאה" onLeave={() => left > 0 && ctx.say(LEAVE_LINE)} />;
   const low = left <= 5 * 60_000;
 
   return (
@@ -308,6 +311,7 @@ export default function MockRun({ ctx, attemptId }: { ctx: ScreenProps<"practice
                   </li>
                 ))}
               </ol>
+              <p className="a-small a-muted m-leave">יוצאים באמצע? השעון ממשיך. חוזרים מ״סימולציה״ בעמוד הקורס.</p>
               <section className="a-callout warn m-submit">
                 <b>{submitLine(empty)}</b>
                 <div className="a-row">
@@ -365,7 +369,7 @@ function MockQuestion(p: {
       {form === "tf" || form === "match" ? (
         <Suspense fallback={<p className="a-small a-muted">רגע…</p>}>
           {form === "tf" ? (
-            <TfAnswer qid={q.id} options={q.options} value={setValue} onChange={p.onSet} />
+            <TfAnswer qid={q.id} options={q.options} value={setValue} onChange={p.onSet} noCheck />
           ) : (
             <MatchAnswer qid={q.id} options={q.options} prompts={prompts} value={setValue} onChange={p.onSet} />
           )}
@@ -427,7 +431,7 @@ function MockResult({ ctx, a, score, qs, title }: { ctx: ScreenProps<"practice">
                     <span className="l">{LETTERS[i]}</span>
                     <span dir="rtl">
                       {richText(o, `o${i}`)}
-                      {i === it.answer ? " · ✓ הנכונה" : i === it.choice ? " · ✗ הבחירה שלך" : ""}
+                      {i === it.answer ? (it.origin === "solved" ? " · התשובה המוצעת" : " · ✓ הנכונה") : i === it.choice ? " · ✗ הבחירה שלך" : ""}
                     </span>
                   </li>
                 ))}
@@ -458,6 +462,7 @@ function MockResult({ ctx, a, score, qs, title }: { ctx: ScreenProps<"practice">
           <span>נכונות</span>
         </div>
         {lines.note ? <span className="a-small">{lines.note}</span> : null}
+        {score.suggested ? <span className="a-small a-muted e-suggested">תשובה מוצעת: האפליקציה פתרה, ועוד לא אישרו אותה בקבוצה.</span> : null}
         <span className="a-small a-muted">{[score.auto ? "הוגשה כשהזמן נגמר" : "", usedLine(a.started_at, a.finished_at, a.minutes)].filter(Boolean).join(" · ")}</span>
       </section>
       {topics.length ? (
@@ -504,7 +509,7 @@ function MockResult({ ctx, a, score, qs, title }: { ctx: ScreenProps<"practice">
           <div className="a-sec">
             <h2>לא נספרו ({notCounted.length})</h2>
           </div>
-          <p className="a-small a-muted">לשאלות האלה אין תשובה בטוחה, אז הן לא בציון.</p>
+          <p className="a-small a-muted">לשאלות האלה אין תשובה בטוחה, אז הן לא בציון. תשובה שמאשרים בעמוד המבחן תיספר בסימולציה הבאה.</p>
           <ul className="a-list e-uncounted">{notCounted.map((it) => row(it, it.choice !== null ? `בחרת ${letter(it.choice)}` : "לא ענית"))}</ul>
         </>
       ) : null}

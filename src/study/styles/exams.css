@@ -124,6 +124,20 @@
 .x-keynote {
   margin: var(--sp-3) 0 0;
 }
+/* An answer option with its one-line hint under it ("התשובה מוקפת או מסומנת על הדף."). */
+.x-keyopt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-block: var(--sp-2);
+}
+.x-keyopt small {
+  font-size: var(--text-small);
+  font-weight: 400;
+}
+.x-cost-note {
+  margin: 0;
+}
 .x-minutes {
   max-width: 8rem;
 }

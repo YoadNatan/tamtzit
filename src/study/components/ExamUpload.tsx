@@ -4,6 +4,7 @@ import { courseOverview, type CourseOverview } from "../lib/courses";
 import { MAX_EXAM_PAGES, MAX_PHOTOS, openExamPdf, photoPage, type ExamPageFile, type ExamPdf } from "../lib/examPages";
 import { examCreate, examReadStart, pageRows, signPages, uploadExamPages, type KeySource } from "../lib/exams";
 import { failText } from "../lib/failText";
+import { writingHelp } from "../features/writing";
 import type { ScreenProps } from "../features/types";
 import { holdScreen, setDrive } from "./ExamParts";
 import { BackLink, Head, Loading, StickyActions } from "./Shell";
@@ -26,9 +27,9 @@ import "../styles/exams.css";
 type Photo = { id: number; file: File; turns: number; url: string };
 type Source = { kind: "pdf"; pdf: ExamPdf } | { kind: "photos"; photos: Photo[] };
 const MOEDS = ["א׳", "ב׳", "ג׳"];
-const KEYS: Array<{ v: KeySource; label: string }> = [
-  { v: "marked", label: "מסומנות במבחן" },
-  { v: "separate", label: "בקובץ נפרד" },
+const KEYS: Array<{ v: KeySource; label: string; hint?: string }> = [
+  { v: "marked", label: "מסומנות במבחן", hint: "התשובה מוקפת או מסומנת על הדף." },
+  { v: "separate", label: "בקובץ נפרד", hint: "דף תשובות בקובץ או בתמונות משלו." },
   { v: "none", label: "אין תשובות" },
 ];
 
@@ -367,7 +368,10 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
         {KEYS.map((k) => (
           <label key={k.v} className="a-choice">
             <input type="radio" name="x-key" checked={keySource === k.v} onChange={() => setKeySource(k.v)} />
-            <span>{k.label}</span>
+            <span className="x-keyopt">
+              <span>{k.label}</span>
+              {k.hint ? <small className="a-muted">{k.hint}</small> : null}
+            </span>
           </label>
         ))}
         {keySource === "separate" ? (
@@ -421,7 +425,7 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
             {err("key")}
           </div>
         ) : keySource === "none" ? (
-          <p className="a-small a-muted x-keynote">האפליקציה תציע תשובות, ויהיה כתוב לידן ״תשובה מוצעת · לא נבדקה״.</p>
+          <p className="a-small a-muted x-keynote">האפליקציה תציע תשובות, ויהיה כתוב לידן ״תשובה מוצעת · לא נבדקה״. לכן זה עולה קצת יותר.</p>
         ) : null}
       </fieldset>
 
@@ -446,6 +450,10 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
           {error}
         </p>
       ) : null}
+      {/* The price and the timing only (decision 1: nothing about where the exam goes). */}
+      <p className="a-small a-muted x-cost-note">
+        {`המחיר נספר בתקציב החודשי של הקבוצה, ואפשר להתחיל עד 3 מבחנים ביום. ההעתקה לוקחת לרוב 10–20 דקות${writingHelp().serverWrites ? ", ואפשר לסגור את הטלפון אחרי שכל הדפים עלו." : "."}`}
+      </p>
       <StickyActions>
         <button type="button" className="a-btn primary wide" disabled={sending || reading} onClick={() => void upload()}>
           {sending ? (

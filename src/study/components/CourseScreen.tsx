@@ -15,7 +15,7 @@ import "../styles/courses.css";
  * (and, with past exams, how many exams) it has; a card says when the exam is
  * and how long ("המבחן ב-12.2 · עוד 23 ימים", "100 שאלות · 3 שעות"), set in
  * the course's sheet with its name and "לאחד קורסים". Then what to do now:
- * "לתרגל מה שכבר יש · בחינם (184)" (s=c.<course>, the questions its lectures
+ * "לתרגל מה שכבר יש · 184 שאלות · בחינם" (s=c.<course>, the questions its lectures
  * already have, $0) and "לשאול על כל הקורס". Under them, its lectures, and
  * "העלאה של כמה קבצים". Past exams (phase 2) are a segment of their own only
  * with VITE_STUDY_EXAMS; "נוצר בקבוצה" waits for its phase. */
@@ -110,7 +110,7 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
   const examRows = course.exams as CourseExam[];
   const ready = flags.exams ? examRows.filter((e) => e.status === "ready" && (e.questions ?? 0) > 0).sort((a, b) => ((a.created_at ?? "") < (b.created_at ?? "") ? 1 : -1)) : [];
   const simulation = ready.some((e) => (e.questions ?? 0) >= 5);
-  // "(184)": what a course session may ask, the exams' items too once they are on (s=c includes them).
+  // "184 שאלות": what a course session may ask, the exams' items too once they are on (s=c includes them).
   const free = course.questions + ready.reduce((n, e) => n + (e.questions ?? 0), 0);
   // The course question reads ready parts: none while no lecture is ready or
   // being written (a lecture being written may have ready parts already).
@@ -125,7 +125,8 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
       </Head>
       <p className="ph-sub">
         <span>{lecturesWord(course.lectures)}</span>
-        {flags.exams ? (
+        {/* No past exam yet: the head says nothing of them ("מבחנים קודמים" below says it). */}
+        {flags.exams && exams > 0 ? (
           <>
             <span aria-hidden="true">·</span>
             <span>{exams === 1 ? "מבחן קודם אחד" : `${exams} מבחנים קודמים`}</span>
@@ -167,16 +168,16 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
         {flags.practice ? (
           free > 0 ? (
             <RouteLink to={{ v: "practice", s: `c.${course.name}` }} go={ctx.go} className={simulation ? "a-link c-free" : "a-btn primary wide c-free"}>
-              {`לתרגל מה שכבר יש · בחינם (${free})`}
+              {`לתרגל מה שכבר יש · ${free === 1 ? "שאלה אחת" : `${free} שאלות`} · בחינם`}
             </RouteLink>
           ) : (
-            <p className="a-small a-muted c-free-none">עוד אין שאלות בהרצאות של הקורס. יוצרים אותן בתרגול של כל הרצאה.</p>
+            <p className="a-small a-muted c-free-none">עוד אין שאלות בהרצאות של הקורס. בתרגול של כל הרצאה, ״שאלות חדשות״ כותב אותן לכל הקבוצה, מהתקציב החודשי.</p>
           )
         ) : null}
         {flags.ask ? (
           noSummary ? (
             <>
-              <button type="button" className="a-btn wide" disabled aria-describedby="c-ask-why">
+              <button type="button" className="a-btn wide c-ask" disabled aria-describedby="c-ask-why">
                 לשאול על כל הקורס
               </button>
               <p id="c-ask-why" className="a-small a-muted c-free-none">
@@ -184,11 +185,13 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
               </p>
             </>
           ) : (
-            <RouteLink to={{ v: "ask", c: course.id }} go={ctx.go} className={`a-btn wide${(flags.practice && free > 0) || simulation ? "" : " primary"}`}>
+            <RouteLink to={{ v: "ask", c: course.id }} go={ctx.go} className={`a-btn wide c-ask${(flags.practice && free > 0) || simulation ? "" : " primary"}`}>
               לשאול על כל הקורס
             </RouteLink>
           )
         ) : null}
+        {/* No ready past exam yet: where the simulation and the replay come from. */}
+        {flags.exams && !simulation ? <p className="a-small a-muted c-sim-none">״סימולציה״ ו״לתרגל מבחן קודם״ נפתחים אחרי שמעלים מבחן קודם, ב״מבחנים קודמים״ למטה.</p> : null}
       </div>
 
       {flags.exams ? (
@@ -225,7 +228,7 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
               })}
             </ul>
           ) : (
-            <p className="a-para a-muted">עוד אין מבחנים קודמים בקורס.</p>
+            <p className="a-para a-muted">עוד אין מבחנים קודמים בקורס. מעלים PDF או צילום של מבחן משנים קודמות, ואז אפשר לתרגל אותו או לעשות סימולציה עם שעון.</p>
           )}
           <RouteLink to={{ v: "exams", isNew: true, c: course.id }} go={ctx.go} className="a-btn">
             העלאת מבחן קודם
@@ -235,7 +238,7 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
         <section className="a-stack" aria-labelledby="c-lectures-h">
           <div className="a-sec">
             <h2 id="c-lectures-h">הרצאות</h2>
-            <RouteLink to={{ v: "upload", many: true, c: course.id }} go={ctx.go} className="a-link">
+            <RouteLink to={{ v: "upload", many: true, c: course.id }} go={ctx.go} className="a-link c-many">
               העלאה של כמה קבצים
             </RouteLink>
           </div>
@@ -312,6 +315,7 @@ function CourseSheet({ ctx, course, onClose, onSaved }: { ctx: ScreenProps<"cour
     <Sheet label="הגדרות הקורס" className="c-sheet" head={<h2>הגדרות הקורס</h2>} onClose={onClose}>
       {(s) => (
         <div className="a-stack">
+          <p className="a-small a-muted">מה שמשנים כאן משתנה לכל הקבוצה.</p>
           <form
             className="a-stack"
             onSubmit={(e) => {
@@ -359,6 +363,7 @@ function CourseSheet({ ctx, course, onClose, onSaved }: { ctx: ScreenProps<"cour
               <span>שם הקורס</span>
               <input className="a-input" dir="auto" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
             </label>
+            <p className="a-small a-muted">השם משתנה בכל ההרצאות של הקורס.</p>
             <button type="submit" className="a-btn" disabled={busy !== "" || !name.trim() || name.trim() === course.name}>
               לשנות שם
             </button>

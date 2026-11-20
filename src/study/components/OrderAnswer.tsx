@@ -125,21 +125,26 @@ function OrderPick(p: SetProps) {
             </li>
           ))}
         </ol>
-      ) : (
-        <p className="a-small a-muted">לגעת בשלבים לפי הסדר, מהראשון לאחרון.</p>
-      )}
-      <h3 className="a-small" id={`pool-${p.qid}`}>
-        השלבים
-      </h3>
-      <div className="a-wrap qt-bank" role="group" aria-labelledby={`pool-${p.qid}`}>
-        {p.options.map((o, k) =>
-          placed.includes(k) ? null : (
-            <button key={k} type="button" className="a-chip qt-chip" data-f={`pool-${k}`} disabled={p.disabled} onClick={() => add(k)}>
-              <bdi>{o}</bdi>
-            </button>
-          ),
-        )}
-      </div>
+      ) : null}
+      {/* The instruction stays while the member orders, not only before the first tap. */}
+      {!p.disabled ? <p className="a-small a-muted qt-how">נוגעים בשלבים לפי הסדר, מהראשון לאחרון. ↑ ↓ מזיזים, ✕ מחזיר.</p> : null}
+      {/* Every step placed: no empty "השלבים" left under the order. */}
+      {placed.length < p.options.length ? (
+        <>
+          <h3 className="a-small" id={`pool-${p.qid}`}>
+            השלבים
+          </h3>
+          <div className="a-wrap qt-bank" role="group" aria-labelledby={`pool-${p.qid}`}>
+            {p.options.map((o, k) =>
+              placed.includes(k) ? null : (
+                <button key={k} type="button" className="a-chip qt-chip" data-f={`pool-${k}`} disabled={p.disabled} onClick={() => add(k)}>
+                  <bdi>{o}</bdi>
+                </button>
+              ),
+            )}
+          </div>
+        </>
+      ) : null}
       <p className="sr-only" aria-live="polite">
         {said}
       </p>

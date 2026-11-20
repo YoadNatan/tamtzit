@@ -97,10 +97,14 @@ these and no other.
 | One round of questions over several lectures | סבב על כמה הרצאות (עד 5 הרצאות, לפחות 4 שאלות מכל הרצאה) |
 | Two courses that are one | לאחד קורסים (never "למזג") |
 | Back to a course's page | → לקורס |
-| A course's link in the library and its page's head | the course's name; under it: 25 הרצאות · 5 מבחנים קודמים |
+| A course's link in the library and its page's head | the course's name; under it: 25 הרצאות · 5 מבחנים קודמים (no past exam yet: 25 הרצאות alone; the segment says it) |
 | The exam's date and what is left | המבחן ב-12.2 · עוד 23 ימים (the day itself: המבחן היום; past: המבחן היה ב-12.2) |
 | The exam's length | 100 שאלות · 3 שעות |
-| Practising a course's questions | לתרגל מה שכבר יש · בחינם (184) |
+| Practising a course's questions | לתרגל מה שכבר יש · 184 שאלות · בחינם (one: שאלה אחת); none yet: עוד אין שאלות בהרצאות של הקורס. בתרגול של כל הרצאה, ״שאלות חדשות״ כותב אותן לכל הקבוצה, מהתקציב החודשי. |
+| No ready past exam yet, under the course's actions | ״סימולציה״ ו״לתרגל מבחן קודם״ נפתחים אחרי שמעלים מבחן קודם, ב״מבחנים קודמים״ למטה. |
+| What each file of a batch becomes (above the files) | כל קובץ נהיה הרצאה בקורס, בשם של הקובץ ובלי מרצה ותאריך, לפי סדר השמות. את השם אי אפשר לשנות אחר כך, אז כדאי לתת לקבצים שמות ברורים לפני שבוחרים. כל הקבוצה רואה אותן בספרייה. |
+| Summaries that wait for next month (the price card) | 12 סיכומים יחכו לחודש הבא. ההרצאות עצמן עולות עכשיו, והסיכומים יתחילו מה-1 בחודש, כשהאפליקציה תיפתח בטלפון הזה. (one: סיכום אחד יחכה…, והסיכום יתחיל…; the list of waiting summaries is kept on the phone that uploaded) |
+| The course's sheet | first: מה שמשנים כאן משתנה לכל הקבוצה.; under "השם": השם משתנה בכל ההרצאות של הקורס. |
 | The batch upload's price card | המחיר מראש · סיכומים ל-8 הרצאות: כ-$7 · נשארו החודש $24 |
 | The batch's progress | קוראים קובץ 4 מתוך 14 · כדאי להשאיר את המסך פתוח |
 | Coming back to a batch that stopped | הועלו 3. נשארו 11 קבצים, then: ההעלאה נעצרה באמצע. בוחרים שוב את אותם קבצים, ומה שכבר עלה מדלגים עליו. נשארו: … (forgetting it: לא להמשיך) |
@@ -129,6 +133,14 @@ The server's part is built (phase 2, part A); the screens use these words.
 | A key a member marked | סומנה ע״י נועה: ג׳ · לבטל |
 | Copying an exam's questions | להעתיק את השאלות; while it runs: מעתיקים עמודים 9–12 מתוך 28…; before any unit reads: עמודים 1–4 בתור…; the key sheet: קוראים את דף התשובות… |
 | The upload's button | להעלות ולהעתיק את השאלות · כ-$1.40 (the usual price; no sentence about where the exam goes, decision 1) |
+| Above the upload's button (the price and the timing only) | המחיר נספר בתקציב החודשי של הקבוצה, ואפשר להתחיל עד 3 מבחנים ביום. ההעתקה לוקחת לרוב 10–20 דקות, ואפשר לסגור את הטלפון אחרי שכל הדפים עלו. (no server writer: …10–20 דקות.) |
+| Where the answers are, each with its hint | מסומנות במבחן: התשובה מוקפת או מסומנת על הדף.; בקובץ נפרד: דף תשובות בקובץ או בתמונות משלו.; אין תשובות: האפליקציה תציע תשובות, ויהיה כתוב לידן ״תשובה מוצעת · לא נבדקה״. לכן זה עולה קצת יותר. |
+| An item's answer, under its actions (the review) | a suggested one: האפליקציה הציעה את התשובה הזו. ״לאשר״ או ״לסמן תשובה אחרת״ משנים אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.; else: סימון תשובה משנה אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל. |
+| Picking another answer | בוחרים את התשובה הנכונה. היא תשתנה לכל הקבוצה: |
+| Reading pages again (its cost) | קריאה חוזרת נספרת בתקציב החודשי של הקבוצה, עד 3 פעמים ביום לכל מבחן. אם רק מילה שגויה, ״לתקן טקסט״ בחינם. (under a unit that failed: the first sentence) |
+| The reading, "כשזה נגמר" | לרוב 10–20 דקות. בסוף יופיע כאן כמה שאלות נמצאו, והמבחן יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול. |
+| The simulation's setup, under the lengths | שעון אחד לכל הסימולציה. הוא מתחיל ב״להתחיל״, ממשיך גם כשיוצאים או נועלים את הטלפון, וכשהזמן נגמר היא מוגשת לבד. התשובות נבדקות רק בסוף. בחינם, והציון רק לך. |
+| Leaving a running simulation | the toast on "→ יציאה": השעון ממשיך. חוזרים מ״סימולציה״ בעמוד הקורס.; in the question map: יוצאים באמצע? השעון ממשיך. חוזרים מ״סימולציה״ בעמוד הקורס. |
 | Pages that were not read | עמודים 13–16 לא נקראו · לנסות שוב; one page: לקרוא שוב את עמוד 7 |
 | What was found | נמצאו 98 שאלות · 91 עם תשובה · 7 לבדיקה; open questions: 2 שאלות פתוחות דולגו. |
 | A number another page already had (not saved) | 3 שאלות לא נשמרו: המספר שלהן כבר הופיע בעמוד אחר. (one: שאלה אחת לא נשמרה: …) |
@@ -140,9 +152,9 @@ The server's part is built (phase 2, part A); the screens use these words.
 | The year of an exam (needed) | צריך לכתוב את השנה של המבחן, למשל 2025. (no greyed year in the field: it reads as filled) |
 | A page beside an item, opened whole | לפתוח את העמוד כולו (the picture's name for a screen reader) |
 | A badly read item | לא נקראה טוב · לתקן טקסט |
-| Leaving an exam out of the course's picture | לא לכלול בחישוב הנושאים; under it: המבחן נשאר לתרגול. הוא לא ייכנס לחישוב הנושאים של הקורס, ולא ישמש כדוגמה לסגנון של שאלות חדשות. |
+| Leaving an exam out of the course's picture | לא לכלול בחישוב הנושאים; under it: המבחן נשאר לתרגול. לכל הקבוצה: הוא לא ייכנס לחישוב הנושאים של הקורס, ולא ישמש כדוגמה לסגנון של שאלות חדשות. |
 | The limit of a day | אפשר להתחיל עד 3 מבחנים ביום. מתחדש בחצות. |
-| Back to one past exam | → למבחן הקודם |
+| Back to one past exam | → למבחן |
 | Back to the simulation's setup | → לסימולציה |
 | Practising one past exam | לתרגל את המבחן (its own order, its options as printed); from the course page: לתרגל מבחן קודם |
 | The simulation's lengths, short first | קצר · 20 שאלות · 36 דקות; חצי · 50 שאלות; מלא (the whole exam) |
@@ -153,16 +165,25 @@ The server's part is built (phase 2, part A); the screens use these words.
 | Every question at a glance | מפת השאלות: ענית · לחזרה · בלי תשובה |
 | Submitting | להגיש; before it: להגיש עכשיו? נשארו 6 שאלות בלי תשובה. |
 | Submitted by the clock | הזמן נגמר, והסימולציה הוגשה. |
-| The result | 71 מתוך 97 נכונות; 3 שאלות עם תשובה מוצעת · 3 לא נספרו; the time in words: זמן: 12 דקות מתוך 36 דקות, זמן: שעתיים ו-41 דקות מתוך 3 שעות, זמן: פחות מדקה מתוך 30 דקות (never "0:01" beside "דקות") |
-| A mistake in the result | בחרת א׳, הנכונה ג׳; a blank: לא ענית. הנכונה ג׳ |
+| The result | 71 מתוך 97 נכונות; 3 שאלות עם תשובה מוצעת · 3 לא נספרו, and under it: תשובה מוצעת: האפליקציה פתרה, ועוד לא אישרו אותה בקבוצה.; over the items not counted: לשאלות האלה אין תשובה בטוחה, אז הן לא בציון. תשובה שמאשרים בעמוד המבחן תיספר בסימולציה הבאה.; the time in words: זמן: 12 דקות מתוך 36 דקות, זמן: שעתיים ו-41 דקות מתוך 3 שעות, זמן: פחות מדקה מתוך 30 דקות (never "0:01" beside "דקות") |
+| A mistake in the result | בחרת א׳, הנכונה ג׳; a blank: לא ענית. הנכונה ג׳; a suggested key: בחרת ב׳, המוצעת א׳ · לא ענית. המוצעת א׳, and on its option: · התשובה המוצעת (never ✓ הנכונה) |
 | Practising a simulation's mistakes | רק הטעויות; the session's title: הטעויות מהסימולציה |
 | A simulation left open | יש סימולציה שעוד לא הוגשה · להמשיך |
 | Confirming a suggested key | לאשר; another: לסמן תשובה אחרת; none yet: לסמן תשובה; done: התשובה ג׳ אושרה. (a true/false or match item: התשובה המוצעת אושרה.) |
 | A true/false or match item without a key | בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד. |
 | An undo the key moved past | התשובה השתנתה מאז, אז אי אפשר לבטל. אפשר לסמן את התשובה הנכונה. |
-| A change of a key in the log | נועה: ג׳ במקום א׳ · נועה: אישור של ב׳ · נועה: אישור התשובה המוצעת · נועה: ביטול (חזרה לתשובה המוצעת) (no gendered verbs) |
+| A change of a key in the log | נועה: ג׳ במקום א׳ · נועה: אישור של ב׳ · נועה: אישור התשובה המוצעת · נועה: ביטול (חזרה לתשובה המוצעת) (no gendered verbs; no name kept: חבר או חברה מהקבוצה) |
 | The reading while the server works | אפשר לסגור את הטלפון. ההעתקה ממשיכה בלעדיו. |
 | The reading when the phone copies (no server writer) | הטלפון מעתיק את הדפים. כדאי להשאיר את המסך פתוח. |
+
+### New words: answering the question types (`question-types.md`)
+
+| Concept | Words |
+|---|---|
+| נכון / לא נכון, until every row is marked | מסמנים כל משפט: נכון או לא נכון. ״לבדוק״ נפתח כשכולם מסומנים. (in a simulation, which checks at the end: the first sentence) |
+| סידור | נוגעים בשלבים לפי הסדר, מהראשון לאחרון. ↑ ↓ מזיזים, ✕ מחזיר. (it stays while ordering; "השלבים" goes once every step is placed) |
+| התאמה | נוגעים במקום ואז בתשובה, או בתשובה ואז במקום.; then: עכשיו נוגעים במקום. / עכשיו נוגעים בתשובה. (never "לגעת…") |
+| A staged case's story so far | המקרה עד כאן; folded: המקרה עד כאן (להראות), with a chevron |
 
 ### Kept, on purpose
 

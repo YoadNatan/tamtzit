@@ -145,7 +145,7 @@ export default function MockSetup({ route, ctx }: ScreenProps<"mock">) {
               <input type="checkbox" checked={unseen} onChange={(e) => setUnseen(e.target.checked)} />
             </label>
           ) : null}
-          <p className="a-small a-muted">שעון אחד לכל הסימולציה. התשובות נבדקות רק בסוף.</p>
+          <p className="a-small a-muted s-foot">שעון אחד לכל הסימולציה. הוא מתחיל ב״להתחיל״, ממשיך גם כשיוצאים או נועלים את הטלפון, וכשהזמן נגמר היא מוגשת לבד. התשובות נבדקות רק בסוף. בחינם, והציון רק לך.</p>
         </>
       ) : (
         <section className="a-stack">
