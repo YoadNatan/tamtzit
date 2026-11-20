@@ -316,6 +316,12 @@ a.x-zoom {
   font-size: var(--text-small);
   overflow-wrap: anywhere;
 }
+/* "מוצעת" / "מסומנת" after the option's words: which one is the answer, in words (not only the outline). */
+.r-opts .r-keytag {
+  margin-inline-start: var(--sp-2);
+  padding: 0 var(--sp-3);
+  vertical-align: 1px;
+}
 .r-opts .a-opt > .l {
   width: 26px;
   height: 26px;

@@ -57,6 +57,9 @@ const visible = (el: Element) => {
   return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden";
 };
 
+/** The bars a target can sit in (never scrolled, never clipped by the top bar). */
+const BARS = ".shell-stack, .ph-head, .ph-top, .ph-tabs, .ph-foot";
+
 /** The top of the free screen: under the live banner and the sticky top bar. */
 function topLimit(): number {
   let top = 0;
@@ -184,6 +187,8 @@ export default function GuideLayer({ route, ctx }: { route: Route; ctx: Ctx }) {
   const pressed = useRef(0);
   const miss = useRef<{ key: string; since: number }>({ key: "", since: 0 });
   const scrolled = useRef("");
+  /** Since when the step's target has been out of sight after its scroll, when the guide last scrolled, and how often again. */
+  const away = useRef({ since: 0, at: 0, tries: 0 });
   /** The mini-guide scrolled the page (it puts it back when it ends). */
   const moved = useRef(false);
   /** "קחו אותי" was pressed: the next screen is the walk's own. */
@@ -432,8 +437,25 @@ export default function GuideLayer({ route, ctx }: { route: Route; ctx: Ctx }) {
       const key = cur.kind === "walk" ? `w${cur.i}|${routeUrl(routeRef.current)}` : cur.kind === "mini" ? `m${cur.i}` : "h";
       if (el && scrolled.current !== key) {
         scrolled.current = key;
+        away.current = { since: 0, at: t, tries: 0 };
         const b = bubble.current;
         if (bringIntoView(el, b && !b.hidden ? b.offsetHeight : 0) && cur.kind === "mini") moved.current = true;
+      } else if (el && !roomLive() && !el.closest(BARS)) {
+        // Something else scrolled the page after the step's one scroll (an
+        // item's own smooth scroll as it opened): a target left under the top
+        // bar or below the screen for 400 ms is brought back, twice at most.
+        const r = el.getBoundingClientRect();
+        const out = r.top < topLimit() - 4 || r.top >= innerHeight - bottomTaken();
+        const a = away.current;
+        if (!out) a.since = 0;
+        else if (!a.since) a.since = t;
+        else if (t - a.since > 400 && t - a.at > 700 && a.tries < 2) {
+          a.since = 0;
+          a.at = t;
+          a.tries += 1;
+          const b = bubble.current;
+          if (bringIntoView(el, b && !b.hidden ? b.offsetHeight : 0) && cur.kind === "mini") moved.current = true;
+        }
       }
       place(el, ring.current, bubble.current);
     };
@@ -631,10 +653,17 @@ function place(el: HTMLElement | null, ring: HTMLDivElement | null, bubble: HTML
     else if (overBottom && overTop) dock = r.top - top > bottomTop - r.bottom ? "top" : "bottom";
   }
   if (ring && r) {
+    // Clipped, never shifted: a target partly above the screen (or under the
+    // top bar) gets a ring around its visible part only, never one drawn over
+    // whatever is below it; wholly under the bar, no ring.
+    // (A target in a bar itself, the "?" or "⋯" in the top bar, is never clipped by it.)
+    const limit = el && !el.closest(BARS) ? topLimit() : 0;
+    const t = Math.max(2, limit, r.top - pad);
     ring.style.left = `${Math.max(2, r.left - pad)}px`;
-    ring.style.top = `${Math.max(2, r.top - pad)}px`;
+    ring.style.top = `${t}px`;
     ring.style.width = `${Math.min(innerWidth - 4, r.width + 2 * pad)}px`;
-    ring.style.height = `${r.bottom - r.top + 2 * pad}px`;
+    ring.style.height = `${Math.max(0, r.bottom + pad - t)}px`;
+    ring.style.visibility = limit && r.bottom <= limit ? "hidden" : "";
   }
   if (!bubble || !shown) return;
   if (dock === "bottom") {

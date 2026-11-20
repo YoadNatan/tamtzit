@@ -14,6 +14,8 @@ import {
   itemState,
   keyByLine,
   lastUndoable,
+  unkeyedLine,
+  wasConfirmed,
   letter,
   LETTERS,
   readingLine,
@@ -193,7 +195,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
     return (
       <main className="exam-review">
         {head}
-        <p className="a-para a-muted">המבחן הזה לא עלה עד הסוף. אפשר להעלות אותו שוב מהקורס.</p>
+        <p className="a-para a-muted x-stalled">המבחן הזה לא עלה עד הסוף. אפשר להעלות אותו שוב מהקורס.</p>
         {courseId ? (
           <RouteLink to={{ v: "exams", isNew: true, c: courseId }} go={ctx.go} className="a-btn">
             העלאת מבחן קודם
@@ -377,6 +379,8 @@ function ExamReviewBody(p: {
             לתרגל את המבחן
           </RouteLink>
         ) : null}
+        {/* A session asks only items with an answer (isActive): say so, rather than "1/6" after "12 נמצאו". */}
+        {counts.found && unkeyedLine(review.items) ? <p className="a-small a-muted r-nokey-note">{unkeyedLine(review.items)}</p> : null}
         {p.courseId && counts.found >= 5 ? (
           <RouteLink to={{ v: "mock", c: p.courseId, e: p.examId }} go={ctx.go} className="a-btn wide">
             סימולציה מהמבחן
@@ -388,7 +392,7 @@ function ExamReviewBody(p: {
       {live.length ? (
         <div className="r-filters" role="radiogroup" aria-label="להראות">
           {chips.map((c) => (
-            <button key={c.f} type="button" className="a-chip" role="radio" aria-checked={filter === c.f} onClick={() => setFilter(c.f)}>
+            <button key={c.f} type="button" className={`a-chip r-f-${c.f}`} role="radio" aria-checked={filter === c.f} onClick={() => setFilter(c.f)}>
               {c.label} · {c.n}
             </button>
           ))}
@@ -407,7 +411,7 @@ function ExamReviewBody(p: {
                   <span className="m" dir="rtl">
                     {firstWords(q.question)}
                   </span>
-                  {keyByLine(q) ? <span className="r-who a-small">{keyByLine(q)}</span> : null}
+                  {keyByLine(q, wasConfirmed(review.key_log, q.id)) ? <span className="r-who a-small">{keyByLine(q, wasConfirmed(review.key_log, q.id))}</span> : null}
                 </div>
                 <RowChip q={q} />
               </button>
@@ -464,6 +468,7 @@ function ItemCard(p: {
   const [draft, setDraft] = useState({ question: q.question, vignette: q.vignette, options: [...q.options] });
   const st = itemState(q);
   const undo = lastUndoable(p.log, q.id);
+  const confirmed = wasConfirmed(p.log, q.id);
   const history = p.log.filter((l) => l.question_id === q.id);
   const one = q.form === "one";
 
@@ -570,8 +575,17 @@ function ItemCard(p: {
                   <span dir="rtl">
                     {richText(o, `o${i}`)}
                     {seqMark}
+                    {/* Seen, not only heard: which option is the suggested or the marked answer. */}
+                    {key ? (
+                      <>
+                        {" "}
+                        <span className={`a-chip r-keytag${st === "suggested" ? " warn" : " ok"}`} aria-hidden="true">
+                          {st === "suggested" ? "מוצעת" : "מסומנת"}
+                        </span>
+                        <span className="sr-only"> (התשובה {st === "suggested" ? "המוצעת" : "המסומנת"})</span>
+                      </>
+                    ) : null}
                   </span>
-                  {key ? <span className="sr-only"> (התשובה {st === "suggested" ? "המוצעת" : "המסומנת"})</span> : null}
                 </>
               );
               return (
@@ -614,20 +628,20 @@ function ItemCard(p: {
         </div>
       ) : mode === "pick" ? (
         <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("view")}>
-          ביטול
+          סגירה
         </button>
       ) : null}
       {/* What a tap here does: the answer changes for the whole group, with the member's name, and can be undone. */}
       {mode === "view" && st === "suggested" ? (
-        <p className="a-small a-muted r-group">האפליקציה הציעה את התשובה הזו. ״לאשר״ או ״לסמן תשובה אחרת״ משנים אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.</p>
+        <p className="a-small a-muted r-group">האפליקציה הציעה את התשובה המסומנת ״מוצעת״. ״לאשר״ או ״לסמן תשובה אחרת״ משנים אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.</p>
       ) : mode === "view" && one ? (
         <p className="a-small a-muted r-group">סימון תשובה משנה אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.</p>
       ) : null}
       {mode === "view" && q.page && st === "unclear" && !q.fixed && !q.answered ? <p className="a-small a-muted r-reread-note">{`${REREAD_COST} אם רק מילה שגויה, ״לתקן טקסט״ בחינם.`}</p> : null}
       {mode === "view" && !one && st === "nokey" ? <p className="a-small a-muted">בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד.</p> : null}
-      {keyByLine(q) || undo ? (
+      {keyByLine(q, confirmed) || undo ? (
         <p className="r-who a-small">
-          {keyByLine(q) ? <span>{keyByLine(q)}</span> : null}
+          {keyByLine(q, confirmed) ? <span>{keyByLine(q, confirmed)}</span> : null}
           {undo ? (
             <button type="button" className="a-link" disabled={sending} onClick={() => void run(() => examKeyUndo(q.id), "השינוי בוטל.")}>
               לבטל
@@ -653,7 +667,7 @@ function ItemCard(p: {
 
 /** A change of an item's answer, in the log's words: "נועה: ג׳ במקום א׳" · "נועה: אישור של ב׳" · "נועה: ביטול". */
 function logLine(l: KeyLog): string {
-  const who = l.by || "חבר או חברה מהקבוצה";
+  const who = l.by || "מהקבוצה";
   if (l.undo_of !== null)
     return `${who}: ביטול (${l.origin_new === "solved" && l.new === null ? "חזרה לתשובה המוצעת" : l.new === null ? "בלי תשובה" : `חזרה ל-${letter(l.new)}`})`;
   // A confirmation: the same key, now a member's (a true/false or match item's has no letter).

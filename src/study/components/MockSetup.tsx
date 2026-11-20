@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { courseOverview, examWhen, type CourseOverview } from "../lib/courses";
-import { lengthsFor, minutesText, mockCreate, mockGet, mockStart, openAttempt, rememberAttempt, type CourseExam, type MockAttempt } from "../lib/exams";
+import { lengthsFor, minutesText, paceLine, mockCreate, mockGet, mockStart, openAttempt, rememberAttempt, type CourseExam, type MockAttempt } from "../lib/exams";
 import { failText } from "../lib/failText";
 import type { ScreenProps } from "../features/types";
 import { BackLink, Head, Loading, RouteLink, StickyActions } from "./Shell";
@@ -138,6 +138,9 @@ export default function MockSetup({ route, ctx }: ScreenProps<"mock">) {
               </button>
             ))}
           </div>
+          {exam && paceLine({ questions: exam.questions ?? 0, minutes: exam.minutes ?? null, printed: exam.printed }, lengths) ? (
+            <p className="a-small a-muted s-pace">{paceLine({ questions: exam.questions ?? 0, minutes: exam.minutes ?? null, printed: exam.printed }, lengths)}</p>
+          ) : null}
           {/* A part of the exam takes the questions not seen yet first, then fills with seen ones; the whole exam has them all. */}
           {chosen && chosen.key !== "full" ? (
             <label className="a-li setting-row s-unseen">

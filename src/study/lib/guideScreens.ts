@@ -31,7 +31,8 @@ export function miniScreen(r: MiniRoute, f: Flags): boolean {
     case "course":
       return f.courses;
     case "exams":
-      return f.exams && (Boolean(r.isNew) || Boolean(r.e));
+      // ExamsScreen: one exam (e), else the upload (isNew with its course), else the bare list.
+      return f.exams && (Boolean(r.e) || Boolean(r.isNew && r.c));
     case "mock":
       return f.exams;
     case "ask":

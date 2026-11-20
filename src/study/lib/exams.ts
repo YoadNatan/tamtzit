@@ -403,10 +403,23 @@ export function cropStyle(box: Omit<PageBox, "page">, page: { w: number; h: numb
   };
 }
 
-/** "סומנה ע״י נועה: ג׳" (a member's key), or "". */
-export function keyByLine(q: Pick<ReviewItem, "origin" | "key_by" | "answer">): string {
+/** "סומנה ע״י נועה: ג׳" (a member's key; "אושרה" when the member confirmed the suggested one), or "". */
+export function keyByLine(q: Pick<ReviewItem, "origin" | "key_by" | "answer">, confirmed = false): string {
   if (q.origin !== "member" || q.answer === null) return "";
-  return `סומנה ע״י ${q.key_by || "מישהו מהקבוצה"}: ${letter(q.answer)}`;
+  return `${confirmed ? "אושרה" : "סומנה"} ע״י ${q.key_by || "מישהו מהקבוצה"}: ${letter(q.answer)}`;
+}
+
+/** The item's standing key is a confirmation of the suggested answer (its last change not undone kept the same key). */
+export function wasConfirmed(log: readonly KeyLog[], questionId: string): boolean {
+  const l = lastUndoable(log, questionId);
+  return Boolean(l && l.old === l.new && l.origin_old === "solved");
+}
+
+/** "6 שאלות בלי תשובה לא נכנסות לתרגול עד שמסמנים להן תשובה." (a session asks only keyed items), or "". */
+export function unkeyedLine(items: ReadonlyArray<Pick<ReviewItem, "answer" | "seq" | "retired">>): string {
+  const n = items.filter((q) => !q.retired && q.answer === null && !(q.seq !== null && q.seq.length > 0)).length;
+  if (!n) return "";
+  return n === 1 ? "שאלה אחת בלי תשובה לא נכנסת לתרגול עד שמסמנים לה תשובה." : `${n} שאלות בלי תשובה לא נכנסות לתרגול עד שמסמנים להן תשובה.`;
 }
 
 /** The last change of an item's key that can still be undone (the log's newest not undone). */
@@ -440,6 +453,16 @@ export function lengthsFor(exam: { questions: number; minutes: number | null; pr
   if (pool > 50) out.push({ key: "half", label: "חצי", n: 50, minutes: minutesFor(50, pace, course) });
   out.push({ key: "full", label: "מלא", n: pool, minutes: exam.minutes && pool === printed ? exam.minutes : minutesFor(pool, pace, course) });
   return out;
+}
+
+/** Why the whole simulation's minutes are not the exam's own ("30 דקות" on the exam, "26 דקות" for מלא):
+ *  "26 דקות למלא: הקצב של המבחן, בלי 2 השאלות שלא נכנסו לסימולציה.", or "" when they are the same. */
+export function paceLine(exam: { questions: number; minutes: number | null; printed?: number }, lengths: readonly Length[]): string {
+  const full = lengths.find((l) => l.key === "full");
+  if (!full || !exam.minutes || full.minutes === exam.minutes) return "";
+  const left = Math.max(exam.questions, exam.printed ?? 0) - full.n;
+  if (left <= 0) return "";
+  return `${minutesText(full.minutes)} למלא: הקצב של המבחן, בלי ${left === 1 ? "השאלה שלא נכנסה" : `${left} השאלות שלא נכנסו`} לסימולציה.`;
 }
 
 /** "36 דקות", "90 דקות", "שעה", "שעתיים", "3 שעות" (whole hours in hours, the rest in minutes, as the mockups). */
@@ -491,11 +514,12 @@ export function submitLine(empty: number): string {
   return empty === 1 ? "להגיש עכשיו? נשארה שאלה אחת בלי תשובה." : `להגיש עכשיו? נשארו ${empty} שאלות בלי תשובה.`;
 }
 
-/** The result's head: "71 מתוך 97", and "3 שאלות עם תשובה מוצעת · 3 לא נספרו". */
+/** The result's head: "71 מתוך 97", and "3 לא נספרו: אין להן תשובה בטוחה · 3 מה-97 נבדקו מול תשובה מוצעת"
+ *  (the suggested ones are among the counted; the not counted are outside them). */
 export function scoreLines(s: Pick<MockScore, "right" | "counted" | "suggested" | "not_counted">): { big: string; note: string } {
   const parts: string[] = [];
-  if (s.suggested) parts.push(s.suggested === 1 ? "שאלה אחת עם תשובה מוצעת" : `${s.suggested} שאלות עם תשובה מוצעת`);
-  if (s.not_counted) parts.push(s.not_counted === 1 ? "שאלה אחת לא נספרה" : `${s.not_counted} לא נספרו`);
+  if (s.not_counted) parts.push(s.not_counted === 1 ? "שאלה אחת לא נספרה: אין לה תשובה בטוחה" : `${s.not_counted} לא נספרו: אין להן תשובה בטוחה`);
+  if (s.suggested) parts.push(s.suggested === 1 ? `אחת מה-${s.counted} נבדקה מול תשובה מוצעת` : `${s.suggested} מה-${s.counted} נבדקו מול תשובה מוצעת`);
   return { big: `${s.right} מתוך ${s.counted}`, note: parts.join(" · ") };
 }
 

@@ -338,7 +338,7 @@ test("courses (sources.md, phase 1): help says what the course page does, with e
   const row = (names: string[]) => helpRows(flagSet(names), W, ALL_ENDS).find((r) => r.title === "קורסים")?.text ?? "";
   assert.equal(row([...R9]), "", "no row without VITE_STUDY_COURSES");
   const all = row([...R9, "COURSES"]);
-  for (const words of ["עמוד הקורס", "״לתרגל מה שכבר יש״", "״לשאול על כל הקורס״", "״נבחרו 12 מתוך 340 פסקאות״", "״העלאה של כמה קבצים״", "מחכים לחודש הבא", "בוחרים שוב את אותם קבצים", "בשם של הקובץ", "ממתין לכתיבה", "לכל הקבוצה"])
+  for (const words of ["עמוד הקורס", "״לתרגל מה שכבר יש״", "״לשאול על כל הקורס״", "״נבחרו 12 מתוך 340 פסקאות״", "״העלאה של כמה קבצים״", "מחכים לחודש הבא", "בוחרים שוב את אותם קבצים", "בשם של הקובץ", "ממתינה לכתיבה", "לכל הקבוצה"])
     assert.ok(all.includes(words), words);
   const alone = row(["COURSES"]);
   assert.ok(!alone.includes("לתרגל") && !alone.includes("לשאול"), "without practice and ask, neither is promised");

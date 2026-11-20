@@ -21,7 +21,7 @@ import "../styles/courses.css";
  * with VITE_STUDY_EXAMS; "נוצר בקבוצה" waits for its phase. */
 
 const STATUS: Record<LectureRow["status"], { label: string; cls: string }> = {
-  new: { label: "ממתין לכתיבה", cls: "a-chip" },
+  new: { label: "ממתינה לכתיבה", cls: "a-chip" },
   outlining: { label: "מתכנן את הסיכום", cls: "a-chip busy" },
   writing: { label: "נכתב עכשיו", cls: "a-chip busy" },
   ready: { label: "מוכן", cls: "a-chip ok" },
@@ -42,6 +42,9 @@ function formatDate(d: string | null): string {
 }
 
 /** The lectures of a course, in its order: by date (undated last), then by upload. */
+/** A title that carries its own lecture number ("הרצאה 3 - משתנים", "שיעור 10", "Lecture 2"). */
+const OWN_NUMBER = /(הרצאה|שיעור|lecture|lec)[\s_.\-]*\d/i;
+
 function inCourse(lectures: LectureRow[], key: string): LectureRow[] {
   return lectures
     .filter((l) => courseKey(l.course) === key)
@@ -191,7 +194,7 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
           )
         ) : null}
         {/* No ready past exam yet: where the simulation and the replay come from. */}
-        {flags.exams && !simulation ? <p className="a-small a-muted c-sim-none">״סימולציה״ ו״לתרגל מבחן קודם״ נפתחים אחרי שמעלים מבחן קודם, ב״מבחנים קודמים״ למטה.</p> : null}
+        {flags.exams && !simulation ? <p className="a-small a-muted c-sim-none">״סימולציה״ ו״לתרגל מבחן קודם״ נפתחים אחרי שמבחן קודם מועתק, ב״מבחנים קודמים״ למטה.</p> : null}
       </div>
 
       {flags.exams ? (
@@ -247,13 +250,14 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
           ) : list.length ? (
             <ul className="a-list">
               {list.map((l, i) => {
-                const status = l.status === "new" && l.queued_at ? { label: "ממתין לשרת", cls: "a-chip" } : STATUS[l.status];
+                const status = l.status === "new" && l.queued_at ? { label: "ממתינה לשרת", cls: "a-chip" } : STATUS[l.status];
                 return (
                   <li key={l.id}>
                     <RouteLink to={{ v: "lecture", l: l.id }} go={ctx.go} className="a-li c-row">
                       <div>
                         <b dir="auto">{l.title}</b>
-                        <span className="m">{[`הרצאה ${i + 1}`, formatDate(l.lecture_date), l.lecturer].filter(Boolean).join(" · ")}</span>
+                        {/* Its place in the course; left out when the title has its own number ("הרצאה 3 - משתנים" is not "הרצאה 2"). */}
+                        <span className="m">{[!OWN_NUMBER.test(l.title) && `הרצאה ${i + 1}`, formatDate(l.lecture_date), l.lecturer].filter(Boolean).join(" · ")}</span>
                       </div>
                       <span className={status.cls}>{status.label}</span>
                     </RouteLink>

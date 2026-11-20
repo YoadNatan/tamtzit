@@ -459,7 +459,7 @@ function MockResult({ ctx, a, score, qs, title }: { ctx: ScreenProps<"practice">
       <section className="e-score" aria-labelledby="e-score-h">
         <div className="big" id="e-score-h">
           <b>{lines.big}</b>
-          <span>נכונות</span>
+          <span>{score.not_counted ? "נכונות, מהשאלות שנספרו" : "נכונות"}</span>
         </div>
         {lines.note ? <span className="a-small">{lines.note}</span> : null}
         {score.suggested ? <span className="a-small a-muted e-suggested">תשובה מוצעת: האפליקציה פתרה, ועוד לא אישרו אותה בקבוצה.</span> : null}

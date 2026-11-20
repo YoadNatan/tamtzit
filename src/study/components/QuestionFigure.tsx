@@ -230,7 +230,8 @@ function Legend({ layout, answered }: { layout: LabelLayout; answered: NonNullab
               {pin.n}
             </b>
             <span className="sr-only">{`מספר ${pin.n}: `}</span>
-            {names[i] ? <bdi dir="ltr">{names[i]}</bdi> : <span className="a-muted">·</span>}
+            {/* A pin that is none of the options has no name to show: say so, not a lone "·". */}
+            {names[i] ? <bdi dir="ltr">{names[i]}</bdi> : <span className="a-muted">לא בשאלה</span>}
             {right ? (
               <b className="qf-legend-mark">
                 <span aria-hidden="true">✓</span>

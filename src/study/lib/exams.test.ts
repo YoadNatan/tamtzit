@@ -201,7 +201,9 @@ test("the grid and the submit line; the result's words", () => {
   assert.equal(X.submitLine(6), "להגיש עכשיו? נשארו 6 שאלות בלי תשובה.");
   assert.equal(X.submitLine(1), "להגיש עכשיו? נשארה שאלה אחת בלי תשובה.");
   assert.equal(X.submitLine(0), "להגיש עכשיו?");
-  assert.deepEqual(X.scoreLines({ right: 71, counted: 97, suggested: 3, not_counted: 3 }), { big: "71 מתוך 97", note: "3 שאלות עם תשובה מוצעת · 3 לא נספרו" });
+  // What was not counted and why first; the suggested ones are among the counted.
+  assert.deepEqual(X.scoreLines({ right: 71, counted: 97, suggested: 3, not_counted: 3 }), { big: "71 מתוך 97", note: "3 לא נספרו: אין להן תשובה בטוחה · 3 מה-97 נבדקו מול תשובה מוצעת" });
+  assert.equal(X.scoreLines({ right: 0, counted: 3, suggested: 1, not_counted: 1 }).note, "שאלה אחת לא נספרה: אין לה תשובה בטוחה · אחת מה-3 נבדקה מול תשובה מוצעת");
   assert.equal(X.scoreLines({ right: 5, counted: 5, suggested: 0, not_counted: 0 }).note, "");
   assert.equal(X.wrongLine({ form: "one", choice: 0, choices: null, answer: 2 }), "בחרת א׳, הנכונה ג׳");
   assert.equal(X.wrongLine({ form: "one", choice: null, choices: null, answer: 2 }), "לא ענית. הנכונה ג׳");
@@ -262,4 +264,25 @@ test("replaying a past exam: its order, and its options as printed (\"א+ב נכ
 
 test("a key log of no one: the screens still name someone", () => {
   assert.equal(X.keyByLine({ origin: "member", key_by: null, answer: 0 }), "סומנה ע״י מישהו מהקבוצה: א׳");
+});
+
+test("the review's words after the guidance review: a confirmation reads אושרה; items without an answer are named; the simulation's minutes explained", () => {
+  const log = (o: Partial<KeyLog>): KeyLog => ({ id: 1, question_id: "q", old: 0, new: 0, origin_old: "solved", origin_new: "member", undo_of: null, by: "דנה", at: "", ...o });
+  assert.equal(X.wasConfirmed([log({})], "q"), true, "the same key, from solved: a confirmation");
+  assert.equal(X.keyByLine({ origin: "member", key_by: "דנה", answer: 0 }, true), "אושרה ע״י דנה: א׳");
+  assert.equal(X.wasConfirmed([log({}), log({ id: 2, old: 0, new: 2, origin_old: "member" })], "q"), false, "then another answer: a mark");
+  assert.equal(X.wasConfirmed([log({}), log({ id: 2, undo_of: 1, new: 0 })], "q"), false, "a confirmation undone");
+  assert.equal(X.wasConfirmed([], "q"), false);
+  const it = (answer: number | null, seq: number[] | null = null, retired = false) => ({ answer, seq, retired });
+  assert.equal(X.unkeyedLine([it(0), it(null), it(null), it(null, [1, 0]), it(null, null, true)]), "2 שאלות בלי תשובה לא נכנסות לתרגול עד שמסמנים להן תשובה.");
+  assert.equal(X.unkeyedLine([it(0), it(null)]), "שאלה אחת בלי תשובה לא נכנסת לתרגול עד שמסמנים לה תשובה.");
+  assert.equal(X.unkeyedLine([it(0)]), "");
+  // 12 items of a 14-question, 30-minute exam (2 open questions skipped): 26 minutes for מלא, and why.
+  const exam = { questions: 12, minutes: 30, printed: 14 };
+  const L = X.lengthsFor(exam);
+  assert.deepEqual(L.map((l) => [l.key, l.minutes]), [["full", 26]]);
+  assert.equal(X.paceLine(exam, L), "26 דקות למלא: הקצב של המבחן, בלי 2 השאלות שלא נכנסו לסימולציה.");
+  assert.equal(X.paceLine({ questions: 13, minutes: 30, printed: 14 }, X.lengthsFor({ questions: 13, minutes: 30, printed: 14 })), "28 דקות למלא: הקצב של המבחן, בלי השאלה שלא נכנסה לסימולציה.");
+  assert.equal(X.paceLine({ questions: 14, minutes: 30, printed: 14 }, X.lengthsFor({ questions: 14, minutes: 30, printed: 14 })), "", "the whole exam: its own minutes");
+  assert.equal(X.paceLine({ questions: 12, minutes: null, printed: 14 }, X.lengthsFor({ questions: 12, minutes: null, printed: 14 })), "", "no minutes of its own: nothing to explain");
 });

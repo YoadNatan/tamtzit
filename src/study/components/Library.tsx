@@ -33,7 +33,7 @@ import { timeAgo } from "./Together";
  * own (review UX-14). Deleted lectures wait 30 days under "נמחקו לאחרונה". */
 
 const STATUS: Record<LectureRow["status"], { label: string; cls: string }> = {
-  new: { label: "ממתין לכתיבה", cls: "a-chip" },
+  new: { label: "ממתינה לכתיבה", cls: "a-chip" },
   outlining: { label: "מתכנן את הסיכום", cls: "a-chip busy" },
   writing: { label: "נכתב עכשיו", cls: "a-chip busy" },
   ready: { label: "מוכן", cls: "a-chip ok" },
@@ -258,7 +258,7 @@ export default function Library({ ctx }: { ctx: Ctx }) {
             </div>
             <ul className="a-stack lecture-list">
               {list.map((l) => {
-                const status = l.status === "new" && l.queued_at ? { label: "ממתין לשרת", cls: "a-chip" } : STATUS[l.status];
+                const status = l.status === "new" && l.queued_at ? { label: "ממתינה לשרת", cls: "a-chip" } : STATUS[l.status];
                 const who = reads.filter((r) => r.lecture_id === l.id).map((r) => nameOf(r.user_id)).filter(Boolean);
                 const open = questions[l.id] ?? 0;
                 const p = practiceChip(l.id);

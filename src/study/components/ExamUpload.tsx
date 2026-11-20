@@ -451,8 +451,9 @@ export default function ExamUpload({ route, ctx }: ScreenProps<"exams">) {
         </p>
       ) : null}
       {/* The price and the timing only (decision 1: nothing about where the exam goes). */}
+      {/* Before a file is picked the button has no price yet: the line says when it comes. The limit is each member's own. */}
       <p className="a-small a-muted x-cost-note">
-        {`המחיר נספר בתקציב החודשי של הקבוצה, ואפשר להתחיל עד 3 מבחנים ביום. ההעתקה לוקחת לרוב 10–20 דקות${writingHelp().serverWrites ? ", ואפשר לסגור את הטלפון אחרי שכל הדפים עלו." : "."}`}
+        {`${pages ? "המחיר נספר בתקציב החודשי של הקבוצה." : "המחיר יופיע על הכפתור אחרי שבוחרים קובץ, ונספר בתקציב החודשי של הקבוצה."} אפשר להתחיל עד 3 מבחנים ביום, לכל מי שבקבוצה בנפרד. ההעתקה לוקחת לרוב 10–20 דקות${writingHelp().serverWrites ? ", ואפשר לסגור את הטלפון אחרי שכל הדפים עלו." : "."}`}
       </p>
       <StickyActions>
         <button type="button" className="a-btn primary wide" disabled={sending || reading} onClick={() => void upload()}>

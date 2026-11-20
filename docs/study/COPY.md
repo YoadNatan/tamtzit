@@ -101,9 +101,12 @@ these and no other.
 | The exam's date and what is left | המבחן ב-12.2 · עוד 23 ימים (the day itself: המבחן היום; past: המבחן היה ב-12.2) |
 | The exam's length | 100 שאלות · 3 שעות |
 | Practising a course's questions | לתרגל מה שכבר יש · 184 שאלות · בחינם (one: שאלה אחת); none yet: עוד אין שאלות בהרצאות של הקורס. בתרגול של כל הרצאה, ״שאלות חדשות״ כותב אותן לכל הקבוצה, מהתקציב החודשי. |
-| No ready past exam yet, under the course's actions | ״סימולציה״ ו״לתרגל מבחן קודם״ נפתחים אחרי שמעלים מבחן קודם, ב״מבחנים קודמים״ למטה. |
+| No ready past exam yet, under the course's actions | ״סימולציה״ ו״לתרגל מבחן קודם״ נפתחים אחרי שמבחן קודם מועתק, ב״מבחנים קודמים״ למטה. |
 | What each file of a batch becomes (above the files) | כל קובץ נהיה הרצאה בקורס, בשם של הקובץ ובלי מרצה ותאריך, לפי סדר השמות. את השם אי אפשר לשנות אחר כך, אז כדאי לתת לקבצים שמות ברורים לפני שבוחרים. כל הקבוצה רואה אותן בספרייה. |
-| Summaries that wait for next month (the price card) | 12 סיכומים יחכו לחודש הבא. ההרצאות עצמן עולות עכשיו, והסיכומים יתחילו מה-1 בחודש, כשהאפליקציה תיפתח בטלפון הזה. (one: סיכום אחד יחכה…, והסיכום יתחיל…; the list of waiting summaries is kept on the phone that uploaded) |
+| Summaries that wait for next month (the price card) | 12 סיכומים יחכו לחודש הבא. ההרצאות עצמן עולות עכשיו, והסיכומים יתחילו מה-1 בחודש, כשפותחים את הספרייה בטלפון הזה. (one: סיכום אחד יחכה…, והסיכום יתחיל…; the list of waiting summaries is kept on the phone that uploaded, and the library or the course page hands them over; the done card: הם יתחילו כשפותחים את הספרייה בטלפון הזה בחודש הבא.) |
+| The batch's done card, when the phone writes the summaries | כל הרצאה מסוכמת בפעם הראשונה שפותחים אותה, בכל טלפון בקבוצה. עד אז כתוב לידה ״ממתינה לכתיבה״. |
+| A lecture's status chip, waiting | ממתינה לכתיבה; queued for the server: ממתינה לשרת (a lecture: feminine) |
+| A lecture row in the course page | הרצאה 2 · its date · its lecturer; no "הרצאה N" when the title has its own number ("הרצאה 3 - משתנים") |
 | The course's sheet | first: מה שמשנים כאן משתנה לכל הקבוצה.; under "השם": השם משתנה בכל ההרצאות של הקורס. |
 | The batch upload's price card | המחיר מראש · סיכומים ל-8 הרצאות: כ-$7 · נשארו החודש $24 |
 | The batch's progress | קוראים קובץ 4 מתוך 14 · כדאי להשאיר את המסך פתוח |
@@ -133,9 +136,10 @@ The server's part is built (phase 2, part A); the screens use these words.
 | A key a member marked | סומנה ע״י נועה: ג׳ · לבטל |
 | Copying an exam's questions | להעתיק את השאלות; while it runs: מעתיקים עמודים 9–12 מתוך 28…; before any unit reads: עמודים 1–4 בתור…; the key sheet: קוראים את דף התשובות… |
 | The upload's button | להעלות ולהעתיק את השאלות · כ-$1.40 (the usual price; no sentence about where the exam goes, decision 1) |
-| Above the upload's button (the price and the timing only) | המחיר נספר בתקציב החודשי של הקבוצה, ואפשר להתחיל עד 3 מבחנים ביום. ההעתקה לוקחת לרוב 10–20 דקות, ואפשר לסגור את הטלפון אחרי שכל הדפים עלו. (no server writer: …10–20 דקות.) |
+| Above the upload's button (the price and the timing only) | before a file is picked: המחיר יופיע על הכפתור אחרי שבוחרים קובץ, ונספר בתקציב החודשי של הקבוצה.; after: המחיר נספר בתקציב החודשי של הקבוצה.; then: אפשר להתחיל עד 3 מבחנים ביום, לכל מי שבקבוצה בנפרד. ההעתקה לוקחת לרוב 10–20 דקות, ואפשר לסגור את הטלפון אחרי שכל הדפים עלו. (no server writer: …10–20 דקות.) |
 | Where the answers are, each with its hint | מסומנות במבחן: התשובה מוקפת או מסומנת על הדף.; בקובץ נפרד: דף תשובות בקובץ או בתמונות משלו.; אין תשובות: האפליקציה תציע תשובות, ויהיה כתוב לידן ״תשובה מוצעת · לא נבדקה״. לכן זה עולה קצת יותר. |
-| An item's answer, under its actions (the review) | a suggested one: האפליקציה הציעה את התשובה הזו. ״לאשר״ או ״לסמן תשובה אחרת״ משנים אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.; else: סימון תשובה משנה אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל. |
+| An item's answer, under its actions (the review) | a suggested one: האפליקציה הציעה את התשובה המסומנת ״מוצעת״. ״לאשר״ או ״לסמן תשובה אחרת״ משנים אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.; else: סימון תשובה משנה אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל. On the key option, seen: מוצעת (a suggested key) or מסומנת (a keyed one). The answer picker closes with סגירה (never ביטול beside the undo's לבטל). A confirmed key: אושרה ע״י נועה: א׳ · לבטל (a marked one: סומנה ע״י…). |
+| Under "לתרגל את המבחן" when items have no answer | 6 שאלות בלי תשובה לא נכנסות לתרגול עד שמסמנים להן תשובה. (one: שאלה אחת בלי תשובה לא נכנסת…) |
 | Picking another answer | בוחרים את התשובה הנכונה. היא תשתנה לכל הקבוצה: |
 | Reading pages again (its cost) | קריאה חוזרת נספרת בתקציב החודשי של הקבוצה, עד 3 פעמים ביום לכל מבחן. אם רק מילה שגויה, ״לתקן טקסט״ בחינם. (under a unit that failed: the first sentence) |
 | The reading, "כשזה נגמר" | לרוב 10–20 דקות. בסוף יופיע כאן כמה שאלות נמצאו, והמבחן יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול. |
@@ -158,6 +162,7 @@ The server's part is built (phase 2, part A); the screens use these words.
 | Back to the simulation's setup | → לסימולציה |
 | Practising one past exam | לתרגל את המבחן (its own order, its options as printed); from the course page: לתרגל מבחן קודם |
 | The simulation's lengths, short first | קצר · 20 שאלות · 36 דקות; חצי · 50 שאלות; מלא (the whole exam) |
+| Under the lengths, when the whole simulation's minutes are not the exam's | 26 דקות למלא: הקצב של המבחן, בלי 2 השאלות שלא נכנסו לסימולציה. (one: בלי השאלה שלא נכנסה…) |
 | Questions not seen yet first | קודם שאלות שעוד לא ראיתי (on by default; never "רק": the setup fills with seen ones when the unseen run out; not offered for the whole exam) |
 | The simulation's clock | נשארו 1:42:10 (one clock for the whole simulation; it goes on while the phone is locked) |
 | Where the student is | שאלה 37 מתוך 100; the result numbers its rows the same way, the exam's own number beside: שאלה 37 במבחן |
@@ -165,14 +170,14 @@ The server's part is built (phase 2, part A); the screens use these words.
 | Every question at a glance | מפת השאלות: ענית · לחזרה · בלי תשובה |
 | Submitting | להגיש; before it: להגיש עכשיו? נשארו 6 שאלות בלי תשובה. |
 | Submitted by the clock | הזמן נגמר, והסימולציה הוגשה. |
-| The result | 71 מתוך 97 נכונות; 3 שאלות עם תשובה מוצעת · 3 לא נספרו, and under it: תשובה מוצעת: האפליקציה פתרה, ועוד לא אישרו אותה בקבוצה.; over the items not counted: לשאלות האלה אין תשובה בטוחה, אז הן לא בציון. תשובה שמאשרים בעמוד המבחן תיספר בסימולציה הבאה.; the time in words: זמן: 12 דקות מתוך 36 דקות, זמן: שעתיים ו-41 דקות מתוך 3 שעות, זמן: פחות מדקה מתוך 30 דקות (never "0:01" beside "דקות") |
+| The result | 71 מתוך 97 נכונות (with items not counted: נכונות, מהשאלות שנספרו); 3 לא נספרו: אין להן תשובה בטוחה · 3 מה-97 נבדקו מול תשובה מוצעת (one: שאלה אחת לא נספרה: אין לה תשובה בטוחה; אחת מה-97 נבדקה…), and under it: תשובה מוצעת: האפליקציה פתרה, ועוד לא אישרו אותה בקבוצה.; over the items not counted: לשאלות האלה אין תשובה בטוחה, אז הן לא בציון. תשובה שמאשרים בעמוד המבחן תיספר בסימולציה הבאה.; the time in words: זמן: 12 דקות מתוך 36 דקות, זמן: שעתיים ו-41 דקות מתוך 3 שעות, זמן: פחות מדקה מתוך 30 דקות (never "0:01" beside "דקות") |
 | A mistake in the result | בחרת א׳, הנכונה ג׳; a blank: לא ענית. הנכונה ג׳; a suggested key: בחרת ב׳, המוצעת א׳ · לא ענית. המוצעת א׳, and on its option: · התשובה המוצעת (never ✓ הנכונה) |
 | Practising a simulation's mistakes | רק הטעויות; the session's title: הטעויות מהסימולציה |
 | A simulation left open | יש סימולציה שעוד לא הוגשה · להמשיך |
 | Confirming a suggested key | לאשר; another: לסמן תשובה אחרת; none yet: לסמן תשובה; done: התשובה ג׳ אושרה. (a true/false or match item: התשובה המוצעת אושרה.) |
 | A true/false or match item without a key | בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד. |
 | An undo the key moved past | התשובה השתנתה מאז, אז אי אפשר לבטל. אפשר לסמן את התשובה הנכונה. |
-| A change of a key in the log | נועה: ג׳ במקום א׳ · נועה: אישור של ב׳ · נועה: אישור התשובה המוצעת · נועה: ביטול (חזרה לתשובה המוצעת) (no gendered verbs; no name kept: חבר או חברה מהקבוצה) |
+| A change of a key in the log | נועה: ג׳ במקום א׳ · נועה: אישור של ב׳ · נועה: אישור התשובה המוצעת · נועה: ביטול (חזרה לתשובה המוצעת) (no gendered verbs; no name kept: מהקבוצה) |
 | The reading while the server works | אפשר לסגור את הטלפון. ההעתקה ממשיכה בלעדיו. |
 | The reading when the phone copies (no server writer) | הטלפון מעתיק את הדפים. כדאי להשאיר את המסך פתוח. |
 

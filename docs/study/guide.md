@@ -170,7 +170,7 @@ the flags (they never show in a member's first 14 days).
 
 | Part | Built |
 |---|---|
-| Which screens have a "?" | `miniScreen()`: `course` with COURSES; `exams` with EXAMS and `isNew` or `e` (the bare list has none); `mock` with EXAMS; `ask` with ASK, COURSES and `c` (the library's question has none). `upload` stays `true`: `screenGuide()` picks the batch's own words from `many`. `practice` stays `!s && !x`, so no session has a "?": not the running simulation (`s=x.`), its mistakes (`s=w.`) or a replayed exam (`s=e.`). While the clock runs, nothing may cover the question. |
+| Which screens have a "?" | `miniScreen()`: `course` with COURSES; `exams` with EXAMS and `e`, or `isNew` with its course `c` (what ExamsScreen draws; the bare list, and `?v=exams&new=1` without a course, have none); `mock` with EXAMS; `ask` with ASK, COURSES and `c` (the library's question has none). `upload` stays `true`: `screenGuide()` picks the batch's own words from `many`. `practice` stays `!s && !x`, so no session has a "?": not the running simulation (`s=x.`), its mistakes (`s=w.`) or a replayed exam (`s=e.`). While the clock runs, nothing may cover the question. |
 | The mini-guides | Course page (8 steps: the exam card, "סימולציה", "לתרגל מבחן קודם", "לתרגל מה שכבר יש", "לשאול על כל הקורס", "מבחנים קודמים", "העלאה של כמה קבצים", ⋯). Batch upload (its resume, its course field, the files, the price, "העלאה"; never "יצירת סיכום"). Exam upload (how, where the answers are, the price; decision 1: nothing about where the exam goes). One exam (the reading's progress, "לתרגל את המבחן", "לבדיקה", "לאשר"). The simulation's setup (an open simulation, the exam, the length, unseen first, "להתחיל", or the empty state). The course's question (the composer, the sources, "נשארו היום"). The single upload points at the batch, the library at the course link, Today, the practice home and the tour at the course pages. Every line says what is free, what the budget pays and what changes for the whole group, because a mini-guide never adds the STOP line. |
 | First steps | S8 "להציץ בעמוד הקורס", when COURSES is on and the library has a course (`Facts.courses`, counted from the `listLectures` the guide already reads). Done by visiting a course page (`routeEvent`, event `course`). Its "להראות" is the new walk `course` (the library tab, the course link, the course page's actions; no STOP). Order: a joiner S1, S2, S4, S8, S5, S6, S7; a creator S1, S6, S2, S4, S8, S5, S7. With a ready lecture, practice and a queue, a joiner's five are S1, S2, S4, S8, S5: the invite (S6) and "יחד" (S7) give way. All six members join from the creator's link, and the tour points at "יחד"; a creator's invite is never dropped. A brand-new group has no lecture, so S1 (upload) comes first, and with COURSES its line adds "יש כמה מצגות? אפשר להעלות אותן יחד." Stored lists keep their steps. |
 | How-tos | After "uploadmany", so the six "שאלות נפוצות" stay: `coursepractice`, `courseask`, `coursename`, `uploadstopped`, `examupload`, `examcheck`, `examreplay`, `sim`, `qtypes`, `qimage`. "course" and "uploadmany" say more, and have more words. Those that lead to a course page have the `course` walk. `guide.test.ts` runs 28 ways members ask through the search. |
@@ -185,6 +185,37 @@ exam, help's "סימולציה" with the course walk, and the status line.
 `guide-screens.cjs` runs the new screens' "?" at 390×844 and 320×640, light
 and dark. `exams.cjs` checks that no "?" or bubble shows while a simulation
 runs or an exam is replayed, and that "→ יציאה" says "השעון ממשיך".
+
+### Guidance review round (20 Nov 2026)
+
+Two reviews of f5b883a on production's 27 flags: one went through the mock
+as a member who joined that day (116 screenshots), one probed the states the
+e2e did not open. Each finding was checked against the code first.
+
+| Finding | Done | Test |
+|---|---|---|
+| The course walk's last bubble ("כאן הסימולציה, התרגול של כל הקורס…") was false on a course with no past exam, the state of every course in a new group's first days; S8 promised the exam's date, which the walk never showed | The walk is four steps with any of EXAMS, PRACTICE or ASK: the library tab, the course link, the exam's date ("תאריך המבחן ואורכו, אחד לכל הקבוצה.", `הבא`), then the actions: "כאן שואלים ומתרגלים על כל הקורס. ״סימולציה״ מופיעה כאן כשיש מבחן קודם מוכן, ב״מבחנים קודמים״ למטה." True with and without an exam. | `guide.test.ts`; `guide.cjs` runs the walk on the fixture's course before any exam is seeded (no simulation there) and again with one |
+| One exam's "?": a line named "לאשר" on an item that has none; "סימולציה מהמבחן" named where the button is absent (under 5 questions, or no `c`); nothing for an upload that stopped or an error | Each button has its own step on its own element, skipped when it is not there: "לתרגל את המבחן", "סימולציה מהמבחן" (`examSim`), the filters "תשובה מוצעת" and "בלי תשובה" (`r-f-<filter>` on the chips), the item's actions ("סימון או אישור של תשובה…"). New steps for `x-stalled`, the error and the unit rows. | `guide-screens.cjs`: a stopped upload, an exam of 3 questions without `c`, an exam with suggested answers and items without one |
+| `?v=exams&new=1` without a course showed a "?" over the bare list | `miniScreen` and `screenGuide` ask for `isNew` with `c`, as ExamsScreen draws | `guide.test.ts` (the agreement list), `guide-screens.cjs` |
+| The ring, on a target partly above the screen, was shifted down over other content; an item's own smooth scroll could move the page after the guide's one scroll | The ring is clipped to the visible part under the top bar (hidden when none is left; a target in a bar is never clipped). A target that stays under the bar or below the screen for 400 ms after its scroll is brought back, twice at most. | `guide-screens.cjs`: an item opened 300 ms before the "?" |
+| The batch's "?" had nothing once the files were going up | A step on `.upload-many .x-prog` | `guide-screens.cjs`: the batch once its files are up |
+| The exam upload's "?" said the price is on the button before any file is picked; "3 מבחנים ביום" read as the group's limit | Bubble and `x-cost-note`: the price appears after a file is picked; "לכל מי שבקבוצה בנפרד" (budget.ts and `study_reserve` count it per member) | `exams.cjs`, `guide.test.ts` |
+| A course question's cost; "בטלפון הזה" in the bubble against "במכשיר הזה" on the screen | "…ובתקציב החודשי של הקבוצה" (budget.ts: `ask`); the bubble says "במכשיר הזה", as the screen | `guide.test.ts`, `guide.cjs`, `guide-screens.cjs` |
+| The tour's library line dropped the upload once COURSES was on | It keeps "מעלים מצגת או PDF…" and adds the course page | `guide.test.ts` (160 characters) |
+| Search: "מעלים", "סימולציות", "מהשנים", "איך…", "כמה זה עולה" found nothing | More words; two prefix letters; question words (איך, מה, זה, של, את, לעשות…) are left out of a query that has others | `guide.test.ts`: 40 phrasings |
+| No how-to for what costs | "מה עולה מהתקציב", each part with its flag; the budget row names past exams | `guide.test.ts` |
+| The question types' hint pointed at "שאלות חדשות" (paid) | "בתרגול: ״סבב חדש״ ← ״סוג שאלה״"; the how-to says it too; the courses hint no longer promises practice | `guide.test.ts` |
+| Waiting summaries were said to start "when the app opens"; only the library or a course page releases them | "כשפותחים את הספרייה בטלפון הזה" (the batch, help) | `courses.cjs` |
+| Practising an exam silently left out the items without an answer | Under "לתרגל את המבחן": "N שאלות בלי תשובה לא נכנסות לתרגול עד שמסמנים להן תשובה."; help says it | `exams.test.ts`, `guide-screens.cjs` |
+| The suggested answer had only an outline | A visible "מוצעת" / "מסומנת" chip after the option's words; the line under the actions names it | `exams.cjs` |
+| Smaller copy: the picker's "ביטול" beside the undo's "לבטל"; "סומנה" after a confirmation; "ממתין" for a lecture; a pin with no name read "·"; the simulation's minutes and its result headline; "לבדיקה" leaving out items with no answer; the course page's "נפתחים אחרי שמעלים"; the help row's "אפשר לסגור את הטלפון" with no server; "חבר או חברה"; a file's own number beside its place | "סגירה"; "אושרה ע״י…"; "ממתינה"; "לא בשאלה"; "26 דקות למלא: הקצב של המבחן, בלי 2 השאלות שלא נכנסו לסימולציה." and "9 לא נספרו: אין להן תשובה בטוחה · 2 מה-3 נבדקו מול תשובה מוצעת"; "…בלי תשובה…"; "אחרי שמבחן קודם מועתק"; by `serverWrites`; "מהקבוצה"; no "הרצאה N" when the title has its own number | `exams.test.ts`, `helpCopy.test.ts` |
+
+Not done: the course page's "לתרגל מה שכבר יש · N שאלות" still counts an
+exam's items without an answer (the course overview's `questions` per exam
+is every item; a count of the keyed ones needs a field in
+`study_course_overview`, an SQL run). The upload screen still says nothing
+of who sees the exam (decision 1: no explanatory sentence on the upload;
+the reading screen and the course page's "?" say it).
 
 ### Review round (18 Nov 2026)
 

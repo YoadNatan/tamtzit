@@ -417,6 +417,9 @@ test("the \"?\" shows only where a mini-guide has something to say (one check fo
     { v: "practice", s: `e.${ID}` },
     { v: "practice", s: `w.${ID}` },
     { v: "exams", c: ID },
+    // The upload without its course is the bare list on screen (ExamsScreen): no "?" there either.
+    { v: "exams", isNew: true },
+    { v: "exams", e: ID },
     { v: "ask" },
   ];
   for (const [name, names] of SETS) {
@@ -426,6 +429,7 @@ test("the \"?\" shows only where a mini-guide has something to say (one check fo
   const s2 = flagSet(S2);
   for (const s of [`x.${ID}`, `e.${ID}`, `w.${ID}`]) assert.equal(screenGuide({ v: "practice", s }, s2), null, `no "?" in a session (s=${s})`);
   assert.equal(screenGuide({ v: "exams", c: ID }, s2), null, "no \"?\" on the bare exams list");
+  assert.equal(screenGuide({ v: "exams", isNew: true }, s2), null, "?v=exams&new=1 without a course shows the list: no \"?\"");
   assert.equal(screenGuide({ v: "ask" }, s2), null, "the library's question has no mini-guide");
   assert.ok(screenGuide({ v: "ask", c: ID }, s2), "the course's question has one");
   const f = flagSet(W5X);
@@ -472,7 +476,7 @@ test("the app tour: the tab bar one tab at a time, then the screen's \"?\"; offe
 
 /* ── the course pages, past exams, the simulation and the question types (docs/study/guide.md §2.3) ── */
 
-test("no mini-guide line names a button its screen does not have: each step is the screen's own", () => {
+test("each new screen's mini-guide rings only its own screen, and a button it names is the one it rings", () => {
   const f = flagSet(S2);
   const ROOT: Array<[Route, string[]]> = [
     [{ v: "course", c: ID }, [".course-page"]],
@@ -487,6 +491,19 @@ test("no mini-guide line names a button its screen does not have: each step is t
     assert.ok(g && g.steps.length >= 3, routeUrl(r));
     for (const s of g!.steps) assert.ok(roots.some((root) => s.target.sel.startsWith(root)), `${routeUrl(r)}: ${s.target.sel} is on ${roots.join(" or ")}`);
   }
+  // A step that names a button that is not always there rings that very button (and is skipped without it):
+  // "סימולציה מהמבחן" needs 5 questions and the course; "סימולציה" on the course page a ready exam.
+  const named: Array<[Route, string, string]> = [
+    [{ v: "exams", e: ID, c: ID }, "״סימולציה מהמבחן״", TARGETS.examSim],
+    [{ v: "course", c: ID }, "״סימולציה״:", TARGETS.courseSim],
+    [{ v: "course", c: ID }, "״לתרגל מבחן קודם״", TARGETS.courseReplay],
+  ];
+  for (const [r, word, target] of named)
+    for (const s of screenGuide(r, f)!.steps) if (s.say.includes(word)) assert.equal(s.target.sel, target, `${routeUrl(r)}: ${word} rings ${s.target.sel}`);
+  // The states where a screen has little: a stopped exam upload, an error, the batch while its files go up.
+  const exam = screenGuide({ v: "exams", e: ID }, f)!.steps.map((s) => s.target.sel);
+  for (const t of [TARGETS.examStalled, TARGETS.examError, TARGETS.examUnits, TARGETS.examSuggested, TARGETS.examNokey]) assert.ok(exam.includes(t), t);
+  assert.ok(screenGuide({ v: "upload", many: true }, f)!.steps.some((s) => s.target.sel === TARGETS.batchProgress), "the batch's progress card has its step");
   const batch = screenGuide({ v: "upload", many: true }, f)!;
   assert.ok(batch.steps.every((s) => !s.say.includes("יצירת סיכום")), "the batch never says ״יצירת סיכום״ (its button is ״העלאה״)");
   assert.ok(batch.steps.some((s) => s.say.includes("בשם של הקובץ")), "the batch says what each file becomes");
@@ -499,6 +516,9 @@ test("no mini-guide line names a button its screen does not have: each step is t
   const words = (r: Route) => screenGuide(r, f)!.steps.map((s) => s.say).join(" ");
   assert.ok(/בחינם/.test(words({ v: "course", c: ID })) && /נשארו היום/.test(words({ v: "course", c: ID })), "the course page: what is free, what counts");
   assert.ok(/תקציב/.test(words({ v: "exams", isNew: true, c: ID })), "the exam upload: its cost");
+  assert.ok(/אחרי שבוחרים/.test(words({ v: "exams", isNew: true, c: ID })), "the price is on the button only once a file is picked");
+  assert.ok(/לכל מי שבקבוצה בנפרד/.test(words({ v: "exams", isNew: true, c: ID })), "3 exams a day is each member's own limit");
+  assert.ok(/בתקציב החודשי/.test(words({ v: "course", c: ID })) && /בתקציב החודשי/.test(words({ v: "ask", c: ID })), "a course question counts in the budget too");
   const review = screenGuide({ v: "exams", e: ID, c: ID }, f)!.steps;
   assert.ok(review[review.length - 1].say.includes("לכל הקבוצה"), "the review's last step: a mark is for the whole group");
   assert.ok(/בחינם/.test(words({ v: "mock", c: ID })) && /ממשיך/.test(words({ v: "mock", c: ID })), "the simulation: free, and the clock goes on");
@@ -528,7 +548,14 @@ test("the new places are all in TARGETS; the group's and the budget's controls a
     assert.ok(STOP_SELECTORS.includes(sel as never), sel);
   assert.ok(!STOP_SELECTORS.includes(TARGETS.simStart as never), "the simulation's ״להתחיל״ is free and only the member's: not a STOP");
   const w = walkOf("course", f, FULL)!;
-  assert.deepEqual(w.steps.map((s) => s.target.sel), [TARGETS.libraryTab, TARGETS.courseLink, TARGETS.courseActions]);
+  assert.deepEqual(w.steps.map((s) => s.target.sel), [TARGETS.libraryTab, TARGETS.courseLink, TARGETS.courseExam, TARGETS.courseActions]);
+  // The last bubble is true on a brand-new course too: no simulation there until a past exam is ready.
+  const end = w.steps[w.steps.length - 1].say;
+  assert.ok(!end.startsWith("כאן הסימולציה") && /כשיש מבחן קודם מוכן/.test(end), end);
+  assert.ok(/שואלים/.test(end) && /מתרגלים/.test(end), `the course question and practice are named: ${end}`);
+  assert.equal(w.steps[2].say, "תאריך המבחן ואורכו, אחד לכל הקבוצה.", "S8's ״תאריך המבחן״ is shown on the way");
+  const plain = walkOf("course", flagSet(["COURSES"]), FULL)!;
+  assert.deepEqual(plain.steps.map((s) => s.target.sel), [TARGETS.libraryTab, TARGETS.courseLink, TARGETS.courseExam], "courses alone: the walk ends on the exam's date");
   assert.ok(w.steps.every((s) => !s.stop), "no STOP on the way to a course page");
   assert.equal(w.steps[w.steps.length - 1].until, "end");
   assert.equal(walkOf("course", f, { ...FULL, courses: 0 }), null, "no course yet: no ״הראו לי״");
@@ -568,8 +595,21 @@ test("search under production's flags: each way a member asks finds its how-to; 
     ["מקרה בשלבים", "qimage"],
     ["כמה עולה", "uploadmany"],
     ["הרבה מצגות", "uploadmany"],
+    // The second review's phrasings: the app's own plural, plurals and construct forms, two prefixes, question words.
+    ["איך מעלים מבחן", "examupload"],
+    ["מעלים מבחן", "examupload"],
+    ["סימולציות", "sim"],
+    ["לעשות סימולציה", "sim"],
+    ["סימולציית מבחן", "sim"],
+    ["מבחנים מהשנים הקודמות", "examupload"],
+    ["תשובה שגויה", "examcheck"],
+    ["תשובה לא נכונה", "examcheck"],
+    ["כמה זה עולה", "cost"],
+    ["עולה כסף", "cost"],
+    ["מה בחינם", "cost"],
+    ["איפה סוג שאלה", "qtypes"],
   ];
-  assert.equal(ASKED.length, 28);
+  assert.equal(ASKED.length, 40);
   for (const [q, key] of ASKED) assert.ok(keys(q).includes(key), `${q} → ${key} (found ${keys(q).join(", ")})`);
   assert.deepEqual(keys(""), ["read", "upload", "invite", "comment", "practice", "bet"], "the six ״שאלות נפוצות״");
   // A how-to with a walk has one only once there is a course to walk to.
@@ -607,6 +647,9 @@ test("the first steps under production's flags: ״להציץ בעמוד הקור
 test("״חדש״: the course pages and past exams have their hints, in order, after what a member knew", () => {
   const f = flagSet(S2);
   for (const k of ["courses", "exams", "qtypes"]) assert.ok(hintFlags(f).includes(k), k);
+  const say = (flag: string) => HINTS.find((h) => h.flag === flag)!.say;
+  assert.ok(!say("qtypes").includes("שאלות חדשות") && say("qtypes").includes("״סבב חדש״ ← ״סוג שאלה״"), "the types are answered in a round, not bought in ״שאלות חדשות״");
+  assert.ok(!say("courses").includes("תרגול"), "the courses hint holds without PRACTICE");
   for (const h of HINTS) assert.ok(!h.say.startsWith("חדש"), `the kicker says ״חדש״ already: ${h.say}`);
   const now = 100 * RETIRE_MS;
   const m: Memory = { v: 1, views: 0, did: [], list: [], tips: true, known: hintFlags(flagSet(PROD)), offer: "dismissed" };
