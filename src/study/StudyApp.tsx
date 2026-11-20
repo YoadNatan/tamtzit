@@ -94,7 +94,9 @@ export default function StudyApp() {
   const [toast, setToast] = useState<{ text: string; action?: { label: string; run: () => void } } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
   const started = useRef(false);
-  const joinCode = new URLSearchParams(location.search).get("join") ?? "";
+  // An invite link opened by someone who is already in a group (a home-screen
+  // icon saved on the invite, or the link tapped again) goes straight in.
+  const [joinCode, setJoinCode] = useState(() => new URLSearchParams(location.search).get("join") ?? "");
 
   // The text size is the whole app's (review UX-15).
   useEffect(() => applySize(readSize()), []);
@@ -201,7 +203,16 @@ export default function StudyApp() {
 
   // The replaced route's URL and its one line saying why, once the shell is
   // there to show it (on Join the route waits: joining keeps where it pointed).
-  const inShell = configured && ctx !== null && !joinCode;
+  useEffect(() => {
+    if (!joinCode || !groupsLoaded || !group) return;
+    const u = new URL(location.href);
+    u.searchParams.delete("join");
+    history.replaceState(history.state, "", u.pathname + u.search + u.hash);
+    setJoinCode("");
+  }, [joinCode, groupsLoaded, group]);
+
+  const joining = Boolean(joinCode) && !group;
+  const inShell = configured && ctx !== null && !joining;
   useEffect(() => {
     if (!inShell || !gate.notice) return;
     history.replaceState(history.state, "", routeUrl(gate.route));
@@ -222,7 +233,7 @@ export default function StudyApp() {
 
   if (session === undefined || (session && !groupsLoaded)) return <Loading />;
 
-  if (!session || !group || joinCode || !ctx) {
+  if (!session || !group || joining || !ctx) {
     return (
       <>
         <Join
