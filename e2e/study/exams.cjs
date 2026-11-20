@@ -153,6 +153,9 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       const main = page.locator("main");
       const text = norm(await main.innerText());
       for (const said of ["לאן", "נשמר", "לא יוצא", "פרטיות", "Claude"]) expect(!text.includes(said), `no sentence about where the exam goes (${said})`);
+      // The guidance pass's lines: the price and the timing only (decision 1).
+      expect(norm(await page.locator(".x-cost-note").innerText()).includes("המחיר נספר בתקציב החודשי של הקבוצה") && text.includes("10–20 דקות"), "above the button: what it costs and how long it takes");
+      expect(text.includes("התשובה מוקפת או מסומנת על הדף.") && text.includes("דף תשובות בקובץ או בתמונות משלו."), "each answer option says what it means");
       await page.locator("#x-pdf").setInputFiles(files.pdf);
       await page.locator(".x-picked", { hasText: "12 דפים" }).waitFor({ timeout: 60000 });
       await page.getByRole("textbox", { name: "שנה" }).fill("2025");
@@ -240,6 +243,12 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       await page.getByRole("radio", { name: /^תשובה מוצעת/ }).click();
       await page.locator(".r-head", { hasText: `שאלה ${sug.exam_no}` }).click();
       expect(norm(await page.locator(".r-item").innerText()).includes("תשובה מוצעת · לא נבדקה"), "תשובה מוצעת · לא נבדקה");
+      const groupLine = await page.evaluate(() => {
+        const acts = document.querySelector(".r-item .r-acts");
+        const line = document.querySelector(".r-item .r-group");
+        return line && acts && acts.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING ? line.textContent : "";
+      });
+      expect(groupLine.includes("לכל הקבוצה") && groupLine.includes("ואפשר לבטל"), `under ״לאשר״: the answer changes for the whole group (${groupLine})`);
       const was = db.practice.keys.get(sug.id).answer;
       await page.locator(".r-item").getByRole("button", { name: "לאשר" }).click();
       await until(() => db.practice.keys.get(sug.id).origin === "member", "the confirmation");
@@ -268,6 +277,8 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       await page.getByRole("link", { name: "לתרגל את המבחן" }).click();
       await page.waitForURL(new RegExp(`s=e\\.${EID}`), { timeout: 15000 });
       await page.locator(".pq-options").waitFor({ timeout: 15000 });
+      await page.waitForTimeout(600);
+      expect((await page.locator(".guide-btn, .g-bubble:not([hidden])").count()) === 0, "replaying an exam: no \"?\" and no bubble over the question");
       const one = items.find((q) => q.exam_no === 1);
       const shown = async () => (await page.locator(".pq-options .pq-text").allInnerTexts()).map(norm);
       const first = await shown();
@@ -318,6 +329,7 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       const att = () => db.examsMock.attempts.find((a) => a.id === AID);
       const deadline = att().deadline;
       await page.locator(".m-pos", { hasText: `שאלה 1 מתוך ${items.length}` }).waitFor({ timeout: 15000 });
+      expect((await page.locator(".guide-btn, .g-bubble:not([hidden])").count()) === 0, "while the clock runs: no \"?\" and no bubble over the question");
       const clock = async () => norm(await page.locator(".m-time").innerText());
       // 30 minutes were for the 14 questions it printed (2 open ones skipped): 26 for the 12 copied.
       expect(/^0:(25|26):\d\d$/.test(await clock()), `one clock for the whole simulation: ${await clock()}`);
@@ -336,6 +348,7 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       await sheet.waitFor({ timeout: 10000 });
       expect(norm(await sheet.innerText()).includes(`להגיש עכשיו? נשארו ${items.length - 1} שאלות בלי תשובה.`), "the grid's submit line counts the empty ones");
       expect((await sheet.locator(".m-grid button.f").count()) === 1 && (await sheet.locator(".m-grid button:not(.e)").count()) === 1, "the grid: one answered, one flagged");
+      expect(norm(await sheet.locator(".m-leave").innerText()) === "יוצאים באמצע? השעון ממשיך. חוזרים מ״סימולציה״ בעמוד הקורס.", "the grid says the clock goes on when leaving");
       await shot("exams-sim-grid");
       await sheet.getByRole("button", { name: "סגירה" }).click();
       // The phone locked for 5 minutes: the clock moved, the tab is reloaded.
@@ -361,6 +374,15 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       expect(rows.length === 1 && rows[0].mode === "exam", `study_answers: one row for the one counted pick, mode 'exam', with its attempt_id (${rows.length})`);
       const score = att().score;
       expect(res.includes(`${score.right} מתוך ${score.counted}`), `${score.right} מתוך ${score.counted}`);
+      if (score.suggested) expect(res.includes("תשובה מוצעת: האפליקציה פתרה"), "the result says what a suggested answer is");
+      // A suggested answer is "המוצעת" in the result, never "✓ הנכונה".
+      const solvedRow = score.items.find((it) => it.origin === "solved" && it.form === "one" && it.answer !== null && (!it.counted || !it.correct));
+      if (solvedRow) {
+        await page.locator(".e-row .a-li", { hasText: `שאלה ${solvedRow.pos}` }).first().click();
+        const opened = norm(await page.locator(".e-item").first().innerText());
+        expect(opened.includes("התשובה המוצעת") && !opened.includes("✓ הנכונה"), `a solved item's key reads ״התשובה המוצעת״: ${opened}`);
+        steps.solvedShown = solvedRow.pos;
+      }
       await shot("exams-sim-result");
       await noSideScroll("exams-sim-result");
       // "רק הטעויות": the mistakes asked again.
@@ -378,6 +400,10 @@ const ID0 = "e0e00000-0000-4000-8000-000000000999";
       expect(db.examsMock.mocks.find((m) => m.id === att2().mock_id).minutes === 36, "short: 20 questions, 36 minutes");
       await page.locator(".pq-options .a-opt").first().click();
       await until(() => Object.keys(att2().picks).length === 1, "the pick");
+      // "→ יציאה" with time left: the toast says the clock goes on, and where to come back from.
+      await page.getByRole("button", { name: "→ יציאה" }).click();
+      await page.locator(".a-toast", { hasText: "השעון ממשיך" }).waitFor({ timeout: 8000 });
+      expect(norm(await page.locator(".a-toast").first().innerText()).includes("חוזרים מ״סימולציה״ בעמוד הקורס"), "leaving mid-simulation: ״השעון ממשיך״");
       await context.close();
       context = null;
       db.examsMock.offset += 40 * 60_000;

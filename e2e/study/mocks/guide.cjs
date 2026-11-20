@@ -97,6 +97,10 @@ const READS = new Set([
   // The library's course links (VITE_STUDY_COURSES) and the course page's head.
   "study_courses_of",
   "study_course_overview",
+  // Past exams (VITE_STUDY_EXAMS): one exam's reading and review, and a simulation left open on this phone.
+  "study_exam_status",
+  "study_exam_review",
+  "study_mock_get",
 ]);
 
 /** Whether a request writes to the group's data. */

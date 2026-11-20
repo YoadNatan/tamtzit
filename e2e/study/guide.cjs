@@ -28,6 +28,14 @@
 //           replaced, and a storage that refuses writes but still reads.
 //           Throughout, mocks/guide.cjs refuses any write to the group's
 //           data, and the script asserts none was tried.
+//   s2      production's 27 flags (mock.cjs's "s2"): all of "guide", and the
+//           course pages, past exams and the simulation: the joiner's
+//           "להציץ בעמוד הקורס" ticked by a visit; the "?" of the course page,
+//           the batch upload, the exam upload, one exam's review (an item
+//           opened first by the test), the simulation's setup and the course's
+//           question, each ringed on screen at 360×640 with real data; help's
+//           "סימולציה" with the course walk to ".c-actions"; the search's
+//           status line ("תשובה אחת", only help's rows, nothing).
 //   guide1  production's three with VITE_STUDY_GUIDE: nothing of a feature that is
 //           off (no step, how-to, mini-guide line or hint for the quiz, the
 //           meeting, Today, the wall, corrections or "לשאול").
@@ -306,6 +314,24 @@ const SMALL = { width: 360, height: 640 };
       await page.locator(".g-me .a-btn", { hasText: "להחזיר" }).click();
       await page.locator(".g-steps").waitFor({ timeout: 15000 });
       check("להחזיר: the card is back on the home", path0(page) === "/");
+
+      /* ───────────── C2. the course pages (s2): "להציץ בעמוד הקורס", ticked by a visit ───────────── */
+      if (flags.courses) {
+        // From the third home view the card is one row: "כל הצעדים" opens the list.
+        const allSteps = page.locator(".g-steps-row .a-link", { hasText: "כל הצעדים" });
+        if (await allSteps.count()) await allSteps.click();
+        const s8 = page.locator('.g-step[data-step="S8"]');
+        check("courses: the card has ״להציץ בעמוד הקורס״", ids.includes("S8") && (await s8.count()) === 1 && (await s8.innerText()).includes("להציץ בעמוד הקורס"), ids.join(","));
+        await page.goto(`${mock.base}/?v=library`);
+        await page.locator("a.lib-course").first().click();
+        await page.waitForURL(/v=course&c=/, { timeout: 15000 });
+        const tick = page.locator(".a-toast", { hasText: "להציץ בעמוד הקורס" });
+        const said = await tick.waitFor({ timeout: 8000 }).then(() => tick.innerText(), () => "");
+        check("visiting a course page ticks it: ✓ n מתוך m", new RegExp(`✓ \\d מתוך ${ids.length}: להציץ בעמוד הקורס`).test(said), said);
+        check("C2: no write to the group", writes().length === 0, writes().join(" | "));
+        await page.goto(`${mock.base}/`);
+        await page.locator(".g-steps").waitFor({ timeout: 15000 });
+      }
 
       /* ───────────── D. "?" on Today ───────────── */
       await page.locator("main.today .guide-btn").click();
@@ -648,6 +674,27 @@ const SMALL = { width: 360, height: 640 };
       await mp.locator("main.today").waitFor({ timeout: 15000 });
       db.guideNoWrites = true;
       const SCREENS = ["/", "/?v=library", `/?l=${mock.LECTURE_ID}`, "/?v=upload", "/?v=practice", `/?v=practice&l=${mock.LECTURE_ID}`, "/?v=group", "/?v=wall", "/?v=me"];
+      // The course pages, past exams and the simulation (s2), with real data: the fixture's course, and a ready exam of it.
+      const COURSE_SCREENS = {};
+      if (flags.courses) {
+        await mp.goto(`${mock.base}/?v=library`);
+        await mp.locator("a.lib-course").first().waitFor({ timeout: 15000 });
+        const crow = db.coursesMock.rows.find((r) => !r.deleted_at);
+        const cid = crow.id;
+        if (flags.exams) COURSE_SCREENS.exam = db.examsMock.seed({ course: crow.name, title: "מועד א׳ 2025", n: 30, minutes: 60 }).id;
+        Object.assign(COURSE_SCREENS, {
+          course: `/?v=course&c=${cid}`,
+          many: `/?v=upload&many=1&c=${cid}`,
+          manyLib: "/?v=upload&many=1",
+          ...(flags.exams
+            ? { seg: `/?v=course&c=${cid}&seg=exams`, upload: `/?v=exams&new=1&c=${cid}`, review: `/?v=exams&e=${COURSE_SCREENS.exam}&c=${cid}`, mock: `/?v=mock&c=${cid}` }
+            : {}),
+          ...(flags.ask ? { ask: `/?v=ask&c=${cid}` } : {}),
+        });
+        delete COURSE_SCREENS.exam;
+        SCREENS.push(...Object.values(COURSE_SCREENS));
+      }
+      const said = {};
       const bad = [];
       let practiceEmpty = "";
       for (const url of SCREENS) {
@@ -655,12 +702,22 @@ const SMALL = { width: 360, height: 640 };
         const opener = url.includes("?l=") ? mp.locator(".guide-chip") : mp.locator("main .guide-btn").first();
         await opener.waitFor({ timeout: 15000 });
         await mp.waitForTimeout(1200);
+        if (url === COURSE_SCREENS.review) {
+          // The member opens an item first (the guide never taps), so its "לאשר"/"לסמן" row is there.
+          await mp.locator(".r-head").first().click();
+          await mp.locator(".r-item .r-acts").waitFor({ timeout: 10000 });
+          await mp.waitForTimeout(900);
+        }
         const yStart = await mp.evaluate(() => scrollY);
-        await opener.click();
+        // A tap where the "?" is on screen (a locator's click would first scroll the sticky top bar's button "into view", to the top).
+        const ob = await opener.boundingBox();
+        await mp.mouse.click(ob.x + ob.width / 2, ob.y + ob.height / 2);
         const seen = await walkMini(mp);
+        said[url] = seen.map((x) => x.say);
         if (!seen.length) bad.push(`${url}: no bubble`);
         seen.forEach((x, i) => {
           if (!x.geo.ok || x.geo.why === "no ring") bad.push(`${url} step ${i + 1}: ${JSON.stringify(x.geo)} ${x.say}`);
+          if (x.say.includes("לא מוצאים את זה כרגע")) bad.push(`${url} step ${i + 1}: MISSING_LINE`);
         });
         if (url.includes("practice&l=")) practiceEmpty = seen.map((x) => x.say).join(" | ");
         await mp.locator(".g-bubble .g-actions .a-btn", { hasText: "סיום" }).click();
@@ -670,6 +727,62 @@ const SMALL = { width: 360, height: 640 };
         if (Math.abs(yEnd - yStart) > 1) bad.push(`${url}: scrollY ${yStart} → ${yEnd}`);
       }
       check("360×640: every step of every mini-guide is ringed on screen, the bubble never over it, the page put back", bad.length === 0, bad.join(" ; "));
+      if (flags.courses) {
+        const all = (k) => (said[COURSE_SCREENS[k]] ?? []).join(" | ");
+        check("the library's ? has the course link step", said["/?v=library"].some((t) => t.includes("נוגעים בשם הקורס לעמוד שלו")), said["/?v=library"].join(" | "));
+        check("the course page's ?: what is free, what counts, who sees a change", /בחינם/.test(all("course")) && /נשארו היום/.test(all("course")) && /לכל הקבוצה/.test(all("course")) && said[COURSE_SCREENS.course].length >= 5, all("course"));
+        check("the batch's ?: never ״יצירת סיכום״, says what each file becomes", !/יצירת סיכום/.test(all("many") + all("manyLib")) && /בשם של הקובץ/.test(all("many")) && /הקורס שאליו/.test(all("manyLib")), `${all("many")} || ${all("manyLib")}`);
+        if (flags.exams) {
+          check("the exam upload's ?: its cost, nothing about where the exam goes", /תקציב/.test(all("upload")) && !/לאן|נשמר|לא יוצא|פרטיות/.test(all("upload")) && said[COURSE_SCREENS.upload].length === 3, all("upload"));
+          const rv = said[COURSE_SCREENS.review];
+          check("the review's ?: its last step, a mark is the whole group's", rv.length >= 3 && rv[rv.length - 1].includes("לכל הקבוצה"), rv.join(" | "));
+          check("the simulation's ?: free, and the clock goes on", /בחינם/.test(all("mock")) && /ממשיך/.test(all("mock")), all("mock"));
+          check("the exams' segment ?: the past exams' step", /מבחנים קודמים/.test(all("seg")), all("seg"));
+        }
+        if (flags.ask) check("the course question's ?: what counts, and that it stays on this phone", /נשארו היום/.test(all("ask")) && /בטלפון הזה/.test(all("ask")), all("ask"));
+        // Help: the status line, and "סימולציה" with the course walk to the course page's actions (no STOP on the way).
+        await mp.goto(`${mock.base}/?v=help`);
+        const box = mp.locator("#howto input");
+        await box.waitFor({ timeout: 15000 });
+        const status = async (q) => {
+          await box.fill(q);
+          await mp.waitForTimeout(250);
+          return mp.locator("#howto [role=status]").innerText();
+        };
+        const pizza = await status("פיצה");
+        check("search: פיצה still says לא מצאנו", pizza.includes("לא מצאנו"), pizza);
+        const rowsOnly = await status("מחלוקת");
+        check("search: only help's rows found it: the line points down to them", rowsOnly === "אין תשובה קצרה. ההסבר המלא למטה, ב״כל ההסברים״." && (await mp.locator(".help-rows details").count()) >= 1, rowsOnly);
+        const oneHit = await status("שרטוט");
+        check("search: one hit reads תשובה אחת", oneHit === "תשובה אחת", oneHit);
+        if (flags.exams) {
+          await status("סימולציה");
+          await mp.locator(".howto-q", { hasText: "סימולציה של מבחן" }).click();
+          await mp.locator(".howto-a .a-btn", { hasText: "הראו לי" }).click();
+          await waitBubble(mp, "1 מתוך 3");
+          await tapRing(mp);
+          await waitBubble(mp, "2 מתוך 3");
+          const g2 = await geometry(mp);
+          const onLink = await mp.evaluate(() => {
+            const r = document.querySelector(".g-ring:not([hidden])")?.getBoundingClientRect();
+            const a = document.querySelector("a.lib-course")?.getBoundingClientRect();
+            return Boolean(r && a && r.left <= a.left + 1 && r.right >= a.right - 1 && r.top <= a.top + 1 && r.bottom >= a.bottom - 1);
+          });
+          check("help ״סימולציה״ → הראו לי: the course link ringed", onLink && g2.ok && (await bubble(mp)).includes("נוגעים בשם הקורס"), `${await bubble(mp)} ${JSON.stringify(g2)}`);
+          await tapRing(mp);
+          await waitBubble(mp, "3 מתוך 3", 15000);
+          await settle(mp);
+          const onActs = await mp.evaluate(() => {
+            const r = document.querySelector(".g-ring:not([hidden])")?.getBoundingClientRect();
+            const a = document.querySelector(".course-page .c-actions")?.getBoundingClientRect();
+            return Boolean(r && a && r.left <= a.left + 1 && r.right >= a.right - 1 && r.top <= a.top + 1);
+          });
+          const end = await mp.locator(".g-bubble .g-actions .a-btn").allInnerTexts();
+          check("the course walk ends on the course page's actions, with הבנתי (no STOP)", onActs && end.join(",") === "הבנתי" && /סימולציה/.test(await bubble(mp)), `${end} ${await bubble(mp)}`);
+          await mp.locator(".g-bubble .a-btn", { hasText: "הבנתי" }).click();
+          await noBubble(mp);
+        }
+      }
       check("the empty practice page: its ״שאלות חדשות״, with what it costs", /עוד אין כאן שאלות/.test(practiceEmpty) && /AI/.test(practiceEmpty) && /בתקציב/.test(practiceEmpty), practiceEmpty);
       await mp.goto(`${mock.base}/?l=${mock.LECTURE_ID}`);
       await mp.locator(".guide-chip").waitFor({ timeout: 15000 });

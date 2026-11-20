@@ -5,7 +5,7 @@
 //   2. The course page: "2 הרצאות", "עוד אין תאריך"; the course's sheet sets
 //      the exam's date, questions and minutes: "עוד 23 ימים", "100 שאלות ·
 //      3 שעות" (study_course_set).
-//   3. "לתרגל מה שכבר יש · בחינם (5)" opens s=c.<course>, and the session
+//   3. "לתרגל מה שכבר יש · 5 שאלות · בחינם" opens s=c.<course>, and the session
 //      shows the course's questions ($0: no call to /api/study/ai).
 //   4. "לשאול על כל הקורס": "נבחרו 3 מתוך N פסקאות · מהרצאה אחת", the
 //      answer, and its sources as links to the paragraph (?l=…&at=p.a).
@@ -177,16 +177,19 @@ const israelDay = (plus) => {
 
       /* ── 2. the course page and its sheet ── */
       await page.getByRole("heading", { level: 1, name: COURSE }).waitFor({ timeout: 15000 });
-      // With VITE_STUDY_EXAMS ("s2") the head counts the course's past exams too.
-      const head = flags.exams ? "2 הרצאות · 0 מבחנים קודמים" : "2 הרצאות";
+      // With VITE_STUDY_EXAMS ("s2") the head counts the course's past exams once it has one (none yet: "מבחנים קודמים" says it).
+      const head = "2 הרצאות";
       expect(norm(await page.locator(".ph-sub").first().innerText()) === head, `the head: ${head}`);
+      if (flags.exams) expect(norm(await page.locator(".c-sim-none").innerText()).includes("נפתחים אחרי שמעלים מבחן קודם"), "no ready exam: where the simulation comes from");
       expect(norm(await page.locator(".c-exam").innerText()).includes("עוד אין תאריך"), "no exam date yet");
       const free = page.locator(".c-free");
-      expect(norm(await free.innerText()) === "לתרגל מה שכבר יש · בחינם (5)", "לתרגל מה שכבר יש · בחינם (5)");
+      expect(norm(await free.innerText()) === "לתרגל מה שכבר יש · 5 שאלות · בחינם", "לתרגל מה שכבר יש · 5 שאלות · בחינם");
       expect((await page.locator(".a-li.c-row").count()) === 2, "the lectures' segment lists both lectures");
       await page.getByRole("button", { name: "להוסיף תאריך" }).click();
       const sheet = page.locator(".c-sheet");
       await sheet.waitFor({ timeout: 10000 });
+      expect(norm(await sheet.locator(".a-stack > p").first().innerText()) === "מה שמשנים כאן משתנה לכל הקבוצה.", "the sheet says first that its changes are the whole group's");
+      expect((await sheet.getByText("השם משתנה בכל ההרצאות של הקורס.").count()) === 1, "under the name: it changes in every lecture");
       await sheet.locator('input[type="date"]').fill(israelDay(23));
       await sheet.getByLabel("כמה שאלות").fill("100");
       await sheet.getByLabel("כמה דקות").fill("180");
@@ -256,9 +259,12 @@ const israelDay = (plus) => {
       await page.getByRole("link", { name: "העלאה של כמה קבצים" }).click();
       await page.waitForURL(/v=upload&c=c0000000-[0-9a-f-]+&many=1/, { timeout: 15000 });
       await page.getByRole("heading", { level: 1, name: "העלאה של כמה קבצים" }).waitFor({ timeout: 15000 });
+      const what = norm(await page.locator(".u-what").innerText());
+      expect(what.includes("כל קובץ נהיה הרצאה בקורס, בשם של הקובץ") && what.includes("כל הקבוצה רואה אותן בספרייה"), `what each file becomes, before picking: ${what}`);
       await page.locator('input[type="file"]').setInputFiles(files);
       const go12 = page.getByRole("button", { name: "העלאה (12 קבצים)" });
       await go12.waitFor({ timeout: 90000 });
+      expect(await page.evaluate(() => Boolean(document.querySelector(".u-what")?.compareDocumentPosition(document.querySelector(".u-files")) & Node.DOCUMENT_POSITION_FOLLOWING)), "the line stays above the files once they are picked");
       expect((await page.locator(".u-row").count()) === 5, "5 rows, the rest folded");
       await page.getByRole("button", { name: "ועוד 7 קבצים · להראות" }).click();
       expect((await page.locator(".u-row").count()) === 12, "a row for each of the 12 files");
@@ -267,7 +273,7 @@ const israelDay = (plus) => {
       expect(norm(await page.locator(".a-sec h2", { hasText: "נבחרו" }).innerText()) === "נבחרו 12 קבצים", "נבחרו 12 קבצים");
       const costText = norm(await page.locator(".u-cost").innerText());
       expect(costText.includes("סיכומים ל-12 הרצאות") && costText.includes("נשארו החודש $1.50"), `the price card: ${costText}`);
-      expect(costText.includes("12 סיכומים יחכו לחודש הבא. ההרצאות עצמן עולות עכשיו."), "$1.50 is under what 3 parts reserve: every summary waits for next month");
+      expect(costText.includes("12 סיכומים יחכו לחודש הבא. ההרצאות עצמן עולות עכשיו, והסיכומים יתחילו מה-1 בחודש, כשהאפליקציה תיפתח בטלפון הזה."), "$1.50 is under what 3 parts reserve: every summary waits for next month (from the 1st, on this phone)");
       expect((await page.locator(".u-row", { hasText: "הסיכום יחכה לחודש הבא" }).count()) === 12, "their rows say so");
       expect(!norm(await page.locator(".u-row").first().innerText()).includes("PowerPoint"), "a row says its slides, not its format (PDF only)");
       const queued0 = queues();
