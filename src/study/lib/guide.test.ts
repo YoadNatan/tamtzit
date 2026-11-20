@@ -10,10 +10,13 @@ import {
   DONE_BY,
   firstSteps,
   foldWord,
+  HINTS,
   hintFlags,
+  hitsLine,
   howTos,
   matches,
   NO_FACTS,
+  NO_HITS,
   nextHint,
   offerWanted,
   paragraphActions,
@@ -21,6 +24,8 @@ import {
   readMemory,
   recordEvent,
   RETIRE_MS,
+  ROWS_ONLY,
+  routeEvent,
   screenGuide,
   searchHowTos,
   STOP_LINE,
@@ -49,6 +54,15 @@ const R1 = ["QUESTIONS", "PRACTICE", "CARDS"];
 const W4 = [...R1, "QUIZ", "ANCHOR", "CORRECTIONS", "ASK", "VAR", "WALL", "MEETING", "GUESS"];
 const W5 = [...W4, "PROGRESS", "CARDS_REVIEW", "TODAY", "PULSE"];
 const W5X = [...W5, "MUSEUM", "BOSS", "MARATHONS", "GROUP_PLAN", "NEEDS_ME", "EVE", "TRAPS", "BLANK_TABLE", "QUIZ_ROUNDS"];
+/** Production's 27 flags (mock.cjs's "s2"; flagSet adds GUIDE, the 27th): the course pages, past exams and the question types on. */
+const S2 = [
+  "ANCHOR", "ASK", "BLANK_TABLE", "BOSS", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "COURSES", "EVE", "EXAMS", "GROUP_PLAN", "GUESS", "MARATHONS",
+  "MEETING", "MUSEUM", "NEEDS_ME", "PRACTICE", "PROGRESS", "PULSE", "QTYPES", "QUESTIONS", "QUIZ", "TODAY", "TRAPS", "VAR", "WALL",
+];
+/** Production before the course pages and past exams (what a member who joined then knew). */
+const PROD = S2.filter((n) => n !== "COURSES" && n !== "EXAMS");
+/** Every flag the guide speaks of. */
+const ALL = [...new Set([...W5X, ...S2])];
 const SETS: Array<[string, string[]]> = [
   ["off", []],
   ["rel1", R1],
@@ -58,10 +72,13 @@ const SETS: Array<[string, string[]]> = [
   ["cards only", ["CARDS"]],
   ["today alone", ["TODAY"]],
   ["quiz without the meeting", ["QUESTIONS", "QUIZ"]],
+  ["s2 (production, 27 flags)", S2],
+  ["courses alone", ["COURSES"]],
+  ["courses with practice", [...R1, "COURSES"]],
 ];
 const flagSet = (names: string[]): Flags => flagsFrom(Object.fromEntries([...names, "GUIDE"].map((n) => [`VITE_STUDY_${n}`, "1"])));
-const FULL: Facts = { lectures: 3, ready: [ID], writing: 1, members: 2, practiceLecture: ID, queue: 4, serverWrites: true };
-const WALKS: WalkId[] = ["read", "upload", "practice", "invite", "today", "group", "cards", "correct", "readaloud", "quizopen", "meeting", "ask", "readmark"];
+const FULL: Facts = { lectures: 3, ready: [ID], writing: 1, members: 2, practiceLecture: ID, queue: 4, serverWrites: true, courses: 1 };
+const WALKS: WalkId[] = ["read", "upload", "practice", "invite", "today", "group", "cards", "correct", "readaloud", "quizopen", "meeting", "ask", "readmark", "course"];
 const ROUTES: Route[] = [
   { v: "today" },
   { v: "library" },
@@ -72,6 +89,13 @@ const ROUTES: Route[] = [
   { v: "group" },
   { v: "wall" },
   { v: "me" },
+  { v: "course", c: ID },
+  { v: "upload", many: true },
+  { v: "upload", many: true, c: ID },
+  { v: "exams", isNew: true, c: ID },
+  { v: "exams", e: ID, c: ID },
+  { v: "mock", c: ID },
+  { v: "ask", c: ID },
 ];
 
 /** Every word the guide can say under a flag set, with all the facts there are. */
@@ -164,7 +188,7 @@ test("never a step, a walk, a mini-guide, a how-to or a hint for a feature that 
 
 test("every place the guide points at is in TARGETS, and every STOP ends its walk there", () => {
   const known = new Set<string>(Object.values(TARGETS));
-  const f = flagSet(W5X);
+  const f = flagSet(ALL);
   // A target that is a STOP control, or inside one.
   const stops = (sel: string) => STOP_SELECTORS.some((s) => sel === s || sel.includes(s));
   for (const id of WALKS) {
@@ -369,9 +393,11 @@ test("the paragraph's actions are named as the build has them", () => {
 });
 
 test("every sentence is gender-neutral and short", () => {
-  const text = allText(flagSet(W5X));
-  for (const bad of ["מישהו", "מישהי", "לחץ ", "לחצי", "בחר ", "בחרי", "תוכל", "תוכלי", "את/ה", "/ת "]) assert.ok(!text.includes(bad), bad);
-  for (const line of text.split("\n")) assert.ok(line.length <= 160, `short: ${line}`);
+  for (const names of [W5X, S2, ["COURSES"], [...R1, "COURSES"]]) {
+    const text = [allText(flagSet(names)), ...HINTS.flatMap((h) => [h.title, h.say])].join("\n");
+    for (const bad of ["מישהו", "מישהי", "לחץ ", "לחצי", "בחר ", "בחרי", "תוכל", "תוכלי", "את/ה", "/ת "]) assert.ok(!text.includes(bad), bad);
+    for (const line of text.split("\n")) assert.ok(line.length <= 160, `short: ${line}`);
+  }
   const copy = Object.values(COPY).filter((v): v is string => typeof v === "string");
   for (const c of copy) assert.ok(c.length <= 80, c);
 });
@@ -386,11 +412,22 @@ test("the \"?\" shows only where a mini-guide has something to say (one check fo
     { v: "help" },
     { v: "cards" },
     { v: "quiz" },
+    // A session never has a "?": the simulation's clock (x.), its mistakes (w.), an exam replayed (e.).
+    { v: "practice", s: `x.${ID}` },
+    { v: "practice", s: `e.${ID}` },
+    { v: "practice", s: `w.${ID}` },
+    { v: "exams", c: ID },
+    { v: "ask" },
   ];
   for (const [name, names] of SETS) {
     const f = flagSet(names);
     for (const r of more) assert.equal(miniScreen(r, f), screenGuide(r, f) !== null, `${name}: ${routeUrl(r)}`);
   }
+  const s2 = flagSet(S2);
+  for (const s of [`x.${ID}`, `e.${ID}`, `w.${ID}`]) assert.equal(screenGuide({ v: "practice", s }, s2), null, `no "?" in a session (s=${s})`);
+  assert.equal(screenGuide({ v: "exams", c: ID }, s2), null, "no \"?\" on the bare exams list");
+  assert.equal(screenGuide({ v: "ask" }, s2), null, "the library's question has no mini-guide");
+  assert.ok(screenGuide({ v: "ask", c: ID }, s2), "the course's question has one");
   const f = flagSet(W5X);
   assert.equal(screenGuide({ v: "today", run: true }, f), null, "Today's run has no mini-guide (and so no \"?\")");
   // A lecture's practice with no question yet: the empty state's "שאלות חדשות", with its cost.
@@ -402,7 +439,7 @@ test("the \"?\" shows only where a mini-guide has something to say (one check fo
 });
 
 test("the copy reads whole: no stray fragment, no dangling ending", () => {
-  const text = allText(flagSet(W5X));
+  const text = [W5X, S2, ["COURSES"]].map((n) => allText(flagSet(n))).join("\n");
   assert.ok(!text.includes("כאן זה."), "no \"כאן זה.\"");
   for (const line of text.split("\n")) assert.ok(!/\. רק (לך|אצלך)\.$/.test(line), `no dangling "רק לך.": ${line}`);
   // The STOP lines and the hints are said as they are written.
@@ -431,4 +468,150 @@ test("the app tour: the tab bar one tab at a time, then the screen's \"?\"; offe
   assert.equal(parseMemory(JSON.stringify({ offer: "dismissed" })).offer, "dismissed");
   assert.equal(parseMemory(JSON.stringify({ offer: "maybe" })).offer, undefined, "anything else is dropped");
   assert.equal(cardState(parseMemory(JSON.stringify({ offer: "taken" })), [], Date.now()), "none", "the tour does not start the first steps");
+});
+
+/* ── the course pages, past exams, the simulation and the question types (docs/study/guide.md §2.3) ── */
+
+test("no mini-guide line names a button its screen does not have: each step is the screen's own", () => {
+  const f = flagSet(S2);
+  const ROOT: Array<[Route, string[]]> = [
+    [{ v: "course", c: ID }, [".course-page"]],
+    [{ v: "upload", many: true }, [".upload"]],
+    [{ v: "exams", isNew: true, c: ID }, [".exam-new"]],
+    [{ v: "exams", e: ID, c: ID }, [".exam-review"]],
+    [{ v: "mock", c: ID }, [".sim-setup"]],
+    [{ v: "ask", c: ID }, [".course-ask"]],
+  ];
+  for (const [r, roots] of ROOT) {
+    const g = screenGuide(r, f);
+    assert.ok(g && g.steps.length >= 3, routeUrl(r));
+    for (const s of g!.steps) assert.ok(roots.some((root) => s.target.sel.startsWith(root)), `${routeUrl(r)}: ${s.target.sel} is on ${roots.join(" or ")}`);
+  }
+  const batch = screenGuide({ v: "upload", many: true }, f)!;
+  assert.ok(batch.steps.every((s) => !s.say.includes("יצירת סיכום")), "the batch never says ״יצירת סיכום״ (its button is ״העלאה״)");
+  assert.ok(batch.steps.some((s) => s.say.includes("בשם של הקובץ")), "the batch says what each file becomes");
+  assert.equal(batch.screen, "העלאה של כמה קבצים");
+  // The single upload points at the batch only with the course pages.
+  const one = (names: string[]) => screenGuide({ v: "upload" }, flagSet(names))!.steps.map((s) => s.target.sel);
+  assert.ok(one(S2).includes(TARGETS.uploadMany));
+  assert.ok(!one(PROD).includes(TARGETS.uploadMany));
+  // The words the members will see first.
+  const words = (r: Route) => screenGuide(r, f)!.steps.map((s) => s.say).join(" ");
+  assert.ok(/בחינם/.test(words({ v: "course", c: ID })) && /נשארו היום/.test(words({ v: "course", c: ID })), "the course page: what is free, what counts");
+  assert.ok(/תקציב/.test(words({ v: "exams", isNew: true, c: ID })), "the exam upload: its cost");
+  const review = screenGuide({ v: "exams", e: ID, c: ID }, f)!.steps;
+  assert.ok(review[review.length - 1].say.includes("לכל הקבוצה"), "the review's last step: a mark is for the whole group");
+  assert.ok(/בחינם/.test(words({ v: "mock", c: ID })) && /ממשיך/.test(words({ v: "mock", c: ID })), "the simulation: free, and the clock goes on");
+});
+
+test("decision 1 (sources.md): the exam upload's mini-guide says nothing of where the exam goes", () => {
+  for (const names of [S2, ALL]) {
+    const g = screenGuide({ v: "exams", isNew: true, c: ID }, flagSet(names))!;
+    for (const s of g.steps) for (const word of ["לאן", "נשמר", "לא יוצא", "פרטיות"]) assert.ok(!s.say.includes(word), `${word}: ${s.say}`);
+  }
+});
+
+test("the new places are all in TARGETS; the group's and the budget's controls are STOPs; the course walk has none", () => {
+  const known = new Set<string>(Object.values(TARGETS));
+  const f = flagSet(S2);
+  for (const r of ROUTES) for (const s of screenGuide(r, f)?.steps ?? []) assert.ok(known.has(s.target.sel), `${routeUrl(r)}: ${s.target.sel}`);
+  for (const sel of [
+    ".exam-new .ph-foot .a-btn.primary",
+    ".r-acts .a-btn.primary",
+    ".r-optbtn",
+    ".r-acts .r-reread",
+    ".x-units .x-retry",
+    ".c-sheet button[type=submit]",
+    ".course-ask .k-composer button[type=submit]",
+    ".upload .ph-foot .a-btn.primary", // the batch's "העלאה (N קבצים)" too: its <main> is "upload upload-many"
+  ])
+    assert.ok(STOP_SELECTORS.includes(sel as never), sel);
+  assert.ok(!STOP_SELECTORS.includes(TARGETS.simStart as never), "the simulation's ״להתחיל״ is free and only the member's: not a STOP");
+  const w = walkOf("course", f, FULL)!;
+  assert.deepEqual(w.steps.map((s) => s.target.sel), [TARGETS.libraryTab, TARGETS.courseLink, TARGETS.courseActions]);
+  assert.ok(w.steps.every((s) => !s.stop), "no STOP on the way to a course page");
+  assert.equal(w.steps[w.steps.length - 1].until, "end");
+  assert.equal(walkOf("course", f, { ...FULL, courses: 0 }), null, "no course yet: no ״הראו לי״");
+  assert.equal(walkOf("course", flagSet(PROD), FULL), null, "without the course pages: none");
+  for (const s of appTour(f).steps) assert.ok(!STOP_SELECTORS.some((x) => s.target.sel.includes(x)), s.target.sel);
+});
+
+test("search under production's flags: each way a member asks finds its how-to; the six ״שאלות נפוצות״ stay", () => {
+  const list = howTos(flagSet(S2));
+  const keys = (q: string) => searchHowTos(q, list).map((h) => h.key);
+  const ASKED: Array<[string, string]> = [
+    ["לאחד קורסים", "coursename"],
+    ["לשנות שם קורס", "coursename"],
+    ["תאריך מבחן", "course"],
+    ["אורך מבחן", "course"],
+    ["העלאה נעצרה", "uploadstopped"],
+    ["להעלות מבחן", "examupload"],
+    ["שנים קודמות", "examupload"],
+    ["מבחנים קודמים", "examupload"],
+    ["צילום", "examupload"],
+    ["דף תשובות", "examupload"],
+    ["מועד", "examupload"],
+    ["סימולציה", "sim"],
+    ["להגיש", "sim"],
+    ["שעון", "sim"],
+    ["מפת השאלות", "sim"],
+    ["לאשר תשובה", "examcheck"],
+    ["תשובה מוצעת", "examcheck"],
+    ["לתקן טקסט", "examcheck"],
+    ["לתרגל מבחן", "examreplay"],
+    ["לתרגל קורס", "coursepractice"],
+    ["לשאול על הקורס", "courseask"],
+    ["נכון לא נכון", "qtypes"],
+    ["התאמה", "qtypes"],
+    ["סידור", "qtypes"],
+    ["שרטוט", "qimage"],
+    ["מקרה בשלבים", "qimage"],
+    ["כמה עולה", "uploadmany"],
+    ["הרבה מצגות", "uploadmany"],
+  ];
+  assert.equal(ASKED.length, 28);
+  for (const [q, key] of ASKED) assert.ok(keys(q).includes(key), `${q} → ${key} (found ${keys(q).join(", ")})`);
+  assert.deepEqual(keys(""), ["read", "upload", "invite", "comment", "practice", "bet"], "the six ״שאלות נפוצות״");
+  // A how-to with a walk has one only once there is a course to walk to.
+  for (const h of list) if (h.walk === "course") assert.ok(walkOf(h.walk, flagSet(S2), FULL), h.key);
+  // The status line: one answer, several, only help's rows, nothing.
+  assert.equal(hitsLine(1, 0), "תשובה אחת");
+  assert.equal(hitsLine(3, 2), "3 תשובות");
+  assert.equal(hitsLine(0, 2), ROWS_ONLY);
+  assert.equal(hitsLine(0, 0), NO_HITS);
+});
+
+test("the first steps under production's flags: ״להציץ בעמוד הקורס״ once there is a course", () => {
+  const f = flagSet(S2);
+  const ids = (m: Partial<Memory> = {}, x: Facts = FULL, g: Flags = f) => firstSteps(g, x, { list: [], mode: "join", ...m }).map((s) => s.id);
+  assert.deepEqual(ids(), ["S1", "S2", "S4", "S8", "S5"], "a joiner: the course page before the queue");
+  assert.deepEqual(ids({ mode: "create" }), ["S1", "S6", "S2", "S4", "S8"], "a creator: the invite kept");
+  assert.ok(!ids({}, { ...FULL, courses: 0 }).includes("S8"), "no course yet: no S8");
+  assert.ok(!ids({}, FULL, flagSet(PROD)).includes("S8"), "without the course pages: no S8");
+  assert.equal(ids({}, { ...NO_FACTS, members: 1 })[0], "S1", "a brand-new group: the upload first");
+  const s1 = firstSteps(f, { ...NO_FACTS, members: 1 }, { list: [], mode: "create" })[0];
+  assert.ok(s1.line.includes("אפשר להעלות אותן יחד"), s1.line);
+  const s8 = firstSteps(f, FULL, { list: [], mode: "join" }).find((s) => s.id === "S8")!;
+  assert.equal(s8.title, "להציץ בעמוד הקורס");
+  assert.equal(s8.walk, "course");
+  // Lists already stored are kept as they were.
+  assert.deepEqual(ids({ list: ["S1", "S2", "S4", "S5", "S6"] }), ["S1", "S2", "S4", "S5", "S6"], "a stored list of five stays five");
+  assert.equal(routeEvent({ v: "course", c: ID }), "course");
+  const now = 1_000_000;
+  const m: Memory = { v: 1, born: now, mode: "join", views: 1, did: ["open"], list: ["S1", "S2", "S4", "S8", "S5"], tips: true };
+  assert.equal(recordEvent(m, "course", now).tick, "✓ 2 מתוך 5: להציץ בעמוד הקורס");
+  const parsed = parseMemory(JSON.stringify({ did: ["course"], list: ["S8"] }));
+  assert.deepEqual([parsed.did, parsed.list], [["course"], ["S8"]]);
+});
+
+test("״חדש״: the course pages and past exams have their hints, in order, after what a member knew", () => {
+  const f = flagSet(S2);
+  for (const k of ["courses", "exams", "qtypes"]) assert.ok(hintFlags(f).includes(k), k);
+  for (const h of HINTS) assert.ok(!h.say.startsWith("חדש"), `the kicker says ״חדש״ already: ${h.say}`);
+  const now = 100 * RETIRE_MS;
+  const m: Memory = { v: 1, views: 0, did: [], list: [], tips: true, known: hintFlags(flagSet(PROD)), offer: "dismissed" };
+  const first = nextHint(m, f, "2026-11-20", now);
+  assert.equal(first?.flag, "courses");
+  assert.equal(nextHint({ ...m, known: [...m.known!, "courses"] }, f, "2026-11-20", now)?.flag, "exams");
+  assert.equal(nextHint({ ...m, born: now - 1000 }, f, "2026-11-20", now), null, "never in a member's first 14 days");
 });

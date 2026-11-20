@@ -42,8 +42,9 @@ type HelpProps = {
   /** The spend line ("השימוש של הקבוצה החודש: …"). */
   footer?: ReactNode;
   /** The guide's "איך עושים…?" for members (VITE_STUDY_GUIDE): its search also
-   *  filters the rows below, which then come under "כל ההסברים". */
-  howto?: (query: string, onQuery: (q: string) => void) => ReactNode;
+   *  filters the rows below, which then come under "כל ההסברים" (`rows`: how
+   *  many of them the query found, so its status line can point at them). */
+  howto?: (query: string, onQuery: (q: string) => void, rows: number) => ReactNode;
 };
 
 export default function Help({ back, footer, howto }: HelpProps) {
@@ -53,7 +54,7 @@ export default function Help({ back, footer, howto }: HelpProps) {
   return (
     <main className="help">
       <Head back={back} title="עזרה" />
-      {howto ? howto(query, setQuery) : null}
+      {howto ? howto(query, setQuery, shown.length) : null}
       {howto ? (
         <div className="a-sec">
           <h2>כל ההסברים</h2>

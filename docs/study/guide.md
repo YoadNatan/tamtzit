@@ -11,8 +11,10 @@
    - מי שבוחרים "פתיחת קבוצה חדשה" בלי קוד מקבלים אזהרה: "כאן פותחים קבוצה חדשה וריקה. קיבלתם קישור?…".
      זה מונע מצב שבו נשארים לבד בקבוצה ריקה.
 2. במסך הבית מופיע הכרטיס "הצעדים הראשונים": עד חמישה דברים אמיתיים לעשות.
-   - למשל: לפתוח סיכום, לגעת בפסקה, לענות על שאלה ולהמר, להתחיל את התור,
-     להזמין את הקבוצה, להציץ ב"יחד".
+   - למשל: לפתוח סיכום, לגעת בפסקה, לענות על שאלה ולהמר, להציץ בעמוד הקורס,
+     להתחיל את התור, להזמין את הקבוצה, להציץ ב"יחד".
+   - "להציץ בעמוד הקורס" מופיע כשיש בספרייה קורס: תאריך המבחן, מבחנים קודמים
+     וסימולציה. הוא מסומן ✓ כשנכנסים לעמוד של קורס.
    - רק מה שפתוח בגרסה ורק מה שיש לקבוצה. אם אין עדיין הרצאה, הצעד הראשון
      הוא "להעלות הרצאה ראשונה".
 3. ליד כל צעד יש "להראות":
@@ -51,12 +53,21 @@
   - הסיור נגמר בקישור "כל העזרה".
   - "?" מופיע רק במסך שיש בו מה להראות. למשל, אין "?" בזמן ריצת התור של
     "היום".
+  - יש "?" גם בעמוד הקורס, ב"העלאה של כמה קבצים", ב"העלאת מבחן קודם", במבחן
+    קודם (ההעתקה והבדיקה), בהגדרות הסימולציה וב"לשאול על כל הקורס". כל שורה
+    אומרת מה בחינם, מה נספר בתקציב, ומה משתנה לכל הקבוצה.
+  - אין "?" בזמן שהשעון של סימולציה רץ, ולא כשמתרגלים מבחן קודם: שום בועה לא
+    מכסה שאלה.
   - כשהסיור גולל את המסך, בסוף הוא מחזיר אותו בדיוק למקום שבו היה.
   - כשמקריאים לקבוצה או עוקבים אחרי מי שמקריא, הסיור לא גולל בכלל. כך הוא
     לא מזיז אף אחד בקבוצה.
 - **"איך עושים…?" בראש העזרה:** חיפוש מקומי, למשל "לתרגל", "להעלות" או
   "תגובה".
   - ליד כל תשובה יש "הראו לי", שמוביל לשם במסכים האמיתיים.
+  - יש תשובות גם לקורסים, למבחנים קודמים, לסימולציה ולסוגי השאלות, למשל
+    "סימולציה", "להעלות מבחן", "לאשר תשובה", "לאחד קורסים" או "נכון לא נכון".
+  - כשאין תשובה קצרה אבל ההסבר המלא נמצא למטה, כתוב "אין תשובה קצרה. ההסבר
+    המלא למטה, ב״כל ההסברים״."
 - **"לנסות בלי לחץ":** פסקה לדוגמה ושאלה עם הימור. שום דבר לא נשמר ולא נשלח.
 - **"חדש":** כשנפתחת תכונה חדשה, מי שכבר בקבוצה מקבלים עליה טיפ אחד, לכל
   היותר טיפ אחד ביום. אפשר לכבות את זה ב"שלי".
@@ -67,7 +78,8 @@
 - לא עולה כסף ולא קורא ל-AI.
 - לא מעמעם את המסך ולא חוסם שום כפתור.
 - נעצר לפני כל לחיצה שכל הקבוצה רואה או שעולה מהתקציב, ומסביר. למשל:
-  "להקריא לקבוצה", "יצירת סיכום", "שאלות חדשות", "לפתוח" מבחן קבוצתי.
+  "להקריא לקבוצה", "יצירת סיכום", "שאלות חדשות", "לפתוח" מבחן קבוצתי,
+  העלאת מבחן קודם, "לאשר" תשובה במבחן קודם, "הגדרות הקורס".
 - נעלם כשנפתח גיליון, כשמקלידים, וכשמופיע הרמז של הכרטיסיות.
 - ✕ ו-Escape תמיד סוגרים אותו.
 - במקלדת או ב-VoiceOver: אחרי כל "הבא" הפוקוס נשאר בבועה. אחרי "סיום" הוא
@@ -87,6 +99,8 @@
 4. בעזרה, לחפש "לתרגל".
 5. בהרצאה, ללחוץ "איך קוראים כאן?" עד "סיום", ולראות שהמסך חוזר בדיוק למקום
    שבו היה.
+6. ללחוץ "?" בעמוד של קורס.
+7. בעזרה, לחפש "סימולציה", ולנסות "הראו לי".
 
 ## Technical notes
 
@@ -96,9 +110,9 @@
 |---|---|---|
 | 2.0 principles: no scrim, one slot, no money, $0, flag, lazy | `GuideLayer` draws a fixed ring element (`.g-ring`, `pointer-events: none`) and a docked non-modal bubble (`role=dialog`, `aria-modal=false`). Nothing traps focus and nothing catches taps. The guide never calls `.click()`, and a unit test scans its files for that. The bubble and the ring hide while a sheet is open (`openSheets()`, `.a-scrim`, `.a-sheet`), while `.hint-line` shows, and while focus is in a text field. The guide reads only `listLectures`, `members` and `sessionCounts`; the unit test checks those imports. The entry carries `features/guide.tsx` and `lib/guideMark.ts` only. | none |
 | 2.1 first use: Join lines, `markFresh`, the card | Join's two lines. `markFresh(mode, group)` writes sessionStorage `study-guide-fresh` (with a module copy as fallback) and preloads `GuideSteps`. The card goes on Today before "התור שלי", or in the library after `.lib-actions` before Today is on. It has a progress bar, the ✓ with a hidden "בוצע", "להראות", "לנסות בלי לחץ" and "להסתיר" with "ביטול". It is expanded on home views 1 and 2 and collapsed from view 3 (with "כל הצעדים"). When everything is done it shows "סגירה". It retires after 14 days. Its place is held from first paint. | The Join lines and Today's "?" (gap fixes) ship **only with the flag**, because the task's rule says that with the flag off the app behaves exactly as before. Making them unconditional is a one-line change each. |
-| 2.1 steps S1a/S1w/S1b, S2, S4, S5, S6, S7 | `firstSteps()` in `lib/guide.ts`, capped at 5 and dropped from the end. A creator gets upload first and keeps the invite step. A step shown once stays (`memory.list`). A step whose facts are gone shows "דולג" without "להראות". A step whose flag went off is dropped. Steps are done by real actions: `guideMark("para")` in LectureView, `"bet"` in PracticeSession, `"upload"` in Upload, `"invite"` in `shareInvite`. Routes also count: a ready lecture on screen ("open"), `today&run`, `group`. | none |
-| 2.2 walks, "קודם / קחו אותי", Back re-sync, missing target after 2.5 s, STOP | `walkOf()` defines 13 walks: read, correct, upload, practice, invite, today, group, cards, readaloud, readmark, quizopen, meeting, ask. `stepWalk()` re-syncs on every frame, pushes no history entry, and steps back when a "select" target closes. A STOP rings the control, adds the STOP line, and its only button is "סיום". A walk ends quietly when the member goes on their own to a screen that is none of its steps, or that does not move it on (another tab instead of the ringed one). The browser's Back still re-syncs it, and "קחו אותי" still leads it. | The practice walk has one more step: "סבב חדש"'s start button, the screen between the lecture's practice and the session. The meeting walk rings "לקבוע פגישה" and ends there, because the save button is inside a sheet, where the guide always hides. |
-| 2.3 "?" mini-guides | `screenGuide()` covers Today, the library, the lecture, upload, practice (home and a lecture's, including its empty state), group, the wall and "שלי". Which screens have one is a single pure check, `miniScreen()` in `lib/guideScreens.ts`, that the registry and the entry's "?" (`hasScreenGuide`) both use, so no "?" shows with nothing behind it (Today's run has none). Steps whose element is missing are skipped and the count is recomputed. It ends with "כל העזרה", and with "לנסות שאלה לדוגמה" on practice. Head adds the "?" itself (`GuideButton`). The library's own `.help-btn` gives way to it. The reader has the chip "איך קוראים כאן?" first in `.lecture-actions`. A mini-guide that scrolled the page puts it back when it ends. While the room is live (reading aloud or following) it never scrolls, and keeps only the steps on screen. | The `.t-minutes`, `.room-bar` and `.n-anchor` lines are the design's, still to be proof-read. The quiz line "׳כולנו נגד המבחן׳: בלי נקודות אישיות, ו-80% זה ׳עברנו׳." matches helpCopy's quiz row ("ו-80% זה ׳עברנו׳"). |
+| 2.1 steps S1a/S1w/S1b, S2, S4, S8, S5, S6, S7 | `firstSteps()` in `lib/guide.ts`, capped at 5 and dropped from the end. S8 "להציץ בעמוד הקורס" (Nov 20) comes before the queue, see below. A creator gets upload first and keeps the invite step. A step shown once stays (`memory.list`). A step whose facts are gone shows "דולג" without "להראות". A step whose flag went off is dropped. Steps are done by real actions: `guideMark("para")` in LectureView, `"bet"` in PracticeSession, `"upload"` in Upload, `"invite"` in `shareInvite`. Routes also count: a ready lecture on screen ("open"), `today&run`, `group`. | none |
+| 2.2 walks, "קודם / קחו אותי", Back re-sync, missing target after 2.5 s, STOP | `walkOf()` defines 14 walks: read, correct, upload, practice, invite, today, group, cards, readaloud, readmark, quizopen, meeting, ask, course. `stepWalk()` re-syncs on every frame, pushes no history entry, and steps back when a "select" target closes. A STOP rings the control, adds the STOP line, and its only button is "סיום". A walk ends quietly when the member goes on their own to a screen that is none of its steps, or that does not move it on (another tab instead of the ringed one). The browser's Back still re-syncs it, and "קחו אותי" still leads it. | The practice walk has one more step: "סבב חדש"'s start button, the screen between the lecture's practice and the session. The meeting walk rings "לקבוע פגישה" and ends there, because the save button is inside a sheet, where the guide always hides. |
+| 2.3 "?" mini-guides | `screenGuide()` covers Today, the library, the lecture, upload, practice (home and a lecture's, including its empty state), group, the wall and "שלי"; since Nov 20 also the course page, the batch upload, the exam upload, one exam (its reading and review), the simulation's setup and the course's question. `GuideButton` hands `hasScreenGuide` the whole route (it passed only `l`, `s`, `x`, `run`, so a screen told apart by `c`, `e`, `isNew` or `many` would have got the wrong "?"). Which screens have one is a single pure check, `miniScreen()` in `lib/guideScreens.ts`, that the registry and the entry's "?" (`hasScreenGuide`) both use, so no "?" shows with nothing behind it (Today's run has none). Steps whose element is missing are skipped and the count is recomputed. It ends with "כל העזרה", and with "לנסות שאלה לדוגמה" on practice. Head adds the "?" itself (`GuideButton`). The library's own `.help-btn` gives way to it. The reader has the chip "איך קוראים כאן?" first in `.lecture-actions`. A mini-guide that scrolled the page puts it back when it ends. While the room is live (reading aloud or following) it never scrolls, and keeps only the steps on screen. | The `.t-minutes`, `.room-bar` and `.n-anchor` lines are the design's, still to be proof-read. The quiz line "׳כולנו נגד המבחן׳: בלי נקודות אישיות, ו-80% זה ׳עברנו׳." matches helpCopy's quiz row ("ו-80% זה ׳עברנו׳"). |
 | 2.4 "איך עושים…?" | `HowTo.tsx` sits at the top of help (`#howto`, members only). The search folds niqqud, final letters and one leading ו/ה/ב/ל/מ/ש. It filters help's own rows, which appear under "כל ההסברים". With an empty query it shows "שאלות נפוצות" (the first six). When nothing matches it shows "לא מצאנו…". | The design's list was cut at entry 12. The how-tos after it follow the same rules: "לשאול את החומר", "התור של היום", "לסמן שקראתי", "לכתוב אסוציאציה", "לראות את ההתקדמות שלי", "להגדיל את הטקסט", "לנסות בלי לחץ". Each has its flag. |
 | Existing members (the owner's request, Nov 2026: "where is the guide?") | `Memory.offer` ("taken" / "dismissed"), `offerWanted()` (no `born`, no `offer`). `GuideSteps` renders `TourOffer` in the card's place on the home; `features/guide.tsx`'s `cardWanted` holds its place ("offer", 150 px) from the first paint. "להתחיל סיור" sends the new command `{ type: "tour" }`; `GuideLayer.startTour` runs `appTour(flags)` as a mini-guide run over the tab bar (new TARGETS: `todayTab`, `practiceTab`, `meTab`, `screenHelp`), from any screen that has the tab bar (it goes home first from one without). `nextHint()` says nothing while the offer waits. "שלי"'s section is now "מדריך לאפליקציה", moved above the settings, with the tour as its first row; help has the same row above "איך עושים…?"; help's row "המדריך" is now "מדריך לאפליקציה". | The tour does not start the first steps (`born` stays unset); "שלי" → "להתחיל" still does. |
 | "known flags" for "חדש" | `nextHint()`: one hint a day, on the home only, for a flag on now that the member did not know. It never comes in the first 14 days after joining, and tips can be turned off in "שלי". On the first look the flags that are on are recorded and nothing is said. | none |
@@ -127,6 +141,7 @@
 - **Copy:** `helpCopy.ts` adds the row "המדריך", only with the flag. (Its sentence on the privacy note went with the note, 19 Nov 2026.)
 - **Tests:**
   - `src/study/lib/guide.test.ts`
+  - `e2e/study/guide-screens.cjs` (Nov 20): the new screens' "?" at 390 and 320 px, light and dark.
   - Additions to `route.test.ts` and `helpCopy.test.ts`.
   - `tools/study-bundle.mjs`: GUIDE is on, and the guide counts as package D.
   - `e2e/study/guide.cjs`
@@ -145,6 +160,31 @@ the new sets are called **`guide`** and **`guide1`**:
 Every other script runs on the `guide` build as it does on `w5x`. That covers
 the release scripts too: `practice` and `quiz` run as `rel2`, `cards` as
 `review` and `ahead` as `k`.
+
+### Courses, past exams, the simulation and the question types (20 Nov 2026)
+
+The group is new and all six members join in the next days, so the first
+steps, the "?" mini-guides, the how-tos, the help rows and the screens' own
+words come first. The "חדש" hints exist too, for members who joined before
+the flags (they never show in a member's first 14 days).
+
+| Part | Built |
+|---|---|
+| Which screens have a "?" | `miniScreen()`: `course` with COURSES; `exams` with EXAMS and `isNew` or `e` (the bare list has none); `mock` with EXAMS; `ask` with ASK, COURSES and `c` (the library's question has none). `upload` stays `true`: `screenGuide()` picks the batch's own words from `many`. `practice` stays `!s && !x`, so no session has a "?": not the running simulation (`s=x.`), its mistakes (`s=w.`) or a replayed exam (`s=e.`). While the clock runs, nothing may cover the question. |
+| The mini-guides | Course page (8 steps: the exam card, "סימולציה", "לתרגל מבחן קודם", "לתרגל מה שכבר יש", "לשאול על כל הקורס", "מבחנים קודמים", "העלאה של כמה קבצים", ⋯). Batch upload (its resume, its course field, the files, the price, "העלאה"; never "יצירת סיכום"). Exam upload (how, where the answers are, the price; decision 1: nothing about where the exam goes). One exam (the reading's progress, "לתרגל את המבחן", "לבדיקה", "לאשר"). The simulation's setup (an open simulation, the exam, the length, unseen first, "להתחיל", or the empty state). The course's question (the composer, the sources, "נשארו היום"). The single upload points at the batch, the library at the course link, Today, the practice home and the tour at the course pages. Every line says what is free, what the budget pays and what changes for the whole group, because a mini-guide never adds the STOP line. |
+| First steps | S8 "להציץ בעמוד הקורס", when COURSES is on and the library has a course (`Facts.courses`, counted from the `listLectures` the guide already reads). Done by visiting a course page (`routeEvent`, event `course`). Its "להראות" is the new walk `course` (the library tab, the course link, the course page's actions; no STOP). Order: a joiner S1, S2, S4, S8, S5, S6, S7; a creator S1, S6, S2, S4, S8, S5, S7. With a ready lecture, practice and a queue, a joiner's five are S1, S2, S4, S8, S5: the invite (S6) and "יחד" (S7) give way. All six members join from the creator's link, and the tour points at "יחד"; a creator's invite is never dropped. A brand-new group has no lecture, so S1 (upload) comes first, and with COURSES its line adds "יש כמה מצגות? אפשר להעלות אותן יחד." Stored lists keep their steps. |
+| How-tos | After "uploadmany", so the six "שאלות נפוצות" stay: `coursepractice`, `courseask`, `coursename`, `uploadstopped`, `examupload`, `examcheck`, `examreplay`, `sim`, `qtypes`, `qimage`. "course" and "uploadmany" say more, and have more words. Those that lead to a course page have the `course` walk. `guide.test.ts` runs 28 ways members ask through the search. |
+| Hints | "עמוד לכל קורס" (courses) and "מבחנים קודמים" (exams), before "סוגי שאלות", whose line no longer starts with "חדש" (the kicker says it). |
+| STOPs | The exam's upload, "לאשר", marking an answer (`.r-optbtn`), "לקרוא שוב את עמוד N" (`.r-reread`), a unit's "לנסות שוב" (`.x-retry`), the course sheet's buttons, and a question on the whole course. The batch's "העלאה (N קבצים)" was a STOP already: its `<main>` is `upload upload-many`, so `.upload .ph-foot .a-btn.primary` matches it. The simulation's "להתחיל" is not one: it is free and only the member's. |
+| Help | The status line under the search counts help's own rows too: "תשובה אחת", "N תשובות", "אין תשובה קצרה. ההסבר המלא למטה, ב״כל ההסברים״." when only the rows found it, and "לא מצאנו…" when nothing did. |
+| Hooks | Class names only: `c-ask`, `c-many` and `c-sim-none` on the course page, `r-reread` and `x-retry` on an exam, `u-what` on the batch, `x-cost-note` on the exam upload, `r-group` under an item's actions, `m-leave` in the question map. |
+
+E2E: `guide.cjs` on `s2` (production's 27 flags) runs the whole of `guide`
+and adds the joiner's S8, every new screen's "?" at 360×640 with a seeded
+exam, help's "סימולציה" with the course walk, and the status line.
+`guide-screens.cjs` runs the new screens' "?" at 390×844 and 320×640, light
+and dark. `exams.cjs` checks that no "?" or bubble shows while a simulation
+runs or an exam is replayed, and that "→ יציאה" says "השעון ממשיך".
 
 ### Review round (18 Nov 2026)
 

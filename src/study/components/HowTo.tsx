@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Ctx } from "../features/types";
 import { flags } from "../lib/flags";
-import { COPY, howTos, NO_HITS, readMemory, searchHowTos, walkOf, writeMemory, type Facts } from "../lib/guide";
+import { COPY, hitsLine, howTos, readMemory, searchHowTos, walkOf, writeMemory, type Facts } from "../lib/guide";
 import { guideFacts } from "../lib/guideFacts";
 import { guideSend } from "../lib/guideMark";
 import "../styles/guide.css";
@@ -13,7 +13,7 @@ import "../styles/guide.css";
  * answer is one line; "הראו לי" starts the walk that shows it on the real
  * screens, and stops before anything the group would see or pay for. */
 
-export default function HowTo({ ctx, query, onQuery }: { ctx: Ctx; query: string; onQuery: (q: string) => void }) {
+export default function HowTo({ ctx, query, onQuery, rows = 0 }: { ctx: Ctx; query: string; onQuery: (q: string) => void; rows?: number }) {
   const list = useMemo(() => howTos(flags), []);
   const hits = useMemo(() => searchHowTos(query, list), [query, list]);
   const [open, setOpen] = useState<string | null>(null);
@@ -76,7 +76,7 @@ export default function HowTo({ ctx, query, onQuery }: { ctx: Ctx; query: string
           />
         </label>
         <p className="a-small a-muted" role="status" aria-live="polite">
-          {query.trim() ? (hits.length ? `${hits.length} תשובות` : NO_HITS) : "שאלות נפוצות"}
+          {query.trim() ? hitsLine(hits.length, rows) : "שאלות נפוצות"}
         </p>
         {hits.length ? (
           <ul className="a-list howto-list">

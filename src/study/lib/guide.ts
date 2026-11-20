@@ -35,15 +35,17 @@ export type Facts = {
   queue: number | null;
   /** The summary is written on the server (W's slot): the upload can be left. */
   serverWrites: boolean;
+  /** Courses the library links to (distinct course texts of the lectures). */
+  courses: number;
 };
 
-export const NO_FACTS: Facts = { lectures: 0, ready: [], writing: 0, members: 0, practiceLecture: null, queue: null, serverWrites: false };
+export const NO_FACTS: Facts = { lectures: 0, ready: [], writing: 0, members: 0, practiceLecture: null, queue: null, serverWrites: false, courses: 0 };
 
 /* ─────────────────────────── the device's memory ─────────────────────────── */
 
-export type StepId = "S1" | "S2" | "S4" | "S5" | "S6" | "S7";
+export type StepId = "S1" | "S2" | "S4" | "S5" | "S6" | "S7" | "S8";
 /** A real action the first steps count: the layer's marks and routes. */
-export type DoneEvent = "upload" | "open" | "para" | "bet" | "run" | "invite" | "group";
+export type DoneEvent = "upload" | "open" | "para" | "bet" | "run" | "invite" | "group" | "course";
 
 export type Memory = {
   v: 1;
@@ -81,8 +83,8 @@ const held = new Map<string, Memory>();
  *  value stored there is older than this load's copy, which wins. */
 const unsaved = new Set<string>();
 
-const DONE: readonly DoneEvent[] = ["upload", "open", "para", "bet", "run", "invite", "group"];
-const STEPS: readonly StepId[] = ["S1", "S2", "S4", "S5", "S6", "S7"];
+const DONE: readonly DoneEvent[] = ["upload", "open", "para", "bet", "run", "invite", "group", "course"];
+const STEPS: readonly StepId[] = ["S1", "S2", "S4", "S5", "S6", "S7", "S8"];
 
 /** A stored value, cleaned: anything that is not the guide's shape is dropped. */
 export function parseMemory(raw: string | null | undefined): Memory {
@@ -154,7 +156,8 @@ export type WalkId =
   | "quizopen"
   | "meeting"
   | "ask"
-  | "readmark";
+  | "readmark"
+  | "course";
 
 export type FirstStep = {
   id: StepId;
@@ -190,7 +193,13 @@ function step(id: StepId, f: Flags, x: Facts, creator: boolean): FirstStep | nul
         return { id, title: "לפתוח סיכום", line: "כל הרצאה שהקבוצה העלתה, מסוכמת עם מספרי השקפים.", walk: "read", doneBy: DONE_BY.S1 };
       if (x.writing)
         return { id, title: "להעלות הרצאה ראשונה", chip: "נכתב", line: "הסיכום נכתב כמה דקות. אפשר להמשיך בינתיים, הוא יחכה בספרייה.", doneBy: DONE_BY.S1 };
-      return { id, title: "להעלות הרצאה ראשונה", line: "מצגת או PDF, ותוך כמה דקות יש סיכום מלא לכולם.", walk: "upload", doneBy: DONE_BY.S1 };
+      return {
+        id,
+        title: "להעלות הרצאה ראשונה",
+        line: f.courses ? "מצגת או PDF, ותוך כמה דקות יש סיכום מלא לכולם. יש כמה מצגות? אפשר להעלות אותן יחד." : "מצגת או PDF, ותוך כמה דקות יש סיכום מלא לכולם.",
+        walk: "upload",
+        doneBy: DONE_BY.S1,
+      };
     case "S2":
       return x.ready.length ? { id, title: "לגעת בפסקה", line: `כל פסקה נפתחת: ${paragraphActions(f)}.`, walk: "read", doneBy: DONE_BY.S2 } : null;
     case "S4":
@@ -210,6 +219,17 @@ function step(id: StepId, f: Flags, x: Facts, creator: boolean): FirstStep | nul
       const what = ["מי מקריאים עכשיו", f.meeting && "הפגישה הבאה", f.quiz && "מבחן קבוצתי"].filter(Boolean) as string[];
       return { id, title: "להציץ ב״יחד״", line: `${what.join(", ")} ושאלות פתוחות.`, walk: "group", doneBy: DONE_BY.S7 };
     }
+    case "S8":
+      // The course page (docs/study/sources.md): only once the library has a course to open.
+      return f.courses && x.courses > 0
+        ? {
+            id,
+            title: "להציץ בעמוד הקורס",
+            line: f.exams ? "תאריך המבחן, מבחנים קודמים וסימולציה, לכל קורס." : f.practice ? "תאריך המבחן ותרגול של כל הקורס." : "תאריך המבחן וכל ההרצאות, לכל קורס.",
+            walk: "course",
+            doneBy: DONE_BY.S8,
+          }
+        : null;
   }
 }
 
@@ -217,11 +237,14 @@ export const MAX_STEPS = 5;
 
 /** The first steps: those shown before (never dropped, so the counts only
  *  grow), then those that apply now, in order, at most five. A creator's
- *  invite is kept when the list is cut. */
+ *  invite is kept when the list is cut. The course page (S8) comes before
+ *  the queue: with a ready lecture, practice and a queue, a joiner's invite
+ *  (S6) and "יחד" (S7) give way to it (all six join from the creator's link,
+ *  and the tour points at "יחד"). */
 export function firstSteps(f: Flags, x: Facts, m: Pick<Memory, "list" | "mode">): FirstStep[] {
   const creator = m.mode === "create";
   const kept = new Set(m.list);
-  const order: StepId[] = creator ? ["S1", "S6", "S2", "S4", "S5", "S7"] : ["S1", "S2", "S4", "S5", "S6", "S7"];
+  const order: StepId[] = creator ? ["S1", "S6", "S2", "S4", "S8", "S5", "S7"] : ["S1", "S2", "S4", "S8", "S5", "S6", "S7"];
   const applies = order.filter((id) => kept.has(id) || step(id, f, x, creator) !== null);
   const room = Math.max(MAX_STEPS, kept.size);
   const chosen: StepId[] = [];
@@ -239,7 +262,7 @@ export function firstSteps(f: Flags, x: Facts, m: Pick<Memory, "list" | "mode">)
 }
 
 /** Facts under which every step whose flags are on applies. */
-const SOME_FACTS: Facts = { ...NO_FACTS, ready: ["-"], practiceLecture: "-", queue: 1 };
+const SOME_FACTS: Facts = { ...NO_FACTS, ready: ["-"], practiceLecture: "-", queue: 1, courses: 1 };
 
 /** Whether a step is done: one of its real actions was seen. */
 export const isDone = (s: FirstStep, m: Pick<Memory, "did">) => s.doneBy.some((e) => m.did.includes(e));
@@ -259,7 +282,7 @@ export function cardState(m: Memory, steps: FirstStep[], now: number): CardState
 }
 
 /** The real actions that tick each step off. */
-export const DONE_BY: Record<StepId, DoneEvent[]> = { S1: ["upload", "open"], S2: ["para"], S4: ["bet"], S5: ["run"], S6: ["invite"], S7: ["group"] };
+export const DONE_BY: Record<StepId, DoneEvent[]> = { S1: ["upload", "open"], S2: ["para"], S4: ["bet"], S5: ["run"], S6: ["invite"], S7: ["group"], S8: ["course"] };
 const EVENT_TITLE: Record<DoneEvent, string> = {
   upload: "להעלות הרצאה ראשונה",
   open: "לפתוח סיכום",
@@ -268,6 +291,7 @@ const EVENT_TITLE: Record<DoneEvent, string> = {
   run: "להתחיל את התור",
   invite: "להזמין את הקבוצה",
   group: "להציץ ב״יחד״",
+  course: "להציץ בעמוד הקורס",
 };
 
 /** Whether the home offers the app tour: a member this device never started
@@ -295,6 +319,7 @@ export function recordEvent(m: Memory, ev: DoneEvent, now: number): { m: Memory;
 export function routeEvent(r: Route): DoneEvent | null {
   if (r.v === "today" && r.run) return "run";
   if (r.v === "group") return "group";
+  if (r.v === "course") return "course";
   return null;
 }
 
@@ -350,7 +375,16 @@ export const STOP_SELECTORS = [
   ".quiz-setup .ph-foot .a-btn.primary", // opening a quiz, "לפתוח את שאלות הפתיחה"
   ".wall-screen .ph-foot", // "תנו לי 3 מצחיקות" (AI)
   ".ask-bar .ask-row", // "לשאול" (AI)
-  ".upload .ph-foot .a-btn.primary", // "יצירת סיכום" (AI)
+  // "יצירת סיכום" (AI), and the batch's "העלאה (N קבצים)": its <main> is "upload upload-many".
+  ".upload .ph-foot .a-btn.primary",
+  // Past exams and the course pages (docs/study/sources.md).
+  ".exam-new .ph-foot .a-btn.primary", // the exam's upload (its price on the button)
+  ".r-acts .a-btn.primary", // "לאשר" a suggested answer (for the whole group)
+  ".r-optbtn", // marking an answer (for the whole group)
+  ".r-acts .r-reread", // "לקרוא שוב את עמוד N" (the budget)
+  ".x-units .x-retry", // a unit's "לנסות שוב" (the budget)
+  ".c-sheet button[type=submit]", // the course sheet's "לשמור", "לשנות שם", "לאחד" (for the whole group)
+  ".course-ask .k-composer button[type=submit]", // a question on the whole course (AI)
 ] as const;
 
 /** Every selector the guide may ring, in one place (guide.test.ts checks
@@ -406,6 +440,37 @@ export const TARGETS = {
   practiceTab: `a.ph-tab[href="${APP_PATH}?v=practice"], a.ph-tab[href="${APP_PATH}?v=cards"]`,
   meTab: `a.ph-tab[href="${APP_PATH}?v=me"]`,
   screenHelp: ".ph-head .guide-btn",
+  // The course pages, the batch upload, past exams and the simulation (docs/study/sources.md).
+  courseLink: "a.lib-course",
+  courseExam: ".course-page .c-exam",
+  courseSim: '.course-page .c-actions a[href*="v=mock"]',
+  courseReplay: '.course-page .c-actions a[href*="s=e."]',
+  courseFree: ".course-page .c-free",
+  courseAsk: ".course-page .c-ask",
+  courseSeg: ".course-page .c-seg",
+  courseMany: ".course-page .c-many",
+  courseMenu: '.course-page .ph-head [aria-label="הגדרות הקורס"]',
+  courseActions: ".course-page .c-actions",
+  uploadMany: ".upload .up-many",
+  batchCourse: ".upload-many .a-field",
+  batchCost: ".upload-many .u-cost",
+  batchResume: ".upload-many .u-resume",
+  examMode: '.exam-new .a-seg[aria-label="איך מעלים"]',
+  examKeys: ".exam-new .x-keys",
+  examGo: ".exam-new .ph-foot .a-btn.primary",
+  examProg: ".exam-review .x-prog",
+  examSum: ".exam-review .r-sum",
+  examFilters: ".exam-review .r-filters",
+  examActs: ".exam-review .r-acts",
+  simOpen: ".sim-setup .s-open",
+  simSource: ".sim-setup .s-src",
+  simLength: ".sim-setup .s-len",
+  simUnseen: ".sim-setup .s-unseen",
+  simStart: ".sim-setup .ph-foot .a-btn.primary",
+  simEmpty: '.sim-setup a[href*="v=exams"]',
+  caComposer: ".course-ask .k-composer",
+  caSources: ".course-ask .ca-sources",
+  caLeft: ".course-ask .k-left",
 } as const;
 
 const T = TARGETS;
@@ -628,6 +693,40 @@ export function walkOf(id: WalkId, f: Flags, x: Facts): Walk | null {
             ],
           }
         : null;
+    case "course": {
+      // The course page (docs/study/sources.md): only once the library has a course. No STOP on the way.
+      if (!f.courses || x.courses === 0) return null;
+      const acts = f.exams || f.practice || f.ask;
+      return {
+        id,
+        title: "עמוד הקורס",
+        steps: [
+          toLibrary(f, "הקורסים בספרייה: כל קורס עם ההרצאות שלו."),
+          {
+            at: onLibrary,
+            place: "הספרייה",
+            go: { v: "library" },
+            target: sel(T.courseLink),
+            say: "נוגעים בשם הקורס.",
+            until: "route",
+            empty: "עוד אין קורס. קורס נוצר כשמעלים הרצאה עם שם של קורס.",
+          },
+          {
+            at: (r) => r.v === "course",
+            place: "עמוד הקורס",
+            go: { v: "library" },
+            target: sel(acts ? T.courseActions : T.courseExam),
+            say: f.exams
+              ? "כאן הסימולציה, התרגול של כל הקורס, ו״מבחנים קודמים״ למטה."
+              : acts
+                ? `כאן ${andList([f.practice && "התרגול", f.ask && "השאלות"])} על כל הקורס.`
+                : "כאן תאריך המבחן, וההרצאות של הקורס למטה.",
+            until: "end",
+            empty: f.practice ? "עוד אין כאן מה לתרגל. מתחילים בהרצאות שלמטה." : "עוד אין כאן כלום. מתחילים בהרצאות שלמטה.",
+          },
+        ],
+      };
+    }
   }
 }
 
@@ -649,7 +748,10 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
           m(T.todayMinutes, "בוחרים כמה זמן יש היום, והתור נחתך בהתאם. התור גלוי רק לך."),
           m(T.todayQueue, "התור שלי: מה כדאי לחזור עליו עכשיו. כשהוא ריק, הוא מתמלא כשמתרגלים וקוראים."),
           ...(f.meeting ? [m(T.meetingBand, "הפגישה של היום: מתי ומה קוראים.")] : []),
-          m(T.libraryTab, "ההרצאות עצמן בספרייה."),
+          m(
+            T.libraryTab,
+            f.courses ? `ההרצאות בספרייה, לפי קורס. בעמוד של כל קורס: תאריך המבחן${f.exams ? ", מבחנים קודמים וסימולציה." : "."}` : "ההרצאות עצמן בספרייה.",
+          ),
         ],
       };
     case "library":
@@ -657,6 +759,18 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
         screen: "הספרייה",
         steps: [
           m(T.libraryCards, "כל הרצאה מסוכמת פעם אחת לכל הקבוצה. נוגעים כדי לקרוא, או מעלים מצגת ותוך כמה דקות יש סיכום."),
+          ...(f.courses
+            ? [
+                m(
+                  T.courseLink,
+                  f.exams
+                    ? "נוגעים בשם הקורס לעמוד שלו: תאריך המבחן, מבחנים קודמים, סימולציה ותרגול של כל הקורס."
+                    : f.practice
+                      ? "נוגעים בשם הקורס לעמוד שלו: תאריך המבחן ותרגול של כל הקורס."
+                      : "נוגעים בשם הקורס לעמוד שלו: תאריך המבחן וכל ההרצאות שלו.",
+                ),
+              ]
+            : []),
           ...(f.questions || f.cards || f.corrections ? [m(T.lectureChips, `מתחת להרצאה: ${andList([f.questions && "התרגול", f.cards && "הכרטיסיות", f.corrections && "התיקונים"])} שלה.`)] : []),
           ...(f.ask ? [m(T.askBar, "חיפוש בכל ההרצאות בחינם. ״לשאול״ עונה מהשקפים ונספר ב״נשארו היום״.")] : []),
           m(T.libActions, "״הזמנה לקבוצה״ שולח קישור. נכנסים בלי סיסמה, רק עם שם."),
@@ -673,9 +787,26 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
         ],
       };
     case "upload":
+      // "העלאה של כמה קבצים": its own words, never the single upload's "יצירת סיכום".
+      if (r.many)
+        return {
+          screen: "העלאה של כמה קבצים",
+          steps: [
+            m(T.batchResume, "ההעלאה נעצרה? בוחרים שוב את אותם קבצים, ומה שכבר עלה מדלגים עליו."),
+            m(T.batchCourse, "הקורס שאליו נכנסים כל הקבצים."),
+            m(T.drop, "בוחרים עד 30 מצגות או PDF. כל קובץ נהיה הרצאה, בשם של הקובץ."),
+            m(T.batchCost, "המחיר מראש: כמה יעלו הסיכומים ומה נשאר החודש. מה שלא נכנס מחכה לחודש הבא."),
+            m(T.uploadStart, "״העלאה״ מעלה את כל הקבצים לקבוצה, והסיכומים נכתבים מהתקציב החודשי. כדאי להשאיר את המסך פתוח עד הסוף."),
+          ],
+        };
       return {
         screen: "העלאה",
-        steps: [m(T.drop, "בוחרים pptx או PDF."), m(T.uploadForm, "השם, המרצה והקורס הם מה שהקבוצה תראה בספרייה."), m(T.uploadStart, "״יצירת סיכום״ כותב את הסיכום לכל הקבוצה, מהתקציב החודשי.")],
+        steps: [
+          m(T.drop, "בוחרים pptx או PDF."),
+          ...(f.courses ? [m(T.uploadMany, "יש כמה מצגות של אותו קורס? ״העלאה של כמה קבצים״ מעלה עד 30 יחד, עם המחיר מראש.")] : []),
+          m(T.uploadForm, "השם, המרצה והקורס הם מה שהקבוצה תראה בספרייה."),
+          m(T.uploadStart, "״יצירת סיכום״ כותב את הסיכום לכל הקבוצה, מהתקציב החודשי."),
+        ],
       };
     case "practice":
       if (r.l)
@@ -690,7 +821,10 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
         };
       return {
         screen: "תרגול",
-        steps: [m(T.practiceLead, "התשובות והציונים כאן רק לך."), m(T.practiceRow, "בוחרים הרצאה או קורס שלם.")],
+        steps: [
+          m(T.practiceLead, "התשובות והציונים כאן רק לך."),
+          m(T.practiceRow, f.exams ? "בוחרים הרצאה או קורס שלם. מבחנים קודמים וסימולציה נמצאים בעמוד הקורס, בספרייה." : "בוחרים הרצאה או קורס שלם."),
+        ],
         tryIt: f.practice ? { v: "try", s: "b" } : undefined,
       };
     case "group":
@@ -715,6 +849,76 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
         screen: "שלי",
         steps: [m(T.guideRows, "״מדריך לאפליקציה״: הסיור הקצר, הצעדים הראשונים והטיפים."), m(T.settings, "״א-״ ו״א+״ משנים את גודל הטקסט, רק במכשיר הזה.")],
       };
+    case "course":
+      return {
+        screen: "עמוד הקורס",
+        steps: [
+          m(T.courseExam, "תאריך המבחן ואורכו, אחד לכל הקבוצה. ״להוסיף תאריך״ או ״לשנות״ משנים אותם לכולם."),
+          ...(f.exams
+            ? [
+                m(T.courseSim, "״סימולציה״: מבחן קודם עם שעון, כמו במבחן האמיתי. בחינם, והציון רק לך."),
+                m(T.courseReplay, "״לתרגל מבחן קודם״: אותו מבחן בלי שעון, בסדר המקורי. בחינם, והתשובות רק לך."),
+              ]
+            : []),
+          ...(f.practice
+            ? [
+                m(
+                  T.courseFree,
+                  f.exams
+                    ? "״לתרגל מה שכבר יש״: כל השאלות של ההרצאות והמבחנים הקודמים בקורס, בחינם. התשובות רק לך."
+                    : "״לתרגל מה שכבר יש״: כל השאלות של ההרצאות בקורס, בחינם. התשובות רק לך.",
+                ),
+              ]
+            : []),
+          ...(f.ask ? [m(T.courseAsk, "״לשאול על כל הקורס״ עונה מהסיכומים של כל ההרצאות, עם הרצאה ושקף. כל שאלה נספרת ב״נשארו היום״.")] : []),
+          ...(f.exams ? [m(T.courseSeg, "״מבחנים קודמים״: מעלים מבחן משנים קודמות, והשאלות שלו נכנסות לתרגול ולסימולציה של כל הקבוצה.")] : []),
+          m(T.courseMany, "״העלאה של כמה קבצים״: עד 30 מצגות לקורס בבת אחת, עם המחיר מראש."),
+          m(T.courseMenu, "⋯ הוא ״הגדרות הקורס״: לשנות את השם, או לאחד שני קורסים שהם אותו קורס. מה שמשנים שם משתנה לכל הקבוצה."),
+        ],
+      };
+    case "exams":
+      // Decision 1 (sources.md): the upload says nothing about where the exam goes.
+      if (r.isNew)
+        return {
+          screen: "העלאת מבחן קודם",
+          steps: [
+            m(T.examMode, "קובץ PDF, או צילום של הדפים: עמוד אחד בכל תמונה, ישר ובאור טוב."),
+            m(T.examKeys, "איפה התשובות: מסומנות על הדפים, בקובץ נפרד, או אין. בלי תשובות, האפליקציה מציעה תשובות והקבוצה בודקת אותן."),
+            m(T.examGo, "המחיר כתוב על הכפתור, ונספר בתקציב החודשי של הקבוצה. אפשר להתחיל עד 3 מבחנים ביום."),
+          ],
+        };
+      // One exam: its reading, then its review.
+      return {
+        screen: "מבחן קודם",
+        steps: [
+          m(T.examProg, "כאן רואים כמה מהדפים כבר הועתקו. בסוף יופיע כאן כמה שאלות נמצאו."),
+          m(T.examSum, "״לתרגל את המבחן״ ו״סימולציה מהמבחן״: בחינם, והתשובות רק לך."),
+          m(T.examFilters, "״לבדיקה״: שאלות שלא נקראו טוב, או עם תשובה מוצעת שעוד לא נבדקה. נוגעים בשאלה כדי לבדוק אותה מול הדף."),
+          m(T.examActs, "״לאשר״ ו״לסמן תשובה אחרת״ משנים את התשובה לכל הקבוצה, עם השם שלך. אפשר לבטל."),
+        ],
+      };
+    case "mock":
+      return {
+        screen: "סימולציה",
+        steps: [
+          m(T.simOpen, "סימולציה שעוד לא הוגשה: השעון שלה ממשיך לרוץ. ״להמשיך״ חוזר אליה."),
+          m(T.simSource, "בוחרים מבחן קודם. השאלות והתשובות כמו שהיו בו."),
+          m(T.simLength, "קצר, חצי או מלא. הזמן לפי הקצב של המבחן המקורי."),
+          m(T.simUnseen, "קודם שאלות שעוד לא עניתם עליהן, בתרגול או בסימולציה קודמת."),
+          m(T.simStart, "״להתחיל״ מפעיל את השעון מיד, והוא ממשיך גם כשיוצאים מהמסך או נועלים את הטלפון. בחינם, והציון רק לך."),
+          m(T.simEmpty, "סימולציה נבנית ממבחן קודם של הקורס. מכאן מעלים אחד."),
+        ],
+      };
+    case "ask":
+      // The course's own question ("לשאול על כל הקורס"); the library's has no mini-guide.
+      return {
+        screen: "לשאול על כל הקורס",
+        steps: [
+          m(T.caComposer, "כותבים שאלה על החומר של כל הקורס. כל שאלה נספרת ב״נשארו היום״."),
+          m(T.caSources, "המקורות פותחים את הפסקה בהרצאה, כדי לבדוק את התשובה מול הסיכום."),
+          m(T.caLeft, "השיחה רק בטלפון הזה, ונשמרת 14 יום. הקבוצה לא רואה אותה."),
+        ],
+      };
     default:
       return null;
   }
@@ -728,7 +932,9 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
  *  are skipped when it runs. */
 export function appTour(f: Flags): MiniGuide {
   const m = (target: string, say: string): MiniStep => ({ target: sel(target), say });
-  const library = "בספרייה כל ההרצאות של הקבוצה, מסוכמות. מעלים מצגת או PDF, ותוך כמה דקות יש סיכום לכולם.";
+  const library = f.courses
+    ? `בספרייה כל ההרצאות של הקבוצה, מסוכמות, לפי קורס. נוגעים בשם של קורס לעמוד שלו: תאריך המבחן${f.exams ? ", מבחנים קודמים וסימולציה." : "."}`
+    : "בספרייה כל ההרצאות של הקבוצה, מסוכמות. מעלים מצגת או PDF, ותוך כמה דקות יש סיכום לכולם.";
   // "תרגול" is a tab only without Today (with Today its screens are under "היום").
   const practice = f.today ? "" : f.questions ? `בתרגול: ${andList(["שאלות", f.cards && "כרטיסיות"])} לכל הרצאה. התשובות גלויות רק לך.` : f.cards ? "כאן הכרטיסיות של כל הרצאה." : "";
   return {
@@ -783,8 +989,96 @@ export function howTos(f: Flags): HowTo[] {
     { on: f.today, key: "today", title: "התור של היום", answer: "היום ← בוחרים 10, 20 או 45 דקות ← ״להתחיל״. מה שלא נכנס עובר למחר.", words: "תור חזרה היום דקות", walk: "today" },
     { on: true, key: "readmark", title: "לסמן שקראתי", answer: "בסוף הסיכום ״סימון שקראתי״. כל הקבוצה רואה מי קראו.", words: "קראתי סימון קריאה", walk: "readmark" },
     { on: f.wall, key: "wall", title: "לכתוב אסוציאציה", answer: "נוגעים בפסקה ← ״אסוציאציה״, או ביחד ← ״קיר האסוציאציות״.", words: "אסוציאציה זכירה מצחיק קיר" },
-    { on: f.courses, key: "course", title: "עמוד של קורס", answer: "בספרייה נוגעים בשם הקורס: תאריך המבחן, כל ההרצאות שלו ותרגול של כל הקורס.", words: "קורס בלוק מבחן תאריך עמוד" },
-    { on: f.courses, key: "uploadmany", title: "להעלות כמה הרצאות יחד", answer: "בעמוד הקורס ← ״העלאה של כמה קבצים״. המחיר מופיע לפני ההעלאה.", words: "העלאה כמה קבצים הרבה מצגות יחד" },
+    {
+      on: f.courses,
+      key: "course",
+      title: "עמוד של קורס",
+      answer: `בספרייה נוגעים בשם הקורס. בעמוד הקורס: ${andList(["תאריך המבחן ואורכו (״להוסיף תאריך״)", "כל ההרצאות שלו", f.practice && "תרגול של כל הקורס", f.ask && "שאלה על כל הקורס"])}.${f.exams ? " גם מבחנים קודמים וסימולציה." : ""}`,
+      words: "קורס בלוק מבחן תאריך אורך שאלות דקות עמוד להוסיף לקבוע מתי",
+      walk: "course",
+    },
+    {
+      on: f.courses,
+      key: "uploadmany",
+      title: "להעלות כמה הרצאות יחד",
+      answer: "בעמוד הקורס ← ״העלאה של כמה קבצים״. עד 30 קבצים, וכל קובץ נהיה הרצאה בשם של הקובץ. המחיר מופיע לפני ההעלאה.",
+      words: "העלאה להעלות כמה קבצים הרבה מצגות יחד קורס שלם מחיר עולה כמה עולה תקציב",
+    },
+    {
+      on: f.courses && f.practice,
+      key: "coursepractice",
+      title: "לתרגל את כל הקורס",
+      answer: `בעמוד הקורס ← ״לתרגל מה שכבר יש״: השאלות של כל ההרצאות${f.exams ? " והמבחנים הקודמים" : ""} בקורס, בחינם. התשובות רק לך.`,
+      words: "תרגול קורס שאלות כל ההרצאות בחינם בלוק",
+      walk: "course",
+    },
+    {
+      on: f.courses && f.ask,
+      key: "courseask",
+      title: "לשאול על כל הקורס",
+      answer: "בעמוד הקורס ← ״לשאול על כל הקורס״. התשובה מהסיכומים של כל ההרצאות, עם הרצאה ושקף, ונספרת ב״נשארו היום״.",
+      words: "שאלה קורס כל ההרצאות בינה בלוק",
+      walk: "course",
+    },
+    {
+      on: f.courses,
+      key: "coursename",
+      title: "לשנות שם של קורס או לאחד קורסים",
+      answer: "בעמוד הקורס ← ⋯ ״הגדרות הקורס״. השם משתנה בכל ההרצאות, ואיחוד מעביר את כולן לקורס האחר. זה לכל הקבוצה, ואיחוד אי אפשר לבטל.",
+      words: "שם קורס לאחד איחוד כפול פעמיים טעות הגדרות לשנות",
+    },
+    {
+      on: f.courses,
+      key: "uploadstopped",
+      title: "ההעלאה נעצרה באמצע",
+      answer: "נעצרה באמצע? בוחרים שוב את אותם קבצים, ומה שכבר עלה מדלגים עליו. מה שלא נכנס בתקציב מחכה לחודש הבא.",
+      words: "העלאה נעצרה להמשיך נתקעה חודש הבא תקציב ממתין לכתיבה מחכה",
+    },
+    {
+      on: f.exams,
+      key: "examupload",
+      title: "להעלות מבחן קודם",
+      answer: "ספרייה ← נוגעים בשם הקורס ← ״מבחנים קודמים״ ← ״העלאת מבחן קודם״. PDF או צילום של הדפים. המחיר על הכפתור, מהתקציב החודשי.",
+      words: "להעלות העלאה מבחן מבחנים קודמים קודם ישנים שנים קודמות שנה שעברה מועד pdf צילום לצלם דפים סריקה תשובות דף תשובות",
+      walk: "course",
+    },
+    {
+      on: f.exams,
+      key: "examcheck",
+      title: "לאשר תשובה במבחן קודם",
+      answer: "במבחן ← ״לבדיקה״ ← נוגעים בשאלה ← ״לאשר״ או ״לסמן תשובה אחרת״. התשובה משתנה לכל הקבוצה, עם השם שלך, ואפשר לבטל.",
+      words: "לאשר אישור תשובה מוצעת לא נבדקה בדיקה לבדוק אחרת טעות מפתח לתקן טקסט לא נקראה טוב",
+    },
+    {
+      on: f.exams,
+      key: "examreplay",
+      title: "לתרגל מבחן קודם",
+      answer: "בעמוד הקורס ״לתרגל מבחן קודם״, או בתוך המבחן ״לתרגל את המבחן״. השאלות בסדר של המבחן, בלי שעון. בחינם, והתשובות רק לך.",
+      words: "לתרגל תרגול מבחן מבחנים קודמים קודם שנים קודמות מועד לפתור",
+      walk: "course",
+    },
+    {
+      on: f.exams,
+      key: "sim",
+      title: "סימולציה של מבחן",
+      answer: "בעמוד הקורס ← ״סימולציה״. מבחן קודם עם שעון אחד שלא עוצר, גם כשיוצאים. כשהזמן נגמר היא מוגשת לבד. בחינם, והציון רק לך.",
+      words: "סימולציה מבחן אמיתי דמה שעון זמן להגיש הגשה לסמן לחזרה מפת השאלות מבחנים קודמים",
+      walk: "course",
+    },
+    {
+      on: f.qtypes,
+      key: "qtypes",
+      title: "איך עונים על סוגי השאלות",
+      answer: "נכון / לא נכון: מסמנים כל משפט. התאמה: נוגעים במקום ואז בתשובה. סידור: נוגעים בשלבים מהראשון לאחרון.",
+      words: "נכון לא נכון התאמה סידור סדר שלבים סוגי שאלות",
+    },
+    {
+      on: f.qtypes,
+      key: "qimage",
+      title: "שאלה על תמונה ומקרה בשלבים",
+      answer: "סימון על תמונה: בוחרים מה מסומן במספר, או נוגעים במספר שבשרטוט. מקרה בשלבים: כל שלב הוא שאלה, והמקרה ממשיך.",
+      words: "תמונה שרטוט סימון מספר מקרה קליני שלבים",
+    },
     { on: f.progress, key: "progress", title: "לראות את ההתקדמות שלי", answer: "שלי ← ״ההתקדמות שלי״. גלוי רק לך.", words: "התקדמות ציונים טעויות" },
     { on: true, key: "size", title: "להגדיל את הטקסט", answer: "בהרצאה ׳א+׳, או שלי ← ״גודל הטקסט״. רק במכשיר הזה.", words: "גודל גופן טקסט קטן גדול" },
     { on: true, key: "try", title: "לנסות בלי לחץ", answer: "פסקה ושאלה לדוגמה. שום דבר לא נשמר ולא נשלח.", words: "ניסיון דוגמה לנסות", open: { label: "לנסות", route: { v: "try" } } },
@@ -833,13 +1127,22 @@ export function searchHowTos(query: string, list: HowTo[]): HowTo[] {
 }
 
 export const NO_HITS = "לא מצאנו. אפשר לנסות מילה אחרת, או לשאול בקבוצה.";
+export const ROWS_ONLY = "אין תשובה קצרה. ההסבר המלא למטה, ב״כל ההסברים״.";
+
+/** The search's status line: how many short answers, or, with none, whether
+ *  help's own rows below ("כל ההסברים") found it. */
+export function hitsLine(hits: number, rows: number): string {
+  if (hits === 1) return "תשובה אחת";
+  if (hits > 1) return `${hits} תשובות`;
+  return rows > 0 ? ROWS_ONLY : NO_HITS;
+}
 
 /* ─────────────────────────── "חדש" ─────────────────────────── */
 
 export type Hint = { flag: keyof Flags; title: string; say: string; walk?: WalkId; go?: Route };
 
 /** One line for each feature a member may meet after it is turned on. */
-const HINTS: Hint[] = [
+export const HINTS: Hint[] = [
   { flag: "today", title: "היום", say: "המסך הראשון הוא עכשיו ״היום״: התור שלי לפי הזמן שיש.", go: { v: "today" } },
   { flag: "practice", title: "תרגול", say: "אפשר לתרגל כל הרצאה, ולסמן כמה בטוחים בכל תשובה. התשובות רק לך.", go: { v: "try", s: "b" } },
   { flag: "cards", title: "כרטיסיות", say: "לכל הרצאה יש כרטיסיות לחזרה.", walk: "cards" },
@@ -857,7 +1160,9 @@ const HINTS: Hint[] = [
   { flag: "groupPlan", title: "תוכנית עד המבחן", say: "תוכנית של הקבוצה עד המבחן, ב״יחד״.", go: { v: "plan" } },
   { flag: "traps", title: "שאלה משלי", say: "בפסקה אפשר לכתוב שאלה משלך ולבדוק אותה מול השקפים.", walk: "read" },
   { flag: "blankTable", title: "טבלה ריקה", say: "טבלה מהשקפים למילוי מהזיכרון, בתרגול.", go: { v: "practice" } },
-  { flag: "qtypes", title: "סוגי שאלות", say: "חדש: עוד סוגי שאלות, גם על תמונות מהשקפים.", go: { v: "practice" } },
+  { flag: "courses", title: "עמוד לכל קורס", say: "בספרייה נוגעים בשם הקורס: תאריך המבחן, תרגול של כל הקורס בחינם, והעלאה של כמה קבצים יחד.", go: { v: "library" } },
+  { flag: "exams", title: "מבחנים קודמים", say: "בעמוד הקורס מעלים מבחן משנים קודמות, מתרגלים אותו בסדר המקורי, ועושים סימולציה עם שעון.", go: { v: "library" } },
+  { flag: "qtypes", title: "סוגי שאלות", say: "שאלות על תמונות מהשקפים, התאמה, סידור ונכון / לא נכון. בוחרים אותן ב״שאלות חדשות״.", go: { v: "practice" } },
 ];
 
 /** The flags of a build that have a "חדש" line, on now. */

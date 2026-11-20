@@ -277,7 +277,7 @@ function renderRoute(route: Route, ctx: Ctx, courses: string[]) {
         <HelpScreen
           back={<BackLink go={ctx.go} fallback={{ v: "me" }} />}
           footer={<HelpFooter ctx={ctx} />}
-          howto={flags.guide ? (query, onQuery) => <GuideHowTo ctx={ctx} query={query} onQuery={onQuery} /> : undefined}
+          howto={flags.guide ? (query, onQuery, rows) => <GuideHowTo ctx={ctx} query={query} onQuery={onQuery} rows={rows} /> : undefined}
         />
       );
     case "group":

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { flags } from "../lib/flags";
 import { freshFor, guideSend, hasScreenGuide } from "../lib/guideMark";
+import type { MiniRoute } from "../lib/guideScreens";
 import { allowed, parseRoute, type Route } from "../lib/route";
 import type { Ctx, ScreenProps } from "./types";
 
@@ -37,8 +38,9 @@ function shownRoute(): Route {
 /** "?" at the end of a screen's top bar: the screen's mini-guide. */
 export function GuideButton() {
   if (!flags.guide) return null;
-  const r = shownRoute() as Route & { l?: string; s?: string; x?: string; run?: true };
-  if (!hasScreenGuide(r.v, { l: r.l, s: r.s, x: r.x, run: r.run })) return null;
+  // The whole route: a screen may be told apart by its course, exam, "new" or "many".
+  const r = shownRoute();
+  if (!hasScreenGuide(r.v, r as Omit<MiniRoute, "v">)) return null;
   return (
     <button type="button" className="a-btn ghost icon guide-btn" aria-label="איך זה עובד? מדריך קצר למסך" onClick={(e) => guideSend({ type: "screen", opener: e.currentTarget })}>
       ?
@@ -89,12 +91,12 @@ export function GuideHome({ ctx, home, queue }: { ctx: Ctx; home: "today" | "lib
 }
 
 /** Help's "איך עושים…?" (members only): the search, its answers with "הראו
- *  לי", and the filter it hands help's own rows. */
-export function GuideHowTo({ ctx, query, onQuery }: { ctx: Ctx; query: string; onQuery: (q: string) => void }) {
+ *  לי", and the filter it hands help's own rows (`rows`: how many it found there). */
+export function GuideHowTo({ ctx, query, onQuery, rows }: { ctx: Ctx; query: string; onQuery: (q: string) => void; rows: number }) {
   if (!flags.guide) return null;
   return (
     <Suspense fallback={null}>
-      <HowToBody ctx={ctx} query={query} onQuery={onQuery} />
+      <HowToBody ctx={ctx} query={query} onQuery={onQuery} rows={rows} />
     </Suspense>
   );
 }
