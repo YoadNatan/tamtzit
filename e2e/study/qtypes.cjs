@@ -14,7 +14,7 @@
 // again: 5 labels for slide 3's picture). On a build without the flag (w5x):
 // no new chips, and no question of a new type is ever asked.
 //
-//   NODE_PATH=$(npm root -g) E2E_FLAGS=prod node e2e/study/qtypes.cjs <dist> <out dir>   (prod or w5x)
+//   NODE_PATH=$(npm root -g) E2E_FLAGS=prod node e2e/study/qtypes.cjs <dist> <out dir>   (prod, s1, s2 or w5x)
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
@@ -25,8 +25,8 @@ const { makePptx } = require("./fixtures/make-pptx.cjs");
 
 const [dist, out] = process.argv.slice(2);
 const flagSet = flagSetOf().set;
-if (!dist || !out || !["prod", "w5x"].includes(flagSet)) {
-  console.error("usage: E2E_FLAGS=prod|w5x node e2e/study/qtypes.cjs <dist> <out dir>");
+if (!dist || !out || !["prod", "s1", "s2", "w5x"].includes(flagSet)) {
+  console.error("usage: E2E_FLAGS=prod|s1|s2|w5x node e2e/study/qtypes.cjs <dist> <out dir>");
   process.exit(2);
 }
 fs.mkdirSync(out, { recursive: true });
