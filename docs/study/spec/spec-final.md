@@ -10165,7 +10165,7 @@ export function failShort(code: string): string;                        // the "
 | Code | Area | Hebrew | From |
 |---|---|---|---|
 | `not signed in`, `session expired` | any | without `flags.account`: הכניסה במכשיר הזה פגה. צריך להצטרף מחדש עם קוד הקבוצה. With it: הכניסה במכשיר הזה פגה. נכנסים שוב עם המייל: ״כניסה עם מייל״. (Join opens on the email sign-in, so a saved member does not join again as a new member: review UX-17) | design-me §1.3; review |
-| `session expiring` | any | the signed-out line above, only when it comes back after the refresh and the one repeat (the app refreshes the session and repeats the call once; a refresh that brings no session is `session expired`, or `network` when Auth cannot be reached) | review FE-5; the new-questions screen fix |
+| `session expiring` | any | הכניסה מתחדשת. אפשר לרענן את העמוד ולנסות שוב. Only when it comes back after the refresh and the one repeat: the app refreshes the session and repeats the call once. A refresh that brings no session is `session expired` when Auth refused the refresh token for good (400, 401, 403; the session then leaves the device, so Join opens), `network` when Auth cannot be reached, else `server`. | review FE-5; the new-questions screen fix |
 | `schema` | any | העדכון של האפליקציה עוד לא הושלם. כדאי לנסות שוב בעוד כמה דקות. | review FE-2 |
 | `off` | any | התכונה הזו כבויה כרגע בשרת. | review M10 |
 | `member_share` | practice, exam, cards, ask, mnemonic | השימוש שלך החודש הגיע לחלק האישי בתקציב (40%). אפשר להמשיך בחודש הבא, וכל השאר בקבוצה ממשיכים כרגיל. | review M6 |

@@ -1,5 +1,13 @@
 import type { Box, FigureGeo } from "../../../shared/study/figureGeo";
-import { createClient, isAuthRetryableFetchError, type RealtimeChannel, type Session, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient,
+  isAuthApiError,
+  isAuthRetryableFetchError,
+  isAuthSessionMissingError,
+  type RealtimeChannel,
+  type Session,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 import { REQUIRED_SCHEMA } from "./flags";
 import type { Slide } from "./pptx";
 
@@ -840,20 +848,33 @@ export async function figureUrls(paths: string[]): Promise<Record<string, string
 
 /* ─────────────────────────── generation ─────────────────────────── */
 
-/** The code of a forced refresh that brought no session: "network" when
- *  Auth could not be reached (worth another try), else "session expired"
- *  (a refresh token used, revoked or timed out: signing in again helps). */
-export const refreshFailure = (error: unknown): "network" | "session expired" =>
-  isAuthRetryableFetchError(error) || error instanceof TypeError ? "network" : "session expired";
+/** The code of a forced refresh that brought no session:
+ *  - "session expired" only when Auth refused the refresh token for good
+ *    (a 400, 401 or 403: used, revoked or timed out; or no session at all):
+ *    signing in again is the only way back;
+ *  - "network" when Auth could not be reached (auth-js counts its 5xx so too);
+ *  - "server" for the rest (a 429 from Auth, a refresh auth-js discarded, an
+ *    error of its own): the session may still be good, so another try later. */
+export const refreshFailure = (error: unknown): "network" | "server" | "session expired" => {
+  if (isAuthRetryableFetchError(error) || error instanceof TypeError) return "network";
+  if (isAuthSessionMissingError(error)) return "session expired";
+  if (isAuthApiError(error) && [400, 401, 403].includes(error.status ?? 0)) return "session expired";
+  return "server";
+};
 
 /** The server refuses a session with under 5 minutes left ("session
  *  expiring"; 30 s for a quick call with no model call): its token must
  *  outlive a call of up to 270 s. Such a session is refreshed before it is
  *  sent; `refresh` forces it. A forced refresh that brings no new session
- *  never sends the refused token again: Error("network") when the refresh
- *  could not reach Auth (worth another try), else Error("session expired"),
- *  the signed-out line. An early refresh that fails sends the token it has:
- *  the server decides whether it still serves. */
+ *  never sends the refused token again. It first takes the stored session
+ *  when that is another one (another tab refreshed meanwhile); else it
+ *  throws refreshFailure's code. On "session expired" the session also goes
+ *  from this device (scope local), so the app shows Join, where the sign-in
+ *  is: auth-js keeps a session whose token still runs until it runs out,
+ *  and the screens would say "signed out" beside a signed-in app for those
+ *  minutes. The device's stored material stays (no forgetOtherUsers): the
+ *  same member signing in again finds it. An early refresh that fails sends
+ *  the token it has: the server decides whether it still serves. */
 export async function authHeader(refresh = false): Promise<Record<string, string>> {
   const c = client();
   let s = (await c.auth.getSession()).data.session;
@@ -866,7 +887,15 @@ export async function authHeader(refresh = false): Promise<Record<string, string
       error = e;
     }
     if (next) s = next;
-    else if (refresh) throw new Error(refreshFailure(error));
+    else if (refresh) {
+      const stored = (await c.auth.getSession()).data.session;
+      if (!stored || stored.access_token === s.access_token) {
+        const code = refreshFailure(error);
+        if (code === "session expired") await c.auth.signOut({ scope: "local" }).catch(() => undefined);
+        throw new Error(code);
+      }
+      s = stored;
+    }
   }
   if (!s) throw new Error("not signed in");
   return { authorization: `Bearer ${s.access_token}`, "content-type": "application/json" };
@@ -874,7 +903,7 @@ export async function authHeader(refresh = false): Promise<Record<string, string
 
 /** POST to /api/study/*; after a 401 "session expiring" the session is
  *  refreshed and the call made once more (a refresh that fails throws
- *  "network" or "session expired" instead: authHeader). */
+ *  "network", "server" or "session expired" instead: authHeader). */
 export async function postStudy(path: string, body: unknown, init?: { signal?: AbortSignal }): Promise<Response> {
   const send = async (refresh: boolean) =>
     fetch(path, { method: "POST", headers: await authHeader(refresh), body: JSON.stringify(body), signal: init?.signal });

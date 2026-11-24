@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, test } from "node:test";
-import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
+import { AuthApiError, AuthRefreshDiscardedError, AuthRetryableFetchError, AuthSessionMissingError } from "@supabase/supabase-js";
 
 /* The app's own wrappers (src/study/lib/api.ts) in Node, against a local mock
  * of Supabase (Auth, PostgREST) and of /api/study: what F0 changed on the
@@ -212,17 +212,40 @@ test("a refused refresh after 401 session expiring never posts the same token ag
     "posted once: the refused token is not sent again",
   );
   assert.equal(log.filter((l) => l.path === "/auth/v1/token").length, 1, "one refresh");
+  assert.equal(log.filter((l) => l.path === "/auth/v1/logout").length, 1, "signed out on this device");
+  assert.equal(await api.getSession(), null, "the session is gone, so the app shows Join (where the sign-in is)");
   const other = failText("no such code", "group");
   assert.notEqual(failText("session expired", "practice"), other, "a line of its own, not the generic one");
   assert.equal(failText("session expired", "practice"), failText("not signed in", "practice"), "the signed-out line");
 });
 
-test("a forced refresh that cannot reach Auth is network (worth another try); any other refusal is session expired", () => {
+test("a refresh Auth only held back (429) is server: the refused token is not sent again, and the session stays", async () => {
+  routes["POST /rest/v1/rpc/study_join"] = () => ({ status: 200, body: [{ id: "g1", name: "g" }] });
+  await api.joinGroup("ABC123", "שוהם");
+  routes["POST /api/study/section"] = () => ({ status: 401, body: { error: "session expiring" } });
+  tokenReply = { status: 429, body: { code: "over_request_rate_limit", msg: "Request rate limit reached" } };
+  await assert.rejects(api.runSection("eeeeeeee-0000-4000-8000-000000000005", 1, () => undefined), isError("server"));
+  assert.deepEqual(
+    log.filter((l) => l.path === "/api/study/section").map((c) => c.auth),
+    ["Bearer first"],
+    "posted once",
+  );
+  assert.equal(log.filter((l) => l.path === "/auth/v1/logout").length, 0, "not signed out");
+  assert.equal((await api.getSession())?.access_token, "first", "the session stays: a later refresh may work");
+  assert.notEqual(failText("server", "practice"), failText("session expired", "practice"), "not the signed-out line");
+});
+
+test("a forced refresh: network when Auth cannot be reached, session expired only for a refusal for good, else server", () => {
   assert.equal(api.refreshFailure(new AuthRetryableFetchError("Failed to fetch", 0)), "network");
   assert.equal(api.refreshFailure(new AuthRetryableFetchError("Service Unavailable", 503)), "network");
   assert.equal(api.refreshFailure(new TypeError("Failed to fetch")), "network");
   assert.equal(api.refreshFailure(new AuthApiError("Invalid Refresh Token: Already Used", 400, "refresh_token_already_used")), "session expired");
-  assert.equal(api.refreshFailure(null), "session expired", "no error and no session: signed out");
+  assert.equal(api.refreshFailure(new AuthApiError("Session not found", 403, "session_not_found")), "session expired");
+  assert.equal(api.refreshFailure(new AuthSessionMissingError()), "session expired");
+  assert.equal(api.refreshFailure(new AuthApiError("Request rate limit reached", 429, "over_request_rate_limit")), "server", "a rate limit: the token may still be good");
+  assert.equal(api.refreshFailure(new AuthApiError("Internal error", 500, "unexpected_failure")), "server");
+  assert.equal(api.refreshFailure(new AuthRefreshDiscardedError()), "server", "another tab replaced the session");
+  assert.equal(api.refreshFailure(null), "server", "no error and no session: not a sure refusal");
 });
 
 /* F1 additions: readLines for the item ops (spec §2.11), the lease-aware isStuck, schemaOk. */

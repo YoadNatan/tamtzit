@@ -74,7 +74,7 @@ test("plan: every failure on the way has a line of its own in practice, and its 
     reply = r;
     const e = await caught(P.askPlan(LECTURE));
     assert.equal(e.message, code, `${r.status} ${r.body?.slice(0, 30)}`);
-    assert.equal(F.failCode(e), raw, "the answer's own code, for the line under the words");
+    assert.equal(F.failCode(e, "practice"), raw, "the answer's own code, for the line under the words");
     assert.notEqual(F.failText(e.message, "practice"), OTHER, `${code}: not the generic line`);
     assert.ok(F.hasText(e.message, "practice"), code);
   }
@@ -84,10 +84,11 @@ test("plan: a code the screen has words for keeps them (a 5xx with words, a 4xx)
   reply = { status: 500, body: JSON.stringify({ error: "missing ANTHROPIC_API_KEY" }), type: "application/json" };
   let e = await caught(P.askPlan(LECTURE));
   assert.equal(e.message, "missing ANTHROPIC_API_KEY");
-  assert.equal(F.failCode(e), "missing ANTHROPIC_API_KEY");
+  assert.equal(F.failCode(e, "practice"), "", "a line of its own: no code under it");
   reply = { status: 409, body: JSON.stringify({ error: "points stale" }), type: "application/json" };
   e = await caught(P.createRequest(LECTURE, {} as never));
   assert.equal(e.message, "points stale");
+  assert.equal(F.failCode(e, "practice"), "");
   reply = { status: 401, body: JSON.stringify({ error: "session expired" }), type: "application/json" };
   e = await caught(P.askPlan(LECTURE));
   assert.equal(F.failText(e.message, "practice"), F.failText("not signed in", "practice"), "the signed-out line");

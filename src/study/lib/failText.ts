@@ -51,8 +51,9 @@ const TEXT: Record<string, string> = {
   // any call
   "not signed in": SIGNED_OUT,
   "session expired": SIGNED_OUT,
-  // Answered by a refresh and one more try (api.ts postStudy): a second one means the session cannot be renewed.
-  "session expiring": SIGNED_OUT,
+  // Answered by a refresh and one more try (api.ts postStudy). A second one comes after a refresh that
+  // worked (one that fails is "session expired" or "network": authHeader), so the session is alive.
+  "session expiring": "הכניסה מתחדשת. אפשר לרענן את העמוד ולנסות שוב.",
   schema: "העדכון של האפליקציה עוד לא הושלם. כדאי לנסות שוב בעוד כמה דקות.",
   off: "התכונה הזו כבויה כרגע בשרת.",
   forbidden: "אין גישה להרצאה הזו מהחשבון הזה.",
@@ -61,7 +62,7 @@ const TEXT: Record<string, string> = {
   // a 5xx or an empty 200 (bad reply), a 403 or 429 from the way to the server.
   server: "השרת לא הצליח לענות כרגע. אפשר לנסות שוב בעוד דקה.",
   "bad reply": "השרת לא הצליח לענות כרגע. אפשר לנסות שוב בעוד דקה.",
-  blocked: "הבקשה נחסמה בדרך לשרת. אפשר לנסות שוב בעוד דקה, או לפתוח את האפליקציה בדפדפן.",
+  blocked: "הבקשה נחסמה בדרך לשרת. אפשר לנסות שוב בעוד דקה, או מרשת אחרת.",
   "unknown op": "משהו השתבש בבקשה. כדאי לרענן את העמוד ולנסות שוב.",
   "bad json": "משהו השתבש בבקשה. כדאי לרענן את העמוד ולנסות שוב.",
   "bad request": "משהו השתבש בבקשה. כדאי לרענן את העמוד ולנסות שוב.",
@@ -535,15 +536,23 @@ export function hasText(code: string, area?: Area): boolean {
   return k in TEXT || Object.keys(TEXT).some((key) => key.endsWith(`:${k}`));
 }
 
+/** Codes whose one line covers several causes (the sign-in's). */
+const SIGN_IN_CODES = ["not signed in", "session expired", "session expiring"];
+
 /** The code a screen prints small under its error line, so a member's
- *  screenshot names it: the server's own code when a wrapper put a line of
- *  its own on it (`raw`, as practice2.ts action() does), else the code
- *  itself; nothing for "network" (no answer came from the server). */
-export function failCode(e: unknown): string {
-  if (!(e instanceof Error)) return "";
-  const raw = (e as Error & { raw?: unknown }).raw;
-  const code = typeof raw === "string" && raw ? raw : e.message;
-  return code === "network" ? "" : code.slice(0, 120);
+ *  screenshot names a failure the line does not: the server's own code when
+ *  a wrapper put a line of its own on it (`raw`, as practice2.ts action()
+ *  does); else the code when the line is a generic one (no words in this
+ *  area, or internal: the area's fallback) or the sign-in's. Nothing for a
+ *  code with a line of its own, and nothing for "network" (no answer came
+ *  from the server). Takes an Error or a code. */
+export function failCode(e: unknown, area: Area): string {
+  const raw = e instanceof Error ? (e as Error & { raw?: unknown }).raw : undefined;
+  if (typeof raw === "string" && raw) return raw.slice(0, 120);
+  const code = (e instanceof Error ? e.message : typeof e === "string" ? e : "").trim();
+  if (!code || code === "network") return "";
+  const generic = !hasText(code, area) || isInternal(code, area) || SIGN_IN_CODES.includes(code);
+  return generic ? code.slice(0, 120) : "";
 }
 
 /** The "{סיבה}" of a part that will be retried by itself (design-platform §1.A). */

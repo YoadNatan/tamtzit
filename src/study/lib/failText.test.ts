@@ -332,18 +332,27 @@ test("the new-questions screen never shows the generic line: the wrappers' own c
   }
   assert.equal(failText("server", "practice"), "השרת לא הצליח לענות כרגע. אפשר לנסות שוב בעוד דקה.");
   assert.equal(failText("bad reply", "practice"), failText("server", "practice"));
-  assert.equal(failText("blocked", "practice"), "הבקשה נחסמה בדרך לשרת. אפשר לנסות שוב בעוד דקה, או לפתוח את האפליקציה בדפדפן.");
-  assert.equal(failText("session expiring", "practice"), failText("session expired", "practice"), "a second session expiring reads as the signed-out line");
+  assert.equal(failText("blocked", "practice"), "הבקשה נחסמה בדרך לשרת. אפשר לנסות שוב בעוד דקה, או מרשת אחרת.");
+  assert.equal(failText("session expiring", "practice"), "הכניסה מתחדשת. אפשר לרענן את העמוד ולנסות שוב.");
+  assert.notEqual(failText("session expiring", "cards"), failText("session expired", "cards"), "the session is alive: never the line that says to join again");
   assert.ok(!isInternal("session expiring"), "it has words now: a refresh that did not help");
   assert.equal(failText("no claim", "practice"), "משהו השתבש בתרגול. אפשר לנסות שוב.", "practice's own fallback");
 });
 
-test("failCode: the answer's own code (raw) or the code, never network, at most 120 characters", () => {
-  assert.equal(failCode(Object.assign(new Error("server"), { raw: "http_504" })), "http_504");
-  assert.equal(failCode(new Error("points stale")), "points stale");
-  assert.equal(failCode(new Error("network")), "", "no answer came from the server");
-  assert.equal(failCode("not an error"), "");
-  assert.equal(failCode(new Error("x".repeat(300))).length, 120);
+test("failCode: the answer's own code (raw), or the code under a generic or sign-in line only; never network; at most 120 characters", () => {
+  assert.equal(failCode(Object.assign(new Error("server"), { raw: "http_504" }), "practice"), "http_504");
+  assert.equal(failCode(Object.assign(new Error("server"), { raw: "permission denied for table study_points" }), "practice"), "permission denied for table study_points");
+  assert.equal(failCode(new Error("points stale"), "practice"), "", "a line of its own says it all");
+  assert.equal(failCode(new Error("member_share"), "practice"), "");
+  assert.equal(failCode(new Error("something new"), "practice"), "something new", "practice's fallback: the code names it");
+  assert.equal(failCode(new Error("bad level"), "practice"), "bad level", "internal: the fallback too");
+  assert.equal(failCode(new Error("session expiring"), "practice"), "session expiring");
+  assert.equal(failCode(new Error("session expired"), "practice"), "session expired");
+  assert.equal(failCode("no summary", "practice"), "", "a code as a string");
+  assert.equal(failCode("stopped", "practice"), "stopped");
+  assert.equal(failCode(new Error("network"), "practice"), "", "no answer came from the server");
+  assert.equal(failCode(42, "practice"), "");
+  assert.equal(failCode(new Error("x".repeat(300)), "practice").length, 120);
 });
 
 test("failShort names the reason of a part that is retried by itself", () => {

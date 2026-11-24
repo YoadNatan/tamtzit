@@ -1,6 +1,6 @@
 import { reserve, settle } from "../budget.js";
 import { claimExam, examPriceUsd, runExamUnit, UNIT_STOP_MS } from "../exams.js";
-import { assertSchema, HttpError, json, keyed, memberClient, MODEL, QUICK_TOKEN_SECONDS } from "../study.js";
+import { assertSchema, HttpError, json, keyed, memberClient, MODEL } from "../study.js";
 import type { Op } from "./types.js";
 
 /* Op "exam_read" (docs/study/sources.md B2, B6.2, and its "Built so far"
@@ -52,8 +52,7 @@ export const examReadOp: Op = async (req, body, started) => {
     }
     if (body.pages.length > 120) throw new HttpError(400, "too many pages");
   }
-  // "start" only reserves and saves the pages (no model call); a unit reads with the model and saves after it.
-  const { sb } = await memberClient(req, action === "start" ? { minSeconds: QUICK_TOKEN_SECONDS } : {});
+  const { sb } = await memberClient(req);
   await assertSchema(sb, "exams");
 
   if (action === "unit") {

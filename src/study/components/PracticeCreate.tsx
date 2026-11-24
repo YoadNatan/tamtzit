@@ -131,7 +131,7 @@ function usePlan(lectureId: string, choices: Choices, withRows = false) {
     } catch (e) {
       if (n === seq.current) {
         setError(failText(codeOf(e), "practice"));
-        setErrorCode(failCode(e));
+        setErrorCode(failCode(e, "practice"));
       }
       return null;
     }
@@ -335,7 +335,8 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
       dropReading(lectureId);
       // busy: another member's read started first; the screen shows it.
       setReadError(code === "busy" ? "" : code === "network" ? failText("network", "practice") : pointsReason(code));
-      setReadCode(code === "busy" || code === "network" ? "" : code);
+      // The code only under a generic line: pointsReason's own lines say it all.
+      setReadCode(code === "busy" || pointsReason(code) !== failText(code, "practice") ? "" : failCode(code, "practice"));
     }
     // The database's state before `asked` goes, so the screen (and whose read it is) follows it, not the stream.
     await refresh();
@@ -672,7 +673,7 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
       setChoices((c) => ({ ...c, style: { description: a.description, example: a.example, sig: a.sig } }));
     } catch (e) {
       setStyleError(failText(codeOf(e), "practice"));
-      setStyleCode(failCode(e));
+      setStyleCode(failCode(e, "practice"));
     } finally {
       setStyleBusy(false);
     }
@@ -691,7 +692,7 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
       ctx.go({ v: "practice", l: lectureId, x: "bank", r: made.request.id }, { replace: true });
     } catch (e) {
       setCreateError(failText(codeOf(e), "practice"));
-      setCreateCode(failCode(e));
+      setCreateCode(failCode(e, "practice"));
       setCreating(false);
     }
   };
