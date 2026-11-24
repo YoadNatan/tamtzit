@@ -38,17 +38,36 @@ const OPS: Record<string, Op> = {
   whoami: whoamiOp,
 };
 
+/** The 401s a member's session answers: logged, so the Vercel log tells a
+ *  session that cannot refresh from a server that fails. */
+const SESSION_CODES = new Set(["session expiring", "session expired"]);
+
+/** One line in the function's log for a failure the member cannot fix: a
+ *  status of 500 or more, or a session refused. The op, its action, the
+ *  status and the code only: never the token, the body or a member's data. */
+function logFailure(op: string, action: unknown, status: number, error: string): void {
+  if (status < 500 && !(status === 401 && SESSION_CODES.has(error))) return;
+  const act = typeof action === "string" && /^[a-z_]{1,32}$/.test(action) ? action : "-";
+  console.error("ai", op || "-", act, status, error.slice(0, 200));
+}
+
 async function handler(req: Request): Promise<Response> {
   const started = Date.now();
+  let name = "";
+  let action: unknown;
   try {
     const body = await readBody<AiBody>(req);
-    const name = body && typeof body === "object" ? String(body.op ?? "") : "";
+    name = body && typeof body === "object" ? String(body.op ?? "") : "";
     const op = Object.hasOwn(OPS, name) ? OPS[name] : undefined;
     if (!op) throw new HttpError(400, "unknown op");
+    action = body.action;
     await assertSchema(serverClient(), name);
     return await op(req, body, started);
   } catch (e) {
-    return json(e instanceof HttpError ? e.status : 500, { error: errorText(e) });
+    const status = e instanceof HttpError ? e.status : 500;
+    const error = errorText(e);
+    logFailure(name, action, status, error);
+    return json(status, { error });
   }
 }
 

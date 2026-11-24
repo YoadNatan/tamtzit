@@ -41,6 +41,7 @@ import {
   loadLecture,
   memberClient,
   MODEL,
+  QUICK_TOKEN_SECONDS,
   schemaOk,
   serverKey,
   textStream,
@@ -705,7 +706,7 @@ export async function shareOp(req: Request, raw: unknown): Promise<Response> {
   const share = readShare(raw);
   const key = serverKey();
   if (!share.turn.u.includes(share.question) || !(await verifyTurn(key, share.lectureId, share.turn))) throw new HttpError(400, "bad turn");
-  const { sb } = await memberClient(req);
+  const { sb } = await memberClient(req, { minSeconds: QUICK_TOKEN_SECONDS }); // one RPC, no model call
   await assertCollabSchema(sb);
   const { data, error } = await sb.rpc("study_ask_to_group", {
     p_lecture: share.lectureId,

@@ -5,7 +5,7 @@ import { after, before, beforeEach, test } from "node:test";
 import ai from "../../api/study/ai.js";
 import { MODEL } from "./claude.js";
 import { claimedParts, PIECE_MIN_MS, readPoints } from "./points.js";
-import { signStyle, verifyStyle } from "./practice2.js";
+import { partFacts, signStyle, tableParts, verifyStyle } from "./practice2.js";
 import { POINTS_SYSTEM } from "./prompts/points.js";
 import { QUESTIONS_SYSTEM, STYLE_READ_SYSTEM } from "./prompts/questions.js";
 import { SOLVER_SYSTEM } from "./prompts/solver.js";
@@ -754,6 +754,51 @@ test("plan: bad options answer 400 with their code; a part not in the summary is
   assert.deepEqual((await post({ op: "questions", action: "plan" }).then((r) => r.json())) as unknown, { error: "lectureId required" });
 });
 
+test("plan and create (no model call) serve a token with 2 minutes left; points and style still answer 401 session expiring, and under 30 s plan does too", async () => {
+  const tokenFor = (secondsLeft: number) => `${b64({ alg: "HS256" })}.${b64({ sub: USER, exp: Math.floor(Date.now() / 1000) + secondsLeft })}.sig`;
+  const send = (token: string, body: Record<string, unknown>) =>
+    ai.fetch(
+      new Request("http://localhost/api/study/ai", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ op: "questions", lectureId: LECTURE, ...body }),
+      }),
+    );
+  const late = tokenFor(120);
+  const plan = await send(late, { action: "plan" });
+  assert.equal(plan.status, 200, "plan reads and answers in a second");
+  const create = await send(late, { action: "create", options: { level: "full" } });
+  assert.equal(create.status, 200, "create saves the request with one RPC");
+  for (const body of [{ action: "points" }, { action: "style", text: "שאלה לדוגמה?" }]) {
+    const r = await send(late, body);
+    assert.deepEqual([r.status, await r.json()], [401, { error: "session expiring" }], `${body.action} calls the model and saves after it`);
+  }
+  assert.equal(models().length, 0, "no model call with a token about to end");
+  const r = await send(tokenFor(20), { action: "plan" });
+  assert.deepEqual([r.status, await r.json()], [401, { error: "session expiring" }], "under 30 s even plan refuses it");
+});
+
+test("plan: a slide saved without tables, a null slide or slides that are not a list plan with what there is (200, not a TypeError)", async () => {
+  const slides = lecture.slides;
+  try {
+    lecture.slides = slides.map(({ tables: _t, ...s }, i) => (i === 19 ? { ...s, tables: [[["a"]]] } : s)) as unknown as Lecture["slides"];
+    const r = await call({ action: "plan" });
+    assert.equal(r.status, 200);
+    assert.deepEqual([r.json.lecture, r.json.facts["0"].tables, r.json.facts["1"].tables], [{ slides: 24 }, false, true], "slide 20's table still counts");
+    lecture.slides = [null, ...slides] as unknown as Lecture["slides"];
+    assert.equal((await call({ action: "plan" })).status, 200);
+    lecture.slides = null as unknown as Lecture["slides"];
+    const n = await call({ action: "plan" });
+    assert.deepEqual([n.status, n.json.lecture], [200, { slides: 0 }]);
+  } finally {
+    lecture.slides = slides;
+  }
+  const parts = [{ part_idx: 0, slide_from: 1, slide_to: 12 }];
+  assert.deepEqual([...tableParts({ slides: [{ n: 3 }] as unknown as Lecture["slides"] }, parts)], []);
+  assert.deepEqual([...tableParts({ slides: [{ n: 3, tables: [[["x"]]] }] as unknown as Lecture["slides"] }, parts)], [0]);
+  assert.equal(partFacts({ slides: undefined } as unknown as Lecture, parts, [], []).get(0)?.tables, false);
+});
+
 // ═══ create ═══
 
 test("create: the plan saved as a request and its batches (study_request_create, with the key)", async () => {
@@ -870,6 +915,38 @@ test("create in a round: a sixth lecture, or fewer than 4 questions, is refused 
     const res = await call({ action: "create", options: { level: "deep" }, planId: PLAN });
     assert.deepEqual([res.status, res.json], [status, { error: code }], code);
   }
+});
+
+test("the router logs a 500 and a refused session (op, action, status, code), never the token or the body; a 400 or 409 is not logged", async () => {
+  const logged: unknown[][] = [];
+  const real = console.error;
+  console.error = (...a: unknown[]) => void logged.push(a);
+  try {
+    createRefusal = "enough questions";
+    assert.equal((await call({ action: "create", options: { focus: "מה בודקים" } })).status, 409);
+    createRefusal = null;
+    assert.equal((await call({ action: "plan", options: { level: "everything" } })).status, 400);
+    assert.deepEqual(logged, [], "a refusal the member can act on is not logged");
+    createRows = () => [];
+    assert.equal((await call({ action: "create", options: { focus: "מה בודקים" } })).status, 500);
+    const late = `${b64({ alg: "HS256" })}.${b64({ sub: USER, exp: Math.floor(Date.now() / 1000) + 120 })}.sig`;
+    const res = await ai.fetch(
+      new Request("http://localhost/api/study/ai", {
+        method: "POST",
+        headers: { authorization: `Bearer ${late}`, "content-type": "application/json" },
+        body: JSON.stringify({ op: "questions", action: "points", lectureId: LECTURE }),
+      }),
+    );
+    assert.equal(res.status, 401);
+  } finally {
+    console.error = real;
+  }
+  assert.deepEqual(logged, [
+    ["ai", "questions", "create", 500, "no request"],
+    ["ai", "questions", "points", 401, "session expiring"],
+  ]);
+  const text = JSON.stringify(logged);
+  for (const secret of [TOKEN, LECTURE, "מה בודקים", USER]) assert.ok(!text.includes(secret), "no token, id or input in the log");
 });
 
 test("POLICY: practice 2.0's kinds are optional (80%), 40% a member, with daily limits; the writer and the solver keep theirs", async () => {

@@ -67,6 +67,7 @@ import {
   loadLecture,
   memberClient,
   MODEL,
+  QUICK_TOKEN_SECONDS,
   serverKey,
   textStream,
   tidyMarkdown,
@@ -181,7 +182,7 @@ export function partFacts(
     const md = sections.find((s) => s.idx === p.part_idx)?.markdown ?? "";
     const captioned = md ? figureList([md], p.slide_from, p.slide_to) : [];
     let labelled = 0;
-    for (const sl of lecture.slides) {
+    for (const sl of slidesOf(lecture)) {
       if (sl.n < p.slide_from || sl.n > p.slide_to) continue;
       labelled += (sl.figures ?? []).filter((f) => f.geo && Array.isArray(f.geo.labels) && f.geo.labels.length >= 3).length;
     }
@@ -204,9 +205,15 @@ export async function needTypes(sb: SupabaseClient, styles: readonly string[]): 
   if ((have.X ?? 0) < 1 || (have.Q ?? 0) < 3) throw new HttpError(409, "schema");
 }
 
-/** The parts whose slides show a table (a blank table needs one). */
+/** The lecture's slides as objects: a row whose slides are not an array (or
+ *  hold a null) plans with what there is instead of a TypeError (a 500). */
+const slidesOf = (lecture: Pick<Lecture, "slides">): Lecture["slides"] =>
+  (Array.isArray(lecture.slides) ? lecture.slides : []).filter((s) => s !== null && typeof s === "object");
+
+/** The parts whose slides show a table (a blank table needs one). A slide
+ *  saved without `tables` has none. */
 export function tableParts(lecture: Pick<Lecture, "slides">, parts: ReadonlyArray<Pick<StateRow, "part_idx" | "slide_from" | "slide_to">>): Set<number> {
-  const tables = new Set(lecture.slides.filter((s) => s.tables.length > 0).map((s) => s.n));
+  const tables = new Set(slidesOf(lecture).filter((s) => Array.isArray(s.tables) && s.tables.length > 0).map((s) => s.n));
   return new Set(parts.filter((p) => [...tables].some((n) => n >= p.slide_from && n <= p.slide_to)).map((p) => p.part_idx));
 }
 
@@ -234,7 +241,8 @@ function chosenParts(state: readonly StateRow[], options: Options): number[] {
 export const planAction: Op = async (req, body) => {
   const lectureId = lectureIdOf(body);
   const options = optionsOf(body.options);
-  const { sb } = await memberClient(req);
+  // No model call and about a second of reads: a token near its end still serves.
+  const { sb } = await memberClient(req, { minSeconds: QUICK_TOKEN_SECONDS });
   const lecture = await loadLecture(sb, lectureId);
   const [state, points, sections, spent, mine] = await Promise.all([
     pointsState(sb, lectureId),
@@ -255,7 +263,7 @@ export const planAction: Op = async (req, body) => {
   const readUsd = stale.length ? pointsUsd(chars, stale.length) : 0;
   const planned = plannedStyles(plan);
   const answer: PlanAnswer = {
-    lecture: { slides: lecture.slides.length },
+    lecture: { slides: slidesOf(lecture).length },
     parts: state,
     points: {
       total: state.reduce((n, s) => n + s.points, 0),
@@ -348,7 +356,8 @@ export const createAction: Op = async (req, body) => {
   const lectureId = lectureIdOf(body);
   const options = optionsOf(body.options);
   const planId = planIdOf(body);
-  const { sb } = await memberClient(req);
+  // No model call: reads and one RPC. Each batch's write checks its own token.
+  const { sb } = await memberClient(req, { minSeconds: QUICK_TOKEN_SECONDS });
   const key = serverKey();
   // A round over several lectures writes plan_id (section S at 1).
   if (planId) await assertSchema(sb, "questions_plan");

@@ -88,10 +88,16 @@ function tokenExpiry(token: string): number | null {
   }
 }
 
+/** The margin of a call that makes no model call and ends in a few seconds
+ *  (practice 2.0's plan and create, sharing an answer, starting an exam's
+ *  read): its token only has to outlive a few reads and one RPC. */
+export const QUICK_TOKEN_SECONDS = 30;
+
 /** The caller's Supabase client, or a 401: "session expired" for a token Supabase
- *  Auth refuses, "session expiring" for one with under 5 minutes left (the
- *  phone refreshes its session and repeats the call once). */
-export async function memberClient(req: Request): Promise<{ sb: SupabaseClient; userId: string }> {
+ *  Auth refuses, "session expiring" for one with under `minSeconds` left (5
+ *  minutes by default; the phone refreshes its session and repeats the call
+ *  once). A quick call with no model call passes QUICK_TOKEN_SECONDS. */
+export async function memberClient(req: Request, { minSeconds = TOKEN_MIN_SECONDS }: { minSeconds?: number } = {}): Promise<{ sb: SupabaseClient; userId: string }> {
   const token = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
   if (!token) throw new HttpError(401, "not signed in");
   const sb = createClient(supabaseUrl(), supabaseAnonKey(), {
@@ -101,7 +107,7 @@ export async function memberClient(req: Request): Promise<{ sb: SupabaseClient; 
   const { data, error } = await sb.auth.getUser(token);
   if (error || !data.user) throw new HttpError(401, "session expired");
   const exp = tokenExpiry(token);
-  if (exp !== null && exp * 1000 - Date.now() < TOKEN_MIN_SECONDS * 1000) throw new HttpError(401, "session expiring");
+  if (exp !== null && exp * 1000 - Date.now() < minSeconds * 1000) throw new HttpError(401, "session expiring");
   return { sb, userId: data.user.id };
 }
 
