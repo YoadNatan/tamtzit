@@ -1868,3 +1868,8 @@ input[type="radio"]:disabled {
   }
 }
 
+/* The code under an error line (FailCode): small, and never wider than the screen. */
+.a-fail-code {
+  margin-top: calc(-1 * var(--sp-2));
+  overflow-wrap: anywhere;
+}

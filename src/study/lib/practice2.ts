@@ -19,6 +19,7 @@ import {
 } from "../../../shared/study/practice2";
 import type { FlagReason } from "../../../shared/study/aspects";
 import { postStudy, readLines, sb } from "./api";
+import { hasText } from "./failText";
 import { flags } from "./flags";
 import type { PointPartRow } from "./pointsRead";
 import { startRound, type RoundResult } from "./rounds";
@@ -51,7 +52,16 @@ function network(e: unknown): never {
   throw e;
 }
 
-/** POST op "questions" with an action; a JSON answer, or Error(code). */
+/** Error(code) with the answer's own code as `raw` (failText.ts failCode). */
+function coded(code: string, raw: string): Error {
+  return Object.assign(new Error(code), { raw });
+}
+
+/** POST op "questions" with an action; a JSON answer, or Error(code). An
+ *  answer that is no JSON (the platform's own page or a firewall's) is
+ *  "server" for a 5xx, "blocked" for a 403 or 429; a 5xx whose code has no
+ *  words is "server"; an empty 200 is "bad reply". Each keeps what came as
+ *  `raw` ("http_504", the database's message), so the screen can show it. */
 async function action<T>(body: Record<string, unknown>): Promise<T> {
   let res: Response;
   try {
@@ -65,7 +75,13 @@ async function action<T>(body: Record<string, unknown>): Promise<T> {
   } catch {
     /* not json */
   }
-  if (!res.ok) throw new Error(((json ?? {}) as { error?: string }).error ?? `http_${res.status}`);
+  if (!res.ok) {
+    const code = (json as { error?: unknown } | null)?.error;
+    if (typeof code !== "string" || !code) throw coded(res.status === 403 || res.status === 429 ? "blocked" : "server", `http_${res.status}`);
+    if (res.status >= 500 && !hasText(code, "practice")) throw coded("server", code);
+    throw new Error(code);
+  }
+  if (json === null || typeof json !== "object") throw coded("bad reply", `http_${res.status}`);
   return json as T;
 }
 

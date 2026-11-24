@@ -51,10 +51,17 @@ const TEXT: Record<string, string> = {
   // any call
   "not signed in": SIGNED_OUT,
   "session expired": SIGNED_OUT,
+  // Answered by a refresh and one more try (api.ts postStudy): a second one means the session cannot be renewed.
+  "session expiring": SIGNED_OUT,
   schema: "העדכון של האפליקציה עוד לא הושלם. כדאי לנסות שוב בעוד כמה דקות.",
   off: "התכונה הזו כבויה כרגע בשרת.",
   forbidden: "אין גישה להרצאה הזו מהחשבון הזה.",
   network: "אין חיבור כרגע. כדאי לבדוק את החיבור ולנסות שוב.",
+  // A wrapper's own codes for an answer that is no JSON (practice2.ts action()):
+  // a 5xx or an empty 200 (bad reply), a 403 or 429 from the way to the server.
+  server: "השרת לא הצליח לענות כרגע. אפשר לנסות שוב בעוד דקה.",
+  "bad reply": "השרת לא הצליח לענות כרגע. אפשר לנסות שוב בעוד דקה.",
+  blocked: "הבקשה נחסמה בדרך לשרת. אפשר לנסות שוב בעוד דקה, או לפתוח את האפליקציה בדפדפן.",
   "unknown op": "משהו השתבש בבקשה. כדאי לרענן את העמוד ולנסות שוב.",
   "bad json": "משהו השתבש בבקשה. כדאי לרענן את העמוד ולנסות שוב.",
   "bad request": "משהו השתבש בבקשה. כדאי לרענן את העמוד ולנסות שוב.",
@@ -393,18 +400,17 @@ const FALLBACK: Partial<Record<Area, string>> = {
   writing: "הכתיבה נעצרה. אפשר ללחוץ ״המשך כתיבה״.",
   corrections: "לא נשמר. כדאי לבדוק את החיבור ולנסות שוב.",
   plan: "התוכנית לא נשמרה. אפשר לנסות שוב.",
+  practice: "משהו השתבש בתרגול. אפשר לנסות שוב.",
 };
 const OTHER_FALLBACK = "לא הצלחנו. אפשר לנסות שוב.";
 
 /** Codes the screens never show as words: either no screen can meet them
  *  (input the app never sends, the server's own bookkeeping), or a screen
- *  answers them itself (`session expiring` is refreshed and repeated once,
- *  `confirm name` makes A1's sheet ask again, `edit conflict` opens K's A6 with
+ *  answers them itself (`confirm name` makes A1's sheet ask again, `edit conflict` opens K's A6 with
  *  the name). An entry "area:code" is internal in that area only (the code
  *  has words elsewhere). failText() gives them the area's fallback all the
  *  same. */
 export const INTERNAL_CODES: readonly string[] = [
-  "session expiring",
   // a writer's item of a question type the server's checks already passed (server key only)
   "bad form",
   "confirm name",
@@ -527,6 +533,17 @@ export function hasText(code: string, area?: Area): boolean {
   const k = keyOf(code.trim());
   if (area !== undefined) return `${area}:${k}` in TEXT || k in TEXT;
   return k in TEXT || Object.keys(TEXT).some((key) => key.endsWith(`:${k}`));
+}
+
+/** The code a screen prints small under its error line, so a member's
+ *  screenshot names it: the server's own code when a wrapper put a line of
+ *  its own on it (`raw`, as practice2.ts action() does), else the code
+ *  itself; nothing for "network" (no answer came from the server). */
+export function failCode(e: unknown): string {
+  if (!(e instanceof Error)) return "";
+  const raw = (e as Error & { raw?: unknown }).raw;
+  const code = typeof raw === "string" && raw ? raw : e.message;
+  return code === "network" ? "" : code.slice(0, 120);
 }
 
 /** The "{סיבה}" of a part that will be retried by itself (design-platform §1.A). */

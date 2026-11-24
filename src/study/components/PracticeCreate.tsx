@@ -4,7 +4,7 @@ import { addFacts, canStyle, emptyFacts, MCQ_STYLES, NEW_STYLES, type PartFacts 
 import type { ScreenProps } from "../features/types";
 import { flags } from "../lib/flags";
 import { getLecture, type Lecture } from "../lib/api";
-import { failText } from "../lib/failText";
+import { failCode, failText } from "../lib/failText";
 import { shrinkImage, toBase64 } from "../lib/images";
 import {
   askPlan,
@@ -24,6 +24,7 @@ import {
 } from "../lib/practice2";
 import { dropReading, failedParts, markReading, type PartView, type PointPartRow, pointsReason, readingHere, readProgress, readTime } from "../lib/pointsRead";
 import { barLabel, richText } from "../lib/rich";
+import FailCode from "./FailCode";
 import { BackLink, Head, Loading, StickyActions } from "./Shell";
 
 /** The styles this build offers: the question types only with their flag. */
@@ -106,6 +107,7 @@ function usePlan(lectureId: string, choices: Choices, withRows = false) {
   const [plan, setPlan] = useState<PlanAnswer | null>(null);
   const [rows, setRows] = useState<PointPartRow[] | null>(null);
   const [error, setError] = useState("");
+  const [errorCode, setErrorCode] = useState("");
   const [applied, setApplied] = useState(0);
   const seq = useRef(0);
   const known = useRef<number[] | null>(null);
@@ -124,9 +126,13 @@ function usePlan(lectureId: string, choices: Choices, withRows = false) {
       setRows(r);
       setApplied(n);
       setError("");
+      setErrorCode("");
       return { plan: p, rows: r };
     } catch (e) {
-      if (n === seq.current) setError(failText(codeOf(e), "practice"));
+      if (n === seq.current) {
+        setError(failText(codeOf(e), "practice"));
+        setErrorCode(failCode(e));
+      }
       return null;
     }
   }, [lectureId, withRows, JSON.stringify({ ...choices, focus: "", exampleText: "", style: null })]);
@@ -146,7 +152,7 @@ function usePlan(lectureId: string, choices: Choices, withRows = false) {
     };
   }, [lectureId, ask]);
   const issued = useCallback(() => seq.current, []);
-  return { plan, rows, error, refresh: ask, applied, issued };
+  return { plan, rows, error, errorCode, refresh: ask, applied, issued };
 }
 
 /** While points are read: the plan again every few seconds (a Realtime event
@@ -238,7 +244,7 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
       saveChoices(ctx.userId, lectureId, next);
       return next;
     });
-  const { plan, rows, error, refresh, applied, issued } = usePlan(lectureId, choices, true);
+  const { plan, rows, error, errorCode, refresh, applied, issued } = usePlan(lectureId, choices, true);
   // Question types: the member's last choice for this lecture, else the plan's defaults, once.
   const typed = useRef(false);
   const [geoOpen, setGeoOpen] = useState(false);
@@ -252,6 +258,7 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
   // The stale parts when this phone asked, while its stream is open.
   const [asked, setAsked] = useState<number[] | null>(null);
   const [readError, setReadError] = useState("");
+  const [readCode, setReadCode] = useState("");
   // This phone's read: seen its claim in the rows (`seen`), or the plan asked
   // after its stream opened (`after`); then the database ends it, not the stream.
   const claim = useRef({ seen: false, after: Infinity });
@@ -286,6 +293,7 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
     claim.current = { seen: false, after: Infinity };
     setAsked(plan.points.stale);
     setReadError("");
+    setReadCode("");
     let started = false;
     const start = () => {
       if (started) return;
@@ -327,6 +335,7 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
       dropReading(lectureId);
       // busy: another member's read started first; the screen shows it.
       setReadError(code === "busy" ? "" : code === "network" ? failText("network", "practice") : pointsReason(code));
+      setReadCode(code === "busy" || code === "network" ? "" : code);
     }
     // The database's state before `asked` goes, so the screen (and whose read it is) follows it, not the stream.
     await refresh();
@@ -355,6 +364,7 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
         <p className="a-error" role="alert">
           {error}
         </p>
+        <FailCode code={errorCode} />
         <button type="button" className="a-btn" onClick={() => void refresh()}>
           לנסות שוב
         </button>
@@ -447,9 +457,12 @@ function SetupScreen({ route, ctx }: ScreenProps<"practice">) {
         </section>
       ) : null}
       {readError || error ? (
-        <p className="a-error" role="alert">
-          {readError || error}
-        </p>
+        <>
+          <p className="a-error" role="alert">
+            {readError || error}
+          </p>
+          <FailCode code={readError ? readCode : errorCode} />
+        </>
       ) : null}
 
       {never || reading || stopped ? null : (
@@ -626,17 +639,20 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
       saveChoices(ctx.userId, lectureId, next);
       return next;
     });
-  const { plan, error } = usePlan(lectureId, choices);
+  const { plan, error, errorCode } = usePlan(lectureId, choices);
   const [image, setImage] = useState<{ mediaType: string; data: string; name: string } | null>(null);
   const [styleBusy, setStyleBusy] = useState(false);
   const [styleError, setStyleError] = useState("");
+  const [styleCode, setStyleCode] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [createCode, setCreateCode] = useState("");
   const file = useRef<HTMLInputElement>(null);
 
   const pickImage = async (f: File | undefined) => {
     if (!f) return;
     setStyleError("");
+    setStyleCode("");
     try {
       const small = await shrinkImage(new Uint8Array(await f.arrayBuffer()), f.type || "image/jpeg");
       setImage({ mediaType: "image/jpeg", data: await toBase64(small.blob), name: f.name });
@@ -650,11 +666,13 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
     if (styleBusy || (!text && !image)) return;
     setStyleBusy(true);
     setStyleError("");
+    setStyleCode("");
     try {
       const a = await readStyle(lectureId, { ...(text ? { text } : {}), ...(image ? { image: { mediaType: image.mediaType, data: image.data } } : {}) });
       setChoices((c) => ({ ...c, style: { description: a.description, example: a.example, sig: a.sig } }));
     } catch (e) {
       setStyleError(failText(codeOf(e), "practice"));
+      setStyleCode(failCode(e));
     } finally {
       setStyleBusy(false);
     }
@@ -663,6 +681,7 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
     if (creating || !plan) return;
     setCreating(true);
     setCreateError("");
+    setCreateCode("");
     try {
       const made = await createRequest(lectureId, optionsOf(choices));
       markMade(made.request.id);
@@ -672,6 +691,7 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
       ctx.go({ v: "practice", l: lectureId, x: "bank", r: made.request.id }, { replace: true });
     } catch (e) {
       setCreateError(failText(codeOf(e), "practice"));
+      setCreateCode(failCode(e));
       setCreating(false);
     }
   };
@@ -685,6 +705,7 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
         <p className="a-error" role="alert">
           {error}
         </p>
+        <FailCode code={errorCode} />
       </main>
     );
   }
@@ -757,9 +778,12 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
         <input ref={file} type="file" accept="image/jpeg,image/png,image/webp,image/gif" capture="environment" hidden onChange={(e) => void pickImage(e.target.files?.[0])} />
       </div>
       {styleError ? (
-        <p className="a-error" role="alert">
-          {styleError}
-        </p>
+        <>
+          <p className="a-error" role="alert">
+            {styleError}
+          </p>
+          <FailCode code={styleCode} />
+        </>
       ) : null}
       {choices.style ? (
         <aside className="a-callout pc-style" dir="rtl">
@@ -804,9 +828,12 @@ function ExampleScreen({ route, ctx }: ScreenProps<"practice">) {
         ) : null}
       </section>
       {stop || mineStop || createError ? (
-        <p className="a-error" role="alert">
-          {createError || failText(mineStop && !stop ? "member_share" : "reserve", "practice")}
-        </p>
+        <>
+          <p className="a-error" role="alert">
+            {createError || failText(mineStop && !stop ? "member_share" : "reserve", "practice")}
+          </p>
+          {createError ? <FailCode code={createCode} /> : null}
+        </>
       ) : null}
 
       {hasExample && !choices.style && !styleBusy ? <p className="a-small a-muted pc-hint">כדי ליצור בסגנון של הדוגמה, קודם קוראים אותה. אפשר גם למחוק אותה וליצור בלי.</p> : null}

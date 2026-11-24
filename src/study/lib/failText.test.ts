@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BOSS_NOT_COUNTED, failShort, failText, hasText, INTERNAL_CODES, isInternal, type Area } from "./failText";
+import { BOSS_NOT_COUNTED, failCode, failShort, failText, hasText, INTERNAL_CODES, isInternal, type Area } from "./failText";
 
 /* F-13 (review FE-19; §12.2.7, §12.7.4): every exception the SQL can raise
  * reaches a screen as words. Each `raise exception '…'` of §3's SQL
@@ -323,6 +323,27 @@ test("the area decides, then the code, then the area's fallback (§6.3)", () => 
   assert.equal(failText("daily_limit", "wall"), "אפשר להעלות עד 30 אסוציאציות ביום. מתחדש בחצות.");
   assert.equal(failText("daily_limit", "mnemonic"), "אפשר ליצור אסוציאציות עד 5 פעמים ביום. מתחדש בחצות.", "J's drafts: 5 a day (review F-19)");
   assert.equal(failText("server off", "bank"), "הכתיבה בשרת עוד לא פועלת, אז השאלות ייכתבו מהטלפון אחרי הסיכום.");
+});
+
+test("the new-questions screen never shows the generic line: the wrappers' own codes, a second session expiring and practice's fallback", () => {
+  const OTHER = "לא הצלחנו. אפשר לנסות שוב.";
+  for (const c of ["server", "blocked", "bad reply", "session expiring", "session expired", "something new"]) {
+    assert.notEqual(failText(c, "practice"), OTHER, c);
+  }
+  assert.equal(failText("server", "practice"), "השרת לא הצליח לענות כרגע. אפשר לנסות שוב בעוד דקה.");
+  assert.equal(failText("bad reply", "practice"), failText("server", "practice"));
+  assert.equal(failText("blocked", "practice"), "הבקשה נחסמה בדרך לשרת. אפשר לנסות שוב בעוד דקה, או לפתוח את האפליקציה בדפדפן.");
+  assert.equal(failText("session expiring", "practice"), failText("session expired", "practice"), "a second session expiring reads as the signed-out line");
+  assert.ok(!isInternal("session expiring"), "it has words now: a refresh that did not help");
+  assert.equal(failText("no claim", "practice"), "משהו השתבש בתרגול. אפשר לנסות שוב.", "practice's own fallback");
+});
+
+test("failCode: the answer's own code (raw) or the code, never network, at most 120 characters", () => {
+  assert.equal(failCode(Object.assign(new Error("server"), { raw: "http_504" })), "http_504");
+  assert.equal(failCode(new Error("points stale")), "points stale");
+  assert.equal(failCode(new Error("network")), "", "no answer came from the server");
+  assert.equal(failCode("not an error"), "");
+  assert.equal(failCode(new Error("x".repeat(300))).length, 120);
 });
 
 test("failShort names the reason of a part that is retried by itself", () => {

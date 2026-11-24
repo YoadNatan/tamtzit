@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, test } from "node:test";
+import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 
 /* The app's own wrappers (src/study/lib/api.ts) in Node, against a local mock
  * of Supabase (Auth, PostgREST) and of /api/study: what F0 changed on the
@@ -16,6 +17,8 @@ let log: Logged[] = [];
 let routes: Record<string, (l: Logged) => Reply> = {};
 let signupSeconds = 3600;
 let refreshes = 0;
+/** What /auth/v1/token answers instead of a fresh session (a refused refresh). */
+let tokenReply: Reply | null = null;
 
 const USER = { id: "33333333-0000-4000-8000-000000000003", aud: "authenticated", role: "authenticated", is_anonymous: true, app_metadata: {}, user_metadata: {} };
 const session = (token: string, seconds: number) => ({
@@ -48,7 +51,7 @@ const server = createServer(async (req, res) => {
   const l: Logged = { method: req.method ?? "", path: url.pathname, query: url.searchParams, auth: req.headers.authorization ?? null, body: await readAll(req) };
   log.push(l);
   if (l.path === "/auth/v1/signup") return send(res, { status: 200, body: session("first", signupSeconds) });
-  if (l.path === "/auth/v1/token") return send(res, { status: 200, body: session(`fresh${++refreshes}`, 3600) });
+  if (l.path === "/auth/v1/token") return send(res, tokenReply ?? { status: 200, body: session(`fresh${++refreshes}`, 3600) });
   if (l.path === "/auth/v1/logout") return send(res, { status: 204 });
   if (l.path === "/auth/v1/user") return send(res, { status: 200, body: USER });
   const route = routes[`${l.method} ${l.path}`];
@@ -58,6 +61,7 @@ const server = createServer(async (req, res) => {
 
 type Api = typeof import("./api");
 let api: Api;
+let failText: typeof import("./failText").failText;
 before(async () => {
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", () => ok()));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -70,6 +74,7 @@ before(async () => {
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     realFetch(typeof input === "string" && input.startsWith("/") ? base + input : input, init)) as typeof fetch;
   api = await import("./api");
+  ({ failText } = await import("./failText"));
 });
 after(() => server.close());
 beforeEach(async () => {
@@ -77,6 +82,7 @@ beforeEach(async () => {
   log = [];
   routes = {};
   signupSeconds = 3600;
+  tokenReply = null;
 });
 
 const rpcCalls = (name: string) => log.filter((l) => l.path === `/rest/v1/rpc/${name}`);
@@ -190,6 +196,33 @@ test('a call refused with 401 "session expiring" is made once more with a refres
   routes["POST /api/study/section"] = () => ({ status: 401, body: { error: "session expiring" } });
   await assert.rejects(api.runSection("eeeeeeee-0000-4000-8000-000000000005", 1, () => undefined), isError("session expiring"));
   assert.equal(log.filter((l) => l.path === "/api/study/section").length, 2, "repeated once, not in a loop");
+  assert.notEqual(failText("session expiring", "practice"), failText("no such code", "group"), "the safety net: never the generic line");
+});
+
+test("a refused refresh after 401 session expiring never posts the same token again: session expired, the signed-out line", async () => {
+  routes["POST /rest/v1/rpc/study_join"] = () => ({ status: 200, body: [{ id: "g1", name: "g" }] });
+  await api.joinGroup("ABC123", "שוהם");
+  routes["POST /api/study/section"] = () => ({ status: 401, body: { error: "session expiring" } });
+  tokenReply = { status: 400, body: { error: "invalid_grant", error_description: "Invalid Refresh Token: Already Used" } };
+  await assert.rejects(api.runSection("eeeeeeee-0000-4000-8000-000000000005", 1, () => undefined), isError("session expired"));
+  const calls = log.filter((l) => l.path === "/api/study/section");
+  assert.deepEqual(
+    calls.map((c) => c.auth),
+    ["Bearer first"],
+    "posted once: the refused token is not sent again",
+  );
+  assert.equal(log.filter((l) => l.path === "/auth/v1/token").length, 1, "one refresh");
+  const other = failText("no such code", "group");
+  assert.notEqual(failText("session expired", "practice"), other, "a line of its own, not the generic one");
+  assert.equal(failText("session expired", "practice"), failText("not signed in", "practice"), "the signed-out line");
+});
+
+test("a forced refresh that cannot reach Auth is network (worth another try); any other refusal is session expired", () => {
+  assert.equal(api.refreshFailure(new AuthRetryableFetchError("Failed to fetch", 0)), "network");
+  assert.equal(api.refreshFailure(new AuthRetryableFetchError("Service Unavailable", 503)), "network");
+  assert.equal(api.refreshFailure(new TypeError("Failed to fetch")), "network");
+  assert.equal(api.refreshFailure(new AuthApiError("Invalid Refresh Token: Already Used", 400, "refresh_token_already_used")), "session expired");
+  assert.equal(api.refreshFailure(null), "session expired", "no error and no session: signed out");
 });
 
 /* F1 additions: readLines for the item ops (spec §2.11), the lease-aware isStuck, schemaOk. */
