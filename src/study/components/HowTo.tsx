@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useCodesOn } from "../features/account";
 import type { Ctx } from "../features/types";
 import { flags } from "../lib/flags";
 import { COPY, hitsLine, howTos, readMemory, searchHowTos, walkOf, writeMemory, type Facts } from "../lib/guide";
@@ -14,7 +15,8 @@ import "../styles/guide.css";
  * screens, and stops before anything the group would see or pay for. */
 
 export default function HowTo({ ctx, query, onQuery, rows = 0 }: { ctx: Ctx; query: string; onQuery: (q: string) => void; rows?: number }) {
-  const list = useMemo(() => howTos(flags), []);
+  const codes = useCodesOn();
+  const list = useMemo(() => howTos(flags, { codes }), [codes]);
   const hits = useMemo(() => searchHowTos(query, list), [query, list]);
   const [open, setOpen] = useState<string | null>(null);
   const [facts, setFacts] = useState<Facts | null>(null);

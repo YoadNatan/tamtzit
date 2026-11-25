@@ -234,6 +234,77 @@ main.join {
 .join-signin {
   justify-self: start;
 }
+/* The home-screen app keeps its own storage: a member's first stop there. */
+.join-home {
+  display: grid;
+  gap: var(--sp-4);
+}
+.join-home > .a-btn {
+  justify-self: start;
+}
+
+/* ═════════════ the personal code (docs/study/personal-code.md) ═════════════ */
+
+/* The code reads left to right in a right-to-left page, in a monospace
+   font where 0/O and 1/I never matter (the alphabet has none of them). */
+.pc-code {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: center;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: clamp(1.15rem, 5.6vw, 1.6rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: var(--sp-6) var(--sp-4);
+  border-radius: var(--r-md, 12px);
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  overflow-wrap: anywhere;
+  user-select: all;
+  -webkit-user-select: all;
+}
+input.pc-field {
+  width: 100%;
+  min-height: auto;
+}
+.pc-input {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: center;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+}
+.pc-input::placeholder {
+  letter-spacing: 0.04em;
+}
+.pc-mask {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: start;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  color: var(--muted, inherit);
+}
+.pc-actions {
+  flex-wrap: wrap;
+}
+.pc-actions > .a-btn {
+  flex: 1 1 auto;
+}
+a.pc-wa {
+  text-decoration: none;
+}
+.pc-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+.pc-back {
+  justify-self: start;
+}
+.pc-notice,
+.pc-prompt {
+  display: grid;
+  gap: var(--sp-4);
+}
 
 /* ═════════════ the library ═════════════ */
 
@@ -906,6 +977,12 @@ main.join {
 .member > .a-li {
   align-items: center;
   min-height: 52px;
+}
+.member-acts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
 }
 .member-name {
   display: inline-flex;

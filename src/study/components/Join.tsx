@@ -1,15 +1,28 @@
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { createGroup, joinGroup, type Group } from "../lib/api";
 import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { markFresh } from "../lib/guideMark";
-import { openAccount } from "../features/account";
+import { CodeEntry, openAccount, useCodesOn } from "../features/account";
+import { standalone } from "../lib/personalCode";
 
 /* ── Getting in ──
  * One person opens a group and gets a code; everyone else joins with the code
- * (or straight from the invite link, which carries it). No email, no password. */
+ * (or straight from the invite link, which carries it). No email, no password.
+ * A member coming back on another phone or browser uses their personal code
+ * (docs/study/personal-code.md): "כניסה עם הקוד האישי" turns the card into
+ * the code's panel, once the server offers codes. */
 
-type Props = { initialCode: string; onJoined: (g: Group) => void };
+type Props = {
+  initialCode: string;
+  onJoined: (g: Group) => void;
+  /** A session is on this device (a member removed, or a join half done). */
+  signedIn?: boolean;
+  /** Open on the code's panel: a #k= link that failed, with its line. */
+  codePanel?: { code: string; error: string } | null;
+  /** Signs in as the personal code's member (StudyApp's restore). */
+  restore?: (code: string) => Promise<void>;
+};
 
 const NAME_KEY = "study-my-name";
 
@@ -21,8 +34,13 @@ function savedName(): string {
   }
 }
 
-export default function Join({ initialCode, onJoined }: Props) {
+export default function Join({ initialCode, onJoined, signedIn = false, codePanel = null, restore }: Props) {
   const [mode, setMode] = useState<"join" | "create">("join");
+  const codes = useCodesOn() && Boolean(restore);
+  const [panel, setPanel] = useState(Boolean(codePanel));
+  useEffect(() => {
+    if (codePanel) setPanel(true);
+  }, [codePanel]);
   const [name, setName] = useState(savedName);
   const [code, setCode] = useState(initialCode);
   const [groupName, setGroupName] = useState("");
@@ -65,9 +83,38 @@ export default function Join({ initialCode, onJoined }: Props) {
     }
   };
 
+  const toCode = () => {
+    setError("");
+    setPanel(true);
+  };
+
+  if (panel && restore && (codes || codePanel)) {
+    return (
+      <main className="join">
+        <div className="join-card">
+          <p className="join-kicker">סיכום מלא לכל הרצאה</p>
+          <h1 className="join-name">תמצית</h1>
+          <div className="a-card join-form">
+            <Suspense fallback={<p className="a-muted">טוען…</p>}>
+              <CodeEntry initial={codePanel?.code ?? ""} initialError={codePanel?.error ?? ""} onCode={restore} onBack={() => setPanel(false)} />
+            </Suspense>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="join">
       <div className="join-card">
+        {codes && !signedIn && standalone() ? (
+          <div className="a-callout join-home">
+            <span>מי שכבר בקבוצה נכנסים כאן עם הקוד האישי.</span>
+            <button type="button" className="a-btn primary small" onClick={toCode}>
+              כניסה עם הקוד האישי
+            </button>
+          </div>
+        ) : null}
         <p className="join-kicker">סיכום מלא לכל הרצאה</p>
         <h1 className="join-name">תמצית</h1>
         {flags.guide && initialCode ? <p className="a-small a-muted join-invited">יש הזמנה. נשאר רק להקליד שם.</p> : null}
@@ -121,6 +168,11 @@ export default function Join({ initialCode, onJoined }: Props) {
                 כבר שמרת חשבון? כניסה עם מייל
               </button>
             ) : null}
+            {error && taken && codes ? (
+              <button type="button" className="a-link" onClick={toCode}>
+                זה השם שלך? כניסה עם הקוד האישי
+              </button>
+            ) : null}
             <button className="a-btn primary wide" disabled={busy}>
               {busy ? "רגע…" : mode === "join" ? "הצטרפות" : "פתיחת הקבוצה"}
             </button>
@@ -129,6 +181,11 @@ export default function Join({ initialCode, onJoined }: Props) {
         {flags.account ? (
           <button type="button" className="a-link join-signin" onClick={() => openAccount("signin")}>
             כבר שמרת חשבון? כניסה עם מייל
+          </button>
+        ) : null}
+        {codes ? (
+          <button type="button" className="a-link join-signin join-code-link" onClick={toCode}>
+            כבר בקבוצה? כניסה עם הקוד האישי
           </button>
         ) : null}
       </div>

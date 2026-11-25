@@ -33,8 +33,10 @@ export type HelpRow = {
   text: string;
 };
 
-/** What W has shipped: the server writes the summary; "שיתוף" opens W1's sheet. */
-export type WritingHelp = { serverWrites: boolean; devicePrint: boolean };
+/** What W has shipped: the server writes the summary; "שיתוף" opens W1's sheet.
+ *  And the runtime's own facts Help passes: `codes`, the server offers the
+ *  personal code (/api/study/health "codes"; docs/study/personal-code.md). */
+export type WritingHelp = { serverWrites: boolean; devicePrint: boolean; codes?: boolean };
 
 /** "PDF ושיתוף": §6.2's row with the PDF (W3); with W1's share sheet and no
  *  PDF yet, its link and device printing; before W, today's link share. */
@@ -314,6 +316,12 @@ export function helpRows(f: Flags, w: WritingHelp, ends: Ends = ENDS): HelpRow[]
       title: "שמירת החשבון",
       on: f.account,
       text: "ב״שלי״: ״שמירת החשבון עם מייל״, ואז הקוד מהמייל. בטלפון אחר או במחשב: ״כבר שמרתי חשבון במקום אחר״, והכול עובר יחד: התגובות, הסימונים וההתקדמות. במכשיר שאינו שלך כדאי להיכנס בחלון פרטי, כדי שחשבון לא שמור שפתוח בו לא יצורף לחשבון שלך.",
+    },
+    {
+      // Decision 1 amended (25 Nov 2026): the personal code, shown once the server offers it.
+      title: "הקוד האישי",
+      on: w.codes === true,
+      text: "לכל אחד בקבוצה יש קוד אישי. איתו נכנסים מכל טלפון או דפדפן, וגם מהאפליקציה שעל מסך הבית, וחוזרים לאותו חשבון: השם, ההתקדמות, התשובות והכרטיסיות. בכניסה: ״כניסה עם הקוד האישי״, או נוגעים בקישור השמור. ב״שלי״: הצגת הקוד, קוד חדש (הקודם מפסיק לעבוד) וניתוק מכשירים אחרים. קוד שאבד: מי שפתחו את הקבוצה יוצרים קוד חדש.",
     },
     {
       title: "הקלטות",

@@ -1,9 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { claimDevice, configured, getSession, listLectures, members, myGroups, onAuthChange, type Group, type Member } from "./lib/api";
+import { claimDevice, configured, getSession, listLectures, members, myGroups, onAuthChange, redeemPersonalCode, type Group, type Member } from "./lib/api";
+import { failText } from "./lib/failText";
+import { cachedCode, takeLinkCode } from "./lib/personalCode";
 import { flags } from "./lib/flags";
 import { allowed, parseRoute, routeUrl, screenKey, type Route } from "./lib/route";
-import { AccountLayer, accountStartup } from "./features/account";
+import { AccountLayer, accountStartup, openAccount, type PendingLink } from "./features/account";
 import { BossScreen } from "./features/boss";
 import { CardsScreen } from "./features/cards";
 import { CourseScreen } from "./features/courses";
@@ -32,11 +34,20 @@ import Shell, { applySize, BackLink, Loading, placeNow, readSize, type Place } f
  * /?l=<id>     one lecture's summary, shareable on WhatsApp
  * /?v=…        every other screen (lib/route.ts, spec §5.2)
  *
+ * /#k=CODE    a member's personal code (docs/study/personal-code.md): read
+ *              and taken out of the address at once; without a member on
+ *              this device it signs in as that member, with one it asks first
+ *
  * Order of checks (spec §5.1): ?join= → Join; no session or no group → Join;
  * else the route, inside the shell. A route whose feature is off is replaced
  * by the nearest one that is on, with one line saying why. */
 
 const GROUP_KEY = "study-group";
+
+/** A #k= link this page was opened with, read once as the app loads (before
+ *  anything renders, so the code never stays in the address bar). */
+const LINK_AT_START = configured ? takeLinkCode() : null;
+const MALFORMED = "הקוד האישי הוא 16 תווים, אותיות ומספרים.";
 
 function rememberGroup(id: string) {
   try {
@@ -97,6 +108,14 @@ export default function StudyApp() {
   // An invite link opened by someone who is already in a group (a home-screen
   // icon saved on the invite, or the link tapped again) goes straight in.
   const [joinCode, setJoinCode] = useState(() => new URLSearchParams(location.search).get("join") ?? "");
+  // The personal code: a #k= link still to handle, a sign-in with it under
+  // way, the join screen's code panel to open (with what failed), and the
+  // toast once the member is back.
+  const [link, setLink] = useState(LINK_AT_START);
+  const [restoring, setRestoring] = useState(false);
+  const [codePanel, setCodePanel] = useState<{ code: string; error: string } | null>(null);
+  const [pendingLink, setPendingLink] = useState<PendingLink | null>(null);
+  const welcome = useRef(false);
 
   // The text size is the whole app's (review UX-15).
   useEffect(() => applySize(readSize()), []);
@@ -137,6 +156,51 @@ export default function StudyApp() {
     setToast({ text, action: action && { label: action.label, run: () => (setToast(null), action.run()) } });
     toastTimer.current = setTimeout(() => setToast(null), action ? 6000 : 3500);
   }, []);
+
+  /** Signs this device in as a personal code's member, and loads their
+   *  group before the shell shows it ("חזרה לקבוצה בתור …" then). The same
+   *  member already here: one line. Throws the code's failure. */
+  const restore = useCallback(
+    async (code: string) => {
+      const before = (await getSession())?.user.id;
+      if (before && cachedCode(before)?.code === code) {
+        say("הכניסה כבר פעילה במכשיר הזה.");
+        return;
+      }
+      const r = await redeemPersonalCode(code);
+      if (r.same) {
+        say("הכניסה כבר פעילה במכשיר הזה.");
+        return;
+      }
+      const s = await getSession();
+      setGroupsLoaded(false);
+      setSession(s);
+      setCodePanel(null);
+      welcome.current = true;
+      if (s) await loadGroups(s).catch(() => setGroupsLoaded(true));
+    },
+    [loadGroups, say],
+  );
+
+  // A #k= link: once it is known whether a member is signed in here.
+  useEffect(() => {
+    if (!link || session === undefined || (session && !groupsLoaded)) return;
+    setLink(null);
+    if (!link.code) {
+      if (group) say(MALFORMED);
+      else setCodePanel({ code: "", error: MALFORMED });
+      return;
+    }
+    if (session && group) {
+      setPendingLink({ code: link.code, name: group.me });
+      return;
+    }
+    const code = link.code;
+    setRestoring(true);
+    restore(code)
+      .catch((e: unknown) => setCodePanel({ code, error: failText(e instanceof Error ? e.message : "", "group") }))
+      .finally(() => setRestoring(false));
+  }, [link, session, groupsLoaded, group, restore, say]);
 
   // A route whose feature is off is never shown: it is replaced while
   // rendering by the nearest one that is on (§5.2, review UX-1), so no screen
@@ -201,6 +265,13 @@ export default function StudyApp() {
     [session, group, go, say, nameOf],
   );
 
+  // Back with the personal code: the toast, once the member's group is in.
+  useEffect(() => {
+    if (!ctx || !welcome.current) return;
+    welcome.current = false;
+    say(`חזרה לקבוצה בתור ${ctx.group.me}.`);
+  }, [ctx, say]);
+
   // The replaced route's URL and its one line saying why, once the shell is
   // there to show it (on Join the route waits: joining keeps where it pointed).
   useEffect(() => {
@@ -231,13 +302,17 @@ export default function StudyApp() {
     );
   }
 
-  if (session === undefined || (session && !groupsLoaded)) return <Loading />;
+  if (restoring) return <Loading text="נכנסים עם הקוד האישי…" />;
+  if (session === undefined || (session && !groupsLoaded) || link) return <Loading />;
 
   if (!session || !group || joining || !ctx) {
     return (
       <>
         <Join
           initialCode={joinCode}
+          signedIn={Boolean(session)}
+          codePanel={codePanel}
+          restore={restore}
           onJoined={(g) => {
             rememberGroup(g.id);
             // Join keeps the route: a quiz or marathon link opened before joining lands where it pointed.
@@ -247,9 +322,11 @@ export default function StudyApp() {
               setSession(s);
               if (s) void loadGroups(s);
             });
+            // The member's personal code, to keep (only once codes work: health's "codes").
+            openAccount("new");
           }}
         />
-        <AccountLayer session={session ?? null} />
+        <AccountLayer session={session ?? null} restore={restore} />
       </>
     );
   }
@@ -259,7 +336,7 @@ export default function StudyApp() {
       <Shell route={shown} ctx={ctx} toast={toast}>
         <Suspense fallback={<Loading />}>{renderRoute(shown, ctx, courses)}</Suspense>
       </Shell>
-      <AccountLayer session={session} />
+      <AccountLayer session={session} restore={restore} link={pendingLink} onLinkDone={() => setPendingLink(null)} />
     </>
   );
 }

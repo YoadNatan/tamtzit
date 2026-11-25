@@ -351,3 +351,21 @@ test("past exams (sources.md, phase 2): help's row names where things are, what 
   for (const words of ["״מבחנים קודמים״ ←", "״לבדיקה״", "״רק הטעויות״", "בתקציב החודשי", "לכל הקבוצה", "״סימולציה״"]) assert.ok(text.includes(words), words);
   for (const bad of ["מישהו", "השרת"]) assert.ok(!text.includes(bad), bad);
 });
+
+test("the personal code's row: after the account's place, only when the server offers codes, in its words", () => {
+  for (const names of [R1, R9, S2]) {
+    const f = flagSet(names);
+    assert.ok(!helpRows(f, W, ALL_ENDS).some((r) => r.title === "הקוד האישי"), `${names.length} flags: not without codes`);
+    const rows = helpRows(f, { ...W, codes: true }, ALL_ENDS);
+    const titles = rows.map((r) => r.title);
+    const at = titles.indexOf("הקוד האישי");
+    assert.ok(at > 0, "shown with codes");
+    assert.equal(titles[at + 1], f.recordings ? "הקלטות" : "PDF ושיתוף", "where the withdrawn account's row stood");
+    const text = rows[at].text;
+    assert.equal(
+      text,
+      "לכל אחד בקבוצה יש קוד אישי. איתו נכנסים מכל טלפון או דפדפן, וגם מהאפליקציה שעל מסך הבית, וחוזרים לאותו חשבון: השם, ההתקדמות, התשובות והכרטיסיות. בכניסה: ״כניסה עם הקוד האישי״, או נוגעים בקישור השמור. ב״שלי״: הצגת הקוד, קוד חדש (הקודם מפסיק לעבוד) וניתוק מכשירים אחרים. קוד שאבד: מי שפתחו את הקבוצה יוצרים קוד חדש.",
+    );
+    assert.ok(!/מייל|סיסמה/.test(text), "no email, no password");
+  }
+});

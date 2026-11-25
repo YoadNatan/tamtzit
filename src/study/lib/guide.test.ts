@@ -658,3 +658,23 @@ test("״חדש״: the course pages and past exams have their hints, in order, af
   assert.equal(nextHint({ ...m, known: [...m.known!, "courses"] }, f, "2026-11-20", now)?.flag, "exams");
   assert.equal(nextHint({ ...m, born: now - 1000 }, f, "2026-11-20", now), null, "never in a member's first 14 days");
 });
+
+test("the personal code: a how-to after readmark (the first six stay), found by its words; the tour's שלי names it", () => {
+  for (const names of [R1, W5X, S2]) {
+    const f = flagSet(names);
+    const without = howTos(f);
+    const withCodes = howTos(f, { codes: true });
+    assert.ok(!without.some((h) => h.key === "code"), "not without codes");
+    assert.deepEqual(withCodes.slice(0, 6), without.slice(0, 6), "the first six are as they were");
+    const keys = withCodes.map((h) => h.key);
+    assert.equal(keys[keys.indexOf("readmark") + 1], "code");
+    const h = withCodes.find((x) => x.key === "code")!;
+    assert.equal(h.title, "להיכנס מטלפון אחר");
+    assert.equal(h.answer, "בכניסה ← ״כניסה עם הקוד האישי״, או נוגעים בקישור השמור. הקוד ב״שלי״.");
+    for (const q of ["קוד אישי", "טלפון חדש", "התנתקתי", "מסך הבית", "סיסמה"]) assert.ok(searchHowTos(q, withCodes).some((x) => x.key === "code"), q);
+    const me = (x: { codes?: boolean }) => appTour(f, x).steps.find((s) => s.say.startsWith("ב״שלי״"))!.say;
+    assert.ok(me({ codes: true }).includes("הקוד האישי"));
+    assert.ok(!me({}).includes("הקוד האישי"));
+    assert.ok(me({ codes: true }).length <= 160);
+  }
+});

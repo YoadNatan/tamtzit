@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Ctx } from "../features/types";
 import { flags } from "../lib/flags";
+import { codesKnownOn } from "../lib/personalCode";
 import {
   appTour,
   COPY,
@@ -250,7 +251,7 @@ export default function GuideLayer({ route, ctx }: { route: Route; ctx: Ctx }) {
   /** A mini-guide's run: a screen's "?" or the app tour (`tour`). */
   const startScreen = useCallback((opener: HTMLElement | null, tour = false) => {
     const r = routeRef.current;
-    const g = tour ? appTour(flags) : screenGuide(r, flags);
+    const g = tour ? appTour(flags, { codes: codesKnownOn() }) : screenGuide(r, flags);
     // While the reader is live the page is never scrolled: only what is on screen.
     const live = roomLive();
     const steps = (g?.steps ?? []).filter((s) => {

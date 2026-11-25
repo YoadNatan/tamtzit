@@ -961,7 +961,7 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
  *  works as always, and leaving the screen ends the tour. Steps whose
  *  element is not on the page (no "תרגול" tab with Today on, no "?" on help)
  *  are skipped when it runs. */
-export function appTour(f: Flags): MiniGuide {
+export function appTour(f: Flags, x: { codes?: boolean } = {}): MiniGuide {
   const m = (target: string, say: string): MiniStep => ({ target: sel(target), say });
   // A new group's first need is the upload: it stays in the line with the course pages too.
   const library = f.courses
@@ -976,7 +976,7 @@ export function appTour(f: Flags): MiniGuide {
       m(T.libraryTab, library),
       ...(practice ? [m(T.practiceTab, practice)] : []),
       m(T.groupTab, `ב״יחד״: ${andList(["מי מקריאים עכשיו", f.meeting && "הפגישה הבאה", f.quiz && "מבחן קבוצתי", "שאלות פתוחות"])}.`),
-      m(T.meTab, `ב״שלי״: ${andList([f.progress && "ההתקדמות שלך", "גודל הטקסט", "העזרה"])}. שם גם ״מדריך לאפליקציה״, אם רוצים את הסיור שוב.`),
+      m(T.meTab, `ב״שלי״: ${andList([x.codes === true && "הקוד האישי", f.progress && "ההתקדמות שלך", "גודל הטקסט", "העזרה"])}. שם גם ״מדריך לאפליקציה״, אם רוצים את הסיור שוב.`),
       m(T.screenHelp, "״?״ למעלה מסביר את המסך שפתוח. בהרצאה זה ״איך קוראים כאן?״."),
     ],
   };
@@ -995,8 +995,9 @@ export type HowTo = {
   open?: { label: string; route: Route };
 };
 
-/** The how-tos under these flags, in order (the first six are "שאלות נפוצות"). */
-export function howTos(f: Flags): HowTo[] {
+/** The how-tos under these flags, in order (the first six are "שאלות נפוצות").
+ *  `codes`: the server offers the personal code (health's "codes"). */
+export function howTos(f: Flags, x: { codes?: boolean } = {}): HowTo[] {
   const list: Array<HowTo & { on: boolean }> = [
     { on: true, key: "read", title: "לקרוא הרצאה", answer: "בספרייה נוגעים בהרצאה. כל פסקה נפתחת בנגיעה.", words: "סיכום קריאה לפתוח הרצאה", walk: "read" },
     { on: true, key: "upload", title: "להעלות הרצאה", answer: "ספרייה ← ״העלאת הרצאה״. pptx או PDF, והסיכום מוכן תוך כמה דקות.", words: "העלאה מצגת קובץ פאוורפוינט pptx pdf סיכום חדש", walk: "upload" },
@@ -1020,6 +1021,14 @@ export function howTos(f: Flags): HowTo[] {
     { on: f.ask, key: "ask", title: "לשאול את החומר", answer: "בספרייה כותבים בשורת החיפוש. ״לשאול״ עונה מהשקפים ונספר ב״נשארו היום״.", words: "חיפוש לחפש שאלה בינה", walk: "ask" },
     { on: f.today, key: "today", title: "התור של היום", answer: "היום ← בוחרים 10, 20 או 45 דקות ← ״להתחיל״. מה שלא נכנס עובר למחר.", words: "תור חזרה היום דקות", walk: "today" },
     { on: true, key: "readmark", title: "לסמן שקראתי", answer: "בסוף הסיכום ״סימון שקראתי״. כל הקבוצה רואה מי קראו.", words: "קראתי סימון קריאה", walk: "readmark" },
+    {
+      // The personal code (docs/study/personal-code.md), after "readmark" so the first six stay.
+      on: x.codes === true,
+      key: "code",
+      title: "להיכנס מטלפון אחר",
+      answer: "בכניסה ← ״כניסה עם הקוד האישי״, או נוגעים בקישור השמור. הקוד ב״שלי״.",
+      words: "קוד אישי טלפון חדש מכשיר אחר דפדפן התנתקתי נמחק התחברות חשבון סיסמה מסך הבית",
+    },
     { on: f.wall, key: "wall", title: "לכתוב אסוציאציה", answer: "נוגעים בפסקה ← ״אסוציאציה״, או ביחד ← ״קיר האסוציאציות״.", words: "אסוציאציה זכירה מצחיק קיר" },
     {
       on: f.courses,

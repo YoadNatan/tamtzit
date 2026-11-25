@@ -1,9 +1,23 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { groupCreator, groupSpent, health, memberSaved, members, mySpent, removeMember, rotateCode, signOut, type Member } from "../lib/api";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  groupCreator,
+  groupSpent,
+  health,
+  issuePersonalCode,
+  memberSaved,
+  members,
+  mySpent,
+  personalCodeStatus,
+  removeMember,
+  rotateCode,
+  signOut,
+  type Member,
+} from "../lib/api";
 import { failText } from "../lib/failText";
 import { flags, ILS_PER_USD } from "../lib/flags";
 import { APP_PATH, meLinks } from "../lib/route";
-import { AccountCard } from "../features/account";
+import { AccountCard, CodeSheet, openAccount, useCodesOn } from "../features/account";
+import { issuedMessage } from "../lib/personalCode";
 import { ReviewHomeSetting } from "../features/cards";
 import { GuideMeRows } from "../features/guide";
 import { MyLaneRows } from "../features/plan";
@@ -20,8 +34,9 @@ import { Head, readSize, RouteLink, saveSize, shareInvite, SIZES } from "./Shell
  * the pulse (U), "הקבוצה צריכה אותך" (T), the text size (the whole app's)
  * and, with recordings, their boxes (W); 4 the month's spend; 5 the group:
  * its members, the invite, and for the group's creator a new invite code
- * and removing a member (review M4); 6 help; 7 signing out of
- * this device (A1's card takes it once accounts ship). */
+ * and removing a member (review M4), and with the personal code a new code
+ * for a member who lost theirs; 6 help; 7 signing out of this device, after
+ * a confirm that says what coming back needs (docs/study/personal-code.md). */
 
 const REC_KEY = "study-rec-notes";
 
@@ -67,6 +82,37 @@ function Confirm({ text, act, busy, onAct, onCancel }: { text: string; act: stri
   );
 }
 
+/** "יציאה מהמכשיר הזה": what coming back needs, said first. */
+function SignOutConfirm({ hasCode, canMake, onCancel, onMake, onOut }: { hasCode: boolean; canMake: boolean; onCancel: () => void; onMake: () => void; onOut: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    box.current?.scrollIntoView({ block: "nearest" });
+    box.current?.querySelector<HTMLButtonElement>(".confirm-cancel")?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <div ref={box} className="a-callout warn confirm" role="alert">
+      <span>
+        {hasCode
+          ? "לצאת מהמכשיר הזה? כדי לחזור צריך את הקוד האישי."
+          : `לצאת מהמכשיר הזה? בלי קוד אישי אי אפשר לחזור לחשבון הזה.${canMake ? " כדאי ליצור קוד קודם." : ""}`}
+      </span>
+      <div className="a-row">
+        {!hasCode && canMake ? (
+          <button className="a-btn primary" onClick={onMake}>
+            יצירת קוד
+          </button>
+        ) : null}
+        <button className="a-btn danger" onClick={onOut}>
+          {hasCode ? "יציאה" : "יציאה בכל זאת"}
+        </button>
+        <button className="a-btn ghost confirm-cancel" onClick={onCancel}>
+          ביטול
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Me({ ctx }: ScreenProps<"me">) {
   const [size, setSize] = useState(readSize);
   const [recNotes, setRecNotes] = useState(() => {
@@ -80,7 +126,11 @@ export default function Me({ ctx }: ScreenProps<"me">) {
   const [people, setPeople] = useState<Member[]>([]);
   const [saved, setSaved] = useState<Record<string, boolean>>({});
   const [creator, setCreator] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<{ kind: "code" } | { kind: "remove"; member: Member } | null>(null);
+  const [confirm, setConfirm] = useState<
+    { kind: "code" } | { kind: "remove"; member: Member } | { kind: "issue"; member: Member } | { kind: "signout"; hasCode: boolean } | null
+  >(null);
+  const [issued, setIssued] = useState<{ name: string; code: string } | null>(null);
+  const codes = useCodesOn();
   const [busy, setBusy] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
   const isCreator = creator === ctx.userId;
@@ -215,14 +265,36 @@ export default function Me({ ctx }: ScreenProps<"me">) {
                 <span className="member-name">
                   {m.name}
                   {m.user_id === ctx.userId ? <span className="a-small a-muted"> (החשבון שלך)</span> : null}
-                  {saved[m.user_id] ? <span className="a-chip ok">שמור</span> : null}
+                  {saved[m.user_id] ? <span className="a-chip ok">יש קוד</span> : null}
                 </span>
                 {isCreator && m.user_id !== ctx.userId ? (
-                  <button className="a-btn ghost small" onClick={(e) => ask({ kind: "remove", member: m }, e.currentTarget)}>
-                    הסרה מהקבוצה
-                  </button>
+                  <span className="member-acts">
+                    {codes ? (
+                      <button className="a-btn ghost small" onClick={(e) => ask({ kind: "issue", member: m }, e.currentTarget)}>
+                        קוד אישי חדש
+                      </button>
+                    ) : null}
+                    <button className="a-btn ghost small" onClick={(e) => ask({ kind: "remove", member: m }, e.currentTarget)}>
+                      הסרה מהקבוצה
+                    </button>
+                  </span>
                 ) : null}
               </div>
+              {confirm?.kind === "issue" && confirm.member.user_id === m.user_id ? (
+                <Confirm
+                  text={`ליצור ל${m.name} קוד אישי חדש? הקוד הקודם של ${m.name} יפסיק לעבוד. שולחים אותו רק ל${m.name}, בהודעה פרטית.`}
+                  act="יצירה"
+                  busy={busy}
+                  onCancel={cancel}
+                  onAct={() =>
+                    void run(async () => {
+                      const code = await issuePersonalCode(ctx.group.id, m.user_id);
+                      setIssued({ name: m.name, code });
+                      setSaved((s) => ({ ...s, [m.user_id]: true }));
+                    })
+                  }
+                />
+              ) : null}
               {/* The confirm opens under the member it is about (review M4), never below the whole list. */}
               {confirm?.kind === "remove" && confirm.member.user_id === m.user_id ? (
                 <Confirm
@@ -276,10 +348,44 @@ export default function Me({ ctx }: ScreenProps<"me">) {
 
       {!flags.account ? (
         <div className="a-row">
-          <button className="a-btn ghost signout" onClick={() => void signOut().then(() => location.assign(APP_PATH))}>
+          <button
+            className="a-btn ghost signout"
+            onClick={(e) => {
+              const from = e.currentTarget;
+              // What coming back needs: the personal code, when there is one.
+              void (codes ? personalCodeStatus().then((s) => s.has_code) : Promise.resolve(false))
+                .catch(() => false)
+                .then((hasCode) => ask({ kind: "signout", hasCode }, from));
+            }}
+          >
             יציאה מהמכשיר הזה
           </button>
         </div>
+      ) : null}
+      {confirm?.kind === "signout" ? (
+        <SignOutConfirm
+          hasCode={confirm.hasCode}
+          canMake={codes}
+          onCancel={cancel}
+          onMake={() => {
+            setConfirm(null);
+            openAccount("new");
+          }}
+          onOut={() => void signOut().then(() => location.assign(APP_PATH))}
+        />
+      ) : null}
+      {issued ? (
+        <Suspense fallback={null}>
+          <CodeSheet
+            title={`הקוד האישי של ${issued.name}`}
+            text={`להעביר רק ל${issued.name}, בהודעה פרטית. הקוד מוצג רק עכשיו.`}
+            code={issued.code}
+            waText={issuedMessage(location.origin, issued.code, issued.name)}
+            waLabel="שליחה בוואטסאפ"
+            done="סגירה"
+            onClose={() => setIssued(null)}
+          />
+        </Suspense>
       ) : null}
     </main>
   );

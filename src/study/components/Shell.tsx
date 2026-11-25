@@ -407,8 +407,8 @@ export function Soon({ title }: { title: string }) {
   );
 }
 
-export function Loading() {
-  return <p className="a-muted loading">טוען…</p>;
+export function Loading({ text = "טוען…" }: { text?: string } = {}) {
+  return <p className="a-muted loading">{text}</p>;
 }
 
 /* ── The live banner: one line, highest priority first (review UX-19) ──

@@ -4,6 +4,7 @@ import { flags } from "../lib/flags";
 import { matches } from "../lib/guide";
 import { helpRows } from "../lib/helpCopy";
 import { isolateLatin } from "../lib/rich";
+import { useCodesOn } from "../features/account";
 import { writingHelp } from "../features/writing";
 import type { Ctx } from "../features/types";
 import { Head } from "./Shell";
@@ -49,7 +50,8 @@ type HelpProps = {
 
 export default function Help({ back, footer, howto }: HelpProps) {
   const [query, setQuery] = useState("");
-  const rows = helpRows(flags, writingHelp());
+  const codes = useCodesOn();
+  const rows = helpRows(flags, { ...writingHelp(), codes });
   const shown = howto && query.trim() ? rows.filter((r) => matches(query, `${r.title} ${r.text}`)) : rows;
   return (
     <main className="help">
