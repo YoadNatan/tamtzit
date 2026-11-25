@@ -205,12 +205,16 @@ body.has-tabs main:has(> .ph-foot) {
   text-decoration: none;
   cursor: pointer;
 }
-.ph-head .back:hover {
-  background: var(--accent-soft);
-}
 .ph-head .back:disabled {
   opacity: 0.5;
   cursor: default;
+}
+/* A tint under the pointer only where there is one: on a touch screen it
+   stuck after the tap. */
+@media (hover: hover) {
+  .ph-head .back:not(:disabled):hover {
+    background: var(--accent-soft);
+  }
 }
 .ph-head > .a-chip {
   flex: none;
@@ -330,8 +334,10 @@ body.has-tabs .ph-foot {
   border-radius: 12px;
   transition: transform var(--t-press) ease;
 }
-.ph-tab:hover svg {
-  background: var(--surface-2);
+@media (hover: hover) {
+  .ph-tab:hover svg {
+    background: var(--surface-2);
+  }
 }
 .ph-tab:active svg {
   transform: scale(0.92);
@@ -353,6 +359,60 @@ body.has-tabs .ph-foot {
   background: var(--group-pop);
   color: var(--pop-ink);
   box-shadow: 0 3px 0 color-mix(in srgb, var(--group-pop) 55%, #000);
+}
+
+/* ── Wide screens (P2; tokens.css names the breakpoints) ──
+   M: the four tabs stay at the bottom, together in the middle, not 200 px
+   apart. L: the bar becomes a rail down the start side (the right, in
+   Hebrew), the same tiles, words and lanes; --tabbar-h is 0 there, so every
+   rule that keeps room for the bar at the bottom (a screen's padding, the
+   bottom bar's place, the toast, the scroll padding, Today's "להתחיל")
+   lets it go at once, and the screen moves over by --rail-w. */
+@media (min-width: 600px) and (max-width: 1023.98px) {
+  .ph-tabs {
+    grid-auto-columns: minmax(0, 120px);
+    justify-content: center;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --rail-w: 88px;
+    --tabbar-h: 0px;
+  }
+  .ph-tabs {
+    inset-block: 0;
+    inset-inline-end: auto;
+    width: var(--rail-w);
+    height: auto;
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    grid-auto-rows: 72px;
+    align-content: start;
+    gap: var(--sp-4);
+    padding: calc(var(--sp-12) + env(safe-area-inset-top, 0px)) 0 env(safe-area-inset-bottom, 0px);
+    border-top: 0;
+    border-inline-end: var(--b) solid var(--line);
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .ph-tabs::before {
+    display: none;
+  }
+  .ph-tab {
+    min-height: 64px;
+  }
+  body.has-tabs .shell {
+    padding-inline-start: var(--rail-w);
+  }
+}
+
+/* The bottom bar on a tablet or a desktop: right under the screen's content,
+   not stranded at the bottom of a tall screen 300–500 px from the options it
+   acts on (it still sticks to the bottom when the content is longer). */
+@media (min-width: 768px) {
+  .ph-foot {
+    margin-top: var(--sp-8);
+  }
 }
 
 /* A tab's home (היום, ספרייה, יחד, שלי): its title is the screen's big

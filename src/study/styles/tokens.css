@@ -175,6 +175,17 @@
   --gutter-left: max(var(--gutter), env(safe-area-inset-left, 0px));
   --gutter-right: max(var(--gutter), env(safe-area-inset-right, 0px));
   --measure: 760px; /* the widest a screen gets (tablets) */
+  /* Wide screens (P2). Breakpoints, by the viewport's width, never by device
+     (an iPad in Split View, a desktop window, can be any width):
+       S  under 600   phones (and a third of an iPad): the phone layout
+       M  600–1023    an iPad upright, half a window: the tabs in the middle
+       L  1024 and up an iPad sideways, a laptop: the tabs become a side rail
+       XL 1280 and up a desktop: the library's cards in two columns
+     768 is "a tablet" for reading: a bigger default text, sheets as dialogs. */
+  --measure-read: 36em; /* the reader's line: about 70 letters, at any text size */
+  --measure-wide: 1040px; /* the reader with its contents, the library's grid */
+  --sheet-w: 560px; /* a sheet as a dialog (768 and up) */
+  --rail-w: 0px; /* the side rail (L), 0 below */
   --hit: 44px; /* every control's smallest hit area */
   --head-h: 56px; /* the top bar */
   --tabbar-h: 60px; /* the tab bar, without the safe area */

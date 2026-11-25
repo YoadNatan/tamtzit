@@ -117,6 +117,12 @@ body.has-tabs .shell > .a-toast {
 html:has(.ph-foot) body.has-tabs .shell > .a-toast {
   bottom: calc(var(--tabbar-h) + 84px + env(safe-area-inset-bottom, 0px));
 }
+/* Beside the side rail (L): in the middle of the screen's own room. */
+@media (min-width: 1024px) {
+  body.has-tabs .shell > .a-toast {
+    inset-inline-start: var(--rail-w);
+  }
+}
 /* While a sheet is open the toast goes to the top, over the scrim above the
    sheet (a sheet is at most 80% of the screen): never over the sheet's own
    words, such as the cost line before a paid action. */

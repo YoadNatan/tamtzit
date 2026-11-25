@@ -34,6 +34,12 @@
   border-color: color-mix(in srgb, var(--me-pop) 60%, var(--line));
   border-bottom-color: var(--me-pop);
 }
+/* Beside the side rail (L), over the screen it explains. */
+@media (min-width: 1024px) {
+  body.has-tabs .g-bubble {
+    inset-inline-start: calc(var(--rail-w) + var(--gutter-right));
+  }
+}
 .g-bubble:focus {
   outline: none;
 }
