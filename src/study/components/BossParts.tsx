@@ -114,7 +114,7 @@ export function BossHudBody({ state }: { state: unknown }) {
   const last = z.state === "reveal" ? b.last_round : null;
   return (
     <section className="a-stack boss-hud" aria-label="אתגר קבוצתי">
-      <div className="a-row between">
+      <div className="a-row between boss-top">
         <span className="a-small a-muted">{isolateLatin(b.name, "bn")}</span>
         <span className="a-chip fun">{headChip(b)}</span>
       </div>

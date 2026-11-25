@@ -15,8 +15,9 @@
   .boss-hud {
     gap: var(--sp-2);
   }
-  .boss-hud .boss-rule {
-    display: none;
+  .boss-hud .boss-rule,
+  .boss-hud > .boss-top {
+    display: none; /* the lecture and "נושא n/m": the strip of topics marks the one on screen */
   }
   .boss-hud > .a-card {
     padding: var(--sp-3) var(--sp-4);
