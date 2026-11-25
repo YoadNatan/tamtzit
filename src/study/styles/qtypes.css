@@ -20,6 +20,22 @@
   border-radius: var(--r-2, 12px);
   overflow: hidden;
 }
+/* A photo capped at its own width sits in the middle of its column. */
+.qf-photo {
+  justify-self: center;
+}
+/* Dark: the stage stays light (the slides are), a step under pure white so
+   it does not glare in a dark room; the pins and lines keep their contrast. */
+@media screen and (prefers-color-scheme: dark) {
+  .qf-stage {
+    background: #e7e5f0;
+    border-color: transparent;
+  }
+  .qf-stage img,
+  .qf-stage svg image {
+    filter: brightness(0.9);
+  }
+}
 .qf-stage svg {
   display: block;
   width: 100%;

@@ -133,7 +133,12 @@ function Stage(p: StageProps) {
   if (!label) {
     const ratio = p.natural ? (p.natural.w * crop.w) / (p.natural.h * crop.h) : 4 / 3;
     return (
-      <div className={`qf-stage qf-photo${p.big ? " big" : ""}`} style={{ aspectRatio: String(ratio) }} dir="ltr">
+      <div
+        className={`qf-stage qf-photo${p.big ? " big" : ""}`}
+        // Never wider than the photo itself (a small scan is not blown up past its pixels), except "להגדיל".
+        style={{ aspectRatio: String(ratio), ...(p.natural && !p.big ? { maxInlineSize: `${Math.round(p.natural.w * crop.w)}px` } : {}) }}
+        dir="ltr"
+      >
         {shown ? (
           <div className="qf-crop" style={{ width: pct(1 / crop.w), height: pct(1 / crop.h), left: pct(-crop.x / crop.w), top: pct(-crop.y / crop.h) }}>
             <img src={p.url!} alt={alt} />

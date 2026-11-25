@@ -335,10 +335,18 @@ export default function SummaryView({
     img: ({ src, alt }) => {
       const m = /^fig:(\d+)-(\d+)$/.exec(src ?? "");
       const url = m && figureUrl ? figureUrl(Number(m[1]), Number(m[2])) : undefined;
-      if (!url) return null;
+      if (!m || !url) return null;
+      const pic = <img src={url} alt={alt ?? ""} loading={eager ? "eager" : "lazy"} />;
       return (
         <figure className="slide-figure">
-          <img src={url} alt={alt ?? ""} loading={eager ? "eager" : "lazy"} />
+          {/* With slide sheets, a tap on the picture opens its slide, big (the summary's own click below). */}
+          {onTag && !compact ? (
+            <button type="button" className="slide-zoom" data-slide={m[1]} aria-label={`הגדלה: שקף ${m[1]}`}>
+              {pic}
+            </button>
+          ) : (
+            pic
+          )}
           {alt ? <figcaption dir="rtl">{isolateLatin(alt, "c")}</figcaption> : null}
         </figure>
       );
@@ -369,7 +377,8 @@ export default function SummaryView({
       onClick={
         onTag && !compact
           ? (e) => {
-              const slides = slideTag(e.target);
+              const zoom = e.target instanceof Element ? e.target.closest<HTMLElement>(".slide-zoom[data-slide]") : null;
+              const slides = zoom ? [Number(zoom.dataset.slide)] : slideTag(e.target);
               if (slides) onTag(slides);
             }
           : undefined

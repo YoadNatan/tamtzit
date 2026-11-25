@@ -843,6 +843,15 @@ a.pc-wa {
 .summary .a-tag {
   margin-inline-start: var(--sp-2);
 }
+/* A tapped paragraph grows by its actions under its words: the browser's
+   scroll anchoring would then hold a paragraph below still and lift the
+   tapped one (and drop it back when they go), so the reader moved under a
+   finger. While one is picked, and while a sheet opened from it is up
+   (the pick clears under it), the page does not re-anchor. */
+.lecture-body:has(.blk-selected),
+html:has(.a-sheet) .lecture-body {
+  overflow-anchor: none;
+}
 .summary .a-callout {
   margin: 1em 0;
 }
@@ -887,6 +896,24 @@ a.pc-wa {
   border: var(--b) solid var(--line);
   border-radius: var(--r-md);
   background: #fff;
+}
+/* The picture as a button: it opens its slide in the sheet. */
+.slide-zoom {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  cursor: zoom-in;
+}
+.slide-zoom img {
+  display: block;
+}
+@media screen and (prefers-color-scheme: dark) {
+  .slide-figure img {
+    filter: brightness(0.92);
+  }
 }
 .slide-figure figcaption {
   margin-top: var(--sp-3);
