@@ -829,7 +829,7 @@ a.pc-wa {
 }
 .summary th {
   color: var(--muted);
-  font-size: 0.92em;
+  font-size: inherit;
   font-weight: 700;
 }
 .slide-figure {
@@ -1029,7 +1029,7 @@ a.pc-wa {
   border-radius: var(--r-pill);
   background: var(--badge-bg);
   color: var(--badge-ink);
-  font-size: 0.75rem;
+  font-size: var(--text-tag);
 }
 
 /* A paragraph's thread, and the lecture's open questions. */
@@ -1243,7 +1243,7 @@ main.help > .ph-head > .t::after {
   overflow-wrap: anywhere;
   text-align: start;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--text-tag);
 }
 
 /* ── "יחד" in the group's lane (the playful look, tokens.css) ──

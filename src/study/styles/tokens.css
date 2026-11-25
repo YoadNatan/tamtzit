@@ -123,10 +123,10 @@
   --text-body: 1rem; /* 16 px */
   --text-para: 0.96875rem; /* 15.5 px: a paragraph in a card (a-para) */
   --text-btn: 0.9375rem; /* 15 px 600 */
-  --text-small: 0.84375rem; /* 13.5 px: meta lines (a-small) */
-  --text-chip: 0.8125rem; /* 13 px 700 */
-  --text-tag: 0.75rem; /* 12 px 700: a slide tag, at least (it grows with the reading size) */
-  --text-tab: 0.75rem; /* 12 px 600: the tab bar's labels */
+  --text-small: 0.875rem; /* 14 px: meta lines (a-small); the smallest text that is read (P3) */
+  --text-chip: 0.875rem; /* 14 px 700 */
+  --text-tag: 0.8125rem; /* 13 px 700: a slide tag, at least (it grows with the reading size); 14 px from 768 */
+  --text-tab: 0.8125rem; /* 13 px 600: the tab bar's labels; 14 px from 768 */
   --reading-size: 17px; /* the reader's text: 15, 17, 19 or 21 px, the member's choice ("שלי") */
   --leading: 1.5;
   --leading-read: 1.75;
@@ -205,6 +205,8 @@
 @media (min-width: 768px) {
   :root {
     --reading-size: 19px;
+    --text-tag: 0.875rem;
+    --text-tab: 0.875rem;
   }
 }
 

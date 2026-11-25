@@ -333,7 +333,7 @@ a.x-zoom {
 .r-opts .a-opt {
   grid-template-columns: 26px minmax(0, 1fr);
   padding: var(--sp-3) var(--sp-5);
-  font-size: var(--text-small);
+  font-size: var(--text-body);
   overflow-wrap: anywhere;
 }
 /* "מוצעת" / "מסומנת" after the option's words: which one is the answer, in words (not only the outline). */
@@ -469,7 +469,7 @@ button.a-card.s-src[aria-checked="true"] {
   font-size: var(--text-btn);
 }
 .s-len small {
-  font-size: 0.75rem;
+  font-size: var(--text-tag);
 }
 .s-unseen {
   align-items: center;
@@ -563,7 +563,7 @@ button.a-card.s-src[aria-checked="true"] {
   min-height: 46px;
   border-radius: 8px;
   color: var(--accent);
-  font: 700 0.8rem / 1 var(--font-body);
+  font: 700 var(--text-small) / 1 var(--font-body);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }

@@ -145,10 +145,10 @@ comes from another host. Display (`--font-display`) is the same face, heavier
 | `--text-body` | 16 px | 400 | body text |
 | `--text-para` | 15.5 px | 400 | a paragraph in a card (`.a-para`), a list row's title |
 | `--text-btn` | 15 px | 700 | buttons, links, the back pill (a wide button 17 px 800) |
-| `--text-small` | 13.5 px | 400 | meta lines (`.a-small`, `.ph-sub`, `.a-li .m`) |
-| `--text-chip` | 13 px | 700 | chips, letter tiles |
-| `--text-tag` | 12 px at least | 700 | a slide tag (it grows with the reading size) |
-| `--text-tab` | 12 px | 600 (800 current) | the tab bar's words |
+| `--text-small` | 14 px | 400 | meta lines (`.a-small`, `.ph-sub`, `.a-li .m`); the smallest text that is read (P3) |
+| `--text-chip` | 14 px | 700 | chips, letter tiles |
+| `--text-tag` | 13 px at least, 14 from 768 | 700 | a slide tag (it grows with the reading size), a grade's interval, a length's count, a badge |
+| `--text-tab` | 13 px, 14 from 768 | 600 (800 current) | the tab bar's words |
 | `--reading-size` | 15, 17, 19 or 21 px | 400 | the summary and a card's text: the member's choice under "שלי" |
 
 **Big numbers** (the band's "הקבוצה היום · 20:41", the quiz's clock and

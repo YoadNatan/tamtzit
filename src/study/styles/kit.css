@@ -1276,7 +1276,7 @@ button.a-li {
 .a-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.8125em;
+  font-size: var(--text-small);
   line-height: 1.4;
 }
 .a-table th,
@@ -1288,7 +1288,7 @@ button.a-li {
 }
 .a-table th {
   color: var(--muted);
-  font-size: 0.9em;
+  font-size: inherit;
   font-weight: 700;
 }
 
@@ -1455,7 +1455,7 @@ button.a-opt:not(:disabled):active {
 .a-grade small {
   display: block;
   color: var(--muted);
-  font-size: 0.6875rem;
+  font-size: var(--text-tag);
   font-weight: 600;
 }
 .a-grade > button {
@@ -1532,6 +1532,7 @@ textarea.a-input {
 }
 .a-field small {
   color: var(--muted);
+  font-size: var(--text-small);
   font-weight: 400;
 }
 /* One of a few: the chosen one outlined in the accent. */
@@ -1770,6 +1771,7 @@ input[type="radio"]:disabled {
 }
 .a-choice small {
   color: var(--muted);
+  font-size: var(--text-small);
 }
 
 /* ═════════════ over the screen ═════════════ */
