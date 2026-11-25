@@ -74,6 +74,11 @@ export function flagsFrom(e: Record<string, unknown>) {
     // upload, "לשאול על כל הקורס" and a round over several lectures. Section
     // S at 1 (study_courses, plan_id) and the switch `courses`.
     courses: on(e.VITE_STUDY_COURSES),
+    // Adding תמצית to the home screen (docs/study/install.md): the steps for
+    // each phone, the browser's own prompt, the row in "שלי", one card on the
+    // home and the guide's step. Its memory stays on the device, so it needs
+    // no SQL section (requiredSchema is unchanged).
+    install: on(e.VITE_STUDY_INSTALL),
   } as const;
 }
 
@@ -155,6 +160,6 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     // simulation (phase 2): S at 2, which has S 1 in it.
     ...(f.courses ? { S: 1 } : {}),
     ...(f.exams ? { S: 2 } : {}),
-    // f.guide needs nothing: the guide keeps its memory on the device.
+    // f.guide and f.install need nothing: both keep their memory on the device.
   };
 }

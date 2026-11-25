@@ -29,7 +29,7 @@ const flagsOff = process.argv.includes("--flags") && process.argv[process.argv.i
 const FLAGS = [
   "QUESTIONS", "PRACTICE", "QUIZ", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "ASK", "RECORDINGS", "PDF", "ACCOUNT",
   "PROGRESS", "MARATHONS", "EXAMS", "MEETING", "ANCHOR", "VAR", "WALL", "TODAY", "GUESS", "NEEDS_ME", "PULSE",
-  "MUSEUM", "BOSS", "GROUP_PLAN", "TRAPS", "BLANK_TABLE", "QUIZ_ROUNDS", "EVE", "GUIDE", "QTYPES", "COURSES",
+  "MUSEUM", "BOSS", "GROUP_PLAN", "TRAPS", "BLANK_TABLE", "QUIZ_ROUNDS", "EVE", "GUIDE", "QTYPES", "COURSES", "INSTALL",
 ];
 for (const f of FLAGS) {
   if (flagsOff) delete process.env[`VITE_STUDY_${f}`];
@@ -48,6 +48,7 @@ const SLOT = {
   meeting: "M", anchor: "N", var: "V", today: "T", pulse: "U", wall: "J", boss: "H", bank: "B", plan: "G", extras: "E",
   guide: "D", // the guide (docs/study/guide.md)
   courses: "S", // courses and past exams (docs/study/sources.md)
+  install: "L", // adding the app to the home screen (docs/study/install.md)
 };
 const COMPONENT = {
   Q: ["PracticeHome", "LecturePractice", "PracticeSession", "PracticeQuestion", "PracticeCreate", "PracticeBank", "PracticeRound", "FlagSheet", "FixSheet", "Exams"],
@@ -67,6 +68,7 @@ const COMPONENT = {
   E: ["TrapScreen", "BlankTable", "RoundPicker", "ExtrasCard"],
   D: ["GuideLayer", "GuideSteps", "HowTo", "GuideMe", "TryScreen"],
   S: ["CourseScreen", "UploadMany", "CourseAsk"],
+  L: ["InstallScreen", "InstallParts"],
 };
 const LIB = {
   W: ["generate", "writing", "transcript", "transcribe", "transcribe.worker", "pdf-export"],
@@ -78,6 +80,7 @@ const LIB = {
   M: ["meeting"], N: ["anchor", "anchorTab"], V: ["var"], T: ["today"], U: ["pulse"], J: ["wall", "photo"], H: ["boss"], B: ["bank"], G: ["groupPlan"], E: ["extras"],
   D: ["guide", "guideMark", "guideFacts"],
   S: ["courses", "batch"],
+  L: ["install", "installPrompt", "installCopy", "installLazy"],
 };
 const SHARED = { C: ["cloze", "fsrs"], K: ["edits"], T: ["today"], G: ["lane"], E: ["blankTable", "extras"], A: ["estimates", "plan", "agenda"], U: ["pulse"], S: ["batch"] };
 const byName = (table) => Object.fromEntries(Object.entries(table).flatMap(([pkg, names]) => names.map((n) => [n, pkg])));
@@ -142,7 +145,7 @@ for (const [id, m] of Object.entries(entry.modules)) {
   const who = ownerOf(id);
   share[who] = (share[who] ?? 0) + m.renderedLength;
 }
-const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "S", "libraries", "other"];
+const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "S", "L", "libraries", "other"];
 const lines = [...ORDER, ...Object.keys(share).filter((k) => !ORDER.includes(k))]
   .filter((k) => k in share)
   .map((k) => {

@@ -8,7 +8,8 @@ import { miniScreen, type MiniRoute } from "./guideScreens";
  *
  *  - guideMark(ev): a real action happened ("para": a paragraph was opened,
  *    "bet": an answer was sent with a bet, "upload": a summary started,
- *    "invite": the invite was shared). The guide's layer ticks the matching
+ *    "invite": the invite was shared, "install": the app was added to the
+ *    home screen). The guide's layer ticks the matching
  *    first step off. Marks made before the layer loads wait in `pending`.
  *  - markFresh(mode, group): Join's success. The device's member is new to
  *    this group: the home shows "הצעדים הראשונים" once (sessionStorage, and a
@@ -18,7 +19,7 @@ import { miniScreen, type MiniRoute } from "./guideScreens";
  *
  * Nothing here talks to the network. */
 
-export type GuideEvent = "para" | "bet" | "upload" | "invite";
+export type GuideEvent = "para" | "bet" | "upload" | "invite" | "install";
 export type GuideCommand =
   | { type: "mark"; ev: GuideEvent }
   | { type: "screen"; opener?: HTMLElement | null }
@@ -62,6 +63,22 @@ export function markFresh(mode: "join" | "create", group: string): void {
     /* private mode: the module copy holds it for this load */
   }
   void import("../components/GuideSteps").catch(() => undefined);
+}
+
+/** A member brought back with the personal code (StudyApp's restore) on a
+ *  browser that never had them, such as the iPhone's home-screen icon: the
+ *  guide's memory starts with the tour's offer answered, so the home does not
+ *  offer the app tour to a member who knows the app. A memory already there
+ *  is kept. */
+export function markRestored(userId: string): void {
+  if (!flags.guide) return;
+  try {
+    const key = `study-guide:${userId}`;
+    if (localStorage.getItem(key) !== null) return;
+    localStorage.setItem(key, JSON.stringify({ v: 1, views: 0, did: [], list: [], tips: true, offer: "dismissed" }));
+  } catch {
+    /* private mode: the offer shows once */
+  }
 }
 
 /** The fresh mark for this group, if any; `take` removes it. */
