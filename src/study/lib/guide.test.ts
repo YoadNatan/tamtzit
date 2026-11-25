@@ -33,8 +33,10 @@ import {
   TARGETS,
   walkOf,
   writeMemory,
+  type DoneEvent,
   type Facts,
   type Memory,
+  type StepId,
   type WalkId,
 } from "./guide";
 import { miniScreen } from "./guideScreens";
@@ -707,6 +709,17 @@ test("S9: the home screen step, right after the first, only with its flag and a 
   assert.ok(line("ios").includes("הקוד האישי"));
   assert.ok(!line("android").includes("הקוד האישי") && !line("prompt").includes("הקוד האישי"));
   assert.ok(line("prompt").includes("בלחיצה אחת"));
+});
+
+test("a finished card takes no new step, S9 included (the deploy that turns it on)", () => {
+  const m = { list: ["S1", "S2", "S6"] as StepId[], mode: "join" as const, did: ["open", "para", "invite"] as DoneEvent[] };
+  const now = firstSteps(flagSet(S2I), { ...FULL, install: "ios" }, m);
+  assert.deepEqual(now.map((s) => s.id), ["S1", "S2", "S6"], "a done card: nothing on top, S9 included");
+  const mem: Memory = { v: 1, born: Date.now(), views: 5, did: m.did, list: m.list, tips: true };
+  assert.equal(cardState(mem, now, Date.now()), "done", "and it stays done");
+  // A card still under way gets it (a step that applies here), and a new card has it from the start.
+  assert.ok(firstSteps(flagSet(S2I), { ...FULL, install: "ios" }, { ...m, did: ["open"] }).some((s) => s.id === "S9"), "under way: added");
+  assert.ok(firstSteps(flagSet(S2I), { ...FULL, install: "ios" }, { list: [], mode: "join", did: [] }).some((s) => s.id === "S9"), "new: added");
 });
 
 test("S9 is ticked by \"install\" (the said, the prompt, the browser's event, a launch from the icon)", () => {

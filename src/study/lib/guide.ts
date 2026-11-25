@@ -249,7 +249,7 @@ function step(id: StepId, f: Flags, x: Facts, creator: boolean): FirstStep | nul
             title: "להוסיף למסך הבית",
             line:
               x.install === "ios"
-                ? "תמצית נפתחת מאייקון, כמו אפליקציה. באייפון צריך את הקוד האישי, והוא מחכה בהסבר."
+                ? "תמצית נפתחת מאייקון, כמו אפליקציה. באייפון ההסבר מתחיל מהקוד האישי."
                 : x.install === "prompt"
                   ? "תמצית נפתחת מאייקון, כמו אפליקציה. התקנה בלחיצה אחת."
                   : "תמצית נפתחת מאייקון, כמו אפליקציה. ההסבר מותאם לטלפון.",
@@ -269,12 +269,16 @@ export const MAX_STEPS = 5;
  *  (S6) and "יחד" (S7) give way to it (all six join from the creator's link,
  *  and the tour points at "יחד"). Adding the app to the home screen (S9)
  *  comes right after the first (the creator's: after the invite), so a cut
- *  never drops it; it is never added in the home-screen app itself. */
-export function firstSteps(f: Flags, x: Facts, m: Pick<Memory, "list" | "mode">): FirstStep[] {
+ *  never drops it; it is never added in the home-screen app itself. A card
+ *  whose kept steps are all done takes no new step (it would reopen). */
+export function firstSteps(f: Flags, x: Facts, m: Pick<Memory, "list" | "mode"> & Partial<Pick<Memory, "did">>): FirstStep[] {
   const creator = m.mode === "create";
   const kept = new Set(m.list);
   const order: StepId[] = creator ? ["S1", "S6", "S9", "S2", "S4", "S8", "S5", "S7"] : ["S1", "S9", "S2", "S4", "S8", "S5", "S6", "S7"];
-  const fresh = (id: StepId) => !(id === "S9" && x.standalone) && step(id, f, x, creator) !== null;
+  // A card already finished stays finished ("סגירה"): no step is added on top, not even S9 on the deploy that
+  // turns it on for everyone at once.
+  const finished = m.list.length > 0 && m.list.every((id) => DONE_BY[id]?.some((e) => m.did?.includes(e)));
+  const fresh = (id: StepId) => !finished && !(id === "S9" && x.standalone) && step(id, f, x, creator) !== null;
   const applies = order.filter((id) => kept.has(id) || fresh(id));
   const room = Math.max(MAX_STEPS, kept.size);
   const chosen: StepId[] = [];
@@ -796,7 +800,7 @@ export function walkOf(id: WalkId, f: Flags, x: Facts): Walk | null {
                 target: sel(T.installRow),
                 say: "כאן. ההסבר מותאם לטלפון שלך.",
                 until: "click",
-                empty: "כאן במכשיר הזה אין מה להוסיף: תמצית כבר פתוחה מהאייקון, או שזה מחשב.",
+                empty: "כאן אין מה להוסיף: תמצית כבר פתוחה מהאייקון, או שהדפדפן הזה לא מציע התקנה.",
               },
             ],
           }
