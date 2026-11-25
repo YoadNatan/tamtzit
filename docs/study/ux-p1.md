@@ -73,8 +73,9 @@ No new flag and no SQL: every change is a fix to what is already on.
 
 - On a touch screen, while a field outside the bottom bar has focus, the bar
   joins the flow (a field inside it, the ask composer, keeps it sticky).
-- Under 480 px tall the top and bottom bars scroll with the page, and the tab
-  bar hides while a field has focus.
+- Under 480 px tall the top bar scrolls with the page. The bottom bar stays
+  sticky (a phone held sideways keeps "לבדוק" in view) and joins the flow
+  only while a field has focus, when the tab bar hides too.
 - Focus never lands under the bars: the scroll padding counts the tab bar and
   the bottom bar together (a specificity bug let the tab bar's rule win).
 - While its field is typed in, a sheet's comment composer is sticky at the

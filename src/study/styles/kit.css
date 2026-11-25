@@ -270,11 +270,15 @@ body.has-tabs .ph-foot {
   }
 }
 /* A very short screen (a keyboard up on Android, a phone held sideways):
-   the top and bottom bars scroll with the page, and the tab bar steps aside
-   while a field has focus. */
+   the top bar scrolls with the page. The bottom bar keeps its place, so the
+   screen's action ("לבדוק") stays in view on a phone held sideways; only
+   while a field has focus (the keyboard is what made the screen short) does
+   it join the flow too, and the tab bar step aside. */
 @media (max-height: 480px) {
-  .ph-head,
-  .ph-foot {
+  .ph-head {
+    position: static;
+  }
+  main:has(:is(input:not([type="radio"], [type="checkbox"], [type="range"], [type="file"], [type="button"], [type="submit"]), textarea, select):focus) .ph-foot {
     position: static;
   }
   body:has(:is(input:not([type="radio"], [type="checkbox"], [type="range"], [type="file"], [type="button"], [type="submit"]), textarea, select):focus) .ph-tabs {
