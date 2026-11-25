@@ -257,6 +257,14 @@ member's own code is "הקוד האישי", never "סיסמה", "חשבון" or 
 - A failed exam: its failure line, then **״להעלות מבחן מחדש״** (a new
   upload; nothing is read again for money).
 
+### Wide screens (docs/study/ux-p2.md)
+
+- Under a practice session's options, only with a mouse: **״במקלדת: 1–4
+  לבחירה · Enter לבדיקה״** (the number is the options' count; the digits and
+  "Enter" as keys, left to right). Nothing else is new: the rail's tabs keep
+  their words, and the reader's contents column has no title of its own
+  (its label is ״תוכן העניינים״, as before).
+
 ## Server-made text
 
 The SQL writes some text into rows. New rows use the new words; the file

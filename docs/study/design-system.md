@@ -186,6 +186,10 @@ summary), `--leading-tight` 1.25 (headings). The summary's headings are 800,
 |---|---|
 | `--gutter` (`--gutter-left`, `--gutter-right`) | 16 px, or the safe area where it is larger |
 | `--measure` | 760 px: the widest a screen gets (tablets) |
+| `--measure-read` | 36em: the reader's line (about 70 letters at any text size) |
+| `--measure-wide` | 1040 px: the reader with its contents column, the library's grid (1280 and up) |
+| `--sheet-w` | 560 px: a sheet as a dialog (768 wide, 560 tall and up) |
+| `--rail-w` | 0, or 88 px from 1024: the side rail |
 | `--hit` | 44 px: every control's smallest hit area |
 | `--head-h`, `--tabbar-h` | 56 px, 60 px (the tab bar adds the safe area) |
 | `--z-bar` 5, `--z-stack` 8, `--z-tabs` 15, `--z-layer` 18, `--z-sheet` 20, `--z-toast` 30 | the sticky bars, the live banner, the tab bar, a full-screen layer, a sheet, the toast |
@@ -255,6 +259,22 @@ an icon tile over a word, the current one's tile filled (the accent, or the
 group's orange on "יחד") with `aria-current="page"`. Only on the tab
 screens; immersive screens have none.
 
+**Wide screens** (`ux-p2.md`). Breakpoints by the window's width, never by
+device: S under 600 (the phone layout, unchanged), M 600–1023, L 1024 and
+up, XL 1280 and up; 768 is "a tablet" for reading.
+- M: the tab bar stays at the bottom with its tabs together in the middle
+  (at most 120 px each).
+- L: the tab bar is a rail, 88 px, down the start side (the right), the
+  same tiles top to bottom; `--tabbar-h` is 0 there, so whatever keeps room
+  for the bar at the bottom lets it go, and the screen moves over by
+  `--rail-w` (the toast and the guide's bubble too).
+- From 768 `ph-foot` follows the content (16 px under it) instead of the
+  screen's bottom; it still sticks when the content is longer.
+- The reader: lines of `--measure-read`; from 768 the text starts at 19 px
+  until a member chooses a size; from 1024 the contents are a sticky column
+  at the start of the text and "תוכן" leaves the top bar.
+- XL: the library is `--measure-wide`, its lectures in two columns.
+
 **Today's start bar** (`main.today > .t-start`): "להתחיל" and the streak's
 tile ("להבה 4/7", 46 px, inline with the button) stay over the tab bar
 while the queue scrolls under them, about 70 px tall with a short fade; a
@@ -297,7 +317,9 @@ that take turns to light up (still under reduced motion).
 ### Buttons and links
 
 `.a-btn` is secondary; `.primary` is the screen's one action; `.ghost` a
-quiet one; `.danger` deletes; `.wide` fills its row (52 px); `.small` sits
+quiet one; `.danger` deletes; `.wide` fills its row (52 px; from 600 px
+wide, one alone in a screen stops at 480 px, at the start; in the bottom
+bar, a row or a sheet it keeps filling); `.small` sits
 in a list row or a line of text (32 px); `.icon` is a square ✕, ?, ⋯. Every
 size is 44 × 44 to the finger: a smaller one grows an invisible `::after`.
 
@@ -499,7 +521,11 @@ inside it.
 Its parts are `.a-scrim`, `.a-sheet` and `.a-sheet-head` (with `SheetClose`)
 for a sheet that keeps its own history (the reader's thread). A sheet is at
 most 85% of the screen tall (so its foot, "לנעוץ" in the wall's moment,
-shows at 390 × 844 without scrolling), with a small grip at its top.
+shows at 390 × 844 without scrolling), with a small grip at its top (none
+with a mouse). On a screen 768 wide and 560 tall it is a dialog in the
+middle, `--sheet-w` wide, four rounded corners, no grip; a sheet of a
+picture (`.slide-sheet`, `.qf-sheet`, `.geo-sheet`, `.fix-sheet`) takes
+`--measure`.
 
 The toast (`.a-toast`) is the shell's: `ctx.say("הקישור הועתק.")`, with an
 optional action (`{ label: "ביטול", run }`).
