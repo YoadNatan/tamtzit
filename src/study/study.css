@@ -510,7 +510,10 @@ a.pc-wa {
   }
   main.library .lecture-list {
     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    align-items: start;
+    align-items: stretch; /* two cards side by side end together */
+  }
+  main.library .lecture-list > .lc {
+    align-content: start; /* the taller card's room goes under its content */
   }
 }
 .ask-bar {

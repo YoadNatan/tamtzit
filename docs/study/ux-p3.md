@@ -74,7 +74,7 @@ What stays under 13 px, on purpose: a figure's own pins and drawn labels
   - The review's filter chips show their edge (`--field-line`) when not
     picked.
   - Upload: "שנה" and "מועד" labels on one line.
-- **Practice**: in dark mode the figure stage is #e7e5f0 and its picture at
+- **Practice**: in dark mode the figure stage is `--figure-stage` (#e6e6e6, the picture's white at 90%, so no box shows) and its picture at
   90% brightness; a photo question is never wider than the photo.
 - **Navigation**: the plan (every state) and "ההתקדמות שלי" have a way
   back (to יחד, or to שלי for one's own lane); a live quiz's end has one way

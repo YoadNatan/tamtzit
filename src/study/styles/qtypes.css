@@ -15,7 +15,7 @@
 .qf-stage {
   position: relative;
   width: 100%;
-  background: #ffffff;
+  background: var(--figure-stage);
   border: 1px solid var(--line);
   border-radius: var(--r-2, 12px);
   overflow: hidden;
@@ -25,10 +25,10 @@
   justify-self: center;
 }
 /* Dark: the stage stays light (the slides are), a step under pure white so
-   it does not glare in a dark room; the pins and lines keep their contrast. */
+   it does not glare in a dark room (--figure-stage, the same grey as the
+   picture's own white at 90%); the pins and lines keep their contrast. */
 @media screen and (prefers-color-scheme: dark) {
   .qf-stage {
-    background: #e7e5f0;
     border-color: transparent;
   }
   .qf-stage img,

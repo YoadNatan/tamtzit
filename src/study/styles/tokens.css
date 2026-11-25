@@ -35,6 +35,7 @@
   --accent-ink: #ffffff; /* text on --accent: 6.9:1 */
   --accent-soft: #ebe6ff;
   --accent-edge: #3720b8; /* the bottom edge of a primary button */
+  --figure-stage: #ffffff; /* behind a question's picture (the slides are white) */
   --accent-2: #8a5cff; /* the primary's light end, for rings and bars */
   /* The primary as a FILL (a primary button, the current tab's tile, a chosen
      segment): in light it is --accent itself; in dark it stays a deep, strong
@@ -233,6 +234,7 @@
     --accent-ink: #140b45; /* text on the light --accent (a chat bubble) */
     --accent-soft: #2e2760;
     --accent-edge: #3a22b0;
+    --figure-stage: #e6e6e6; /* white dimmed as its picture is (90%), so no box shows inside */
     --accent-fill: #6c4cff;
     --accent-fill-ink: #ffffff;
     --accent-2: #d3a6ff;
