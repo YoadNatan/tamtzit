@@ -7,7 +7,7 @@
 
 /* ── the upload ── */
 .x-file {
-  gap: var(--sp-3);
+  gap: var(--sp-4);
 }
 .x-picked {
   flex-wrap: nowrap;
@@ -33,7 +33,7 @@
   flex: none;
   width: 142px;
   display: grid;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
   padding: var(--sp-4);
 }
 .x-page {
@@ -65,7 +65,7 @@
 }
 .x-keystrip {
   display: flex;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -77,7 +77,7 @@
 }
 .x-keypicked {
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
 }
 /* Four tools in a 142 px card: two by two, each its own 44 px target (four
    in a row overlapped, and ✕ stuck out of the card: WP6). */
@@ -102,7 +102,7 @@
     padding: var(--sp-1) 0 var(--sp-4);
   }
 }
-/* Pages not read, at the top of the summary: the line, and "לנסות שוב" under it. */
+/* Pages not read, at the top of the summary: the line, the re-read's cost, and "לנסות שוב". */
 .r-unread {
   display: grid;
   gap: var(--sp-4);
@@ -230,12 +230,12 @@ a.x-zoom {
 /* ── the review ── */
 .r-sum {
   display: grid;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
 }
 .r-sum .nums {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--sp-3);
+  gap: var(--sp-4);
 }
 .r-sum .nums > div {
   display: grid;
@@ -261,7 +261,7 @@ a.x-zoom {
 .r-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
 }
 /* An unpicked filter shows its edge (a field's line, 3:1 and up), not only a pale tint. */
 .r-filters .a-chip {
@@ -496,7 +496,7 @@ button.a-card.s-src[aria-checked="true"] {
 }
 .s-open {
   display: grid;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
 }
 .s-open .a-btn {
   justify-self: start;
@@ -548,7 +548,7 @@ button.a-card.s-src[aria-checked="true"] {
 .m-legend span {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
 }
 .m-legend i {
   display: inline-block;
@@ -631,7 +631,7 @@ button.a-card.s-src[aria-checked="true"] {
 /* ── the result ── */
 .e-score {
   display: grid;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
   padding: var(--sp-10) var(--sp-8);
   border: var(--b) solid color-mix(in srgb, var(--me-pop) 40%, var(--line));
   border-radius: var(--r-xl);

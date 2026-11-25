@@ -216,6 +216,9 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
       <p className="a-small a-muted">{drives(examId) ? "הטלפון מעתיק את הדפים. כדאי להשאיר את המסך פתוח." : "אפשר לסגור את הטלפון. ההעתקה ממשיכה בלעדיו."}</p>
     </section>
   ) : null;
+  // A failed exam (no review) gets a new upload only, no paid re-read (owner's decision): its rows say what failed, without "לנסות שוב".
+  const failedEmpty = status.status === "failed" && (review?.items.length ?? 0) === 0;
+  const canRetry = !failedEmpty;
   const unitList =
     lines.length && (reading || failed.length) ? (
       <ul className="a-list x-units">
@@ -237,22 +240,19 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
                 {l.state === "failed" && l.error === "pages_expired" ? ` · ${failText(l.error, "exam")}` : ""}
               </span>
             </div>
-            {l.state === "failed" ? (
+            {l.state === "failed" && canRetry ? (
               <button type="button" className="a-btn small x-retry" disabled={busy} onClick={() => void retryAll(null)}>
                 לנסות שוב
               </button>
-            ) : (
+            ) : l.state === "failed" ? null : (
               <span className={UNIT_CHIP[l.state]?.cls ?? "a-chip"}>{UNIT_CHIP[l.state]?.label ?? ""}</span>
             )}
           </li>
         ))}
       </ul>
     ) : null;
-  // "לנסות שוב" reads the pages again: its cost, once under the rows.
-  const retryNote = unitList && failed.length ? <p className="a-small a-muted x-retry-note">{REREAD_COST}</p> : null;
-
   // A failed exam with nothing found is not a review: its failure, and a new upload (WP6; no paid re-run).
-  const failedEmpty = status.status === "failed" && (review?.items.length ?? 0) === 0;
+  // In a review, "לנסות שוב" and its cost sit together in the callout at the top (ExamReviewBody).
   if (!review || reading || failedEmpty) {
     return (
       <main className="exam-review">
@@ -260,7 +260,6 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
         {sub}
         {progress}
         {unitList}
-        {retryNote}
         {!reading && status.status === "failed" ? (
           <>
             <p className="a-error" role="alert">
@@ -297,14 +296,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
       head={head}
       sub={sub}
       failedParts={failed.length}
-      unitList={
-        unitList ? (
-          <>
-            {unitList}
-            {retryNote}
-          </>
-        ) : null
-      }
+      unitList={unitList}
       reload={load}
       retry={retryAll}
       busy={busy}
@@ -379,6 +371,7 @@ function ExamReviewBody(p: {
         {p.failedParts ? (
           <div className="a-callout warn r-unread" role="status">
             <p>{p.failedParts === 1 ? "חלק אחד מהמבחן לא נקרא, אז חסרות כאן שאלות." : `${p.failedParts} חלקים מהמבחן לא נקראו, אז חסרות כאן שאלות.`}</p>
+            <p className="a-small a-muted x-retry-note">{REREAD_COST}</p>
             <button type="button" className="a-btn small" disabled={p.busy} onClick={() => void p.retry(null)}>
               לנסות שוב
             </button>
