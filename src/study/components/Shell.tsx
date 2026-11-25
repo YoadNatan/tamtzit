@@ -541,6 +541,30 @@ export function useOnline(): boolean {
   return online;
 }
 
+/** iOS's keyboard covers the page instead of resizing it: --kb on the root
+ *  is how much of the layout viewport it hides (0 at any zoom other than 1,
+ *  and under 80 px: the browser's own bars), so a sheet's composer sits
+ *  above it (kit.css .a-scrim; WP5). Android resizes the page: 0 there. */
+function useKeyboardInset(): void {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement;
+    const set = () => {
+      const hidden = Math.abs(vv.scale - 1) < 0.01 ? Math.round(window.innerHeight - vv.height - vv.offsetTop) : 0;
+      if (hidden > 80) root.style.setProperty("--kb", `${hidden}px`);
+      else root.style.removeProperty("--kb");
+    };
+    vv.addEventListener("resize", set);
+    vv.addEventListener("scroll", set);
+    return () => {
+      vv.removeEventListener("resize", set);
+      vv.removeEventListener("scroll", set);
+      root.style.removeProperty("--kb");
+    };
+  }, []);
+}
+
 /** One line at the top while the browser is offline. */
 function OfflineLine() {
   const online = useOnline();
@@ -566,6 +590,7 @@ export default function Shell({ route, ctx, toast, children }: ShellProps) {
   const [schema, setSchema] = useState<"checking" | "ok" | "old">("checking");
   const [readers, setReaders] = useState<LiveReader[]>([]);
   const stack = useRef<HTMLDivElement>(null);
+  useKeyboardInset();
 
   const check = () => {
     setSchema("checking");

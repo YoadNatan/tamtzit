@@ -91,7 +91,12 @@ html:has(body.has-tabs) {
   scroll-padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-4));
 }
 html:has(.ph-foot) {
-  scroll-padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px) + var(--sp-4));
+  scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px) + var(--sp-4));
+}
+/* Both bars (the wall, a study session's day): (0,1,2) above beat this rule's
+   (0,1,1) until it named both, so focus landed under the bottom bar (WP5). */
+html:has(body.has-tabs):has(.ph-foot) {
+  scroll-padding-bottom: calc(var(--tabbar-h) + 96px + env(safe-area-inset-bottom, 0px) + var(--sp-4));
 }
 
 /* The toast: over everything, clear of the tab bar and of a bottom bar. A
@@ -976,6 +981,15 @@ a.pc-wa {
 .composer {
   padding-top: var(--sp-4);
   border-top: 1px solid var(--line);
+}
+/* In a sheet the composer stays at its bottom while the thread scrolls, so
+   the keyboard never hides "לשלוח" (WP5). */
+.a-sheet .composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
 }
 .composer-kind {
   justify-self: start;

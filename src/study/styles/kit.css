@@ -254,6 +254,27 @@ body.has-tabs .ph-foot {
   flex: 1;
   width: auto;
 }
+/* Typing on a phone (WP5): the on-screen keyboard takes half the screen, and
+   a sticky bottom bar over it would hide the field being typed in. While a
+   field outside the bar has focus, the bar joins the flow (it is the
+   screen's last block); a field inside the bar (the ask composer) keeps it. */
+@media (pointer: coarse) {
+  main:has(:is(input:not([type="radio"], [type="checkbox"], [type="range"], [type="file"], [type="button"], [type="submit"]), textarea, select):focus):not(:has(> .ph-foot :focus)) > .ph-foot {
+    position: static;
+  }
+}
+/* A very short screen (a keyboard up on Android, a phone held sideways):
+   the top and bottom bars scroll with the page, and the tab bar steps aside
+   while a field has focus. */
+@media (max-height: 480px) {
+  .ph-head,
+  .ph-foot {
+    position: static;
+  }
+  body:has(:is(input:not([type="radio"], [type="checkbox"], [type="range"], [type="file"], [type="button"], [type="submit"]), textarea, select):focus) .ph-tabs {
+    display: none;
+  }
+}
 
 /* The tab bar: four tabs, an icon tile over a word. The current tab's tile
    fills with the accent and stands on its edge; the others are quiet. */
@@ -1690,6 +1711,9 @@ input[type="radio"]:disabled {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  /* Over iOS's keyboard, which covers the page rather than resizing it:
+     --kb is its height (Shell's visualViewport watch), 0 elsewhere. */
+  padding-bottom: var(--kb, 0px);
   background: var(--scrim);
 }
 .a-sheet {
