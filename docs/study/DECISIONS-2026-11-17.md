@@ -16,6 +16,18 @@ been since release 1. Every screen the addendum kept for "after the account"
 opens without one. The privacy rules between members stay exactly as they
 are: a row that only its owner may read stays owner-only.
 
+> **Amended 25 Nov 2026: the personal code** ([`personal-code.md`](personal-code.md),
+> SQL section I, [`RELEASE-I1.md`](RELEASE-I1.md)). Yoad: "like any app, keep
+> their username and stay connected". Each member can keep a private code
+> (and a link carrying it); entering it on any phone or browser signs that
+> device in as **the same anonymous user**, so the same name, progress,
+> answers and cards come back. Still no email and no password for members,
+> and `is_anonymous` stays true: the code reaches Auth's password sign-in
+> only through a one-time random address and password that the server uses
+> and removes within seconds. A lost code: the group's opener makes a new
+> one, and the member sees who did. A member is now the anonymous user,
+> on as many devices as they enter the code on, not only the first device.
+
 ### What it changes in the addendum
 
 | Where | The addendum said | Now |

@@ -109,7 +109,7 @@ order are in [`docs/study/`](docs/study/README.md); the move out of the
 | `index.html` | the one page, served at `/` |
 | `src/study/` | the app (React) |
 | `shared/study/` | code used by both the page and the server |
-| `api/study/*.ts` | the Vercel functions: `health`, `outline`, `section`, `work`, `ai` |
+| `api/study/*.ts` | the Vercel functions: `health`, `outline`, `section`, `work`, `ai`, `code` (the personal code, `docs/study/personal-code.md`) |
 | `server/study/` | the functions' shared code (outside `api/`, so Vercel does not count it as a function) |
 | `supabase/study-schema.sql` | the whole database; `supabase/parts/` the same in 9 parts |
 | `supabase/tests/` | SQL behaviour and concurrency tests, the stubs, a test copy of the board app's schema |
@@ -146,7 +146,7 @@ redirects old `/study` and `/study/…` links to `/` (the query is kept).
 `"fluid": true` is required: the writing functions declare
 `maxDuration: 300`, which needs Fluid compute. The functions run on the
 Node.js runtime (the Anthropic SDK imports `@opentelemetry/api`, which the
-edge bundler refuses). Vercel Hobby allows 12 functions; 5 are used.
+edge bundler refuses). Vercel Hobby allows 12 functions; 6 are used.
 
 After a push to `main`, `.github/workflows/smoke.yml` checks the live site
 (the repository variable `SITE_URL`, else `https://tamtzit.vercel.app`):
