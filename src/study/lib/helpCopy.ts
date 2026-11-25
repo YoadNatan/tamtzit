@@ -1,6 +1,7 @@
 import { PLAN } from "../../../shared/study/lane";
 import { FLAME_LIT, FLAME_WINDOW, masteryWords, MINUTES } from "../../../shared/study/today";
 import { ENDS, type Ends, type Flags } from "./flags";
+import { INSTALL, installHelp } from "./installCopy";
 
 /* ── Help, as data (spec §6.2; §12.7.5) ──
  * The rows F renders (components/Help.tsx), each shown with its flag, so a
@@ -311,6 +312,12 @@ export function helpRows(f: Flags, w: WritingHelp, ends: Ends = ENDS): HelpRow[]
         `התוכנית נפתחת מיד, ומדייקת ככל שמתרגלים: הרצאה נחשבת ״עם נתונים״ מ-${PLAN.LECTURE_ANSWERS} תשובות של ${PLAN.FLOOR} מתרגלים לפחות, שנספרות עד תחילת היום (תרגול של היום נספר מחר), וליד התוכנית כתוב כמה עוד חסר להרצאה הבאה.`,
         f.eve && "יומיים לפני המבחן: ״הלילה שלפני״, לכל הרצאה.",
       ),
+    },
+    {
+      // Adding the app to the home screen (docs/study/install.md); the iPhone's way names the personal code once the server offers it.
+      title: INSTALL.title,
+      on: f.install,
+      text: installHelp(w.codes === true),
     },
     {
       title: "שמירת החשבון",

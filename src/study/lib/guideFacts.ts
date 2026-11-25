@@ -4,6 +4,9 @@ import type { Ctx } from "../features/types";
 import { listLectures, members } from "./api";
 import { flags } from "./flags";
 import type { Facts } from "./guide";
+import { envNow } from "./install";
+import { installFact } from "./installLazy";
+import { canPrompt } from "./installPrompt";
 import { sessionCounts } from "./practice2";
 
 /* ── What the guide knows of the group (docs/study/guide.md) ──
@@ -27,7 +30,20 @@ export function guideFacts(ctx: Ctx, fresh = false): Promise<Facts> {
     }
     // The courses the library links to: the lectures' course texts, as the course pages match them.
     const courses = new Set(lectures.map((l) => courseKey(l.course ?? "")).filter(Boolean)).size;
-    return { lectures: lectures.length, ready, writing, members: people.length, practiceLecture, queue: null, serverWrites: writingHelp().serverWrites, courses };
+    // How this device adds the app to the home screen (read now: the prompt can come late).
+    const env = envNow();
+    return {
+      lectures: lectures.length,
+      ready,
+      writing,
+      members: people.length,
+      practiceLecture,
+      queue: null,
+      serverWrites: writingHelp().serverWrites,
+      courses,
+      install: installFact(env, canPrompt()),
+      standalone: env.kind === "standalone",
+    };
   })();
   cache = { group: ctx.group.id, at: Date.now(), facts };
   facts.catch(() => {

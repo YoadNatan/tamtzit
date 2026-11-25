@@ -1,4 +1,6 @@
 import type { Flags } from "./flags";
+import type { InstallFact } from "./installLazy";
+import { installHowTo } from "./installCopy";
 import { miniScreen, type MiniRoute } from "./guideScreens";
 import { APP_PATH, tabOf, type Route } from "./route";
 
@@ -37,15 +39,21 @@ export type Facts = {
   serverWrites: boolean;
   /** Courses the library links to (distinct course texts of the lectures). */
   courses: number;
+  /** How this device adds the app to the home screen (lib/install.ts): an
+   *  iPhone's steps, an Android's menu, the browser's own prompt, or no way
+   *  (a computer without the prompt). */
+  install: InstallFact;
+  /** The page runs as the home-screen app. */
+  standalone: boolean;
 };
 
-export const NO_FACTS: Facts = { lectures: 0, ready: [], writing: 0, members: 0, practiceLecture: null, queue: null, serverWrites: false, courses: 0 };
+export const NO_FACTS: Facts = { lectures: 0, ready: [], writing: 0, members: 0, practiceLecture: null, queue: null, serverWrites: false, courses: 0, install: "none", standalone: false };
 
 /* ─────────────────────────── the device's memory ─────────────────────────── */
 
-export type StepId = "S1" | "S2" | "S4" | "S5" | "S6" | "S7" | "S8";
+export type StepId = "S1" | "S2" | "S4" | "S5" | "S6" | "S7" | "S8" | "S9";
 /** A real action the first steps count: the layer's marks and routes. */
-export type DoneEvent = "upload" | "open" | "para" | "bet" | "run" | "invite" | "group" | "course";
+export type DoneEvent = "upload" | "open" | "para" | "bet" | "run" | "invite" | "group" | "course" | "install";
 
 export type Memory = {
   v: 1;
@@ -83,8 +91,8 @@ const held = new Map<string, Memory>();
  *  value stored there is older than this load's copy, which wins. */
 const unsaved = new Set<string>();
 
-const DONE: readonly DoneEvent[] = ["upload", "open", "para", "bet", "run", "invite", "group", "course"];
-const STEPS: readonly StepId[] = ["S1", "S2", "S4", "S5", "S6", "S7", "S8"];
+const DONE: readonly DoneEvent[] = ["upload", "open", "para", "bet", "run", "invite", "group", "course", "install"];
+const STEPS: readonly StepId[] = ["S1", "S2", "S4", "S5", "S6", "S7", "S8", "S9"];
 
 /** A stored value, cleaned: anything that is not the guide's shape is dropped. */
 export function parseMemory(raw: string | null | undefined): Memory {
@@ -157,7 +165,8 @@ export type WalkId =
   | "meeting"
   | "ask"
   | "readmark"
-  | "course";
+  | "course"
+  | "install";
 
 export type FirstStep = {
   id: StepId;
@@ -230,6 +239,24 @@ function step(id: StepId, f: Flags, x: Facts, creator: boolean): FirstStep | nul
             doneBy: DONE_BY.S8,
           }
         : null;
+    case "S9":
+      // Adding the app to the home screen (docs/study/install.md): where there
+      // is a way here, or in the app itself (a step kept from the browser,
+      // ticked by the launch); firstSteps never adds it there.
+      return f.install && (x.standalone || x.install !== "none")
+        ? {
+            id,
+            title: "להוסיף למסך הבית",
+            line:
+              x.install === "ios"
+                ? "תמצית נפתחת מאייקון, כמו אפליקציה. באייפון צריך את הקוד האישי, והוא מחכה בהסבר."
+                : x.install === "prompt"
+                  ? "תמצית נפתחת מאייקון, כמו אפליקציה. התקנה בלחיצה אחת."
+                  : "תמצית נפתחת מאייקון, כמו אפליקציה. ההסבר מותאם לטלפון.",
+            walk: "install",
+            doneBy: DONE_BY.S9,
+          }
+        : null;
   }
 }
 
@@ -240,12 +267,15 @@ export const MAX_STEPS = 5;
  *  invite is kept when the list is cut. The course page (S8) comes before
  *  the queue: with a ready lecture, practice and a queue, a joiner's invite
  *  (S6) and "יחד" (S7) give way to it (all six join from the creator's link,
- *  and the tour points at "יחד"). */
+ *  and the tour points at "יחד"). Adding the app to the home screen (S9)
+ *  comes right after the first (the creator's: after the invite), so a cut
+ *  never drops it; it is never added in the home-screen app itself. */
 export function firstSteps(f: Flags, x: Facts, m: Pick<Memory, "list" | "mode">): FirstStep[] {
   const creator = m.mode === "create";
   const kept = new Set(m.list);
-  const order: StepId[] = creator ? ["S1", "S6", "S2", "S4", "S8", "S5", "S7"] : ["S1", "S2", "S4", "S8", "S5", "S6", "S7"];
-  const applies = order.filter((id) => kept.has(id) || step(id, f, x, creator) !== null);
+  const order: StepId[] = creator ? ["S1", "S6", "S9", "S2", "S4", "S8", "S5", "S7"] : ["S1", "S9", "S2", "S4", "S8", "S5", "S6", "S7"];
+  const fresh = (id: StepId) => !(id === "S9" && x.standalone) && step(id, f, x, creator) !== null;
+  const applies = order.filter((id) => kept.has(id) || fresh(id));
   const room = Math.max(MAX_STEPS, kept.size);
   const chosen: StepId[] = [];
   for (const id of applies) if (kept.has(id)) chosen.push(id);
@@ -262,7 +292,7 @@ export function firstSteps(f: Flags, x: Facts, m: Pick<Memory, "list" | "mode">)
 }
 
 /** Facts under which every step whose flags are on applies. */
-const SOME_FACTS: Facts = { ...NO_FACTS, ready: ["-"], practiceLecture: "-", queue: 1, courses: 1 };
+const SOME_FACTS: Facts = { ...NO_FACTS, ready: ["-"], practiceLecture: "-", queue: 1, courses: 1, install: "ios" };
 
 /** Whether a step is done: one of its real actions was seen. */
 export const isDone = (s: FirstStep, m: Pick<Memory, "did">) => s.doneBy.some((e) => m.did.includes(e));
@@ -282,7 +312,7 @@ export function cardState(m: Memory, steps: FirstStep[], now: number): CardState
 }
 
 /** The real actions that tick each step off. */
-export const DONE_BY: Record<StepId, DoneEvent[]> = { S1: ["upload", "open"], S2: ["para"], S4: ["bet"], S5: ["run"], S6: ["invite"], S7: ["group"], S8: ["course"] };
+export const DONE_BY: Record<StepId, DoneEvent[]> = { S1: ["upload", "open"], S2: ["para"], S4: ["bet"], S5: ["run"], S6: ["invite"], S7: ["group"], S8: ["course"], S9: ["install"] };
 const EVENT_TITLE: Record<DoneEvent, string> = {
   upload: "להעלות הרצאה ראשונה",
   open: "לפתוח סיכום",
@@ -292,6 +322,7 @@ const EVENT_TITLE: Record<DoneEvent, string> = {
   invite: "להזמין את הקבוצה",
   group: "להציץ ב״יחד״",
   course: "להציץ בעמוד הקורס",
+  install: "להוסיף למסך הבית",
 };
 
 /** Whether the home offers the app tour: a member this device never started
@@ -478,6 +509,8 @@ export const TARGETS = {
   caComposer: ".course-ask .k-composer",
   caSources: ".course-ask .ca-sources",
   caLeft: ".course-ask .k-left",
+  // Adding the app to the home screen (docs/study/install.md): its row in "שלי".
+  installRow: "a.install-row",
 } as const;
 
 const T = TARGETS;
@@ -748,6 +781,26 @@ export function walkOf(id: WalkId, f: Flags, x: Facts): Walk | null {
         ],
       };
     }
+    case "install":
+      // Adding the app to the home screen (docs/study/install.md): its row in "שלי". No STOP: nothing there is seen or paid.
+      return f.install
+        ? {
+            id,
+            title: "להוסיף למסך הבית",
+            steps: [
+              { at: tabbedBut(f, "me"), place: "שלי", go: { v: "me" }, target: sel(T.meTab), say: "ההוספה למסך הבית נמצאת ב״שלי״.", until: "route" },
+              {
+                at: (r) => r.v === "me",
+                place: "שלי",
+                go: { v: "me" },
+                target: sel(T.installRow),
+                say: "כאן. ההסבר מותאם לטלפון שלך.",
+                until: "click",
+                empty: "כאן במכשיר הזה אין מה להוסיף: תמצית כבר פתוחה מהאייקון, או שזה מחשב.",
+              },
+            ],
+          }
+        : null;
   }
 }
 
@@ -1028,6 +1081,15 @@ export function howTos(f: Flags, x: { codes?: boolean } = {}): HowTo[] {
       title: "להיכנס מטלפון אחר",
       answer: "בכניסה ← ״כניסה עם הקוד האישי״, או נוגעים בקישור השמור. הקוד ב״שלי״.",
       words: "קוד אישי טלפון חדש מכשיר אחר דפדפן התנתקתי נמחק התחברות חשבון סיסמה מסך הבית",
+    },
+    {
+      // Adding the app to the home screen (docs/study/install.md), after "code" so the first six stay.
+      on: f.install,
+      key: "install",
+      title: "להוסיף את תמצית למסך הבית",
+      answer: installHowTo(),
+      words: "התקנה להתקין אייקון מסך הבית להוריד אפליקציה אייפון אנדרואיד ספארי כרום קיצור",
+      open: { label: "להוסיף למסך הבית", route: { v: "install" } },
     },
     { on: f.wall, key: "wall", title: "לכתוב אסוציאציה", answer: "נוגעים בפסקה ← ״אסוציאציה״, או ביחד ← ״קיר האסוציאציות״.", words: "אסוציאציה זכירה מצחיק קיר" },
     {

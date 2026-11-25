@@ -62,7 +62,9 @@ const S2 = [
 /** Production before the course pages and past exams (what a member who joined then knew). */
 const PROD = S2.filter((n) => n !== "COURSES" && n !== "EXAMS");
 /** Every flag the guide speaks of. */
-const ALL = [...new Set([...W5X, ...S2])];
+/** Production's set with adding the app to the home screen (docs/study/install.md). */
+const S2I = [...S2, "INSTALL"];
+const ALL = [...new Set([...W5X, ...S2I])];
 const SETS: Array<[string, string[]]> = [
   ["off", []],
   ["rel1", R1],
@@ -73,12 +75,13 @@ const SETS: Array<[string, string[]]> = [
   ["today alone", ["TODAY"]],
   ["quiz without the meeting", ["QUESTIONS", "QUIZ"]],
   ["s2 (production, 27 flags)", S2],
+  ["s2 with the home screen", S2I],
   ["courses alone", ["COURSES"]],
   ["courses with practice", [...R1, "COURSES"]],
 ];
 const flagSet = (names: string[]): Flags => flagsFrom(Object.fromEntries([...names, "GUIDE"].map((n) => [`VITE_STUDY_${n}`, "1"])));
-const FULL: Facts = { lectures: 3, ready: [ID], writing: 1, members: 2, practiceLecture: ID, queue: 4, serverWrites: true, courses: 1 };
-const WALKS: WalkId[] = ["read", "upload", "practice", "invite", "today", "group", "cards", "correct", "readaloud", "quizopen", "meeting", "ask", "readmark", "course"];
+const FULL: Facts = { lectures: 3, ready: [ID], writing: 1, members: 2, practiceLecture: ID, queue: 4, serverWrites: true, courses: 1, install: "ios", standalone: false };
+const WALKS: WalkId[] = ["read", "upload", "practice", "invite", "today", "group", "cards", "correct", "readaloud", "quizopen", "meeting", "ask", "readmark", "course", "install"];
 const ROUTES: Route[] = [
   { v: "today" },
   { v: "library" },
@@ -249,7 +252,7 @@ test("the guide's code never clicks, and reads the group only through the existi
 
 test("the memory: a broken value is cleaned, and the guide works with no storage at all", () => {
   assert.deepEqual(parseMemory("not json"), { v: 1, views: 0, did: [], list: [], tips: true });
-  assert.deepEqual(parseMemory(JSON.stringify({ born: "x", did: ["para", "hack"], list: ["S2", "S9"], tips: false, views: -3 })), {
+  assert.deepEqual(parseMemory(JSON.stringify({ born: "x", did: ["para", "hack"], list: ["S2", "S99"], tips: false, views: -3 })), {
     v: 1,
     views: 0,
     did: ["para"],
@@ -677,4 +680,70 @@ test("the personal code: a how-to after readmark (the first six stay), found by 
     assert.ok(!me({}).includes("הקוד האישי"));
     assert.ok(me({ codes: true }).length <= 160);
   }
+});
+
+/* ── adding the app to the home screen (docs/study/install.md) ── */
+
+test("S9: the home screen step, right after the first, only with its flag and a way to add here", () => {
+  const ids = (names: string[], x: Partial<Facts> = {}, m: Partial<Memory> = {}) =>
+    firstSteps(flagSet(names), { ...FULL, ...x }, { list: [], mode: "join", ...m }).map((s) => s.id);
+  assert.ok(!ids(S2).includes("S9"), "without VITE_STUDY_INSTALL: none");
+  assert.deepEqual(ids(S2I).slice(0, 2), ["S1", "S9"], "a joiner: second");
+  assert.deepEqual(ids(S2I, {}, { mode: "create" }).slice(0, 3), ["S1", "S6", "S9"], "a creator: after the invite");
+  assert.equal(ids(S2I).length, 5, "still five at most");
+  assert.ok(ids(S2I, { install: "android" }).includes("S9"), "Android");
+  assert.ok(ids(S2I, { install: "prompt" }).includes("S9"), "the browser's prompt");
+  assert.ok(!ids(S2I, { install: "none" }).includes("S9"), "a computer with no prompt: none");
+  assert.ok(!ids(S2I, { standalone: true, install: "none" }).includes("S9"), "in the app itself: never added");
+  // A step kept from the browser stays in the app (Android shares the storage), with its walk.
+  const kept = firstSteps(flagSet(S2I), { ...FULL, standalone: true, install: "none" }, { list: ["S1", "S9"], mode: "join" });
+  assert.deepEqual(
+    kept.map((s) => s.id),
+    ["S1", "S9", "S2", "S4", "S8"],
+  );
+  assert.ok(!kept.find((s) => s.id === "S9")!.skipped, "kept, not skipped");
+  // The line is the device's.
+  const line = (install: Facts["install"]) => firstSteps(flagSet(S2I), { ...FULL, install }, { list: [], mode: "join" }).find((s) => s.id === "S9")!.line;
+  assert.ok(line("ios").includes("הקוד האישי"));
+  assert.ok(!line("android").includes("הקוד האישי") && !line("prompt").includes("הקוד האישי"));
+  assert.ok(line("prompt").includes("בלחיצה אחת"));
+});
+
+test("S9 is ticked by \"install\" (the said, the prompt, the browser's event, a launch from the icon)", () => {
+  assert.deepEqual(DONE_BY.S9, ["install"]);
+  const m: Memory = { v: 1, born: Date.now(), views: 1, did: [], list: ["S1", "S9", "S2"], tips: true };
+  const r = recordEvent(m, "install", Date.now());
+  assert.deepEqual(r.m.did, ["install"]);
+  assert.equal(r.tick, "✓ 1 מתוך 3: להוסיף למסך הבית");
+  assert.deepEqual(parseMemory(JSON.stringify({ list: ["S9"], did: ["install"] })).list, ["S9"], "kept by parseMemory");
+  assert.deepEqual(parseMemory(JSON.stringify({ list: ["S9"], did: ["install"] })).did, ["install"]);
+});
+
+test("the install walk: שלי's tab, then the row; it only points", () => {
+  assert.equal(walkOf("install", flagSet(S2), FULL), null, "off without its flag");
+  const w = walkOf("install", flagSet(S2I), FULL)!;
+  assert.deepEqual(
+    w.steps.map((s) => [s.target.sel, s.until]),
+    [
+      [TARGETS.meTab, "route"],
+      [TARGETS.installRow, "click"],
+    ],
+  );
+  assert.ok(w.steps.every((s) => !s.stop), "nothing there is seen by the group or paid");
+  assert.equal(w.steps[1].at({ v: "me" }), true);
+  assert.equal(w.steps[0].at({ v: "me" }), false, "already on שלי: straight to the row");
+});
+
+test("the how-to opens ?v=install, which this build allows; help's search finds it", () => {
+  const f = flagSet(S2I);
+  const h = howTos(f).find((x) => x.key === "install")!;
+  assert.deepEqual(h.open?.route, { v: "install" });
+  assert.deepEqual(allowed({ v: "install" }, f), { route: { v: "install" } });
+  assert.deepEqual(allowed({ v: "install" }, flagSet(S2)), { route: { v: "library" } }, "off: the library, with no notice");
+  assert.equal(tabOf({ v: "install" }, f), "me");
+  assert.deepEqual(parseRoute("?v=install"), { v: "install" });
+  assert.equal(routeUrl({ v: "install" }), "/?v=install");
+  for (const q of ["להתקין", "מסך הבית", "אייקון", "אפליקציה"]) assert.ok(searchHowTos(q, howTos(f)).some((x) => x.key === "install"), q);
+  assert.ok(!howTos(flagSet(S2)).some((x) => x.key === "install"), "not without the flag");
+  assert.deepEqual(howTos(f).slice(0, 6).map((x) => x.key), howTos(flagSet(S2)).slice(0, 6).map((x) => x.key), "the first six stay");
 });
