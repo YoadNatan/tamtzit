@@ -821,29 +821,30 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
             }
           />
         ) : null}
+        {/* In the sticky top bar: wherever the reader has scrolled, the contents open in view (WP6). */}
+        {tocOpen ? (
+          <nav className="a-card flat toc" aria-label="תוכן העניינים">
+            <ol>
+              {toc.map((h) => (
+                <li key={h.id} className={`lvl${h.level}`}>
+                  <a
+                    href={`#${h.id}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      // Closed first: the top bar it sat in is shorter by then, so the heading lands under it.
+                      setTocOpen(false);
+                      requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(h.id)?.scrollIntoView({ behavior: "smooth", block: "start" })));
+                    }}
+                    dir="rtl"
+                  >
+                    {isolateLatin(h.text, `toc${h.id}`)}
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        ) : null}
       </header>
-
-      {tocOpen ? (
-        <nav className="a-card flat toc" aria-label="תוכן העניינים">
-          <ol>
-            {toc.map((h) => (
-              <li key={h.id} className={`lvl${h.level}`}>
-                <a
-                  href={`#${h.id}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    document.getElementById(h.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    setTocOpen(false);
-                  }}
-                  dir="rtl"
-                >
-                  {isolateLatin(h.text, `toc${h.id}`)}
-                </a>
-              </li>
-            ))}
-          </ol>
-        </nav>
-      ) : null}
 
       <article className="lecture-body">
         <header className="lecture-title">

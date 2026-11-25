@@ -79,15 +79,28 @@
   align-items: center;
   gap: var(--sp-3);
 }
+/* Four tools in a 142 px card: two by two, each its own 44 px target (four
+   in a row overlapped, and ✕ stuck out of the card: WP6). */
 .x-tools {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-2);
 }
 .x-tools .a-btn {
-  min-height: 36px;
+  min-width: 0;
+  min-height: var(--hit);
   padding: 0;
   font-size: 0.95rem;
+}
+/* With a mouse a sideways strip cannot be scrolled by the wheel (its
+   scrollbar is hidden): the pages wrap instead. */
+@media (hover: hover) and (pointer: fine) {
+  .x-strip {
+    flex-wrap: wrap;
+    overflow: visible;
+    margin: 0;
+    padding: var(--sp-1) 0 var(--sp-4);
+  }
 }
 .x-years {
   display: grid;

@@ -197,3 +197,16 @@
 .k-ask-sheet .k-composer .a-input {
   background: var(--paper);
 }
+
+/* The ask screen's suggestions ("מה נאמר על Hydrochlorothiazide (HCTZ),
+   Chlorthalidone?"): a chip wraps rather than widen the page past the
+   phone's width (WP6). */
+.k-ask-screen .a-wrap > .a-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding-block: var(--sp-1);
+  border-radius: var(--r-md);
+  white-space: normal;
+  text-align: start;
+  overflow-wrap: anywhere;
+}

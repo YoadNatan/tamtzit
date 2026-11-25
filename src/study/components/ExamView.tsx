@@ -243,7 +243,9 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
   // "לנסות שוב" reads the pages again: its cost, once under the rows.
   const retryNote = unitList && failed.length ? <p className="a-small a-muted x-retry-note">{REREAD_COST}</p> : null;
 
-  if (!review || reading) {
+  // A failed exam with nothing found is not a review: its failure, and a new upload (WP6; no paid re-run).
+  const failedEmpty = status.status === "failed" && (review?.items.length ?? 0) === 0;
+  if (!review || reading || failedEmpty) {
     return (
       <main className="exam-review">
         {head}
@@ -252,9 +254,16 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
         {unitList}
         {retryNote}
         {!reading && status.status === "failed" ? (
-          <p className="a-error" role="alert">
-            {failText(status.error ?? "", "exam") || "לא נמצאו שאלות במבחן הזה."}
-          </p>
+          <>
+            <p className="a-error" role="alert">
+              {failText(status.error ?? "", "exam") || "לא נמצאו שאלות במבחן הזה."}
+            </p>
+            <div className="a-row">
+              <RouteLink to={{ v: "exams", isNew: true, c: courseId ?? undefined }} go={ctx.go} className="a-btn primary">
+                להעלות מבחן מחדש
+              </RouteLink>
+            </div>
+          </>
         ) : null}
         {reading ? (
           <>
@@ -399,27 +408,30 @@ function ExamReviewBody(p: {
         </div>
       ) : null}
 
-      <ul className="a-list r-rows">
-        {shown.map((q) => (
-          <li key={q.id} className="r-row">
-            {open === q.id ? (
-              <ItemCard {...p} q={q} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} />
-            ) : (
-              <button type="button" id={`rh-${q.id}`} className="a-li r-head" aria-expanded={false} onClick={() => setOpen(q.id)}>
-                <div>
-                  <b>שאלה {q.no}</b>
-                  <span className="m" dir="rtl">
-                    {firstWords(q.question)}
-                  </span>
-                  {keyByLine(q, wasConfirmed(review.key_log, q.id)) ? <span className="r-who a-small">{keyByLine(q, wasConfirmed(review.key_log, q.id))}</span> : null}
-                </div>
-                <RowChip q={q} />
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-      {!shown.length ? <p className="a-para a-muted">{filter === "look" ? "אין שאלות לבדיקה." : "אין כאן שאלות."}</p> : null}
+      {shown.length ? (
+        <ul className="a-list r-rows">
+          {shown.map((q) => (
+            <li key={q.id} className="r-row">
+              {open === q.id ? (
+                <ItemCard {...p} q={q} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} />
+              ) : (
+                <button type="button" id={`rh-${q.id}`} className="a-li r-head" aria-expanded={false} onClick={() => setOpen(q.id)}>
+                  <div>
+                    <b>שאלה {q.no}</b>
+                    <span className="m" dir="rtl">
+                      {firstWords(q.question)}
+                    </span>
+                    {keyByLine(q, wasConfirmed(review.key_log, q.id)) ? <span className="r-who a-small">{keyByLine(q, wasConfirmed(review.key_log, q.id))}</span> : null}
+                  </div>
+                  <RowChip q={q} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="a-para a-muted">{filter === "look" ? "אין שאלות לבדיקה." : "אין כאן שאלות."}</p>
+      )}
 
       <label className="a-card flat r-hide">
         <span className="a-stack">

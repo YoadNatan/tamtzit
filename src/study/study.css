@@ -549,6 +549,16 @@ a.pc-wa {
   max-height: 60vh;
   overflow: auto;
 }
+/* Inside the reader's sticky top bar (WP6): in the screen's column, under
+   the room bar, scrolling on its own. */
+.reader-top > .toc {
+  max-height: 60vh;
+  max-height: 60dvh;
+  margin-block: 0 var(--sp-3);
+  margin-left: var(--gutter-left);
+  margin-right: var(--gutter-right);
+  overscroll-behavior: contain;
+}
 .toc ol {
   margin: 0;
   padding: 0;
@@ -915,6 +925,17 @@ a.pc-wa {
 }
 .room-status.following {
   color: var(--accent);
+}
+/* 320 px (an iPhone SE): one line cut "מעקב: שוהם" to "מעק…"; the room
+   wraps instead, the status and its button on a line of their own (WP6). */
+@media (max-width: 373.98px) {
+  .room-bar {
+    flex-wrap: wrap;
+    row-gap: var(--sp-2);
+  }
+  .room-action {
+    flex: 1 1 100%;
+  }
 }
 .room-bar .a-btn {
   flex: none;
