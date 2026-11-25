@@ -400,6 +400,10 @@ function MockResult({ ctx, a, score, qs, title }: { ctx: ScreenProps<"practice">
   const lines = scoreLines(score);
   const topics = useMemo(() => byTopic(score.items), [score.items]);
   const wrong = score.items.filter((it) => it.counted && !it.correct);
+  // A pick that was wrong, and a question left with none: two lists, not "הטעויות (19)" for 1 pick and 18 blanks.
+  const blank = (it: MockScoreItem) => (it.form === "one" ? it.choice === null : !it.choices?.length);
+  const picked = wrong.filter((it) => !blank(it));
+  const unanswered = wrong.filter(blank);
   const notCounted = score.items.filter((it) => !it.counted);
   const back = <BackLink go={ctx.go} fallback={a.course_id ? { v: "course", c: a.course_id } : { v: "library" }} />;
   const row = (it: MockScoreItem, line: string) => {
@@ -494,16 +498,23 @@ function MockResult({ ctx, a, score, qs, title }: { ctx: ScreenProps<"practice">
           </section>
         </>
       ) : null}
-      {wrong.length ? (
+      {picked.length ? (
         <>
           <div className="a-sec">
-            <h2>הטעויות ({wrong.length})</h2>
+            <h2>הטעויות ({picked.length})</h2>
           </div>
-          <ul className="a-list e-wrong">{wrong.map((it) => row(it, wrongLine(it)))}</ul>
+          <ul className="a-list e-wrong">{picked.map((it) => row(it, wrongLine(it)))}</ul>
         </>
-      ) : (
-        <p className="a-para">אין טעויות בשאלות שנספרו.</p>
-      )}
+      ) : null}
+      {unanswered.length ? (
+        <>
+          <div className="a-sec">
+            <h2>לא נענו ({unanswered.length})</h2>
+          </div>
+          <ul className="a-list e-wrong e-blank">{unanswered.map((it) => row(it, wrongLine(it)))}</ul>
+        </>
+      ) : null}
+      {!wrong.length ? <p className="a-para">אין טעויות בשאלות שנספרו.</p> : null}
       {notCounted.length ? (
         <>
           <div className="a-sec">

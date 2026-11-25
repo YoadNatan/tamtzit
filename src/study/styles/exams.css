@@ -102,11 +102,23 @@
     padding: var(--sp-1) 0 var(--sp-4);
   }
 }
+/* Pages not read, at the top of the summary: the line, and "לנסות שוב" under it. */
+.r-unread {
+  display: grid;
+  gap: var(--sp-4);
+}
+.r-unread p {
+  margin: 0;
+}
+.r-unread .a-btn {
+  justify-self: start;
+}
+/* "שנה" and "מועד": their labels on one line (start), whatever each control's height. */
 .x-years {
   display: grid;
   grid-template-columns: 7rem minmax(0, 1fr);
   gap: var(--sp-5);
-  align-items: end;
+  align-items: start;
 }
 .x-years .a-seg > .a-btn {
   flex: 1;
@@ -251,12 +263,14 @@ a.x-zoom {
   flex-wrap: wrap;
   gap: var(--sp-3);
 }
+/* An unpicked filter shows its edge (a field's line, 3:1 and up), not only a pale tint. */
 .r-filters .a-chip {
   min-height: 36px;
+  box-shadow: inset 0 0 0 1.5px var(--field-line);
   cursor: pointer;
 }
 .r-filters .a-chip[aria-checked="true"] {
-  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
 }
@@ -671,6 +685,26 @@ button.a-card.s-src[aria-checked="true"] {
   color: inherit;
   text-align: start;
   cursor: pointer;
+}
+/* A row that opens: a chevron at its end, pointing down once it is open. */
+.e-row > .a-li {
+  align-items: center;
+}
+.e-row > .a-li::after {
+  content: "‹"; /* toward the line's end in a right-to-left page */
+  flex: none;
+  margin-inline-end: var(--sp-3);
+  color: var(--muted);
+  font: 700 1.375rem / 1 var(--font-body);
+  transition: transform var(--t-press);
+}
+.e-row > .a-li[aria-expanded="true"]::after {
+  transform: rotate(-90deg);
+}
+@media (hover: hover) {
+  .e-row > .a-li:hover {
+    background: var(--surface-2);
+  }
 }
 .e-item {
   display: grid;

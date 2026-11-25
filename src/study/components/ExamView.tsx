@@ -224,7 +224,15 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
             <div>
               <b>{l.title}</b>
               <span className="m">
-                {l.state === "failed" ? (l.kind === "read" ? "לא נקראו" : "לא הצליח") : l.state === "running" ? "מעתיקים…" : l.state === "pending" ? "בתור" : ""}
+                {l.state === "failed" ? (
+                  <span className="a-chip warn">{l.kind === "read" ? "לא נקראו" : "לא הצליח"}</span>
+                ) : l.state === "running" ? (
+                  "מעתיקים…"
+                ) : l.state === "pending" ? (
+                  "בתור"
+                ) : (
+                  ""
+                )}
                 {/* An expired link is the one failure worth a sentence: "לנסות שוב" brings fresh ones. */}
                 {l.state === "failed" && l.error === "pages_expired" ? ` · ${failText(l.error, "exam")}` : ""}
               </span>
@@ -288,6 +296,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
       setReview={setReview}
       head={head}
       sub={sub}
+      failedParts={failed.length}
       unitList={
         unitList ? (
           <>
@@ -314,6 +323,7 @@ function ExamReviewBody(p: {
   head: React.ReactNode;
   sub: React.ReactNode;
   unitList: React.ReactNode;
+  failedParts: number;
   reload: () => Promise<ExamStatus | null>;
   retry: (pages: number[] | null) => Promise<void>;
   busy: boolean;
@@ -365,6 +375,15 @@ function ExamReviewBody(p: {
       {p.head}
       {p.sub}
       <section className="a-card r-sum" aria-label="מה נמצא">
+        {/* Pages that were not read: said first, not only as a muted row under the summary (P3). */}
+        {p.failedParts ? (
+          <div className="a-callout warn r-unread" role="status">
+            <p>{p.failedParts === 1 ? "חלק אחד מהמבחן לא נקרא, אז חסרות כאן שאלות." : `${p.failedParts} חלקים מהמבחן לא נקראו, אז חסרות כאן שאלות.`}</p>
+            <button type="button" className="a-btn small" disabled={p.busy} onClick={() => void p.retry(null)}>
+              לנסות שוב
+            </button>
+          </div>
+        ) : null}
         <div className="nums">
           <div>
             <b>{counts.found}</b>
