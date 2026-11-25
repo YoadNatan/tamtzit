@@ -125,10 +125,13 @@ function CodeStep({ userId, say, title }: { userId: string; say: (t: string) => 
             <input ref={field} className="a-input pc-code pc-field" dir="ltr" readOnly value={formatCode(code)} aria-label={INSTALL.codeLabel} onFocus={(e) => e.currentTarget.select()} />
           </>
         ) : (
-          <p className="pc-code inst-code" dir="ltr">
-            <span className="sr-only">{INSTALL.codeLabel}: </span>
-            {formatCode(code)}
-          </p>
+          <>
+            {/* Its name for a screen reader, beside it (a <p> takes no label). */}
+            <span className="sr-only">{INSTALL.codeLabel}:</span>
+            <p className="pc-code inst-code" dir="ltr">
+              {formatCode(code)}
+            </p>
+          </>
         )}
         <button type="button" className={`a-btn wide inst-copy${copied === "yes" ? "" : " primary"}`} onClick={() => void copy()}>
           {copied === "yes" ? INSTALL.codeCopied : INSTALL.codeCopy}
