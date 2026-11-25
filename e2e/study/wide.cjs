@@ -350,7 +350,7 @@ const FRAME = () => {
         const words = hint ? (await page.locator(".pq-keys").innerText()).replace(/\s+/g, " ").trim() : "";
         check(
           `${name}: the keys line ${fine ? "shown with a mouse" : "hidden on a touch screen"}`,
-          fine ? hint && /^במקלדת: 1–4 לבחירה · Enter לבדיקה$/.test(words) : !hint,
+          fine ? hint && /^במקלדת: 1–4 לבחירה · Enter לבדיקה \(אחרי ״כמה בטוחים\?״\)$/.test(words) : !hint,
           JSON.stringify({ hint, words }),
         );
         await shot(page, `l-practice-keys-${name}`);
@@ -358,11 +358,11 @@ const FRAME = () => {
         await page.keyboard.press("2");
         await pause(200);
         const picked = await page.locator(".pq-options [role=radio]").evaluateAll((els) => els.findIndex((e) => e.getAttribute("aria-checked") === "true"));
+        // The bet clicked with the mouse keeps the focus: Enter from there checks (the usual flow).
         await page.locator(".pq-bets").getByRole("radio").first().click();
-        await page.locator("body").click({ position: { x: 5, y: 300 } }).catch(() => undefined);
         await page.keyboard.press("Enter");
         await page.locator(".pq-verdict").waitFor({ timeout: 10000 });
-        check(`${name}: 2 picks the second option; Enter checks`, picked === 1, String(picked));
+        check(`${name}: 2 picks the second option; Enter checks, with the focus on the bet just clicked`, picked === 1, String(picked));
         await access(page, `l-practice-${name}`);
         await ctx.close();
       });

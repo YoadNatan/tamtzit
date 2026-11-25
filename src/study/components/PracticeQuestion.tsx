@@ -275,7 +275,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
         )}
         {p.keys && !set && !tap ? (
           <p className="a-small a-muted pq-keys">
-            במקלדת: <bdi dir="ltr">1–{Math.min(q.options.length, 6)}</bdi> לבחירה · <kbd>Enter</kbd> לבדיקה
+            במקלדת: <bdi dir="ltr">1–{Math.min(q.options.length, 6)}</bdi> לבחירה · <kbd>Enter</kbd> לבדיקה (אחרי ״כמה בטוחים?״)
           </p>
         ) : null}
         {p.noBet ? null : (

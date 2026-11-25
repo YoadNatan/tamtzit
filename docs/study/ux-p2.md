@@ -121,8 +121,10 @@ New tokens: `--measure-read` (36em), `--measure-wide` (1040 px), `--sheet-w`
 
 `PracticeSession` already took 1–6 and Enter (and the sheets Escape). Under
 the options of a practice session, `PracticeQuestion` (prop `keys`) now
-shows "במקלדת: 1–4 לבחירה · Enter לבדיקה" (the number is the options'
-count, at most 6), `.pq-keys`, shown only under `(hover: hover) and
+shows "במקלדת: 1–4 לבחירה · Enter לבדיקה (אחרי ״כמה בטוחים?״)" (the
+number is the options' count, at most 6; Enter checks only once a bet is
+chosen, and it counts with the focus on an option or a bet, where a mouse
+click leaves it), `.pq-keys`, shown only under `(hover: hover) and
 (pointer: fine)`. Not for a set answer (true/false, match, order) or a
 picture's numbers, whose keys differ. Today's session, the catch-up and the
 sandbox do not take the keys, so they show no line.

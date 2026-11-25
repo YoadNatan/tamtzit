@@ -404,7 +404,8 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     void choose(null, null);
   }, [timed, over, id, sending, remaining, choose]);
 
-  // Desktop keys: 1-6 pick an option, Enter checks (with a bet) or goes on.
+  // Desktop keys: 1-6 pick an option, Enter checks (with a bet) or goes on. Enter counts on an option or a
+  // bet too: a mouse click leaves the focus there, and that is where the next Enter comes from.
   const answeredNow = s ? S.answered(s) : false;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -417,7 +418,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
           e.preventDefault();
           setPicked(i);
         }
-      } else if (e.key === "Enter" && !(t && t.closest("button, a"))) {
+      } else if (e.key === "Enter" && !(t && t.closest("button, a") && !t.closest(".pq-options .a-opt, .pq-bets button"))) {
         if (answeredNow) {
           e.preventDefault();
           goNext();
