@@ -39,6 +39,27 @@ const check = (name, pass, detail) => {
     const icon = await guest.request.get(`${mock.base}/apple-touch-icon.png`);
     check("home-screen icon is served", icon.ok() && (await icon.body()).length > 500);
     check("index links both", (await guest.locator('link[rel="manifest"]').count()) === 1 && (await guest.locator('link[rel="apple-touch-icon"]').count()) === 1);
+    // The installed app (docs/study/install.md): its identity, the paper colour, Android's shortcuts and pictures.
+    check("manifest: the app's id is / (as start_url made it before)", man?.id === "/", man?.id);
+    check("manifest: the title bar is the page's paper", man?.theme_color === "#f6f4fd" && man?.background_color === "#f6f4fd", man?.theme_color);
+    check("manifest: every shortcut is in scope", Array.isArray(man?.shortcuts) && man.shortcuts.length > 0 && man.shortcuts.every((x) => x.url.startsWith("/")), JSON.stringify(man?.shortcuts));
+    const maskable = man?.icons?.find((i) => i.purpose === "maskable");
+    const maskRes = maskable ? await guest.request.get(`${mock.base}${maskable.src}`) : null;
+    check("manifest: a padded maskable icon of its own", Boolean(maskable && maskable.src !== "/icon-512.png" && maskRes?.ok()), maskable?.src);
+    const shots = man?.screenshots ?? [];
+    const forms = new Set(shots.map((x) => x.form_factor));
+    let shotsOk = forms.has("narrow") && forms.has("wide");
+    for (const x of shots) {
+      const r = await guest.request.get(`${mock.base}${x.src}`);
+      const body = r.ok() ? await r.body() : Buffer.alloc(0);
+      // A PNG's size is in its IHDR: width at byte 16, height at 20.
+      const size = body.length > 24 ? `${body.readUInt32BE(16)}x${body.readUInt32BE(20)}` : "";
+      if (size !== x.sizes || !x.label) shotsOk = false;
+    }
+    check("manifest: narrow and wide screenshots, served at their sizes, labelled", shotsOk, JSON.stringify(shots));
+    const meta = (name) => guest.locator(`meta[name="${name}"]`).evaluateAll((els) => els.map((e) => e.getAttribute("content")));
+    check("index: the theme colours are the paper's", JSON.stringify(await meta("theme-color")) === JSON.stringify(["#f6f4fd", "#121022"]));
+    check("index: iOS's status bar style", JSON.stringify(await meta("apple-mobile-web-app-status-bar-style")) === JSON.stringify(["default"]));
   } catch (e) {
     ok = false;
     steps.error = String(e);

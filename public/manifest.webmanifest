@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "תמצית",
   "short_name": "תמצית",
   "description": "סיכום מלא לכל הרצאה, לקבוצת הלמידה.",
@@ -8,10 +9,22 @@
   "scope": "/",
   "display": "standalone",
   "background_color": "#f6f4fd",
-  "theme_color": "#5235e8",
+  "theme_color": "#f6f4fd",
+  "categories": ["education"],
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "היום", "url": "/", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "ספרייה", "url": "/?v=library", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "תרגול", "url": "/?v=practice", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ],
+  "screenshots": [
+    { "src": "/screenshots/narrow-lecture.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "סיכום הרצאה, עם מספרי השקפים" },
+    { "src": "/screenshots/narrow-library.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "הספרייה של הקבוצה" },
+    { "src": "/screenshots/wide-library.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "הספרייה של הקבוצה" },
+    { "src": "/screenshots/wide-lecture.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "סיכום הרצאה, עם מספרי השקפים" }
   ]
 }
