@@ -249,7 +249,9 @@ member's own code is "הקוד האישי", never "סיסמה", "חשבון" or 
   **״אין חיבור כרגע. כדאי לבדוק את החיבור ולנסות שוב.״** (failText's
   `network`) with **״הקבוצה תיפתח מעצמה כשהחיבור יחזור.״**; a screen:
   **״המסך לא נטען. כדאי לבדוק את החיבור ולנסות שוב.״**, and, still offline,
-  **״עדיין אין חיבור. ננסה שוב כשהחיבור יחזור.״**
+  **״עדיין אין חיבור. ננסה שוב כשהחיבור יחזור.״** A screen whose own code
+  threw while online is not a connection problem:
+  **״משהו השתבש במסך הזה. אפשר לנסות שוב.״**
 - Offline, one line at the top: **״אין חיבור. מה שכבר נטען נשאר כאן.״**
 - A lecture whose writing stopped, by its title: **״חלק אחד לא נכתב.״** /
   **״N חלקים לא נכתבו.״** / **״הכתיבה נעצרה.״**, with the footer's own

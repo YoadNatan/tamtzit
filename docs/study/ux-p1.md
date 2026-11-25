@@ -23,12 +23,15 @@ No new flag and no SQL: every change is a fix to what is already on.
   refresh) leaves the screen as it is.
 - **A screen that fails** (`components/ErrorBoundary.tsx`). Around the routed
   screen and around the guide's layer (which shows nothing when it fails). A
-  lazy chunk that cannot be fetched, or a screen that throws, shows "המסך לא
-  נטען…" with "לנסות שוב" instead of an empty page; the tab bar stays and
-  another tab clears it. A chunk gone after a deploy still reloads the page
-  once (`lib/staleChunk.ts`), but never offline, where a reload would only
-  bring the browser's error page: there, "לנסות שוב" says "עדיין אין
-  חיבור…", and the connection's return reloads. `retryImport()` tries a
+  lazy chunk that cannot be fetched shows "המסך לא נטען…" with "לנסות שוב"
+  instead of an empty page, and a screen that throws while online shows
+  "משהו השתבש במסך הזה…"; the tab bar stays and another tab clears it. A
+  chunk gone after a deploy still reloads the page once
+  (`lib/staleChunk.ts`), but never offline, where a reload would only bring
+  the browser's error page: there, "לנסות שוב" says "עדיין אין חיבור…", and
+  the connection's return reloads, only for a visible screen whose code was
+  missing (never for the guide's hidden layer, nor for a screen that threw,
+  so a phone changing networks does not reload under the member's typing). `retryImport()` tries a
   lazy screen's import once more after 0.8 s (StudyApp's own screens).
   `vite:preloadError` is no longer prevented: prevented, Vite handed React an
   empty module ("reading 'default'").

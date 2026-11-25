@@ -13,6 +13,8 @@ import { isChunkError, reloadOnce } from "../lib/staleChunk";
 
 export const SCREEN_FAILED = "המסך לא נטען. כדאי לבדוק את החיבור ולנסות שוב.";
 export const STILL_OFFLINE = "עדיין אין חיבור. ננסה שוב כשהחיבור יחזור.";
+/** Online, and the screen's code itself threw: the connection is not the cause. */
+export const SCREEN_BROKE = "משהו השתבש במסך הזה. אפשר לנסות שוב.";
 
 type Props = {
   /** The screen's key: a new one clears the failure. */
@@ -21,13 +23,14 @@ type Props = {
   fallback?: "screen" | "none";
   children: ReactNode;
 };
-type State = { failed: boolean; key: string; offline: boolean };
+/** `chunk`: its code could not be fetched (or the page was offline), so the connection's return may cure it. */
+type State = { failed: boolean; key: string; offline: boolean; chunk: boolean };
 
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { failed: false, key: this.props.reset, offline: false };
+  state: State = { failed: false, key: this.props.reset, offline: false, chunk: false };
 
-  static getDerivedStateFromError(): Partial<State> {
-    return { failed: true };
+  static getDerivedStateFromError(error: unknown): Partial<State> {
+    return { failed: true, chunk: isChunkError(error) || navigator.onLine === false };
   }
 
   static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
@@ -48,8 +51,10 @@ export default class ErrorBoundary extends Component<Props, State> {
     window.removeEventListener("online", this.onOnline);
   }
 
+  // Only a screen the member sees, and only one whose code was missing: a hidden layer (the guide's), or a
+  // screen that threw, must not reload the page under a member's typing when the phone changes networks.
   private onOnline = () => {
-    if (this.state.failed) location.reload();
+    if (this.state.failed && this.state.chunk && this.props.fallback !== "none") location.reload();
   };
 
   private retry = () => {
@@ -63,7 +68,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     return (
       <main className="gate screen-failed">
         <div className="a-card gate-card">
-          <p role="alert">{SCREEN_FAILED}</p>
+          <p role="alert">{this.state.chunk ? SCREEN_FAILED : SCREEN_BROKE}</p>
           {this.state.offline ? (
             <p className="a-small a-muted" role="status">
               {STILL_OFFLINE}
