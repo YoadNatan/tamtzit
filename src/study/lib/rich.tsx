@@ -48,13 +48,14 @@ export function slideTag(target: EventTarget | null): number[] | null {
  *  isolated, and a hyphen inside a word made non-breaking, so a line never
  *  ends in "(K⁺-" shown as "K⁺-)" before "sparing)". */
 export function barLabel(text: string, keyBase = "b"): ReactNode[] {
-  return isolateLatin(text.replace(/(?<=[A-Za-z0-9\u2070-\u209f])-(?=[A-Za-z])/g, "\u2011"), keyBase);
+  return isolateLatin(text.replace(/([A-Za-z0-9\u2070-\u209f])-(?=[A-Za-z])/g, "$1\u2011"), keyBase);
 }
 
 /** A number range's hyphen ("1-8%", "3-4 h") made non-breaking, so a line
- *  never ends in "1-" with "8%" on the next. */
+ *  never ends in "1-" with "8%" on the next. No lookbehind here or in
+ *  barLabel: Safari before 16.4 cannot compile one. */
 export function keepRange(run: string): string {
-  return run.replace(/(?<=\d)-(?=\d)/g, "\u2011");
+  return run.replace(/(\d)-(?=\d)/g, "$1\u2011");
 }
 
 /** Wraps every Latin run of a Hebrew string in <bdi dir="ltr">. A string

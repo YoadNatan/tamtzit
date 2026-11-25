@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { isolateLatin, keepRange, richChildren, softBreaks } from "./rich";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { barLabel, isolateLatin, keepRange, richChildren, softBreaks } from "./rich";
 
 /* The summary's direction rules (lib/rich.tsx; docs/study/ux-p1.md, WP3). */
 
@@ -25,6 +27,14 @@ test("a number range keeps its two ends on one line (a non-breaking hyphen), ins
   assert.equal(keepRange("K⁺-sparing"), "K⁺-sparing");
   assert.equal(html(isolateLatin("3-4 h")), '<bdi dir="ltr">3‑4 h</bdi>');
   assert.equal(html(isolateLatin("ירידה של 1-8% בשנה")), 'ירידה של <bdi dir="ltr">1‑8%</bdi> בשנה');
+  assert.equal(keepRange("1-2-3"), "1‑2‑3", "a chain: every hyphen");
+});
+
+test("a bar's label: a hyphen inside a Latin word is non-breaking; no lookbehind (Safari before 16.4 cannot compile one)", () => {
+  assert.ok(html(barLabel("משתנים (K⁺-sparing)")).includes("K⁺\u2011sparing"));
+  assert.ok(html(barLabel("a-b-c")).includes("a\u2011b\u2011c"), "a chain: every hyphen");
+  const src = readFileSync(join(process.cwd(), "src", "study", "lib", "rich.tsx"), "utf8");
+  assert.ok(!/\(\?<[=!]/.test(src), "rich.tsx has no lookbehind");
 });
 
 test("\"NKCC2 = שני\": the equals sign stays with the Hebrew", () => {
