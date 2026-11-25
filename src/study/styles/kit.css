@@ -147,8 +147,10 @@ body.has-tabs main:has(> .ph-foot) {
   align-items: center;
   gap: var(--sp-3);
   min-height: var(--head-h);
-  padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px)) max(var(--sp-4), env(safe-area-inset-right, 0px)) var(--sp-2)
-    max(var(--sp-4), env(safe-area-inset-left, 0px));
+  /* The notch, once: under the live banner (which pads for it itself) only
+     what the banner does not already cover (WP7). */
+  padding: calc(var(--sp-2) + max(0px, env(safe-area-inset-top, 0px) - var(--study-banner-h, 0px))) max(var(--sp-4), env(safe-area-inset-right, 0px))
+    var(--sp-2) max(var(--sp-4), env(safe-area-inset-left, 0px));
 }
 /* Head and sub-line that stay together (the reader's room). */
 .ph-top > .ph-head,
@@ -357,7 +359,7 @@ body.has-tabs .ph-foot {
    title, in the display face, and the guide's "?" sits in a round tile. */
 :is(main.today:not(.t-session), main.library, main.group-screen, main.me-screen)
   > .ph-head {
-  padding-block: calc(var(--sp-6) + env(safe-area-inset-top, 0px)) var(--sp-6);
+  padding-block: calc(var(--sp-6) + max(0px, env(safe-area-inset-top, 0px) - var(--study-banner-h, 0px))) var(--sp-6);
   border-bottom-color: transparent;
 }
 :is(main.today:not(.t-session), main.library, main.group-screen, main.me-screen)

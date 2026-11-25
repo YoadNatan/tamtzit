@@ -201,7 +201,7 @@
 /* While the guess's answer shows, the shell's toast ("סומן, בלי שם.") goes to
  * the top instead of over the card (review M-DING-CLIPPED, meeting-08). */
 html:has(.m-ding) body .shell > .a-toast {
-  top: calc(var(--study-banner-h, 0px) + var(--sp-6) + env(safe-area-inset-top, 0px));
+  top: calc(var(--study-banner-h, 0px) + var(--sp-6) + max(0px, env(safe-area-inset-top, 0px) - var(--study-banner-h, 0px)));
   bottom: auto;
 }
 
