@@ -4,6 +4,7 @@ import { STYLE_HE, type Style } from "../../../shared/study/practice2";
 import { flags as buildFlags } from "../lib/flags";
 import type { Feedback, Flag, PublicQuestion } from "../lib/practice";
 import { autopsyOrder, betLabel, BETS, type Bet } from "../lib/practiceSession";
+import { reveal } from "../lib/reveal";
 import { richText, slideTag } from "../lib/rich";
 import { flagLine, LETTERS, pinNames } from "../lib/questionText";
 
@@ -106,6 +107,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
   const [figState, setFigState] = useState<"loading" | "ok" | "error">("loading");
   const head = useRef<HTMLHeadingElement>(null);
   const options = useRef<HTMLDivElement>(null);
+  const bets = useRef<HTMLElement>(null);
   const flags = q.study_question_flags ?? [];
   const others = flags.filter((f) => f.user_id !== p.me);
   const revealed = fb !== null;
@@ -254,7 +256,11 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
               tabIndex={p.picked === i || (p.picked == null && i === 0) ? 0 : -1}
               className={`a-opt${p.picked === i ? " picked" : ""}`}
               disabled={busy}
-              onClick={() => p.onPick?.(i)}
+              onClick={() => {
+                p.onPick?.(i);
+                // "לבדוק" waits for "כמה בטוחים?": on a small phone it is under the fold.
+                if (p.bet == null && !p.noBet) reveal(bets.current);
+              }}
             >
               <span className="l">{LETTERS[i]}</span>
               <span className="pq-text" dir="rtl">
@@ -265,7 +271,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
         </div>
         )}
         {p.noBet ? null : (
-          <section className="a-card flat pq-bet" aria-labelledby={`bet-${q.id}`}>
+          <section ref={bets} className="a-card flat pq-bet" aria-labelledby={`bet-${q.id}`}>
             <div className="a-row between">
               <b className="a-small" id={`bet-${q.id}`}>
                 כמה בטוחים? לפני הבדיקה

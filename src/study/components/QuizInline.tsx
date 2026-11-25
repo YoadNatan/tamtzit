@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Ctx } from "../features/types";
 import { coffeeChip } from "../lib/meeting";
 import { answerRound, BET_WORDS, clock as clockText, joinQuiz, nextRound, quizErrorText, type Bet, type QuizQuestion } from "../lib/quiz";
+import { reveal } from "../lib/reveal";
 import { isolateLatin, richText } from "../lib/rich";
 import { useQuiz } from "../lib/useQuiz";
 import { Icon } from "./Icon";
@@ -25,6 +26,7 @@ type Folded = { idx: number; q: QuizQuestion | null; answer: number | null; majo
 export default function QuizInline({ ctx, quizId, onState }: { ctx: Ctx; quizId: string; onState?: (s: { idx: number; total: number; state: string }) => void }) {
   const { state, view, refresh } = useQuiz(quizId);
   const [selected, setSelected] = useState<number | null>(null);
+  const betsRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const folded = useRef<Map<number, Folded>>(new Map());
@@ -145,7 +147,10 @@ export default function QuizInline({ ctx, quizId, onState }: { ctx: Ctx; quizId:
                   role="radio"
                   aria-checked={mine}
                   disabled={!playing || Boolean(sent) || view.v !== "question" || busy}
-                  onClick={() => setSelected(i)}
+                  onClick={() => {
+                    setSelected(i);
+                    reveal(betsRef.current); // sent only with "כמה בטוחים?": never under the fold
+                  }}
                 >
                   <span className="l">{LETTERS[i] ?? i + 1}</span>
                   <span dir="rtl">{isolateLatin(o, `co${idx}.${i}`)}</span>
@@ -154,7 +159,7 @@ export default function QuizInline({ ctx, quizId, onState }: { ctx: Ctx; quizId:
             })}
           </div>
           {playing && !sent && view.v === "question" ? (
-            <div className="a-row m-bets" role="group" aria-label="כמה בטוחים">
+            <div ref={betsRef} className="a-row m-bets" role="group" aria-label="כמה בטוחים">
               {([1, 2, 3] as const).map((b) => (
                 <button key={b} type="button" className="a-btn small" disabled={selected === null || busy} onClick={() => send(b)}>
                   {BET_WORDS[b]}

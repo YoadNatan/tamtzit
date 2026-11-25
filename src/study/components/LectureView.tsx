@@ -716,6 +716,7 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
   };
 
   const readyCount = sections.filter((s) => s.status === "ready").length;
+  const stoppedParts = sections.filter((s) => s.status === "failed" && !startedOver(s)).length;
   const meta = [lecture.lecturer, formatDate(lecture.lecture_date), lecture.course].filter(Boolean).join(" · ");
 
   /* ── deep links: at, slide (marked 2 s), read=1, follow=1 ──
@@ -867,6 +868,16 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
             </div>
           ) : null}
           {ext.top}
+          {writing.needsWork && !lecture.deleted_at && (stoppedParts > 0 || (sections.length === 0 && lecture.status === "failed")) ? (
+            // The footer's "המשך כתיבה" is screens away: the stop and the button by the title too (WP4).
+            <div className="a-callout warn lecture-stopped" role="status">
+              <p>{stoppedParts === 1 ? "חלק אחד לא נכתב." : stoppedParts > 1 ? `${stoppedParts} חלקים לא נכתבו.` : "הכתיבה נעצרה."}</p>
+              <button className="a-btn small" onClick={writing.continueWriting}>
+                <Icon name="pen" size={14} />
+                {writing.buttonText}
+              </button>
+            </div>
+          ) : null}
           {chips.length || ext.chips || flags.guide ? (
             <nav className="lecture-actions" aria-label="פעולות על ההרצאה">
               {flags.guide ? <ReaderGuideChip /> : null}

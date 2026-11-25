@@ -15,7 +15,7 @@ import {
 } from "../../../shared/study/today";
 import { MeetingBand } from "../features/meeting";
 import { QuizBannerLine } from "../features/quiz";
-import { GuideHome } from "../features/guide";
+import { GuideHome, guideOfferFirst } from "../features/guide";
 import { AccountBanners } from "../features/account";
 import { InstallHomeCard } from "../features/install";
 import { EveCard } from "../features/plan";
@@ -69,6 +69,8 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
   const { data, items, ready, error, reload } = useTodayQueue(ctx);
   const [minutes, setMinutes] = useState<Minutes>(() => readMinutes());
   const [flameOpen, setFlameOpen] = useState(false);
+  // Where the guide's card goes, decided once per visit (the offer, once answered, stays put).
+  const [offerBelow] = useState(() => guideOfferFirst(ctx));
   const [catchupMin, setCatchupMin] = useState<number | null>(null);
   const day = studyDay(Date.now());
   const cut = useMemo(() => cutQueue(items, minutes, rowOn), [items, minutes]);
@@ -117,8 +119,8 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
           <span className="a-btn small t-catchup">{catchupMin ? `השלמה · ${catchupMin} דק׳` : "השלמה"}</span>
         </RouteLink>
       ) : null}
-      {/* The guide's first steps (VITE_STUDY_GUIDE), before "התור שלי". */}
-      {flags.guide ? <GuideHome ctx={ctx} home="today" queue={ready ? cut.items.length : null} /> : null}
+      {/* The guide's first steps (VITE_STUDY_GUIDE), before "התור שלי"; the tour's offer goes under the queue. */}
+      {flags.guide && !offerBelow ? <GuideHome ctx={ctx} home="today" queue={ready ? cut.items.length : null} /> : null}
       {/* The personal code: the opener's notice, or the prompt for a member without one (the home is where everyone looks). */}
       <AccountBanners ctx={ctx} />
       {/* Adding the app to the home screen (VITE_STUDY_INSTALL): once, while the guide's card is not here. */}
@@ -195,6 +197,7 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
           {flameLine(flame.days)}
         </p>
       ) : null}
+      {flags.guide && offerBelow ? <GuideHome ctx={ctx} home="today" queue={ready ? cut.items.length : null} /> : null}
 
       {q ? (
         <section className="a-card flat t-group" aria-label="בקבוצה">

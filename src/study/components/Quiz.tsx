@@ -31,6 +31,7 @@ import {
   type Bet,
 } from "../lib/quiz";
 import { KEEP_SCREEN_ON } from "../lib/rounds";
+import { reveal } from "../lib/reveal";
 import { isolateLatin } from "../lib/rich";
 import { shareUrl, type Route } from "../lib/route";
 import { useQuiz } from "../lib/useQuiz";
@@ -80,6 +81,7 @@ export default function Quiz({ quizId, ctx }: ScreenProps<"quiz"> & { quizId: st
   const { state, view, live, error, clock, refresh } = useQuiz(quizId);
   const me = ctx.userId;
   const [selected, setSelected] = useState<number | null>(null);
+  const betRef = useRef<HTMLElement>(null);
   const [pending, setPending] = useState<{ idx: number; vote: 1 | 2; choice: number | null } | null>(null);
   const [sheet, setSheet] = useState<Sheet_>(null);
   const [slide, setSlide] = useState<{ l: string; n: number } | null>(null);
@@ -682,11 +684,12 @@ export default function Quiz({ quizId, ctx }: ScreenProps<"quiz"> & { quizId: st
             if (i === null) return void send(null, null);
             if (vote === 2) return void send(i, null);
             setSelected(i);
+            reveal(betRef.current); // the answer goes only with "כמה בטוחים?": never under the fold
           },
           noDontKnow: race || !canAnswer,
         })}
         {vote === 1 && playing && !sent && !pending && !timeUp ? (
-          <section className="a-stack quiz-bet" aria-labelledby="quiz-bet-h">
+          <section ref={betRef} className="a-stack quiz-bet" aria-labelledby="quiz-bet-h">
             <div className="a-sec">
               <h2 id="quiz-bet-h">כמה בטוחים?</h2>
               {!race ? <span className="a-chip">רק לך</span> : null}

@@ -77,6 +77,13 @@ function cardWanted(ctx: Ctx): "expanded" | "collapsed" | "offer" | null {
   }
 }
 
+/** Whether the home's guide card will be the one-time offer of the app tour
+ *  (not the first steps): Today puts the offer under its queue, so a short
+ *  phone sees the queue and "להתחיל" first (owner's decision, WP4). */
+export function guideOfferFirst(ctx: Ctx): boolean {
+  return flags.guide && cardWanted(ctx) === "offer";
+}
+
 /** "הצעדים הראשונים" on the home (Today, or the library before Today), or,
  *  for a member who never had them, the one-time offer of the app tour. */
 export function GuideHome({ ctx, home, queue }: { ctx: Ctx; home: "today" | "library"; queue?: number | null }) {

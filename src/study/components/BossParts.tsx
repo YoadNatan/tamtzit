@@ -157,7 +157,7 @@ export function BossHudBody({ state }: { state: unknown }) {
           )}
         </p>
       ) : null}
-      <p className="a-small a-muted">{RULE_LINE}</p>
+      <p className="a-small a-muted boss-rule">{RULE_LINE}</p>
     </section>
   );
 }

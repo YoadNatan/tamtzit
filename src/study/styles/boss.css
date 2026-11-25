@@ -7,6 +7,38 @@
 .boss-hud {
   gap: var(--sp-3);
 }
+/* A short screen (an iPhone SE, 568 px; a phone in Safari, under 700 px):
+   the HUD is one compact strip, so the four answers show while the clock
+   runs. The rule line goes (the lobby and the reveal say it), the topics are
+   one row that scrolls sideways, the bars are slimmer (WP4). */
+@media (max-height: 700px) {
+  .boss-hud {
+    gap: var(--sp-2);
+  }
+  .boss-hud .boss-rule {
+    display: none;
+  }
+  .boss-hud > .a-card {
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .boss-hud .a-meter {
+    gap: var(--sp-1);
+  }
+  .boss-hud .boss-heads {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-block-end: 2px;
+  }
+  .boss-hud .boss-heads::-webkit-scrollbar {
+    display: none;
+  }
+  .boss-hud .boss-heads .a-chip {
+    flex: none;
+    max-width: none;
+    white-space: nowrap;
+  }
+}
 .boss-heads {
   list-style: none;
   margin: 0;
@@ -91,6 +123,11 @@
 }
 .boss-hud .a-bar {
   height: 14px;
+}
+@media (max-height: 700px) {
+  .boss-hud .a-bar {
+    height: 10px;
+  }
 }
 @media (prefers-reduced-motion: no-preference) {
   .boss-result {

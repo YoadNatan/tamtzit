@@ -583,7 +583,15 @@ button.a-card.s-src[aria-checked="true"] {
 }
 .a-sheet.m-sheet {
   max-height: 82vh;
+  max-height: 82dvh; /* Safari's vh ignores its own bars */
   overflow-y: auto;
+}
+/* "להגיש" stays in view while the grid scrolls under it (an iPhone SE cut
+   it at the sheet's edge, WP4). */
+.m-sheet .m-submit {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
 }
 
 /* ── the result ── */

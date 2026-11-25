@@ -243,11 +243,28 @@ html:has(main.today:not(.t-session) > .t-start) {
   min-height: 50px;
   font-size: 1.125rem;
 }
-/* A short screen (a small phone, 640 px tall): the bar does not stick. Over
+/* A phone in Safari (600-700 px tall: an iPhone 15 shows 659): the bar
+   still sticks, compact, so "להתחיל" is on the first screen (WP4). */
+@media (min-height: 600px) and (max-height: 700px) {
+  main.today:not(.t-session) > .t-start {
+    padding-block: var(--sp-3) calc(var(--sp-3) + var(--press));
+  }
+  html:has(main.today:not(.t-session) > .t-start) {
+    scroll-padding-bottom: calc(var(--tabbar-h) + 68px + env(safe-area-inset-bottom, 0px));
+  }
+  .today .t-start .a-btn.primary.wide {
+    min-height: 44px;
+    font-size: var(--text-btn);
+  }
+  .today .t-flame {
+    min-height: 44px;
+  }
+}
+/* A short screen (a small phone, 568 px tall): the bar does not stick. Over
    the tab bar and under the meeting's band it would leave room for one row
    of the queue; in the flow after the queue, slimmer, the queue keeps its
    rows and "להתחיל" is one scroll away, as before the look. */
-@media (max-height: 700px) {
+@media (max-height: 599.98px) {
   main.today:not(.t-session) > .t-start {
     position: static;
     margin-inline: 0;
