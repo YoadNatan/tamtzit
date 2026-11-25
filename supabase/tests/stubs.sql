@@ -124,3 +124,23 @@ alter table auth.users add column if not exists email_confirmed_at timestamptz; 
 alter table storage.objects add column if not exists owner_id text;
 alter table storage.buckets add column if not exists file_size_limit bigint;
 alter table storage.buckets add column if not exists allowed_mime_types text[];
+
+-- ── Additions to supabase/tests/stubs.sql (section I, the personal code) ──
+-- The auth.users columns GoTrue's password grant reads and section I writes
+-- (supabase/auth internal/models/user.go), as GoTrue creates them, and
+-- pgcrypto in schema extensions, where Supabase installs it.
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
+alter table auth.users add column if not exists instance_id uuid default '00000000-0000-0000-0000-000000000000';
+alter table auth.users add column if not exists aud varchar(255) default 'authenticated';
+alter table auth.users add column if not exists encrypted_password varchar(255) default '';
+alter table auth.users add column if not exists banned_until timestamptz;
+alter table auth.users add column if not exists is_sso_user boolean not null default false;
+alter table auth.users add column if not exists updated_at timestamptz;
+alter table auth.users add column if not exists email_change varchar(255) default '';
+alter table auth.users add column if not exists email_change_token_new varchar(255) default '';
+alter table auth.users add column if not exists email_change_token_current varchar(255) default '';
+alter table auth.users add column if not exists email_change_confirm_status smallint default 0;
+create unique index if not exists users_email_partial_key on auth.users (email) where is_sso_user = false;
+create table if not exists auth.one_time_tokens (id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade, token_type text not null, token_hash text not null);

@@ -17768,3 +17768,322 @@ insert into study_private.features (name) values ('exams') on conflict (name) do
 insert into study_private.schema_sections (section, version) values ('S', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION S ════
+
+-- ════ BEGIN SECTION I · the personal code (package I) ════
+--  docs/study/personal-code.md; decision 1 of 17 Nov 2026, amended.
+--  A member's personal code brings back the SAME member on any device: the
+--  same anonymous auth user, so the same name, progress, answers and cards.
+--  No row moves between users and Row Level Security does not change.
+--
+--  How a device comes back: /api/study/code (the server key, the caller's
+--  address) calls study_code_redeem(code). For 3 minutes at most, the
+--  member's own auth user gets a random address and a random one-time
+--  password; the device signs in with them at once (Auth's password sign-in,
+--  supabase.auth.signInWithPassword) and calls study_code_finish(), which
+--  puts the user back as it was: no address, no password, still anonymous.
+--  study_private.code_restore() does the same for a device that never
+--  finished (every redeem, every status read, and pg_cron every 5 minutes).
+--
+--  The code: 16 characters from 32 (80 bits), stored only as sha256. Wrong
+--  tries: 10 per address per 15 minutes, 100 in all per hour.
+--
+--  The switch "codes" (study_private.features; no row = on) stops new
+--  codes and every redeem at once, without touching sessions:
+--    insert into study_private.features (name, enabled) values ('codes', false)
+--    on conflict (name) do update set enabled = excluded.enabled, changed_at = now();
+--
+--  Re-runnable. Part 9 of supabase/parts is this section alone.
+
+-- The install check, before anything is created: the definer (postgres on
+-- Supabase) writes these auth.users columns, bypasses the table's row level
+-- security (as study_member_saved already does to read it), and pgcrypto is
+-- in schema extensions. Otherwise the run stops here and nothing changes.
+do $$
+declare c text;
+begin
+  foreach c in array array['email', 'encrypted_password', 'email_confirmed_at', 'updated_at', 'email_change',
+                           'email_change_token_new', 'email_change_token_current', 'email_change_confirm_status'] loop
+    if not has_column_privilege('auth.users', c, 'UPDATE') then
+      raise exception 'section I: this role cannot update auth.users.% (the personal code needs it)', c;
+    end if;
+  end loop;
+  if not (select r.rolbypassrls or r.rolsuper from pg_roles r where r.rolname = current_user) then
+    raise exception 'section I: this role does not bypass row level security on auth.users';
+  end if;
+  if to_regprocedure('extensions.crypt(text,text)') is null or to_regprocedure('extensions.gen_salt(text,integer)') is null
+     or to_regprocedure('extensions.gen_random_bytes(integer)') is null then
+    raise exception 'section I: pgcrypto is not in schema extensions (Database → Extensions → pgcrypto)';
+  end if;
+end $$;
+
+create table if not exists study_private.member_codes (
+  user_id    uuid        primary key references auth.users (id) on delete cascade,
+  code_hash  bytea       not null unique,          -- code_hash(code); the code itself is never stored
+  created_at timestamptz not null default now(),
+  issued_by  uuid        references auth.users (id) on delete set null,  -- the member, or the group's opener
+  seen_at    timestamptz,                          -- the member saw "the opener made you a new code"
+  used_at    timestamptz,
+  uses       int         not null default 0
+);
+-- Wrong (and right) tries, for the limits; ip is a hash of the address, kept a day.
+create table if not exists study_private.code_tries (
+  id bigint      generated always as identity primary key,
+  at timestamptz not null default now(),
+  ok boolean     not null,
+  ip text        not null default ''
+);
+create index if not exists code_tries_at on study_private.code_tries (at);
+-- A user who has a one-time address and password right now, and what to put back.
+create table if not exists study_private.code_pending (
+  user_id    uuid        primary key references auth.users (id) on delete cascade,
+  email      text        not null,
+  until      timestamptz not null,
+  prev_email text,
+  prev_pw    text,
+  prev_conf  timestamptz
+);
+-- Who made which code, and each redeem (no code, no address).
+create table if not exists study_private.code_log (
+  id      bigint      generated always as identity primary key,
+  user_id uuid        not null,
+  event   text        not null check (event in ('new', 'issued', 'redeemed', 'dropped')),
+  by_user uuid,
+  at      timestamptz not null default now()
+);
+
+-- 16 characters from 32 (no 0/O, no 1/I): 80 bits. 256 is a multiple of 32,
+-- so a random byte mod 32 has no bias. Shown as XXXX-XXXX-XXXX-XXXX.
+create or replace function study_private.code_make()
+returns text language plpgsql volatile set search_path = '' as $$
+declare
+  alphabet constant text := '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  b bytea := extensions.gen_random_bytes(16);
+  c text := '';
+begin
+  for i in 0..15 loop
+    c := c || substr(alphabet, 1 + get_byte(b, i) % 32, 1);
+  end loop;
+  return substr(c, 1, 4) || '-' || substr(c, 5, 4) || '-' || substr(c, 9, 4) || '-' || substr(c, 13, 4);
+end $$;
+
+-- The 16 characters, upper case, without dashes or spaces; '' for anything else.
+create or replace function study_private.code_norm(p text)
+returns text language sql immutable set search_path = '' as $$
+  select case when x ~ '^[2-9A-HJ-NP-Z]{16}$' then x else '' end
+    from (select upper(regexp_replace(coalesce(p, ''), '[\s-]', '', 'g')) as x) s
+$$;
+
+create or replace function study_private.code_hash(p text)
+returns bytea language sql immutable set search_path = '' as $$
+  select sha256(convert_to('tamtzit-code-v1:' || study_private.code_norm(p), 'UTF8'))
+$$;
+
+-- Only an anonymous study member with no real address carries a code, so a
+-- password is never written on another app's user in the shared project.
+create or replace function study_private.code_target_ok(p_user uuid)
+returns boolean language sql stable set search_path = '' as $$
+  select exists (select 1 from auth.users u
+                  where u.id = p_user and u.is_anonymous and not coalesce(u.is_sso_user, false)
+                    and (u.email is null or u.email = '' or u.email like 'c-%@code.tamtzit.invalid'))
+     and exists (select 1 from public.study_members m where m.user_id = p_user)
+$$;
+
+create or replace function study_private.code_set(p_user uuid, p_by uuid)
+returns text language plpgsql volatile set search_path = '' as $$
+declare v text := study_private.code_make();
+begin
+  insert into study_private.member_codes (user_id, code_hash, issued_by)
+  values (p_user, study_private.code_hash(v), p_by)
+  on conflict (user_id) do update
+    set code_hash = excluded.code_hash, created_at = now(), issued_by = excluded.issued_by,
+        seen_at = null, used_at = null, uses = 0;
+  insert into study_private.code_log (user_id, event, by_user)
+  values (p_user, case when p_by = p_user then 'new' else 'issued' end, p_by);
+  return v;
+end $$;
+
+-- Puts back each user whose 3 minutes are over (all of them for null; with
+-- p_user, also that one now): the address, password and confirmation from
+-- before, and no email change waiting (one asked for in the 3 minutes must
+-- never complete). One-time tokens go too, where this role may delete them.
+create or replace function study_private.code_restore(p_user uuid default null)
+returns int language plpgsql volatile set search_path = '' as $$
+declare n int; ids uuid[];
+begin
+  select coalesce(array_agg(p.user_id), '{}') into ids from study_private.code_pending p
+   where p.until < now() or p.user_id = p_user;
+  if cardinality(ids) = 0 then return 0; end if;
+  update auth.users u
+     set email = p.prev_email, encrypted_password = coalesce(p.prev_pw, ''), email_confirmed_at = p.prev_conf,
+         email_change = '', email_change_token_new = '', email_change_token_current = '',
+         email_change_confirm_status = 0, updated_at = now()
+    from study_private.code_pending p
+   where p.user_id = u.id and p.user_id = any (ids);
+  get diagnostics n = row_count;
+  delete from study_private.code_pending p where p.user_id = any (ids);
+  if to_regclass('auth.one_time_tokens') is not null then
+    begin
+      execute 'delete from auth.one_time_tokens where user_id = any ($1)' using ids;
+    exception when insufficient_privilege then null;
+    end;
+  end if;
+  return n;
+end $$;
+
+-- ── The member's own code ──
+-- A new code for the caller; the one before stops working at once.
+create or replace function public.study_code_new()
+returns text language plpgsql volatile security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not study_private.feature_on('codes') then raise exception 'off'; end if;
+  if not study_private.code_target_ok(auth.uid()) then raise exception 'no code here'; end if;
+  return study_private.code_set(auth.uid(), auth.uid());
+end $$;
+
+-- Whether the caller has a code, since when, whether the group's opener made
+-- it (and who), and whether the member has yet to see that.
+create or replace function public.study_code_status()
+returns table (has_code boolean, created_at timestamptz, by_opener boolean, by_name text, notice boolean)
+language plpgsql volatile security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  perform study_private.code_restore();
+  return query
+  select c.user_id is not null, c.created_at,
+         coalesce(c.issued_by is distinct from c.user_id, false),
+         (select m.name from public.study_members m
+           where m.user_id = c.issued_by and c.issued_by is distinct from c.user_id
+             and m.group_id in (select x.group_id from public.study_members x where x.user_id = auth.uid())
+           limit 1),
+         coalesce(c.issued_by is distinct from c.user_id and c.seen_at is null, false)
+    from (select auth.uid() as me) w
+    left join study_private.member_codes c on c.user_id = w.me;
+end $$;
+
+create or replace function public.study_code_seen()
+returns void language sql volatile security definer set search_path = '' as $$
+  update study_private.member_codes set seen_at = now() where user_id = auth.uid() and seen_at is null
+$$;
+
+-- ── The group's opener makes a new code for a member who lost theirs ──
+create or replace function public.study_code_issue(p_group uuid, p_user uuid)
+returns text language plpgsql volatile security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if not exists (select 1 from public.study_groups g where g.id = p_group and g.created_by = auth.uid()) then
+    raise exception 'not the creator';
+  end if;
+  if not exists (select 1 from public.study_members m where m.group_id = p_group and m.user_id = p_user) then
+    raise exception 'member not found';
+  end if;
+  if not study_private.feature_on('codes') then raise exception 'off'; end if;
+  if not study_private.code_target_ok(p_user) then raise exception 'no code here'; end if;
+  return study_private.code_set(p_user, auth.uid());
+end $$;
+
+-- ── Any device: the code in, a one-time sign-in out ──
+-- Only /api/study/code calls it (the server key; p_ip is the caller's
+-- address as Vercel saw it). Never raises for a wrong code: a raise would
+-- undo the try's row, and the limit would count nothing. Answers
+-- {"error": "code not found" | "too many tries" | "codes off"} or
+-- {"email": …, "password": …} for Auth's password sign-in, good 3 minutes.
+create or replace function public.study_code_redeem(p_code text, p_ip text, p_key text)
+returns jsonb language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_ip text := encode(sha256(convert_to('tamtzit-ip:' || coalesce(p_ip, ''), 'UTF8')), 'hex');
+  who  uuid;
+  em   text;
+  pw   text;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  perform pg_advisory_xact_lock(hashtext('study_code_redeem'));
+  perform study_private.code_restore();
+  if not study_private.feature_on('codes') then return jsonb_build_object('error', 'codes off'); end if;
+  if (select count(*) from study_private.code_tries t where not t.ok and t.at > now() - interval '1 hour') >= 100
+     or (select count(*) from study_private.code_tries t
+          where not t.ok and t.ip = v_ip and t.at > now() - interval '15 minutes') >= 10 then
+    return jsonb_build_object('error', 'too many tries');
+  end if;
+  select c.user_id into who from study_private.member_codes c
+   where c.code_hash = study_private.code_hash(p_code) and study_private.code_norm(p_code) <> '' for update;
+  if who is null or not study_private.code_target_ok(who) then
+    insert into study_private.code_tries (ok, ip) values (false, v_ip);
+    return jsonb_build_object('error', 'code not found');
+  end if;
+  insert into study_private.code_tries (ok, ip) values (true, v_ip);
+  delete from study_private.code_tries t where t.at < now() - interval '1 day';
+  em := 'c-' || encode(extensions.gen_random_bytes(9), 'hex') || '@code.tamtzit.invalid';
+  pw := encode(extensions.gen_random_bytes(24), 'hex');
+  -- The first redeem's "before" is kept: a second one inside the 3 minutes
+  -- must not take the first's one-time values for the member's own.
+  insert into study_private.code_pending (user_id, email, until, prev_email, prev_pw, prev_conf)
+  select u.id, em, now() + interval '3 minutes', u.email, u.encrypted_password, u.email_confirmed_at
+    from auth.users u where u.id = who
+  on conflict (user_id) do update set email = excluded.email, until = excluded.until;
+  -- bcrypt at cost 10 ($2a$10$, what GoTrue writes): GoTrue neither
+  -- rehashes nor rewrites it on sign-in.
+  update auth.users u
+     set email = em, encrypted_password = extensions.crypt(pw, extensions.gen_salt('bf', 10)),
+         email_confirmed_at = now(), updated_at = now()
+   where u.id = who;
+  if not found then return jsonb_build_object('error', 'codes off'); end if;
+  update study_private.member_codes c set used_at = now(), uses = c.uses + 1 where c.user_id = who;
+  insert into study_private.code_log (user_id, event) values (who, 'redeemed');
+  return jsonb_build_object('email', em, 'password', pw);
+end $$;
+
+-- Right after the sign-in: the caller's user goes back to how it was.
+create or replace function public.study_code_finish()
+returns void language plpgsql volatile security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  perform study_private.code_restore(auth.uid());
+end $$;
+
+-- A member who leaves (or is removed from) their last group loses the code.
+create or replace function study_private.code_drop_on_leave()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if not exists (select 1 from public.study_members m where m.user_id = old.user_id) then
+    delete from study_private.member_codes c where c.user_id = old.user_id;
+    if found then insert into study_private.code_log (user_id, event, by_user) values (old.user_id, 'dropped', auth.uid()); end if;
+  end if;
+  return old;
+end $$;
+drop trigger if exists study_members_code_drop on public.study_members;
+create trigger study_members_code_drop after delete on public.study_members
+  for each row execute function study_private.code_drop_on_leave();
+
+-- The chip beside a name ("יש קוד"): a saved account (none since decision 1)
+-- or a personal code. Same name, arguments and result as section F's.
+create or replace function public.study_member_saved(p_group uuid)
+returns table (user_id uuid, saved boolean) language sql stable security definer set search_path = public as $$
+  select m.user_id, not coalesce(u.is_anonymous, true)
+                    or exists (select 1 from study_private.member_codes c where c.user_id = m.user_id)
+    from public.study_members m left join auth.users u on u.id = m.user_id
+   where m.group_id = p_group and public.study_is_member(p_group)
+$$;
+
+revoke all on function study_private.code_make(), study_private.code_norm(text), study_private.code_hash(text),
+  study_private.code_target_ok(uuid), study_private.code_set(uuid, uuid), study_private.code_restore(uuid),
+  study_private.code_drop_on_leave() from public;
+revoke all on function public.study_code_new(), public.study_code_status(), public.study_code_seen(),
+  public.study_code_issue(uuid, uuid), public.study_code_finish() from public, anon;
+revoke all on function public.study_code_redeem(text, text, text) from public, anon, authenticated;
+grant execute on function public.study_code_new(), public.study_code_status(), public.study_code_seen(),
+  public.study_code_issue(uuid, uuid), public.study_code_finish() to authenticated;
+-- The server calls it with the anon key; it refuses without the server key (F27's allow-list).
+grant execute on function public.study_code_redeem(text, text, text) to anon;
+
+-- Every 5 minutes, beside section W's sweeper (only with pg_cron).
+do $$
+begin
+  if to_regnamespace('cron') is not null then
+    perform cron.schedule('study-code-restore', '*/5 * * * *', 'select study_private.code_restore()');
+  end if;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('I', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION I ════

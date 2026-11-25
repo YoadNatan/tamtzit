@@ -473,6 +473,49 @@
     "required": 1
    }
   ],
+  "study_code_finish": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_code_issue": [
+   {
+    "args": [
+     "p_group",
+     "p_user"
+    ],
+    "required": 2
+   }
+  ],
+  "study_code_new": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_code_redeem": [
+   {
+    "args": [
+     "p_code",
+     "p_ip",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_code_seen": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_code_status": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
   "study_comment_lecture": [
    {
     "args": [

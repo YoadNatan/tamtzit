@@ -389,7 +389,9 @@ select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, 
                          -- each refusing without the key
                          'study_points_ahead_claim', 'study_points_ahead_release', 'study_points_save', 'study_points_fail',
                          -- section S 2 (past exams): the worker's claim, saves and finish of an exam's unit, each refusing without the key
-                         'study_claim_exam', 'study_exam_save_items', 'study_exam_save_keys', 'study_finish_exam_job');
+                         'study_claim_exam', 'study_exam_save_items', 'study_exam_save_keys', 'study_finish_exam_job',
+                         -- section I: the personal code's redeem, called by /api/study/code, refusing without the key
+                         'study_code_redeem');
 
 -- F28 (review of F0, SEC-1): the slide pictures stay with their lecture. The
 -- app of before F0 deletes a lecture's files first and then its row, which
@@ -9179,3 +9181,204 @@ select 'S-end. the fixtures are gone: ' || case when not exists (select 1 from p
   and not exists (select 1 from public.study_courses where group_id = :'sog')
   and not exists (select 1 from public.study_question_requests where plan_id = :'splan') then 'ok' else 'FAIL' end;
 -- ════ END SECTION S ════
+
+-- ════ BEGIN SECTION I ════ (checks for supabase/tests/study.sql)
+-- The personal code: one member's code brings back that same auth user, the
+-- code is never stored, wrong tries are counted and limited, and the
+-- one-time sign-in values go away again.
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef')
+on conflict (name) do nothing;
+\set ikey 'k-0123456789abcdef0123456789abcdef'
+insert into auth.users (id, email, raw_user_meta_data, is_anonymous, encrypted_password) values
+ ('19000000-0000-4000-8000-000000000001', null, '{"app":"study","full_name":"פותחת"}', true, ''),
+ ('19000000-0000-4000-8000-000000000002', null, '{"app":"study","full_name":"דנה"}', true, ''),
+ ('19000000-0000-4000-8000-000000000003', null, '{"app":"study","full_name":"זרה"}', true, ''),
+ ('19000000-0000-4000-8000-000000000004', 'real@example.com', '{}', false, '$2a$10$abcdefghijklmnopqrstuuOrigOrigOrigOrigOrigOrigOrigOrig'),
+ ('19000000-0000-4000-8000-000000000005', null, '{"app":"study","full_name":"אורי"}', true, '');
+-- A group of its own for these checks (study_create_group allows one group: made directly).
+insert into public.study_groups (id, name, join_code, created_by)
+values ('19000000-0000-4000-8000-0000000000a1', 'קבוצת הקוד', 'ICODE1', '19000000-0000-4000-8000-000000000001');
+insert into public.study_members (group_id, user_id, name) values
+ ('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000001', 'פותחת'),
+ ('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000002', 'דנה'),
+ ('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000004', 'עם מייל'),
+ ('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000005', 'אורי');
+
+select 'I1. ' || case when count(distinct c) = 2000 and bool_and(c ~ '^[2-9A-HJ-NP-Z]{4}(-[2-9A-HJ-NP-Z]{4}){3}$')
+  then 'ok' else 'FAIL' end || ': 2000 codes, all distinct, XXXX-XXXX-XXXX-XXXX from the 32 symbols'
+  from (select study_private.code_make() c from generate_series(1, 2000)) s;
+select 'I1b. ' || case when count(distinct ch) = 32 then 'ok' else 'FAIL' end || ': every symbol appears (' || count(distinct ch) || ')'
+  from (select regexp_split_to_table(replace(study_private.code_make(), '-', ''), '') ch from generate_series(1, 500)) s;
+
+set role authenticated;
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
+select 'I2. ' || case when not has_code then 'ok' else 'FAIL' end || ': no code before' from public.study_code_status();
+select public.study_code_new() as dana_code \gset
+select 'I2b. ' || case when s.has_code and not s.by_opener and not s.notice then 'ok' else 'FAIL' end || ': Dana has her own code'
+  from public.study_code_status() s;
+do $$ begin perform count(*) from study_private.member_codes; raise notice 'I3. FAIL: a member reads the codes';
+exception when insufficient_privilege then raise notice 'I3. ok: the codes are closed to members'; end $$;
+do $$ begin perform public.study_code_redeem('X', '1.1.1.1', 'k-0123456789abcdef0123456789abcdef'); raise notice 'I3b. FAIL: a member calls redeem';
+exception when insufficient_privilege then raise notice 'I3b. ok: only the server (anon key + server key) redeems'; end $$;
+
+-- Not a member: no code. Not the opener: no codes for others. Never a real address.
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000003';
+do $$ begin perform public.study_code_new(); raise notice 'I4. FAIL: a stranger got a code';
+exception when others then raise notice 'I4. %: a stranger gets no code (%)', case when sqlerrm = 'no code here' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
+do $$ begin perform public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000005'); raise notice 'I5. FAIL';
+exception when others then raise notice 'I5. %: only the opener makes codes for others (%)', case when sqlerrm = 'not the creator' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000001';
+do $$ begin perform public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000003'); raise notice 'I5b. FAIL';
+exception when others then raise notice 'I5b. %: not for someone outside the group (%)', case when sqlerrm = 'member not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000004'); raise notice 'I5c. FAIL';
+exception when others then raise notice 'I5c. %: never on a user with a real address (%)', case when sqlerrm = 'no code here' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+
+-- The server's call, as the anon key.
+reset role; reset request.jwt.claim.sub; set role anon;
+do $$ begin perform public.study_code_redeem('AAAA-AAAA-AAAA-AAAA', '1.1.1.1', 'wrong-key'); raise notice 'I6. FAIL: redeemed without the server key';
+exception when others then raise notice 'I6. %: no server key, no redeem (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select 'I7. ' || case when public.study_code_redeem('AAAA-AAAA-AAAA-AAAA', '1.1.1.1', :'ikey') ->> 'error' = 'code not found' then 'ok' else 'FAIL' end || ': a wrong code is "code not found"';
+reset role;
+select 'I7b. ' || case when count(*) = 1 then 'ok' else 'FAIL' end || ': and its try stays counted (' || count(*) || ')' from study_private.code_tries where not ok;
+select 'I7c. ' || case when count(*) = 0 then 'ok' else 'FAIL' end || ': no code is stored as text'
+  from study_private.member_codes c where position(replace(:'dana_code', '-', '') in encode(c.code_hash, 'escape')) > 0;
+select 'I7d. ' || case when count(*) = 1 and bool_and(ip !~ '1\.1\.1\.1') then 'ok' else 'FAIL' end || ': the address is kept only as a hash'
+  from study_private.code_tries;
+set role anon;
+select public.study_code_redeem(lower(replace(:'dana_code', '-', ' ')), '1.1.1.1', :'ikey') as r \gset
+reset role;
+select 'I8. ' || case when (:'r')::jsonb ? 'password' then 'ok' else 'FAIL ' || :'r' end || ': lower case with spaces opens it';
+select 'I8b. ' || case when u.encrypted_password = extensions.crypt((:'r')::jsonb ->> 'password', u.encrypted_password)
+                         and u.encrypted_password like '$2a$10$%' and u.email_confirmed_at is not null and u.is_anonymous
+                         and u.email = (:'r')::jsonb ->> 'email'
+  then 'ok' else 'FAIL' end || ': Dana''s own user: bcrypt $2a$10$ of the one-time password, confirmed, still anonymous'
+  from auth.users u where u.id = '19000000-0000-4000-8000-000000000002';
+-- GoTrue's own lookup (models.FindUserByEmailAndAudience): exactly this user.
+select 'I8c. ' || case when count(*) = 1 and min(id::text) = '19000000-0000-4000-8000-000000000002' then 'ok' else 'FAIL' end || ': Auth''s lookup finds Dana'
+  from auth.users where instance_id = '00000000-0000-0000-0000-000000000000' and lower(email) = lower((:'r')::jsonb ->> 'email')
+   and aud = 'authenticated' and is_sso_user = false;
+-- Someone with a session asks Auth for an email change in the 3 minutes (stand-in for GoTrue's columns).
+update auth.users set email_change = 'evil@example.com', email_change_token_new = 'tok' where id = '19000000-0000-4000-8000-000000000002';
+insert into auth.one_time_tokens (user_id, token_type, token_hash) values ('19000000-0000-4000-8000-000000000002', 'email_change_token_new', 'tok');
+-- A second device redeems inside the 3 minutes: the "before" stays the member's own.
+set role anon;
+select public.study_code_redeem(:'dana_code', '2.2.2.2', :'ikey') as r2 \gset
+reset role;
+select 'I8d. ' || case when (:'r2')::jsonb ->> 'email' <> (:'r')::jsonb ->> 'email' and p.prev_pw = '' and p.prev_email is null
+  then 'ok' else 'FAIL' end || ': a second redeem gets new values; the first "before" is kept'
+  from study_private.code_pending p where p.user_id = '19000000-0000-4000-8000-000000000002';
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
+select public.study_code_finish();
+reset role;
+select 'I9. ' || case when email is null and encrypted_password = '' and email_confirmed_at is null and is_anonymous
+                        and email_change = '' and email_change_token_new = ''
+  then 'ok' else 'FAIL' end || ': finish puts Dana back (no address, no password, no email change waiting)'
+  from auth.users where id = '19000000-0000-4000-8000-000000000002';
+select 'I9b. ' || case when not exists (select 1 from auth.one_time_tokens where user_id = '19000000-0000-4000-8000-000000000002')
+  and not exists (select 1 from study_private.code_pending) then 'ok' else 'FAIL' end || ': no one-time token, nothing pending';
+select 'I9c. ' || case when uses = 2 and used_at is not null then 'ok' else 'FAIL' end || ': two uses recorded'
+  from study_private.member_codes where user_id = '19000000-0000-4000-8000-000000000002';
+
+-- A device that never finishes: put back after 3 minutes.
+set role anon;
+select public.study_code_redeem(:'dana_code', '1.1.1.1', :'ikey') is not null as x \gset
+reset role;
+update study_private.code_pending set until = now() - interval '1 second';
+select 'I10. ' || case when study_private.code_restore() = 1 then 'ok' else 'FAIL' end || ': the sweep puts back what is over 3 minutes';
+select 'I10b. ' || case when email is null and encrypted_password = '' then 'ok' else 'FAIL' end || ': Dana is back to no address, no password'
+  from auth.users where id = '19000000-0000-4000-8000-000000000002';
+select 'I10c. ' || case when count(*) = 1 then 'ok' else 'FAIL' end || ': pg_cron runs it every 5 minutes'
+  from cron.job where jobname = 'study-code-restore' and schedule = '*/5 * * * *';
+
+-- A new code: the old one stops at once.
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
+select public.study_code_new() as dana_code2 \gset
+reset role; set role anon;
+select 'I11. ' || case when public.study_code_redeem(:'dana_code', '1.1.1.1', :'ikey') ->> 'error' = 'code not found' then 'ok' else 'FAIL' end || ': the old code no longer opens';
+reset role;
+select study_private.code_restore();
+
+-- The opener makes a new code for Dana: Dana is told, by name, once.
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000001';
+select public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000002') as dana_code3 \gset
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
+select 'I12. ' || case when s.by_opener and s.notice and s.by_name = 'פותחת' then 'ok' else 'FAIL' end || ': Dana sees that the opener made it'
+  from public.study_code_status() s;
+select public.study_code_seen();
+select 'I12b. ' || case when s.by_opener and not s.notice then 'ok' else 'FAIL' end || ': once seen, the notice goes' from public.study_code_status() s;
+reset role; set role anon;
+select 'I12c. ' || case when public.study_code_redeem(:'dana_code2', '1.1.1.1', :'ikey') ->> 'error' = 'code not found'
+                          and public.study_code_redeem(:'dana_code3', '1.1.1.1', :'ikey') ? 'password'
+  then 'ok' else 'FAIL' end || ': the code before it dies, the opener''s works';
+reset role;
+select study_private.code_restore('19000000-0000-4000-8000-000000000002');
+select 'I12d. ' || string_agg(event, ',' order by id) from study_private.code_log where user_id = '19000000-0000-4000-8000-000000000002';
+
+-- The limits: 10 wrong tries from one address in 15 minutes, 100 in all per hour.
+delete from study_private.code_tries;
+set role anon;
+select count(*) from (select public.study_code_redeem('BBBB-BBBB-BBBB-BBBB', '3.3.3.3', :'ikey') from generate_series(1, 10)) s \gset
+select 'I13. ' || case when public.study_code_redeem(:'dana_code3', '3.3.3.3', :'ikey') ->> 'error' = 'too many tries' then 'ok' else 'FAIL' end
+  || ': the 11th try from one address is refused, even with the right code';
+select 'I13b. ' || case when public.study_code_redeem(:'dana_code3', '4.4.4.4', :'ikey') ? 'password' then 'ok' else 'FAIL' end
+  || ': another address still gets in';
+reset role;
+select study_private.code_restore('19000000-0000-4000-8000-000000000002');
+update study_private.code_tries set at = now() - interval '20 minutes';
+set role anon;
+select count(*) from (select public.study_code_redeem('CCCC-CCCC-CCCC-CCCC', '5.5.5.' || g, :'ikey') from generate_series(1, 90) g) s \gset
+select 'I13c. ' || case when public.study_code_redeem(:'dana_code3', '6.6.6.6', :'ikey') ->> 'error' = 'too many tries' then 'ok' else 'FAIL' end
+  || ': 100 wrong tries in an hour close it for everyone';
+reset role;
+delete from study_private.code_tries;
+select 'I13d. ' || case when (public.study_code_redeem('', '7.7.7.7', :'ikey') ->> 'error') = 'code not found'
+                          and (public.study_code_redeem(null, '7.7.7.7', :'ikey') ->> 'error') = 'code not found'
+  then 'ok' else 'FAIL' end || ': empty or missing input is a wrong code, not an error';
+delete from study_private.code_tries;
+
+-- "שמור" now says "has a code".
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000001';
+select 'I14. ' || string_agg(m.name || '=' || s.saved, ', ' order by m.name)
+  from public.study_member_saved('19000000-0000-4000-8000-0000000000a1') s join public.study_members m on m.user_id = s.user_id and m.group_id = '19000000-0000-4000-8000-0000000000a1';
+
+-- Removed from the group: the code goes with the membership.
+select public.study_remove_member('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000002');
+reset role; set role anon;
+select 'I15. ' || case when public.study_code_redeem(:'dana_code3', '1.1.1.1', :'ikey') ->> 'error' = 'code not found' then 'ok' else 'FAIL' end
+  || ': a removed member''s code no longer opens';
+reset role;
+select 'I15b. ' || case when not exists (select 1 from study_private.member_codes where user_id = '19000000-0000-4000-8000-000000000002')
+  then 'ok' else 'FAIL' end || ': and is gone';
+
+-- The switch: off stops new codes and redeems; on again, all as before.
+delete from study_private.code_tries;
+insert into study_private.features (name, enabled) values ('codes', false)
+on conflict (name) do update set enabled = excluded.enabled;
+select 'I15c. ' || case when public.study_code_redeem('AAAA-AAAA-AAAA-AAAA', '1.1.1.1', :'ikey') ->> 'error' = 'codes off'
+  and not exists (select 1 from study_private.code_tries) then 'ok' else 'FAIL' end || ': switched off, a redeem is "codes off" and counts no try';
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000005';
+do $$ begin perform public.study_code_new(); raise notice 'I15d. FAIL: a code while switched off';
+exception when others then raise notice 'I15d. %: no new code while switched off (%)', case when sqlerrm = 'off' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+delete from study_private.features where name = 'codes';
+
+-- Who may call what.
+select 'I16. ' || case when has_function_privilege('anon', 'public.study_code_redeem(text, text, text)', 'execute')
+  and not has_function_privilege('anon', 'public.study_code_new()', 'execute')
+  and not has_function_privilege('anon', 'public.study_code_issue(uuid, uuid)', 'execute')
+  and not has_function_privilege('anon', 'public.study_code_status()', 'execute')
+  and not has_function_privilege('authenticated', 'public.study_code_redeem(text, text, text)', 'execute')
+  and not has_function_privilege('authenticated', 'study_private.code_set(uuid, uuid)', 'execute')
+  then 'ok' else 'FAIL' end || ': anon only redeems (with the server key); members never redeem directly';
+select 'I17. ' || case when public.study_schema() ->> 'I' = '1' then 'ok' else 'FAIL' end || ': the registry has I 1';
+
+-- The fixtures go.
+delete from study_private.code_log where user_id::text like '19000000-%';
+delete from study_private.code_tries;
+delete from public.study_groups where id = '19000000-0000-4000-8000-0000000000a1';
+delete from auth.users where id::text like '19000000-%';
+-- ════ END SECTION I ════
