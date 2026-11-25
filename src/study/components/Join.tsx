@@ -196,6 +196,14 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
                 onChange={(e) => setName(e.target.value)}
                 autoComplete="given-name"
                 enterKeyHint={mode === "join" && code.trim().length >= 6 ? "go" : "next"}
+                onKeyDown={(e) => {
+                  // "next" on the keyboard moves on to the next field instead of sending a half-filled form.
+                  const to = (mode === "join" ? codeRef : groupRef).current;
+                  if (e.key === "Enter" && e.currentTarget.enterKeyHint === "next" && to) {
+                    e.preventDefault();
+                    to.focus();
+                  }
+                }}
                 maxLength={60}
                 placeholder="למשל: שוהם"
                 aria-invalid={bad === "name" || undefined}
