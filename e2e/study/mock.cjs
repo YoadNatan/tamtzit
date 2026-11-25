@@ -16,11 +16,14 @@
 // is inserted only with the upload's columns. Realtime refuses a socket's sixth presence call
 // within 30 s, as Supabase does (review FE-6).
 //
-// A plugin: module.exports = { seed(db), rest({ method, path, query, body, who, db, notify, single, json, refuse, check }),
-//   api(req, res, db, body) } — each returns undefined for requests it does not handle; body is
+// A plugin: module.exports = { seed(db), rest({ method, path, query, body, who, db, notify, single, json, refuse, check, auth }),
+//   api(req, res, db, body, { auth }) } — each returns undefined for requests it does not handle; body is
 //   the request's JSON, read once by the mock (a plugin never reads req itself). guard({ method,
 //   path, who, db, refuse }) and apiGuard(req, res, db, body) run before every plugin's rest and
 //   api (mocks/guide.cjs refuses the group's writes there while a guided step runs).
+//   auth.issue(userId) mints a new session (a token shaped as Auth's, which
+//   supabase-js's setSession reads) for that same user: the personal code's
+//   plugin (mocks/code.cjs) signs a device in with it.
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -278,6 +281,19 @@ async function createMock(o) {
   const A = made[0] ?? { user: { id: uuid(1) } };
   db.group.created_by = made[0] ? A.user.id : null;
   let userSeq = 10;
+  let tokenSeq = 0;
+  /** A new session for an existing user, its token shaped as Auth's JWT. */
+  const auth = {
+    issue: (userId) => {
+      const user = [...users.values()].find((u) => u.id === userId);
+      if (!user) return null;
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+      const t = `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ sub: userId, exp, role: "authenticated", n: ++tokenSeq })}.e2e`;
+      users.set(t, user);
+      return { access_token: t, refresh_token: `r-${t}`, expires_at: exp, user_id: userId };
+    },
+  };
   for (const p of plugins) p.seed?.(db);
 
   /** The fixture lecture, written: eight ready parts (together, shell). */
@@ -544,7 +560,7 @@ async function createMock(o) {
       if (r !== undefined) return r;
     }
     for (const plugin of plugins) {
-      const r = await plugin.rest?.({ method: m, path: p, query: url.searchParams, body, who: me, db, notify, single, json: (b, s) => json(route, b, s), refuse: (msg, s) => refuse(route, msg, s), check: { rpc: checkRpc, cols: checkCols } });
+      const r = await plugin.rest?.({ method: m, path: p, query: url.searchParams, body, who: me, db, notify, single, json: (b, s) => json(route, b, s), refuse: (msg, s) => refuse(route, msg, s), check: { rpc: checkRpc, cols: checkCols }, auth });
       if (r !== undefined) return r;
     }
 
@@ -749,7 +765,7 @@ async function createMock(o) {
     // once, so a plugin that read it itself would leave the next one waiting for good.
     const b = req.method === "POST" ? await readBody(req) : null;
     for (const plugin of plugins) if ((await plugin.apiGuard?.(req, res, db, b)) !== undefined) return;
-    for (const plugin of plugins) if ((await plugin.api?.(req, res, db, b)) !== undefined) return;
+    for (const plugin of plugins) if ((await plugin.api?.(req, res, db, b, { auth, users })) !== undefined) return;
     if (p === "/api/study/health") return sendJson(res, { ok: true, anthropicKey: true, supabase: true, worker: false, workerOk: false, budgetUsd: db.budgetUsd, schema: db.schema, schemaOk: true, features: {} });
     const me = users.get((req.headers.authorization || "").replace(/^Bearer /, ""));
     if (!me) return sendJson(res, { error: "not signed in" }, 401);
@@ -854,6 +870,7 @@ async function createMock(o) {
       plugins.push(plugin);
       plugin.seed?.(db);
     },
+    auth,
     GROUP,
     LECTURE_ID,
     fixture: fx,

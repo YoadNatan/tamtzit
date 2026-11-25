@@ -61,6 +61,7 @@ export function AccountLayer({
         const code = await newPersonalCode();
         cacheCode(s.user.id, code);
         setSheet({ kind: "new", code });
+        window.dispatchEvent(new Event("study-code-changed")); // AccountCode's CODE_CHANGED: "שלי" reads it again
       })().catch(() => undefined);
     };
     window.addEventListener(OPEN, on);
