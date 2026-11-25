@@ -699,7 +699,7 @@ button.a-card.s-src[aria-checked="true"] {
   transition: transform var(--t-press);
 }
 .e-row > .a-li[aria-expanded="true"]::after {
-  transform: rotate(-90deg);
+  transform: rotate(90deg);
 }
 @media (hover: hover) {
   .e-row > .a-li:hover {
