@@ -97,8 +97,10 @@ says "המתג בחלון נשאר דלוק".
   light `#f6f4fd` and dark `#121022`.
 - **A chunk from before a deploy** (`src/study/lib/staleChunk.ts`): a lazy
   screen whose chunk is gone reloads the page once (at most once a minute per
-  tab; never without sessionStorage). `vercel.json` no longer rewrites
-  `/assets/*` to `index.html`, so a missing chunk is a real 404.
+  tab; never without sessionStorage, never offline). `vercel.json` no longer
+  rewrites `/assets/*` to `index.html`, so a missing chunk is a real 404. The
+  screen's error boundary shows "המסך לא נטען…" for the moment before the
+  reload, or when the reload is spent ([`ux-p1.md`](ux-p1.md), WP1).
 - **No service worker.** Add one only if a real Android shows no
   `beforeinstallprompt` (then: a pass-through fetch handler, no caching,
   `Cache-Control: no-cache`).

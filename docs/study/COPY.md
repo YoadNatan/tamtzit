@@ -242,6 +242,21 @@ member's own code is "הקוד האישי", never "סיסמה", "חשבון" or 
   אפליקציה״…) are in one block, `OS` in `src/study/lib/installCopy.ts`, until
   Hebrew screenshots confirm them.
 
+### No connection, and screens that did not load (docs/study/ux-p1.md)
+
+- One pattern, as everywhere: what did not load, then ״כדאי לבדוק את החיבור
+  ולנסות שוב.״, then the button **״לנסות שוב״**. The group at startup:
+  **״אין חיבור כרגע. כדאי לבדוק את החיבור ולנסות שוב.״** (failText's
+  `network`) with **״הקבוצה תיפתח מעצמה כשהחיבור יחזור.״**; a screen:
+  **״המסך לא נטען. כדאי לבדוק את החיבור ולנסות שוב.״**, and, still offline,
+  **״עדיין אין חיבור. ננסה שוב כשהחיבור יחזור.״**
+- Offline, one line at the top: **״אין חיבור. מה שכבר נטען נשאר כאן.״**
+- A lecture whose writing stopped, by its title: **״חלק אחד לא נכתב.״** /
+  **״N חלקים לא נכתבו.״** / **״הכתיבה נעצרה.״**, with the footer's own
+  button words (״המשך כתיבה״).
+- A failed exam: its failure line, then **״להעלות מבחן מחדש״** (a new
+  upload; nothing is read again for money).
+
 ## Server-made text
 
 The SQL writes some text into rows. New rows use the new words; the file
