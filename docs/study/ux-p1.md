@@ -74,7 +74,9 @@ No new flag and no SQL: every change is a fix to what is already on.
   bar hides while a field has focus.
 - Focus never lands under the bars: the scroll padding counts the tab bar and
   the bottom bar together (a specificity bug let the tab bar's rule win).
-- A sheet's comment composer is sticky at the sheet's bottom. On iOS, whose
+- While its field is typed in, a sheet's comment composer is sticky at the
+  sheet's bottom (only then: otherwise it would sit over the thread's own
+  buttons). On iOS, whose
   keyboard covers the page instead of resizing it, `--kb` (Shell's
   `visualViewport` watch) lifts the sheets above it.
 
@@ -85,7 +87,8 @@ No new flag and no SQL: every change is a fix to what is already on.
   With a mouse the photo strip wraps (its sideways scroll had no scrollbar).
 - The reader's contents open inside its sticky top bar, so they show
   wherever the reader has scrolled.
-- Under 374 px the follow room wraps instead of cutting "מעקב: …".
+- Under 374 px, while following, the room wraps instead of cutting "מעקב:
+  …" (the reader's own room keeps its one line: the meeting's sticky top).
 - A failed exam with nothing found shows its failure and "להעלות מבחן מחדש":
   a new upload only, nothing read again for money (owner's decision). An
   empty review draws no empty list.
