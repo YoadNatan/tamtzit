@@ -306,8 +306,14 @@ export default function Library({ ctx }: { ctx: Ctx }) {
                         ) : null}
                       </span>
                     </RouteLink>
-                    {p || c || k ? (
+                    {p || c || k || l.status === "failed" ? (
                       <div className="a-wrap lc-chips">
+                        {/* Stuck: the way to its "המשך כתיבה", by the chip that says so. */}
+                        {l.status === "failed" ? (
+                          <RouteLink to={{ v: "lecture", l: l.id }} go={ctx.go} className="a-chip warn lc-retry">
+                            המשך כתיבה
+                          </RouteLink>
+                        ) : null}
                         {p}
                         {c}
                         {k}

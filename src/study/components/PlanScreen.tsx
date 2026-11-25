@@ -111,6 +111,9 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
     return pendingSlip(data.plan, missedOf(data.saved, cut));
   }, [data, lane, today]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The way back, on every state of the screen: to "יחד" (the group's plan) or "שלי" (one's own lane).
+  const home = <BackLink go={ctx.go} fallback={{ v: route.lane === "mine" ? "me" : "group" }} />;
+
   // PL2: the next 7 days are saved as marathons of the plan, once a screen sees one missing.
   const saving = useRef(false);
   useEffect(() => {
@@ -145,7 +148,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
   if (error && !data)
     return (
       <main className="plan">
-        <Head title="תוכנית עד המבחן" />
+        <Head back={home} title="תוכנית עד המבחן" />
         <p className="a-error" role="alert">
           {error}
         </p>
@@ -157,7 +160,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
   if (!data)
     return (
       <main className="plan">
-        <Head title="תוכנית עד המבחן" />
+        <Head back={home} title="תוכנית עד המבחן" />
         <Loading />
       </main>
     );
@@ -165,7 +168,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
   if (!plan || phaseOn(plan, today) === "after")
     return (
       <main className="plan">
-        <Head title="תוכנית עד המבחן" />
+        <Head back={home} title="תוכנית עד המבחן" />
         <section className="a-card dashed empty pl-empty">
           <Icon name="cal" size={22} />
           <p className="a-para">{plan ? "המבחן של התוכנית הזו עבר. אפשר לבנות תוכנית למבחן הבא." : "עוד אין תוכנית. מזינים את מבחן הבלוק פעם אחת, והתוכנית נבנית לבד."}</p>
@@ -198,7 +201,7 @@ export default function PlanScreen({ route, ctx }: ScreenProps<"plan">) {
 
   const head = (
     <>
-      <Head back={route.lane === "mine" ? <BackLink go={ctx.go} fallback={{ v: "me" }} /> : undefined}>
+      <Head back={home}>
         <h1 className="t">
           {route.lane === "mine" ? "המסלול שלך" : <>תוכנית · {isolateLatin(plan.title, "pt")}</>}
         </h1>

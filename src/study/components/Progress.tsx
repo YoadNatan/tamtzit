@@ -24,7 +24,7 @@ import { flags } from "../lib/flags";
 import { listQuestionsByIds, type PublicQuestion } from "../lib/practice";
 import { AGAIN_KEY, myAspects, myCalibration, myDangerList, myReadiness, myRewordings, todayText } from "../lib/progress";
 import { barLabel, isolateLatin } from "../lib/rich";
-import { Head, Loading, RouteLink } from "./Shell";
+import { BackLink, Head, Loading, RouteLink } from "./Shell";
 import "../styles/progress.css";
 
 /* ── "ההתקדמות שלי" (package A2; spec §12.3.A; proposal/mockups/progress-pulse.html s1) ──
@@ -112,7 +112,7 @@ export default function Progress({ route, ctx }: ScreenProps<"progress">) {
   }, [data, route.x]);
 
   const head = (
-    <Head title="ההתקדמות שלי">
+    <Head back={<BackLink go={ctx.go} fallback={{ v: "me" }} />} title="ההתקדמות שלי">
       <span className="a-chip">רק לך</span>
     </Head>
   );

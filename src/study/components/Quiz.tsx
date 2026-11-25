@@ -475,8 +475,9 @@ export default function Quiz({ quizId, ctx }: ScreenProps<"quiz"> & { quizId: st
         </p>
         <QuizEnd state={state} me={me} />
         <StickyActions>
-          <RouteLink to={{ v: "library" }} go={ctx.go} className="a-btn">
-            חזרה לספרייה
+          {/* One way out, the same as the top bar's (and the boss's end): back to "יחד". */}
+          <RouteLink to={{ v: "group" }} go={ctx.go} className="a-btn">
+            חזרה ליחד
           </RouteLink>
           <RouteLink to={again} go={ctx.go} className="a-btn primary wide">
             {race ? "עוד סיבוב" : "מבחן נוסף"}
