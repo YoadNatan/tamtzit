@@ -604,6 +604,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         media={qq.source === "exam" && qq.exam_id && (qq.figure ?? "").startsWith("pg:") ? <PageCrop groupId={ctx.group.id} examId={qq.exam_id} figure={qq.figure} /> : undefined}
         dangerList={flags.progress}
         autoFocus={!read}
+        keys={!read}
       />
     );
   };

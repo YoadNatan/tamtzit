@@ -27,6 +27,17 @@
   position: absolute;
   inset: 0;
 }
+/* A practice question on a desktop (L, P2): the picture is about half the
+   screen tall at most (520 px), in the middle of the column, so the
+   options under it stay in view. Its width follows from its ratio
+   (--qf-ar, set by QuestionFigure); "להגדיל" still shows it big. */
+@media (min-width: 1024px) {
+  .pq > .qfig {
+    width: 100%;
+    max-inline-size: min(100%, calc(min(50vh, 520px) * var(--qf-ar, 1.3333)));
+    justify-self: center;
+  }
+}
 .qf-wait-box {
   aspect-ratio: 4 / 3;
 }

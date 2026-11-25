@@ -74,6 +74,9 @@ export type PracticeQuestionProps = {
   /** A picture question whose picture does not load: "לדלג" moves on without counting it. */
   onSkip?: () => void;
   autoFocus?: boolean;
+  /** The screen takes 1-6 and Enter (a practice session): one line says so,
+   *  shown only with a mouse (practice.css .pq-keys, P2). */
+  keys?: boolean;
 };
 
 const styleName = (q: PracticeQuestionProps["q"]): string =>
@@ -270,6 +273,11 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
           ))}
         </div>
         )}
+        {p.keys && !set && !tap ? (
+          <p className="a-small a-muted pq-keys">
+            במקלדת: <bdi dir="ltr">1–{Math.min(q.options.length, 6)}</bdi> לבחירה · <kbd>Enter</kbd> לבדיקה
+          </p>
+        ) : null}
         {p.noBet ? null : (
           <section ref={bets} className="a-card flat pq-bet" aria-labelledby={`bet-${q.id}`}>
             <div className="a-row between">

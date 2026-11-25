@@ -36,6 +36,29 @@
 .pq-options .a-opt {
   min-height: 52px;
 }
+/* "במקלדת: 1–4 לבחירה · Enter לבדיקה": only where there is a mouse, so
+   only where there is likely a keyboard (P2). */
+.pq-keys {
+  display: none;
+  margin: calc(-1 * var(--sp-2)) 0 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pq-keys {
+    display: block;
+  }
+}
+.pq-keys kbd,
+.pq-keys bdi {
+  font: inherit;
+  font-weight: 700;
+}
+.pq-keys kbd {
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  box-shadow: 0 1px 0 var(--edge);
+}
 .pq-bet {
   display: grid;
   gap: var(--sp-4);

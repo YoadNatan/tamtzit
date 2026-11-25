@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import type { Box } from "../../../shared/study/figureGeo";
 import type { ImageLayout, LabelLayout, Layout } from "../../../shared/study/forms";
 import { figurePathOf, figureUrls } from "../lib/api";
@@ -317,8 +317,12 @@ export default function QuestionFigure(p: FigureProps) {
     setTries((n) => n + 1);
   };
   const stage = <Stage {...p} figure={fig} url={url} state={state} natural={natural} scale={scale} onRetry={retry} />;
+  // The picture's width over its height: on a desktop a practice question's
+  // picture stops at about half the screen's height (qtypes.css, P2).
+  const crop = p.layout?.kind === "image" ? (p.layout as ImageLayout).crop : null;
+  const ratio = label ? label.stage.w / label.stage.h : natural ? (natural.w * (crop?.w ?? 1)) / (natural.h * (crop?.h ?? 1)) : 4 / 3;
   return (
-    <figure className="qfig" ref={box}>
+    <figure className="qfig" ref={box} style={{ "--qf-ar": ratio.toFixed(4) } as CSSProperties}>
       {scale > 1 ? (
         <div className="qf-scroll qf-dense" tabIndex={0} role="group" aria-label="השרטוט, מוגדל">
           {stage}
