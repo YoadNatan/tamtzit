@@ -297,7 +297,14 @@ test("the area decides, then the code, then the area's fallback (§6.3)", () => 
   assert.equal(failText("something new", "meeting"), "לא הצלחנו. אפשר לנסות שוב.");
   assert.equal(failText("lecture not found", "plan"), "אחת ההרצאות כבר לא קיימת. כדאי לרענן.");
   assert.equal(failText("lecture not found"), "ההרצאה הזו נמחקה או לא נמצאה. אפשר לבדוק ב״נמחקו לאחרונה״.");
-  assert.equal(failText("not signed in"), "הכניסה במכשיר הזה פגה. צריך להצטרף מחדש עם קוד הקבוצה.", "without flags.account");
+  assert.equal(failText("not signed in"), "הכניסה במכשיר הזה פגה. נכנסים שוב עם הקוד האישי, או מצטרפים מחדש עם קוד הקבוצה.", "without flags.account");
+  // The personal code (section I): the redeem's and the RPCs' codes, each with its own line.
+  assert.equal(failText("code not found"), "הקוד הזה לא נמצא. כדאי לבדוק אותו שוב, או לבקש קוד חדש ממי שפתחו את הקבוצה.");
+  assert.equal(failText("too many tries"), "היו יותר מדי ניסיונות. אפשר לנסות שוב בעוד רבע שעה.");
+  assert.equal(failText("codes off"), "כניסה עם קוד אישי לא זמינה כרגע.");
+  assert.equal(failText("sign-in failed"), "הכניסה לא הושלמה. אפשר לנסות שוב.");
+  assert.equal(failText("no code here"), "אי אפשר ליצור קוד אישי לחשבון הזה.");
+  for (const c of ["no code here", "off", "code not found", "too many tries", "codes off", "sign-in failed"]) assert.ok(hasText(c, "group"), c);
   assert.equal(failText("conflict", "marathon"), "מפגש הלמידה השתנה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");
   // §12's areas
   assert.equal(failText("conflict", "meeting"), "הפגישה השתנתה בינתיים. הגרסה החדשה נטענה, ואפשר לערוך שוב.");

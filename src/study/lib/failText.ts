@@ -42,9 +42,11 @@ export type Area =
 const OPTIONAL: Area[] = ["practice", "exam", "cards", "ask", "mnemonic", "museum", "dispute", "traps", "corrections"];
 const each = (areas: Area[], code: string, text: string) => Object.fromEntries(areas.map((a) => [`${a}:${code}`, text]));
 
+// Without accounts (decision 1), the way back is the personal code (SQL
+// section I, docs/study/personal-code.md), or joining again.
 const SIGNED_OUT = flags.account
   ? "הכניסה במכשיר הזה פגה. נכנסים שוב עם המייל: ״כניסה עם מייל״."
-  : "הכניסה במכשיר הזה פגה. צריך להצטרף מחדש עם קוד הקבוצה.";
+  : "הכניסה במכשיר הזה פגה. נכנסים שוב עם הקוד האישי, או מצטרפים מחדש עם קוד הקבוצה.";
 
 /** `code` for any area, `area:code` for one area. */
 const TEXT: Record<string, string> = {
@@ -81,6 +83,12 @@ const TEXT: Record<string, string> = {
   "wrong code": "הקוד לא נמצא. כדאי לבדוק אותו שוב, אות אחרי אות.",
   // meeting design §8.1 (area today), and the same words wherever a group is gone
   "group not found": "הקבוצה לא נמצאה. כדאי לרענן.",
+  // The personal code (section I; /api/study/code and api.ts redeemPersonalCode).
+  "code not found": "הקוד הזה לא נמצא. כדאי לבדוק אותו שוב, או לבקש קוד חדש ממי שפתחו את הקבוצה.",
+  "too many tries": "היו יותר מדי ניסיונות. אפשר לנסות שוב בעוד רבע שעה.",
+  "codes off": "כניסה עם קוד אישי לא זמינה כרגע.",
+  "sign-in failed": "הכניסה לא הושלמה. אפשר לנסות שוב.",
+  "no code here": "אי אפשר ליצור קוד אישי לחשבון הזה.",
   "groups closed": "כבר נפתחה קבוצה. כדי להצטרף צריך את קוד ההזמנה של הקבוצה.",
   "link host": "אפשר לקשר רק להקלטה באתר של האוניברסיטה.",
 

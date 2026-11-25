@@ -10,11 +10,15 @@
  *   schemaOk  the database has every section this code needs (spec §2.11):
  *             the server's, and what the app built with this deployment's
  *             VITE_STUDY_* flags needs (healthSchema)
- *   features  the server-side switches (study_features()) */
+ *   features  the server-side switches (study_features())
+ *   codes     the personal code works end to end (docs/study/personal-code.md):
+ *             section I is loaded, the server key matches, the switch
+ *             "codes" is not off, and Auth's email sign-in is on (its
+ *             public settings). The app shows the code only when it is true. */
 
 /// <reference path="../../server/study/env.d.ts" />
 import { monthlyCap } from "../../server/study/budget.js";
-import { healthSchema, keyed, schemaOk, serverClient, workerKey } from "../../server/study/study.js";
+import { healthSchema, keyed, schemaOk, serverClient, supabaseAnonKey, supabaseUrl, workerKey } from "../../server/study/study.js";
 
 // Node.js runtime: the Anthropic SDK imports @opentelemetry/api, which Vercel's
 // edge bundler refuses outside Next.js, so every study function runs on Node.
@@ -49,11 +53,37 @@ async function workerMatches(): Promise<boolean> {
   }
 }
 
+/** Whether Auth's email (and password) sign-in is on: the personal code's
+ *  sign-in needs it. Auth's public settings, read with the anon key. */
+async function emailSignInOn(): Promise<boolean> {
+  try {
+    const res = await fetch(`${supabaseUrl()}/auth/v1/settings`, {
+      headers: { apikey: supabaseAnonKey() },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return false;
+    const s = (await res.json()) as { external?: { email?: unknown } };
+    return s.external?.email === true;
+  } catch {
+    return false;
+  }
+}
+
+/** The personal code's readiness (section I at 1 or later, the server key,
+ *  the switch, Auth's email sign-in); Auth is asked only when the rest holds. */
+async function codesOn(schema: unknown, features: unknown, workerOk: boolean): Promise<boolean> {
+  const i = schema && typeof schema === "object" ? (schema as Record<string, unknown>).I : undefined;
+  if (typeof i !== "number" || i < 1 || !workerOk) return false;
+  if (features && typeof features === "object" && (features as Record<string, unknown>).codes === false) return false;
+  return emailSignInOn();
+}
+
 async function handler(): Promise<Response> {
   const supabase = Boolean(process.env.VITE_STUDY_SUPABASE_URL || process.env.VITE_SUPABASE_URL);
   const [schema, features, workerOk] = supabase
     ? await Promise.all([read("study_schema"), read("study_features"), workerMatches()])
     : [null, null, false];
+  const codes = supabase ? await codesOn(schema, features, workerOk) : false;
   const body = {
     ok: true,
     anthropicKey: Boolean(process.env.ANTHROPIC_API_KEY),
@@ -65,6 +95,7 @@ async function handler(): Promise<Response> {
     schema,
     schemaOk: schemaOk(schema, healthSchema(process.env)),
     features,
+    codes,
   };
   return new Response(JSON.stringify(body), {
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },

@@ -66,8 +66,8 @@ function env(name: string): string {
 }
 
 // Same project as the browser uses: the study project if one is configured.
-const supabaseUrl = () => process.env.VITE_STUDY_SUPABASE_URL || env("VITE_SUPABASE_URL");
-const supabaseAnonKey = () => process.env.VITE_STUDY_SUPABASE_ANON_KEY || env("VITE_SUPABASE_ANON_KEY");
+export const supabaseUrl = () => process.env.VITE_STUDY_SUPABASE_URL || env("VITE_SUPABASE_URL");
+export const supabaseAnonKey = () => process.env.VITE_STUDY_SUPABASE_ANON_KEY || env("VITE_SUPABASE_ANON_KEY");
 const NO_SESSION = { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false };
 
 /** A member's token must outlive the call it opens: a function stops its model
@@ -116,6 +116,16 @@ export async function memberClient(req: Request, { minSeconds = TOKEN_MIN_SECOND
  *  carry the server key wherever one is needed. */
 export function serverClient(): SupabaseClient {
   return createClient(supabaseUrl(), supabaseAnonKey(), { auth: NO_SESSION });
+}
+
+/** A client that calls as the holder of `token` (a session the server has
+ *  just been given, e.g. by /api/study/code's sign-in), without checking it:
+ *  PostgREST and the SQL do. memberClient is for a caller's token. */
+export function tokenClient(token: string): SupabaseClient {
+  return createClient(supabaseUrl(), supabaseAnonKey(), {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: NO_SESSION,
+  });
 }
 
 /** STUDY_WORKER_KEY without the spaces or line break a paste can leave

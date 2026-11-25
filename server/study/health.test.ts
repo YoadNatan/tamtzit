@@ -15,6 +15,9 @@ let vaultKey: string | null = KEY;
 /** A database with every section this code needs: F and the merged packages' W (with W2's hardening), Q, C, K. */
 const CURRENT = { F: 1, W: 2, Q: 1, C: 1, K: 1 };
 let schema: { status: number; body: unknown } = { status: 200, body: CURRENT };
+/** study_features() and Auth's public settings, for "codes" (section I). */
+let features: Record<string, boolean> = { exams: false, recordings: false };
+let authSettings: { status: number; body: unknown } = { status: 200, body: { external: { email: true, anonymous_users: true } } };
 let calls: Array<{ path: string; body: string }> = [];
 let base = "";
 
@@ -34,7 +37,11 @@ const rest = createServer(async (req, res) => {
   const body = await readAll(req);
   calls.push({ path, body });
   if (path === "/rest/v1/rpc/study_schema") return send(res, schema.status, schema.body);
-  if (path === "/rest/v1/rpc/study_features") return send(res, 200, { exams: false, recordings: false });
+  if (path === "/rest/v1/rpc/study_features") return send(res, 200, features);
+  if (path === "/auth/v1/settings") {
+    if (req.headers.apikey !== "anon-key") return send(res, 401, { message: "no apikey" });
+    return send(res, authSettings.status, authSettings.body);
+  }
   if (path === "/rest/v1/rpc/study_spent") {
     const a = JSON.parse(body) as { p_group?: string; p_key?: string };
     const worker = vaultKey !== null && vaultKey.length >= 32 && a.p_key === vaultKey;
@@ -54,6 +61,8 @@ beforeEach(() => {
   Object.assign(process.env, { VITE_SUPABASE_URL: base, VITE_SUPABASE_ANON_KEY: "anon-key", STUDY_WORKER_KEY: KEY, STUDY_MONTHLY_USD: "33", ANTHROPIC_API_KEY: "test-key" });
   vaultKey = KEY;
   schema = { status: 200, body: CURRENT };
+  features = { exams: false, recordings: false };
+  authSettings = { status: 200, body: { external: { email: true, anonymous_users: true } } };
   calls = [];
 });
 
@@ -77,7 +86,9 @@ test("wired: the key is set on Vercel and is Vault's, the schema has F and the m
     schema: CURRENT,
     schemaOk: true,
     features: { exams: false, recordings: false },
+    codes: false,
   });
+  assert.equal(calls.filter((c) => c.path === "/auth/v1/settings").length, 0, "Auth is not asked without section I");
   const spent = calls.filter((c) => c.path === "/rest/v1/rpc/study_spent");
   assert.equal(spent.length, 1);
   assert.deepEqual(JSON.parse(spent[0].body), { p_group: "00000000-0000-0000-0000-000000000000", p_key: KEY });
@@ -144,4 +155,27 @@ test("no Supabase configured: nothing is asked, and nothing is ok", async () => 
   const h = await check();
   assert.deepEqual([h.supabase, h.worker, h.workerOk, h.schema, h.schemaOk, h.features], [false, true, false, null, false, null]);
   assert.equal(calls.length, 0);
+});
+
+test('"codes": section I, the server key, the switch not off, and Auth\'s email sign-in on', async () => {
+  schema = { status: 200, body: { ...CURRENT, I: 1 } };
+  assert.equal((await check()).codes, true);
+  assert.equal(calls.filter((c) => c.path === "/auth/v1/settings").length, 1);
+  features = { exams: false, codes: true };
+  assert.equal((await check()).codes, true, "the switch on");
+  features = { exams: false, codes: false };
+  assert.equal((await check()).codes, false, "the switch off");
+  features = { exams: false };
+  authSettings = { status: 200, body: { external: { email: false, anonymous_users: true } } };
+  assert.equal((await check()).codes, false, "Auth's email sign-in off");
+  authSettings = { status: 500, body: { message: "down" } };
+  assert.equal((await check()).codes, false, "Auth's settings unreadable");
+  authSettings = { status: 200, body: { external: { email: true } } };
+  vaultKey = null;
+  assert.equal((await check()).codes, false, "the server key not Vault's");
+  vaultKey = KEY;
+  schema = { status: 200, body: { ...CURRENT, I: 0 } };
+  assert.equal((await check()).codes, false, "section I not loaded");
+  schema = { status: 200, body: { ...CURRENT, I: 2 } };
+  assert.equal((await check()).codes, true, "a later version of I");
 });
