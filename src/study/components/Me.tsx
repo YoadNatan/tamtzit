@@ -94,7 +94,7 @@ function SignOutConfirm({ hasCode, canMake, onCancel, onMake, onOut }: { hasCode
       <span>
         {hasCode
           ? "לצאת מהמכשיר הזה? כדי לחזור צריך את הקוד האישי."
-          : `לצאת מהמכשיר הזה? בלי קוד אישי אי אפשר לחזור לחשבון הזה.${canMake ? " כדאי ליצור קוד קודם." : ""}`}
+          : `לצאת מהמכשיר הזה? בלי קוד אישי אי אפשר לחזור לשם הזה ולהתקדמות.${canMake ? " כדאי ליצור קוד קודם." : ""}`}
       </span>
       <div className="a-row">
         {!hasCode && canMake ? (
@@ -282,7 +282,7 @@ export default function Me({ ctx }: ScreenProps<"me">) {
               </div>
               {confirm?.kind === "issue" && confirm.member.user_id === m.user_id ? (
                 <Confirm
-                  text={`ליצור ל${m.name} קוד אישי חדש? הקוד הקודם של ${m.name} יפסיק לעבוד. שולחים אותו רק ל${m.name}, בהודעה פרטית.`}
+                  text={`ליצור ל${m.name} קוד אישי חדש?${saved[m.user_id] ? ` הקוד הקודם של ${m.name} יפסיק לעבוד.` : ""} שולחים אותו רק ל${m.name}, בהודעה פרטית.`}
                   act="יצירה"
                   busy={busy}
                   onCancel={cancel}

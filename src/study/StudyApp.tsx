@@ -2,9 +2,9 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { Session } from "@supabase/supabase-js";
 import { claimDevice, configured, getSession, listLectures, members, myGroups, onAuthChange, redeemPersonalCode, type Group, type Member } from "./lib/api";
 import { failText } from "./lib/failText";
-import { cachedCode, takeLinkCode } from "./lib/personalCode";
+import { cacheCode, cachedCode, takeLinkCode, takeWelcome, welcomeNext } from "./lib/personalCode";
 import { flags } from "./lib/flags";
-import { allowed, parseRoute, routeUrl, screenKey, type Route } from "./lib/route";
+import { allowed, APP_PATH, parseRoute, routeUrl, screenKey, type Route } from "./lib/route";
 import { AccountLayer, accountStartup, openAccount, type PendingLink } from "./features/account";
 import { BossScreen } from "./features/boss";
 import { CardsScreen } from "./features/cards";
@@ -37,6 +37,9 @@ import Shell, { applySize, BackLink, Loading, placeNow, readSize, type Place } f
  * /#k=CODE    a member's personal code (docs/study/personal-code.md): read
  *              and taken out of the address at once; without a member on
  *              this device it signs in as that member, with one it asks first
+ *              (the code this device already holds: one line). A sign-in
+ *              with the code ends with a fresh page, so nothing of the
+ *              member before keeps running as the new one.
  *
  * Order of checks (spec §5.1): ?join= → Join; no session or no group → Join;
  * else the route, inside the shell. A route whose feature is off is replaced
@@ -47,6 +50,9 @@ const GROUP_KEY = "study-group";
 /** A #k= link this page was opened with, read once as the app loads (before
  *  anything renders, so the code never stays in the address bar). */
 const LINK_AT_START = configured ? takeLinkCode() : null;
+/** The page before this one signed in with the code: its toast, once in. */
+const WELCOME_AT_START = takeWelcome();
+const ALREADY_IN = "הכניסה כבר פעילה במכשיר הזה.";
 const MALFORMED = "הקוד האישי הוא 16 תווים, אותיות ומספרים.";
 
 function rememberGroup(id: string) {
@@ -115,7 +121,7 @@ export default function StudyApp() {
   const [restoring, setRestoring] = useState(false);
   const [codePanel, setCodePanel] = useState<{ code: string; error: string } | null>(null);
   const [pendingLink, setPendingLink] = useState<PendingLink | null>(null);
-  const welcome = useRef(false);
+  const welcome = useRef(WELCOME_AT_START);
 
   // The text size is the whole app's (review UX-15).
   useEffect(() => applySize(readSize()), []);
@@ -157,29 +163,33 @@ export default function StudyApp() {
     toastTimer.current = setTimeout(() => setToast(null), action ? 6000 : 3500);
   }, []);
 
-  /** Signs this device in as a personal code's member, and loads their
-   *  group before the shell shows it ("חזרה לקבוצה בתור …" then). The same
-   *  member already here: one line. Throws the code's failure. */
+  /** Signs this device in as a personal code's member. The same member
+   *  already here: one line. Anyone else, or no one: the code is kept on
+   *  the device ("שלי" can show it again), and the page starts afresh as
+   *  that member, with "חזרה לקבוצה בתור …" once their group is in. In-page
+   *  state of the member before (the cards' outbox and its timer, channels)
+   *  would otherwise keep running with the new member's session (review
+   *  data-integrity 1). Throws the code's failure; after a switch it never
+   *  settles (the page is going). */
   const restore = useCallback(
     async (code: string) => {
       const before = (await getSession())?.user.id;
       if (before && cachedCode(before)?.code === code) {
-        say("הכניסה כבר פעילה במכשיר הזה.");
+        say(ALREADY_IN);
         return;
       }
       const r = await redeemPersonalCode(code);
+      cacheCode(r.userId, code);
       if (r.same) {
-        say("הכניסה כבר פעילה במכשיר הזה.");
+        say(ALREADY_IN);
         return;
       }
-      const s = await getSession();
-      setGroupsLoaded(false);
-      setSession(s);
-      setCodePanel(null);
-      welcome.current = true;
-      if (s) await loadGroups(s).catch(() => setGroupsLoaded(true));
+      setPendingLink(null);
+      welcomeNext();
+      location.replace(APP_PATH);
+      await new Promise<never>(() => undefined);
     },
-    [loadGroups, say],
+    [say],
   );
 
   // A #k= link: once it is known whether a member is signed in here.
@@ -192,7 +202,9 @@ export default function StudyApp() {
       return;
     }
     if (session && group) {
-      setPendingLink({ code: link.code, name: group.me });
+      // The code this device already holds (its own link, tapped to test it): nothing to ask.
+      if (cachedCode(session.user.id)?.code === link.code) say(ALREADY_IN);
+      else setPendingLink({ code: link.code, name: group.me });
       return;
     }
     const code = link.code;

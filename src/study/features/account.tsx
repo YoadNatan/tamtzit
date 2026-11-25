@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { getSession, newPersonalCode } from "../lib/api";
+import { getSession, newPersonalCode, personalCodeStatus } from "../lib/api";
 import { cacheCode, codesOn } from "../lib/personalCode";
 import type { Ctx } from "./types";
 
@@ -25,7 +25,9 @@ type Mode = "save" | "signin" | "enter" | "new";
 const OPEN = "study-account";
 
 /** Opens the slot's sheet: "new" makes the member's first code and shows it
- *  (right after joining or opening a group); "enter" the entry with a code.
+ *  (right after joining or opening a group), and never replaces a code the
+ *  member already has (a join repeated after a failed load must not kill the
+ *  code they saved); "enter" the entry with a code.
  *  "save" and "signin" were the withdrawn email account's: nothing. */
 export function openAccount(mode: Mode): void {
   window.dispatchEvent(new CustomEvent(OPEN, { detail: mode }));
@@ -58,6 +60,7 @@ export function AccountLayer({
         if (!(await codesOn())) return;
         const s = await getSession();
         if (!s) return;
+        if ((await personalCodeStatus()).has_code) return;
         const code = await newPersonalCode();
         cacheCode(s.user.id, code);
         setSheet({ kind: "new", code });
@@ -71,7 +74,9 @@ export function AccountLayer({
     <Suspense fallback={null}>
       {sheet?.kind === "new" ? <MyCodeSheet code={sheet.code} onClose={() => setSheet(null)} /> : null}
       {sheet?.kind === "enter" && restore ? <EnterSheet onCode={restore} onClose={() => setSheet(null)} /> : null}
-      {link && restore ? <LinkConfirm name={link.name} onYes={() => restore(link.code)} onClose={() => onLinkDone?.()} /> : null}
+      {link && restore ? (
+        <LinkConfirm name={link.name} onYes={() => restore(link.code)} onMake={() => openAccount("new")} onClose={() => onLinkDone?.()} />
+      ) : null}
     </Suspense>
   );
 }

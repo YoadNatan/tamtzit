@@ -40,6 +40,15 @@ export function codeDate(iso: string | null | undefined): string {
   return `${Number(day)}.${Number(m)}`;
 }
 
+/** "25.11, 14:02", Israel time. */
+export function codeWhen(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const time = d.toLocaleTimeString("en-GB", { timeZone: "Asia/Jerusalem", hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${codeDate(iso)}, ${time}`;
+}
+
 const origin = () => location.origin;
 
 /** The code, large and left to right, with WhatsApp, copy and share. */
@@ -177,7 +186,9 @@ export function CodeEntry({
   const paste = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      setValue(text.trim().slice(0, 300));
+      const t = text.trim().slice(0, 300);
+      const c = parseCode(t);
+      setValue(c ? formatCode(c) : t);
       setHint("");
       setError("");
     } catch {
@@ -204,22 +215,27 @@ export function CodeEntry({
       {titled ? <h2 className="pc-title">כניסה עם הקוד האישי</h2> : null}
       <label className="a-field">
         <span>הקוד האישי</span>
-          <input
-        ref={input}
-        className="a-input pc-input"
-        dir="ltr"
-        value={value}
-        onChange={(e) => {
-          setValue(e.target.value);
-          setError("");
-        }}
-        placeholder="XXXX-XXXX-XXXX-XXXX"
-        autoCapitalize="characters"
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        maxLength={300}
-        aria-describedby={`${id}-hint`}
+        <input
+          ref={input}
+          className="a-input pc-input"
+          dir="ltr"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError("");
+          }}
+          onBlur={() => {
+            // Shown as everywhere else: XXXX-XXXX-XXXX-XXXX, once it reads as a code.
+            const c = parseCode(value);
+            if (c) setValue(formatCode(c));
+          }}
+          placeholder="XXXX-XXXX-XXXX-XXXX"
+          autoCapitalize="characters"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          maxLength={300}
+          aria-describedby={`${id}-hint`}
         />
       </label>
       <p id={`${id}-hint`} className="a-small a-muted">
@@ -259,15 +275,38 @@ export function EnterSheet({ onCode, onClose }: { onCode: (code: string) => Prom
   );
 }
 
-/** A #k= link opened where another member is signed in. */
-export function LinkConfirm({ name, onYes, onClose }: { name: string; onYes: () => Promise<void>; onClose: () => void }) {
+/** A #k= link opened where another member is signed in. When that member
+ *  has no code, saying yes loses them for good: said first, with a way to
+ *  make their code before (a link from someone else can be a trap). */
+export function LinkConfirm({
+  name,
+  onYes,
+  onMake,
+  onClose,
+}: {
+  name: string;
+  onYes: () => Promise<void>;
+  onMake: () => void;
+  onClose: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [noCode, setNoCode] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    personalCodeStatus()
+      .then((s) => alive && setNoCode(!s.has_code))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
   return (
     <Sheet label="כניסה עם הקוד האישי" className="pc-sheet" head={<h2>כניסה עם הקוד האישי</h2>} onClose={onClose}>
       {(sheet) => (
         <div className="a-stack pc-body">
           <p className="a-para">במכשיר הזה כבר יש כניסה בשם {name}. להיכנס במקום זה עם הקוד האישי?</p>
+          {noCode ? <p className="a-callout warn pc-nocode">לכניסה בשם {name} אין קוד אישי, ואי אפשר יהיה לחזור אליה.</p> : null}
           {error ? (
             <p className="a-error" role="alert">
               {error}
@@ -289,6 +328,19 @@ export function LinkConfirm({ name, onYes, onClose }: { name: string; onYes: () 
             >
               {busy ? "רגע…" : "כניסה עם הקוד"}
             </button>
+            {noCode ? (
+              <button
+                type="button"
+                className="a-btn"
+                disabled={busy}
+                onClick={() => {
+                  sheet.close();
+                  onMake();
+                }}
+              >
+                יצירת קוד קודם
+              </button>
+            ) : null}
             <button type="button" className="a-btn ghost" onClick={sheet.close}>
               ביטול
             </button>
@@ -299,10 +351,20 @@ export function LinkConfirm({ name, onYes, onClose }: { name: string; onYes: () 
   );
 }
 
-/** The opener's notice: a new code was made for this member. */
-function noticeText(s: CodeStatus): string {
+/** The opener's notice: a new code was made for this member; whether it
+ *  replaced one; whether it already brought a device in (the opener sees the
+ *  code, so a use the member did not make shows here); and where to cut off
+ *  the other devices (`onMe`: the button is right below, on "שלי"). */
+export function noticeText(s: CodeStatus, onMe: boolean): string {
   const who = s.by_name ? `מי שפתחו את הקבוצה (${s.by_name})` : "מי שפתחו את הקבוצה";
-  return `${who} יצרו לך קוד אישי חדש ב-${codeDate(s.created_at)}. הקוד הקודם כבר לא עובד. אם זה לא היה בבקשתך: ״ניתוק המכשירים האחרים״.`;
+  return [
+    `${who} יצרו לך קוד אישי חדש ב-${codeDate(s.created_at)}.`,
+    s.replaced ? "הקוד הקודם כבר לא עובד." : "",
+    s.uses > 0 && s.used_at ? `הקוד החדש כבר שימש לכניסה ב-${codeWhen(s.used_at)}.` : "",
+    `אם זה לא היה בבקשתך: ${onMe ? "" : "ב״שלי״ ← "}״ניתוק המכשירים האחרים״.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** The member's code status, again whenever it changes. */
@@ -337,10 +399,9 @@ export function CodeCard({ ctx }: { ctx: Ctx }) {
   const cached = cachedCode(ctx.userId);
   const fresh = status?.has_code ? cacheFresh(cached, status.created_at) : false;
 
-  const make = async (after?: () => Promise<void>) => {
+  const make = async () => {
     setBusy(true);
     try {
-      if (after) await after();
       const code = await newPersonalCode();
       cacheCode(ctx.userId, code);
       setShown(code);
@@ -356,6 +417,18 @@ export function CodeCard({ ctx }: { ctx: Ctx }) {
     }
   };
 
+  // "ניתוק": the new code first, then the other sessions, so no one holding
+  // the old code gets in between the two and keeps a session (review 2, 6).
+  const cutOthers = async () => {
+    if (!(await make())) return;
+    try {
+      await signOutOthers();
+      ctx.say("המכשירים האחרים נותקו. הקוד החדש מוצג כאן.");
+    } catch {
+      ctx.say("הקוד הוחלף, אבל הניתוק לא הושלם. אפשר לנסות שוב.");
+    }
+  };
+
   if (!status) return null;
   return (
     <section className="a-stack pc-card-wrap" aria-labelledby="pc-h">
@@ -363,7 +436,7 @@ export function CodeCard({ ctx }: { ctx: Ctx }) {
         <h2 id="pc-h">הקוד האישי</h2>
       </div>
       <div className="a-card flat a-stack pc-card">
-        {status.notice ? <Notice status={status} onSeen={refresh} /> : null}
+        {status.notice ? <Notice status={status} onMe onSeen={refresh} /> : null}
         {!status.has_code ? (
           <>
             <p>עוד אין קוד אישי. בלעדיו, טלפון חדש או דפדפן אחר מתחילים מאפס.</p>
@@ -386,6 +459,7 @@ export function CodeCard({ ctx }: { ctx: Ctx }) {
           <p>יש קוד אישי מ-{codeDate(status.created_at)}. הוא לא שמור במכשיר הזה. אם הוא אבד: ״קוד חדש״.</p>
         )}
         {shown ? <CodeShow code={shown} waText={selfMessage(origin(), shown)} waLabel="שליחה לעצמי בוואטסאפ" /> : null}
+        {status.has_code && status.used_at ? <p className="a-small a-muted pc-used">כניסה אחרונה עם הקוד: {codeWhen(status.used_at)}.</p> : null}
         {status.has_code ? (
           <div className="a-row pc-actions">
             {fresh && cached ? (
@@ -412,14 +486,10 @@ export function CodeCard({ ctx }: { ctx: Ctx }) {
         ) : null}
         {ask === "others" ? (
           <ConfirmLine
-            text="לנתק את כל המכשירים האחרים? הם ייצאו מהחשבון, ונוצר גם קוד חדש. המכשיר הזה נשאר מחובר."
+            text="לנתק את כל המכשירים האחרים? הם ייצאו, וגם ייווצר קוד חדש. המכשיר הזה נשאר מחובר."
             act="ניתוק"
             busy={busy}
-            onAct={() =>
-              void make(signOutOthers).then((ok) => {
-                if (ok) ctx.say("המכשירים האחרים נותקו. הקוד החדש מוצג כאן.");
-              })
-            }
+            onAct={() => void cutOthers()}
             onCancel={() => setAsk(null)}
           />
         ) : null}
@@ -450,11 +520,11 @@ function ConfirmLine({ text, act, busy, onAct, onCancel }: { text: string; act: 
   );
 }
 
-function Notice({ status, onSeen }: { status: CodeStatus; onSeen: () => void }) {
+function Notice({ status, onMe = false, onSeen }: { status: CodeStatus; onMe?: boolean; onSeen: () => void }) {
   const [busy, setBusy] = useState(false);
   return (
     <div className="a-callout warn pc-notice" role="status">
-      <span>{noticeText(status)}</span>
+      <span>{noticeText(status, onMe)}</span>
       <div className="a-row">
         <button
           type="button"
@@ -478,8 +548,8 @@ function Notice({ status, onSeen }: { status: CodeStatus; onSeen: () => void }) 
   );
 }
 
-/** Above the library: the opener's notice, or the prompt for a member
- *  without a code ("אחר כך" hides it for 3 days). */
+/** On the home (Today) and above the library: the opener's notice, or the
+ *  prompt for a member without a code ("אחר כך" hides it for 3 days). */
 export function CodeBanners({ ctx }: { ctx: Ctx }) {
   const [status, refresh] = useCodeStatus();
   const [later, setLater] = useState(() => laterActive(ctx.userId));

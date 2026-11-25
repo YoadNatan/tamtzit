@@ -4,7 +4,7 @@ import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { markFresh } from "../lib/guideMark";
 import { CodeEntry, openAccount, useCodesOn } from "../features/account";
-import { standalone } from "../lib/personalCode";
+import { formatCode, parseCode, standalone } from "../lib/personalCode";
 
 /* ── Getting in ──
  * One person opens a group and gets a code; everyone else joins with the code
@@ -25,6 +25,9 @@ type Props = {
 };
 
 const NAME_KEY = "study-my-name";
+/** "name taken" once the personal code is offered: a returning member is
+ *  pointed at their code before a second "דנה 2" is made. */
+const NAME_TAKEN_CODE = "השם הזה כבר בשימוש בקבוצה. זה השם שלך? נכנסים עם הקוד האישי. אחרת אפשר להוסיף אות או שם משפחה.";
 
 function savedName(): string {
   try {
@@ -38,6 +41,8 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
   const [mode, setMode] = useState<"join" | "create">("join");
   const codes = useCodesOn() && Boolean(restore);
   const [panel, setPanel] = useState(Boolean(codePanel));
+  // A personal code pasted into the group's code field: the code's panel, with it.
+  const [panelCode, setPanelCode] = useState("");
   useEffect(() => {
     if (codePanel) setPanel(true);
   }, [codePanel]);
@@ -88,6 +93,20 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
     setPanel(true);
   };
 
+  /** The group's code field: 6 characters. A whole invite link gives its
+   *  code; a personal code (or its link or message) opens the code's panel
+   *  with it, instead of being cut to 8 characters and failing as "wrong code". */
+  const typeCode = (raw: string) => {
+    const personal = codes ? parseCode(raw) : null;
+    if (personal && raw.replace(/[\s-]/g, "").length > 8) {
+      setPanelCode(formatCode(personal));
+      toCode();
+      return;
+    }
+    const invite = /[?&]join=([0-9A-Za-z]{6})\b/.exec(raw);
+    setCode((invite ? invite[1] : raw).toUpperCase().slice(0, 8));
+  };
+
   if (panel && restore && (codes || codePanel)) {
     return (
       <main className="join">
@@ -96,7 +115,15 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
           <h1 className="join-name">תמצית</h1>
           <div className="a-card join-form">
             <Suspense fallback={<p className="a-muted">טוען…</p>}>
-              <CodeEntry initial={codePanel?.code ?? ""} initialError={codePanel?.error ?? ""} onCode={restore} onBack={() => setPanel(false)} />
+              <CodeEntry
+                initial={panelCode || codePanel?.code || ""}
+                initialError={panelCode ? "" : (codePanel?.error ?? "")}
+                onCode={restore}
+                onBack={() => {
+                  setPanelCode("");
+                  setPanel(false);
+                }}
+              />
             </Suspense>
           </div>
         </div>
@@ -119,18 +146,24 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
         <h1 className="join-name">תמצית</h1>
         {flags.guide && initialCode ? <p className="a-small a-muted join-invited">יש הזמנה. נשאר רק להקליד שם.</p> : null}
         <p className="a-para a-muted">מעלים מצגת, ותוך כמה דקות יש סיכום בעברית לכל הקבוצה.</p>
+        {/* The way back for a returning member, above the fold even at 320×568 (the home-screen callout says it already). */}
+        {codes && !(!signedIn && standalone()) ? (
+          <button type="button" className="a-link join-signin join-code-link" onClick={toCode}>
+            כבר בקבוצה? כניסה עם הקוד האישי
+          </button>
+        ) : null}
 
         <div className="a-card join-form">
           <div className="a-seg" role="tablist" aria-label="איך נכנסים">
             <button type="button" className="a-btn" role="tab" aria-selected={mode === "join"} onClick={() => setMode("join")}>
-              יש לי קוד
+              יש לי קוד קבוצה
             </button>
             <button type="button" className="a-btn" role="tab" aria-selected={mode === "create"} onClick={() => setMode("create")}>
               פתיחת קבוצה חדשה
             </button>
           </div>
           {flags.guide && mode === "create" && !hadCode && !code ? (
-            <p className="a-callout warn join-alone">כאן פותחים קבוצה חדשה וריקה. קיבלתם קישור? לוחצים ״יש לי קוד״ (הקוד בסוף הקישור).</p>
+            <p className="a-callout warn join-alone">כאן פותחים קבוצה חדשה וריקה. קיבלתם קישור? לוחצים ״יש לי קוד קבוצה״ (הקוד בסוף הקישור).</p>
           ) : null}
 
           <form onSubmit={submit} className="a-stack">
@@ -143,11 +176,11 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
                 <span>קוד הקבוצה</span>
                 <input
                   value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  onChange={(e) => typeCode(e.target.value)}
                   dir="ltr"
                   inputMode="text"
                   autoCapitalize="characters"
-                  maxLength={8}
+                  maxLength={codes ? 300 : 8}
                   placeholder="ABC123"
                   className="a-input code-input"
                 />
@@ -160,7 +193,7 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
             )}
             {error ? (
               <p className="a-error" role="alert">
-                {error}
+                {taken && codes ? NAME_TAKEN_CODE : error}
               </p>
             ) : null}
             {error && taken && flags.account ? (
@@ -170,7 +203,7 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
             ) : null}
             {error && taken && codes ? (
               <button type="button" className="a-link" onClick={toCode}>
-                זה השם שלך? כניסה עם הקוד האישי
+                כניסה עם הקוד האישי
               </button>
             ) : null}
             <button className="a-btn primary wide" disabled={busy}>
@@ -181,11 +214,6 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
         {flags.account ? (
           <button type="button" className="a-link join-signin" onClick={() => openAccount("signin")}>
             כבר שמרת חשבון? כניסה עם מייל
-          </button>
-        ) : null}
-        {codes ? (
-          <button type="button" className="a-link join-signin join-code-link" onClick={toCode}>
-            כבר בקבוצה? כניסה עם הקוד האישי
           </button>
         ) : null}
       </div>

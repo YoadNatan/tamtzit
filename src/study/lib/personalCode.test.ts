@@ -10,6 +10,8 @@ import {
   issuedMessage,
   laterActive,
   laterNow,
+  takeWelcome,
+  welcomeNext,
   looksLikeGroupCode,
   maskCode,
   parseCode,
@@ -74,7 +76,7 @@ test("the link and WhatsApp: #k= with the 16 characters, the text encoded once",
   assert.ok(wa.startsWith("https://wa.me/?text="));
   assert.equal(decodeURIComponent(wa.slice("https://wa.me/?text=".length)), msg);
   assert.ok(wa.includes("%23k%3DK7QM3XRPW9TDH4NA"), "the # and = are encoded, so WhatsApp keeps the whole link");
-  assert.equal(issuedMessage("https://x", CODE, "דנה"), "דנה, זה הקוד האישי החדש שלך בתמצית: K7QM-3XRP-W9TD-H4NA\nכניסה בנגיעה: https://x/#k=K7QM3XRPW9TDH4NA");
+  assert.equal(issuedMessage("https://x", CODE, "דנה"), "דנה, זה הקוד האישי החדש שלך בתמצית: K7QM-3XRP-W9TD-H4NA\nכניסה בנגיעה: https://x/#k=K7QM3XRPW9TDH4NA\nכדאי לשמור את ההודעה. לא להעביר לאף אחד.");
 });
 
 function withLocation(href: string, run: (replaced: string[]) => void) {
@@ -149,4 +151,19 @@ test("the device's copy: per member, fresh only when made no earlier than the se
   } finally {
     g.localStorage = before;
   }
+});
+
+test("the welcome toast waits across the reload once, in this tab only", () => {
+  const g = globalThis as unknown as { sessionStorage?: Storage };
+  const before = g.sessionStorage;
+  g.sessionStorage = memoryStorage();
+  try {
+    assert.equal(takeWelcome(), false);
+    welcomeNext();
+    assert.equal(takeWelcome(), true);
+    assert.equal(takeWelcome(), false, "read once");
+  } finally {
+    g.sessionStorage = before;
+  }
+  assert.equal(takeWelcome(), false, "no storage: no toast, no throw");
 });

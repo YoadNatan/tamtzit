@@ -16,6 +16,7 @@ import {
 import { MeetingBand } from "../features/meeting";
 import { QuizBannerLine } from "../features/quiz";
 import { GuideHome } from "../features/guide";
+import { AccountBanners } from "../features/account";
 import { EveCard } from "../features/plan";
 import { NeedsMeCard } from "../features/today";
 import type { Ctx, ScreenProps } from "../features/types";
@@ -117,6 +118,8 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
       ) : null}
       {/* The guide's first steps (VITE_STUDY_GUIDE), before "התור שלי". */}
       {flags.guide ? <GuideHome ctx={ctx} home="today" queue={ready ? cut.items.length : null} /> : null}
+      {/* The personal code: the opener's notice, or the prompt for a member without one (the home is where everyone looks). */}
+      <AccountBanners ctx={ctx} />
 
       <div className="a-sec t-sec">
         <span className="a-row">

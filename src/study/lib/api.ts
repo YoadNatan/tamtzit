@@ -164,7 +164,18 @@ export async function signOut(): Promise<void> {
  * session of that member's own (anonymous) user, which replaces this
  * device's. No account, no email. */
 
-export type CodeStatus = { has_code: boolean; created_at: string | null; by_opener: boolean; by_name: string | null; notice: boolean };
+/** replaced: this code took the place of an earlier one; used_at/uses: the
+ *  devices it brought in (so a member sees an opener's code already used). */
+export type CodeStatus = {
+  has_code: boolean;
+  created_at: string | null;
+  by_opener: boolean;
+  by_name: string | null;
+  notice: boolean;
+  replaced: boolean;
+  used_at: string | null;
+  uses: number;
+};
 
 /** Signs this device in as the code's member. Throws "code not found", "too
  *  many tries", "codes off", "sign-in failed" or "network". Another member's
@@ -216,7 +227,7 @@ export async function personalCodeStatus(): Promise<CodeStatus> {
   const { data, error } = await client().rpc("study_code_status");
   if (error) fail(error);
   const r = ((data ?? []) as CodeStatus[])[0];
-  return r ?? { has_code: false, created_at: null, by_opener: false, by_name: null, notice: false };
+  return r ?? { has_code: false, created_at: null, by_opener: false, by_name: null, notice: false, replaced: false, used_at: null, uses: 0 };
 }
 
 /** "הבנתי" on the opener's notice. */

@@ -1,4 +1,5 @@
 import { flags } from "./flags";
+import { codesKnownOn } from "./personalCode";
 
 /* ── Error codes → Hebrew (spec §6.3; §12.7.4) ──
  * One map for every feature (replacing LectureView's FAIL_TEXT). A wrapper
@@ -43,10 +44,13 @@ const OPTIONAL: Area[] = ["practice", "exam", "cards", "ask", "mnemonic", "museu
 const each = (areas: Area[], code: string, text: string) => Object.fromEntries(areas.map((a) => [`${a}:${code}`, text]));
 
 // Without accounts (decision 1), the way back is the personal code (SQL
-// section I, docs/study/personal-code.md), or joining again.
+// section I, docs/study/personal-code.md) once the server offers it
+// (health's "codes", known this session: codesKnownOn), or joining again.
 const SIGNED_OUT = flags.account
   ? "הכניסה במכשיר הזה פגה. נכנסים שוב עם המייל: ״כניסה עם מייל״."
-  : "הכניסה במכשיר הזה פגה. נכנסים שוב עם הקוד האישי, או מצטרפים מחדש עם קוד הקבוצה.";
+  : "הכניסה במכשיר הזה פגה. צריך להצטרף מחדש עם קוד הקבוצה.";
+const SIGNED_OUT_CODE = "הכניסה במכשיר הזה פגה. נכנסים שוב עם הקוד האישי, או מצטרפים מחדש עם קוד הקבוצה.";
+const SIGNED_OUT_KEYS = new Set(["not signed in", "session expired"]);
 
 /** `code` for any area, `area:code` for one area. */
 const TEXT: Record<string, string> = {
@@ -86,9 +90,11 @@ const TEXT: Record<string, string> = {
   // The personal code (section I; /api/study/code and api.ts redeemPersonalCode).
   "code not found": "הקוד הזה לא נמצא. כדאי לבדוק אותו שוב, או לבקש קוד חדש ממי שפתחו את הקבוצה.",
   "too many tries": "היו יותר מדי ניסיונות. אפשר לנסות שוב בעוד רבע שעה.",
-  "codes off": "כניסה עם קוד אישי לא זמינה כרגע.",
+  "codes off": "כניסה עם קוד אישי לא זמינה כרגע. אפשר לנסות שוב מאוחר יותר.",
+  // A token of a session that "ניתוק המכשירים האחרים" ended (section I's session check).
+  "session ended": "הכניסה במכשיר הזה נותקה. נכנסים שוב עם הקוד האישי.",
   "sign-in failed": "הכניסה לא הושלמה. אפשר לנסות שוב.",
-  "no code here": "אי אפשר ליצור קוד אישי לחשבון הזה.",
+  "no code here": "אי אפשר ליצור כאן קוד אישי.",
   "groups closed": "כבר נפתחה קבוצה. כדי להצטרף צריך את קוד ההזמנה של הקבוצה.",
   "link host": "אפשר לקשר רק להקלטה באתר של האוניברסיטה.",
 
@@ -533,6 +539,7 @@ const keyOf = (code: string) => (/^api_\d+$/.test(code) ? "api_<status>" : code)
 /** The Hebrew line for a code: `area:code`, then `code`, then the area's fallback. */
 export function failText(code: string, area: Area = "writing"): string {
   const k = keyOf(code.trim());
+  if (!flags.account && SIGNED_OUT_KEYS.has(k) && codesKnownOn()) return SIGNED_OUT_CODE;
   return TEXT[`${area}:${k}`] ?? TEXT[k] ?? FALLBACK[area] ?? OTHER_FALLBACK;
 }
 

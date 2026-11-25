@@ -74,7 +74,33 @@ export function selfMessage(origin: string, code: string): string {
 
 /** The message the group's opener sends to the member. */
 export function issuedMessage(origin: string, code: string, name: string): string {
-  return `${name}, זה הקוד האישי החדש שלך בתמצית: ${formatCode(code)}\nכניסה בנגיעה: ${codeLink(origin, code)}`;
+  return `${name}, זה הקוד האישי החדש שלך בתמצית: ${formatCode(code)}\nכניסה בנגיעה: ${codeLink(origin, code)}\nכדאי לשמור את ההודעה. לא להעביר לאף אחד.`;
+}
+
+/* ── "חזרה לקבוצה בתור …" across the reload ──
+ * A sign-in with the code ends with a fresh page (StudyApp's restore), so
+ * nothing of the member who was here before keeps running as the new one
+ * (the cards' outbox, a timer, a channel). The toast waits in this tab's
+ * sessionStorage for the page that comes up. */
+const WELCOME_KEY = "study-code-welcome";
+
+export function welcomeNext(): void {
+  try {
+    sessionStorage.setItem(WELCOME_KEY, "1");
+  } catch {
+    /* private mode: no toast */
+  }
+}
+
+/** Whether the page before this one signed in with the code (read once). */
+export function takeWelcome(): boolean {
+  try {
+    const v = sessionStorage.getItem(WELCOME_KEY) === "1";
+    sessionStorage.removeItem(WELCOME_KEY);
+    return v;
+  } catch {
+    return false;
+  }
 }
 
 /** A #k= link opened on this page: its code (null when it is malformed), or
