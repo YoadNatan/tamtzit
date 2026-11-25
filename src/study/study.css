@@ -34,6 +34,20 @@
 .live-banner.is-empty {
   display: none;
 }
+/* Offline (WP1): one quiet line at the very top, over the live banner. */
+.offline-line {
+  margin: 0;
+  padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px)) var(--gutter-right) var(--sp-2) var(--gutter-left);
+  background: var(--warn-bg);
+  color: var(--ink);
+  border-bottom: 1px solid var(--warn-line);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+/* The notch is the line's: the banner under it does not pad for it again. */
+.offline-line + .live-banner {
+  padding-top: var(--sp-2);
+}
 .live-slot {
   display: none;
   align-items: center;
@@ -157,6 +171,44 @@ html:has(.a-sheet[aria-modal="true"]) body .shell > .a-toast {
 }
 .gate-card {
   justify-items: start;
+}
+/* No connection, or a screen that did not load (WP1): the gate's card, the
+   sentence as an error line, the hint under it, "לנסות שוב" last. */
+.connection-gate .gate-card,
+.screen-failed .gate-card {
+  display: grid;
+  gap: var(--sp-4);
+}
+.connection-gate .gate-card > p,
+.screen-failed .gate-card > p {
+  margin: 0;
+}
+.connection-gate .gate-card > p[role="alert"],
+.screen-failed .gate-card > p[role="alert"] {
+  font-weight: 700;
+}
+
+/* The library's error, as Today's: one panel, the sentence, "לנסות שוב". */
+.lib-error {
+  display: grid;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-6) var(--sp-6);
+  border-color: color-mix(in srgb, var(--bad-pop) 45%, var(--line));
+  background: var(--bad-bg);
+}
+.lib-error > p.a-error {
+  margin: 0;
+  padding: var(--sp-1) 0 0;
+  padding-inline-start: 30px;
+  background: none;
+}
+.lib-error > p.a-error::before {
+  top: var(--sp-1);
+  inset-inline-start: 0;
+}
+.lib-error > .a-btn {
+  justify-self: start;
+  margin-inline-start: 30px;
 }
 
 /* ═════════════ Join ═════════════ */

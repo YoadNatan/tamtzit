@@ -134,6 +134,24 @@ export async function getSession(): Promise<Session | null> {
   return data.session;
 }
 
+/** The session, and whether it could not be read for want of a connection:
+ *  a sign-in kept on this device whose token needs a refresh that cannot
+ *  reach the server (Auth keeps it for a retryable failure) is no sign-out,
+ *  so the app says "no connection" rather than showing the join screen. */
+export async function getSessionState(): Promise<{ session: Session | null; offline: boolean }> {
+  if (!sb) return { session: null, offline: false };
+  const { data, error } = await sb.auth.getSession();
+  if (data.session || !error) return { session: data.session, offline: false };
+  const retryable = error.name === "AuthRetryableFetchError" || (error as { status?: number }).status === 0;
+  let kept = false;
+  try {
+    kept = Boolean(localStorage.getItem("study-auth"));
+  } catch {
+    /* private mode */
+  }
+  return { session: null, offline: retryable && kept };
+}
+
 export function onAuthChange(cb: (s: Session | null) => void): () => void {
   if (!sb) return () => undefined;
   const { data } = sb.auth.onAuthStateChange((_e, s) => cb(s));

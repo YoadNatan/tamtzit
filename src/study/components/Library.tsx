@@ -55,6 +55,8 @@ export default function Library({ ctx }: { ctx: Ctx }) {
   const [reads, setReads] = useState<ReadMark[]>([]);
   const [questions, setQuestions] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
+  // "לנסות שוב" after the shelf failed to load: the same reads again.
+  const [tries, setTries] = useState(0);
   const [query, setQuery] = useState("");
   const [parts, setParts] = useState<Array<{ lecture_id: string; idx: number; title: string }>>([]);
   const asksLeft = useAsksLeft(ctx);
@@ -104,7 +106,7 @@ export default function Library({ ctx }: { ctx: Ctx }) {
       clearTimeout(timer);
       stop();
     };
-  }, [group.id]);
+  }, [group.id, tries]);
 
   // The search bar's part headings (with לשאול on).
   const ids = (lectures ?? []).map((l) => l.id).join(",");
@@ -236,10 +238,26 @@ export default function Library({ ctx }: { ctx: Ctx }) {
       <AccountBanners ctx={ctx} />
       <BatchResumeLine ctx={ctx} />
 
-      {error ? <p className="a-error">{error}</p> : null}
+      {error ? (
+        <div className="a-card flat lib-error">
+          <p className="a-error" role="alert">
+            {error}
+          </p>
+          <button
+            type="button"
+            className="a-btn small"
+            onClick={() => {
+              setError("");
+              setTries((n) => n + 1);
+            }}
+          >
+            לנסות שוב
+          </button>
+        </div>
+      ) : null}
 
       {lectures === null ? (
-        <p className="a-muted loading">טוען…</p>
+        error ? null : <p className="a-muted loading">טוען…</p>
       ) : lectures.length === 0 ? (
         <section className="a-card dashed empty">
           <h2 className="a-h2">עוד אין כאן הרצאות</h2>

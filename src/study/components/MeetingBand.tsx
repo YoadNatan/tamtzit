@@ -156,9 +156,12 @@ export default function MeetingBand({ ctx, card, compact }: { ctx: Ctx; card?: b
           ))}
         </ul>
       ) : null}
-      <RouteLink to={{ v: "meeting", isNew: true }} go={ctx.go} className="a-btn">
-        לקבוע את הפגישה הבאה
-      </RouteLink>
+      {/* Not before the meetings are known: one may already be set (WP1). */}
+      {rows !== null ? (
+        <RouteLink to={{ v: "meeting", isNew: true }} go={ctx.go} className="a-btn">
+          לקבוע את הפגישה הבאה
+        </RouteLink>
+      ) : null}
     </section>
   );
 }

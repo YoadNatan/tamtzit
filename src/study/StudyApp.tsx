@@ -1,10 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { claimDevice, configured, getSession, listLectures, members, myGroups, onAuthChange, redeemPersonalCode, type Group, type Member } from "./lib/api";
+import { claimDevice, configured, getSession, getSessionState, listLectures, members, myGroups, onAuthChange, redeemPersonalCode, type Group, type Member } from "./lib/api";
 import { failText } from "./lib/failText";
 import { cacheCode, cachedCode, takeLinkCode, takeWelcome, welcomeNext } from "./lib/personalCode";
 import { flags } from "./lib/flags";
 import { markRestored } from "./lib/guideMark";
+import { retryImport } from "./lib/staleChunk";
 import { allowed, APP_PATH, parseRoute, routeUrl, screenKey, type Route } from "./lib/route";
 import { AccountLayer, accountStartup, openAccount, type PendingLink } from "./features/account";
 import { BossScreen } from "./features/boss";
@@ -27,7 +28,7 @@ import type { Ctx, Go, Say } from "./features/types";
 import Join from "./components/Join";
 import Library from "./components/Library";
 import LectureView from "./components/LectureView";
-import Shell, { applySize, BackLink, Loading, placeNow, readSize, type Place } from "./components/Shell";
+import Shell, { applySize, BackLink, ConnectionGate, Loading, placeNow, readSize, type Place } from "./components/Shell";
 
 /* ── תמצית ──
  * /            the home: Today once flags.today is on, the group's
@@ -69,11 +70,11 @@ function rememberGroup(id: string) {
  * own module (review F-8: a lazy import here would not split a module that
  * the shell, "יחד", the library or the lecture also import statically).
  * F's own screens that nothing else imports load lazily here. */
-const GroupScreen = lazy(() => import("./components/Group"));
-const MeScreen = lazy(() => import("./components/Me"));
-const UploadScreen = lazy(() => import("./components/Upload"));
-const HelpScreen = lazy(() => import("./components/Help"));
-const HelpFooter = lazy(() => import("./components/Help").then((m) => ({ default: m.HelpSpend })));
+const GroupScreen = lazy(retryImport(() => import("./components/Group")));
+const MeScreen = lazy(retryImport(() => import("./components/Me")));
+const UploadScreen = lazy(retryImport(() => import("./components/Upload")));
+const HelpScreen = lazy(retryImport(() => import("./components/Help")));
+const HelpFooter = lazy(retryImport(() => import("./components/Help").then((m) => ({ default: m.HelpSpend }))));
 
 /** Back restores the place: the same card at the same height once it is on
  *  the page, held there for a moment while the screen's data arrives (read
@@ -107,6 +108,11 @@ export default function StudyApp() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [group, setGroup] = useState<(Group & { me: string }) | null>(null);
   const [groupsLoaded, setGroupsLoaded] = useState(false);
+  // The member's groups (or the session itself) could not be read: no
+  // connection. Join is only for a member with no group (WP1).
+  const [offline, setOffline] = useState(false);
+  const groupRef = useRef(group);
+  groupRef.current = group;
   const [route, setRoute] = useState<Route>(currentRoute);
   const [courses, setCourses] = useState<string[]>([]);
   const [people, setPeople] = useState<Member[]>([]);
@@ -128,10 +134,16 @@ export default function StudyApp() {
   // The text size is the whole app's (review UX-15).
   useEffect(() => applySize(readSize()), []);
 
-  useEffect(() => {
-    void getSession().then(setSession);
-    return onAuthChange(setSession);
+  const readSession = useCallback(() => {
+    void getSessionState().then((r) => {
+      setOffline(r.offline);
+      if (!r.offline) setSession(r.session);
+    });
   }, []);
+  useEffect(() => {
+    readSession();
+    return onAuthChange(setSession);
+  }, [readSession]);
 
   const loadGroups = useCallback(async (s: Session) => {
     const gs = await myGroups(s.user.id);
@@ -148,7 +160,11 @@ export default function StudyApp() {
   useEffect(() => {
     if (session) {
       claimDevice(session.user.id); // another user's entries leave this device (§5.9)
-      void loadGroups(session).catch(() => setGroupsLoaded(true));
+      void loadGroups(session).catch(() => {
+        // A group already on screen stays (a token refresh's re-read failed).
+        if (!groupRef.current) setOffline(true);
+        setGroupsLoaded(true);
+      });
       if (!started.current) {
         started.current = true;
         void accountStartup().then((r) => r === "merged" && location.reload());
@@ -318,6 +334,20 @@ export default function StudyApp() {
   }
 
   if (restoring) return <Loading text="נכנסים עם הקוד האישי…" />;
+  if (offline)
+    return (
+      <ConnectionGate
+        onRetry={() => {
+          if (!session) return readSession();
+          setGroupsLoaded(false);
+          setOffline(false);
+          loadGroups(session).catch(() => {
+            setOffline(true);
+            setGroupsLoaded(true);
+          });
+        }}
+      />
+    );
   if (session === undefined || (session && !groupsLoaded) || link) return <Loading />;
 
   if (!session || !group || joining || !ctx) {

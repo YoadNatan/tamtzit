@@ -24,7 +24,12 @@ export function reloadDue(last: number | null, now: number): boolean {
   return !last || now - last > GAP_MS;
 }
 
-function reloadOnce(): boolean {
+/** Reloads the page for a stale chunk, unless this tab did so in the last
+ *  minute or cannot remember it; whether it reloads. Offline, a failed chunk
+ *  is no deploy: a reload would only bring the browser's own error page, so
+ *  it waits for the connection (components/ErrorBoundary.tsx). */
+export function reloadOnce(): boolean {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
   const now = Date.now();
   try {
     const last = Number(sessionStorage.getItem(RELOAD_KEY)) || null;
@@ -40,8 +45,11 @@ function reloadOnce(): boolean {
 /** main.tsx, once. */
 export function watchStaleChunks(): void {
   if (typeof window === "undefined") return;
-  window.addEventListener("vite:preloadError", (e) => {
-    if (reloadOnce()) e.preventDefault();
+  // Not prevented: Vite would then hand the screen an empty module (React's
+  // "reading 'default'"); the failure goes on to the screen's boundary,
+  // which shows its line for the moment before the reload.
+  window.addEventListener("vite:preloadError", () => {
+    reloadOnce();
   });
   window.addEventListener("unhandledrejection", (e) => {
     if (isChunkError(e.reason)) reloadOnce();
@@ -49,4 +57,11 @@ export function watchStaleChunks(): void {
   window.addEventListener("error", (e) => {
     if (isChunkError(e.error ?? e.message)) reloadOnce();
   });
+}
+
+/** A lazy screen's import, tried once more after a moment when it fails (a
+ *  dropped connection on a phone, a train's tunnel): the second failure is
+ *  the one React sees. */
+export function retryImport<T>(load: () => Promise<T>, waitMs = 800): () => Promise<T> {
+  return () => load().catch(() => new Promise<void>((ok) => setTimeout(ok, waitMs)).then(load));
 }

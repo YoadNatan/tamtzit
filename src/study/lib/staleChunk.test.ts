@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isChunkError, reloadDue } from "./staleChunk";
+import { isChunkError, reloadDue, retryImport } from "./staleChunk";
 
 /* A screen's chunk gone after a deploy (lib/staleChunk.ts): which failures
  * reload the page, and that it reloads at most once a minute. */
@@ -25,4 +25,22 @@ test("once a minute at most", () => {
   assert.equal(reloadDue(null, now), true);
   assert.equal(reloadDue(now - 5_000, now), false);
   assert.equal(reloadDue(now - 61_000, now), true);
+});
+
+test("a lazy screen's import is tried once more after a failure, and only once", async () => {
+  let calls = 0;
+  const flaky = retryImport(async () => {
+    calls += 1;
+    if (calls === 1) throw new Error("Failed to fetch dynamically imported module: /assets/Me-abc.js");
+    return { default: "Me" };
+  }, 1);
+  assert.deepEqual(await flaky(), { default: "Me" });
+  assert.equal(calls, 2);
+  calls = 0;
+  const down = retryImport(async () => {
+    calls += 1;
+    throw new Error("Failed to fetch dynamically imported module: /assets/Me-abc.js");
+  }, 1);
+  await assert.rejects(down(), /dynamically imported module/);
+  assert.equal(calls, 2);
 });

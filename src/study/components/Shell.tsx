@@ -7,6 +7,7 @@ import { GuideButton, GuideSlot } from "../features/guide";
 import { MarathonBannerLine } from "../features/progress";
 import { QuizBannerLine } from "../features/quiz";
 import type { Ctx, Go } from "../features/types";
+import ErrorBoundary from "./ErrorBoundary";
 
 /* ── The app shell (spec §5.1; §12.2.1) ──
  * Around every routed screen: one line of live news at the top (who is
@@ -498,6 +499,59 @@ function SchemaGate({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+/* ── No connection (docs/study/ux-p1.md, WP1) ──
+ * The member's groups could not be read (the API down, no signal): the
+ * member is still signed in here, so the join screen would be wrong. The
+ * connection's return tries again by itself. */
+export const OFFLINE_TEXT = "אין חיבור כרגע. כדאי לבדוק את החיבור ולנסות שוב.";
+export const OFFLINE_AUTO = "הקבוצה תיפתח מעצמה כשהחיבור יחזור.";
+export const OFFLINE_LINE = "אין חיבור. מה שכבר נטען נשאר כאן.";
+
+export function ConnectionGate({ onRetry }: { onRetry: () => void }) {
+  useEffect(() => {
+    window.addEventListener("online", onRetry);
+    return () => window.removeEventListener("online", onRetry);
+  }, [onRetry]);
+  return (
+    <main className="gate connection-gate">
+      <div className="a-card gate-card">
+        <p role="alert">{OFFLINE_TEXT}</p>
+        <p className="a-small a-muted">{OFFLINE_AUTO}</p>
+        <button type="button" className="a-btn primary" onClick={onRetry}>
+          לנסות שוב
+        </button>
+      </div>
+    </main>
+  );
+}
+
+/** Whether the browser says it is online (its online/offline events). */
+export function useOnline(): boolean {
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine !== false));
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+  return online;
+}
+
+/** One line at the top while the browser is offline. */
+function OfflineLine() {
+  const online = useOnline();
+  if (online) return null;
+  return (
+    <p className="offline-line" role="status">
+      {OFFLINE_LINE}
+    </p>
+  );
+}
+
 type ShellProps = {
   route: Route;
   ctx: Ctx;
@@ -549,11 +603,16 @@ export default function Shell({ route, ctx, toast, children }: ShellProps) {
   return (
     <div className="shell">
       <div className="shell-stack" ref={stack}>
+        <OfflineLine />
         {banner ? <LiveBanner ctx={ctx} route={route} readers={readers} /> : null}
       </div>
-      {children}
+      <ErrorBoundary reset={routeUrl(route)}>{children}</ErrorBoundary>
       {tab ? <TabBar active={tab} go={ctx.go} /> : null}
-      {flags.guide ? <GuideSlot route={route} ctx={ctx} /> : null}
+      {flags.guide ? (
+        <ErrorBoundary reset={routeUrl(route)} fallback="none">
+          <GuideSlot route={route} ctx={ctx} />
+        </ErrorBoundary>
+      ) : null}
       {toast ? (
         <div className="a-toast" role="status">
           <span>{toast.text}</span>
