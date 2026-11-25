@@ -7,7 +7,11 @@
 export function reveal(el: Element | null | undefined): void {
   if (!el || typeof window === "undefined") return;
   requestAnimationFrame(() => {
-    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: still ? "auto" : "smooth" });
+    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: motion() });
   });
+}
+
+/** "smooth", unless the member asked for reduced motion. */
+export function motion(): ScrollBehavior {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
 }

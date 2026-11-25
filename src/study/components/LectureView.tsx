@@ -30,6 +30,7 @@ import {
 import { flags } from "../lib/flags";
 import { guideMark } from "../lib/guideMark";
 import { isolateLatin, slidesOf } from "../lib/rich";
+import { motion } from "../lib/reveal";
 import { afterReading, lectureChips, shareUrl, type At, type Route } from "../lib/route";
 import { useMedia, WIDE_L } from "../lib/useMedia";
 import { useLectureN } from "../features/anchor";
@@ -641,7 +642,7 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
 
   const jumpTo = (q: Comment) => {
     setQuestionsOpen(false);
-    document.querySelector<HTMLElement>(`[data-part="${q.part_idx}"] [data-blk="${q.anchor}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    document.querySelector<HTMLElement>(`[data-part="${q.part_idx}"] [data-blk="${q.anchor}"]`)?.scrollIntoView({ behavior: motion(), block: "center" });
     setSheet({ part: q.part_idx, anchor: q.anchor, quote: q.quote, tab: "comments" });
   };
   const draftKey = sheet ? `${sheet.part}:${sheet.anchor}` : "";
@@ -783,11 +784,12 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
                 e.preventDefault();
                 // Closed first: the top bar it sat in is shorter by then, so the heading lands under it.
                 setTocOpen(false);
-                requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(h.id)?.scrollIntoView({ behavior: "smooth", block: "start" })));
+                requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(h.id)?.scrollIntoView({ behavior: motion(), block: "start" })));
               }}
               dir="rtl"
             >
-              {isolateLatin(h.text, `toc${h.id}`)}
+              {/* One inline run: as loose flex items, the Hebrew's trailing space and a <bdi>'s brackets came apart. */}
+              <span>{isolateLatin(h.text, `toc${h.id}`)}</span>
             </a>
           </li>
         ))}
