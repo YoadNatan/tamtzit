@@ -95,12 +95,24 @@ test("the redeem's answers map to statuses", async () => {
   }
 });
 
-test("bad requests: 400 for no code, an empty one, one over 200 characters, or bad JSON; 405 for GET", async () => {
+test("bad requests: 400 for no code, an empty one, one over 200 characters, or bad JSON; 405 for GET; 415 for a body not sent as JSON", async () => {
   for (const body of [{}, { code: "" }, { code: "   " }, { code: 5 }, { code: "x".repeat(201) }, "{"]) {
     const res = await handleCode(post(body), deps());
     assert.equal(res.status, 400, JSON.stringify(body));
   }
   assert.equal((await handleCode(new Request("http://x/api/study/code"), deps())).status, 405);
+  // Not JSON (a cross-site "simple" POST needs no preflight): 415, and no redeem, so no try is counted.
+  for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x", ""]) {
+    const res = await handleCode(new Request("http://x/api/study/code", { method: "POST", headers: type ? { "content-type": type } : {}, body: JSON.stringify({ code: CODE }) }), deps());
+    assert.equal(res.status, 415, type);
+    assert.deepEqual(await res.json(), { error: "json only" });
+  }
+  assert.equal(calls.length, 0);
+  redeemAnswers = [{ data: ONE_TIME, error: null }];
+  assert.equal((await handleCode(post({ code: CODE }, { "content-type": "application/json; charset=utf-8" }), deps())).status, 200);
+  redeemAnswers = [{ data: ONE_TIME, error: null }];
+  calls = [];
+  for (const body of [{}, { code: "" }]) await handleCode(post(body), deps());
   assert.equal(calls.length, 0);
   // A whole WhatsApp message with the code in it still fits.
   const res = await handleCode(post({ code: `הקוד האישי שלי בתמצית: ${CODE}\nכניסה בנגיעה: https://tamtzit.vercel.app/#k=${CODE.replace(/-/g, "")}` }), deps());

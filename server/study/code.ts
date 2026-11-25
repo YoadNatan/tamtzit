@@ -14,7 +14,8 @@
  *      is only logged: the SQL's sweep puts it back within 5 minutes;
  *   4. answers 200 { access_token, refresh_token, expires_at, user_id }.
  *
- * Errors: 400 a missing or overlong code; 401 "code not found"; 429 "too
+ * Errors: 400 a missing or overlong code; 415 a body that is not
+ * application/json (a cross-site form or text/plain post); 401 "code not found"; 429 "too
  * many tries"; 503 "codes off" (the switch, the SQL not run yet, or Auth's
  * email sign-in off); 502 "sign-in failed"; 500 "server".
  * Nothing secret is logged: a line is the status and the error's code, never
@@ -84,6 +85,10 @@ export async function handleCode(req: Request, deps: CodeDeps = realDeps): Promi
   };
   const failed = (f: Failure) => done(f.status, { error: f.error }, f.error);
   if (req.method !== "POST") return failed(fail(405, "POST only"));
+  // JSON only: a page elsewhere can send a "simple" cross-site POST (text/plain,
+  // no preflight) from its visitors' browsers and spend the limit on wrong
+  // tries; application/json needs a preflight, which this endpoint never answers.
+  if (!/^application\/json\b/i.test(req.headers.get("content-type") ?? "")) return failed(fail(415, "json only"));
   let code: unknown;
   try {
     code = ((await req.json()) as { code?: unknown } | null)?.code;
