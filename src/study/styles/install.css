@@ -127,18 +127,22 @@ a.inst-how {
 .inst-arrow.bottom {
   inset-block-end: calc(var(--tabbar-h, 64px) + env(safe-area-inset-bottom, 0px) - 22px);
 }
+/* An iPad: under the screen's head, so it never covers the title; it points
+   up through the head to Safari's bar. */
 .inst-arrow.top {
-  inset-block-start: calc(env(safe-area-inset-top, 0px) + var(--sp-3));
+  inset-block-start: calc(var(--study-banner-h, 0px) + var(--study-head-h, var(--head-h, 56px)) + var(--sp-3));
 }
 .inst-arrow.top svg {
   transform: rotate(180deg);
 }
+/* Three bobs (about 4 s), then it rests: motion that starts by itself stops
+   within 5 s (WCAG 2.2.2). */
 @media (prefers-reduced-motion: no-preference) {
   .inst-arrow.bottom {
-    animation: inst-bob-down 1.4s ease-in-out infinite;
+    animation: inst-bob-down 1.4s ease-in-out 3;
   }
   .inst-arrow.top {
-    animation: inst-bob-up 1.4s ease-in-out infinite;
+    animation: inst-bob-up 1.4s ease-in-out 3;
   }
 }
 @keyframes inst-bob-down {
@@ -152,9 +156,13 @@ a.inst-how {
   }
 }
 /* Room under the last card, so the arrow never covers "הוספתי". */
-.install-screen[data-env="ios-safari"] .inst-steps,
-.install-screen[data-env="ios-browser"] .inst-steps {
+.install-screen[data-env="ios-safari"] .inst-steps {
   padding-block-end: calc(44px + var(--sp-6));
+}
+/* One thing at a time on the home: while the personal code's prompt is up
+   (the iPhone's steps start from that code anyway), the install card waits. */
+main:has(.pc-prompt) .inst-card {
+  display: none;
 }
 
 /* "שלי": the row. */

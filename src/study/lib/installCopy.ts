@@ -30,6 +30,8 @@ export const OS = {
   samsungMenu: "☰",
   samsungAddPageTo: "הוספת דף אל",
   samsungHome: "מסך הבית",
+  /** Android: a Chrome Custom Tab's menu row (a link opened from Gmail or Telegram: "Open in Chrome"). */
+  androidOpenInChrome: "פתיחה ב-Chrome",
 } as const;
 
 /** The app's own entry on the join screen (components/Join.tsx). */
@@ -43,18 +45,19 @@ export const INSTALL = {
 
   // Step 1 on an iPhone: the code, because the icon starts without this sign-in.
   codeTitle: "1. מעתיקים את הקוד האישי",
-  codeLine: "האייקון נפתח בלי הכניסה מכאן. הקוד מכניס אותך בחזרה, עם כל מה שעשית.",
+  codeLine: "האייקון נפתח בלי הכניסה מכאן. הקוד מחזיר לקבוצה עם כל ההתקדמות.",
   codeCopy: "העתקת הקוד",
   codeCopied: "הקוד הועתק ✓",
   codeByHand: "לא הצלחנו להעתיק. זה הקוד, אפשר לרשום אותו:",
   codeNone: "עוד אין קוד אישי. יוצרים אותו כאן, ואז מעתיקים.",
   codeMake: "יצירת קוד אישי",
-  codeElsewhere: "הקוד האישי לא שמור במכשיר הזה. מעתיקים אותו מההודעה ששמרת, או יוצרים קוד חדש.",
+  codeElsewhere: "הקוד האישי לא שמור במכשיר הזה. מעתיקים אותו מההודעה שנשמרה, או יוצרים קוד חדש.",
   codeNew: "קוד חדש",
   codeNewAsk: "ליצור קוד חדש? הקוד הקודם יפסיק לעבוד. מכשירים שכבר מחוברים יישארו מחוברים.",
   codeNewYes: "יצירה",
   cancel: "ביטול",
   codeOff: "באייפון האייקון נפתח בלי הכניסה מכאן, ושם נכנסים שוב לקבוצה.",
+  codeOffTitle: "1. לפני ההוספה",
   codeLabel: "הקוד האישי",
 
   // Step 2 on an iPhone: Safari's share sheet.
@@ -70,8 +73,10 @@ export const INSTALL = {
 
   // Step 3 on an iPhone: add, then the icon.
   addTitle: `3. ${q(OS.iosAdd)}, ואז פותחים מהאייקון`,
-  addLine: `המתג בחלון נשאר דלוק. באייקון בוחרים ${q(CODE_ENTRY)} ומדביקים.`,
-  addLineOff: "המתג בחלון נשאר דלוק. ואז פותחים מהאייקון.",
+  // iOS 26 (and a browser whose version is unknown) may show an "Open as Web App" switch; older iOS has none.
+  addSwitch: "אם בחלון יש מתג, משאירים אותו דלוק.",
+  addLine: `באייקון בוחרים ${q(CODE_ENTRY)} ומדביקים את הקוד.`,
+  addLineOff: `נוגעים ב${q(OS.iosAdd)} ופותחים מהאייקון.`,
   said: "הוספתי",
   saidDone: `מעכשיו נכנסים מהאייקון. אפשר לסגור את הלשונית ב${OS.safari}.`,
   saidDoneAndroid: "מעכשיו נכנסים מהאייקון.",
@@ -84,7 +89,7 @@ export const INSTALL = {
   copyLink: "העתקת הקישור",
   linkCopied: (browser: string) => `הקישור הועתק. מדביקים אותו ב${browser}.`,
   linkByHand: "לא הצלחנו להעתיק. אפשר לסמן את הקישור ולהעתיק:",
-  inAppFallback: `לא נפתח? בתפריט של האפליקציה (⋯) בוחרים ${q(OS.openInBrowser)}.`,
+  inAppFallback: (ios: boolean) => `לא נפתח? בתפריט של האפליקציה (${ios ? OS.iosMore : OS.androidMenu}) בוחרים ${q(OS.openInBrowser)}.`,
 
   // Android and computers.
   promptTitle: "התקנה בלחיצה",
@@ -94,9 +99,11 @@ export const INSTALL = {
   dismissed: "אפשר להתקין גם אחר כך, מכאן.",
   menuTitle: "מהתפריט של הדפדפן",
   chromeMenu: `בתפריט ${OS.androidMenu} בוחרים ${q(OS.androidInstall)} או ${q(OS.androidAddToHome)}.`,
+  // A link opened from Gmail or Telegram runs in a Custom Tab: plain Chrome to detect(), with no install rows.
+  chromeTab: `אין את זה בתפריט? בוחרים קודם ${q(OS.androidOpenInChrome)}.`,
   samsungMenu: `בתפריט ${OS.samsungMenu} בוחרים ${q(OS.samsungAddPageTo)} ← ${q(OS.samsungHome)}. או נוגעים בסמל ההתקנה שבשורת הכתובת.`,
   otherMenu: `בתפריט של הדפדפן בוחרים ${q(OS.androidAddToHome)} או ${q("התקנה")}.`,
-  androidSafety: `נפתח מסך הצטרפות באייקון? בוחרים ${q(CODE_ENTRY)}.`,
+  androidSafety: `נפתח מסך הצטרפות באייקון? בוחרים ${q(CODE_ENTRY)}. הקוד נמצא ב״שלי״, כאן בדפדפן.`,
   desktopTitle: "התקנה במחשב",
   desktopLine: "תמצית נפתחת בחלון משלה, כמו תוכנה.",
   desktopNone: "במחשב אפשר פשוט להמשיך בדפדפן.",
@@ -118,7 +125,9 @@ export const INSTALL = {
   cardLaterSaid: "אפשר להוסיף מתי שרוצים: ״שלי״ ← להוסיף את תמצית למסך הבית.",
 
   // The join screen.
-  joinInApp: (browser: string) => `הקישור נפתח בתוך אפליקציה אחרת. עדיף לפתוח ב${browser} ולהצטרף שם.`,
+  joinInApp: (browser: string, app: string) => `הקישור נפתח בתוך ${app}. עדיף לפתוח ב${browser} ולהצטרף שם.`,
+  /** The other app, by name when the browser says it. */
+  appName: (app: "facebook" | "instagram" | "other") => (app === "instagram" ? "אינסטגרם" : app === "facebook" ? "פייסבוק" : "אפליקציה אחרת"),
   joinIos: "אחרי ההצטרפות אפשר להוסיף את תמצית למסך הבית. מסבירים בפנים.",
 
   // What a screen reader hears for the pictures.
@@ -135,7 +144,7 @@ export function installHelp(codes: boolean): string {
       ? `באייפון: מעתיקים את הקוד האישי, ${OS.iosShare} ← ${OS.iosAddToHome}, ובאייקון ${q(CODE_ENTRY)} ומדביקים את הקוד.`
       : `באייפון: ${OS.iosShare} ← ${OS.iosAddToHome}.`,
     "באנדרואיד ובמחשב: ״התקנה״, ונשארים מחוברים.",
-    "מה שנזכר על ההוספה נשמר רק במכשיר הזה, ושום דבר לא נשלח.",
+    "הבחירה כאן (נוסף או לא עכשיו) נשמרת רק במכשיר הזה, ושום דבר לא נשלח.",
   ].join(" ");
 }
 

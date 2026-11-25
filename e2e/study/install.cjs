@@ -28,6 +28,7 @@ const flags = flagSetOf(process.env.E2E_FLAGS || "i");
 
 const IPHONE = devices["iPhone 15 Pro"]; // Version/26.x: Safari 26
 const IOS26 = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1";
+const CRIOS = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/138.0.7204.156 Mobile/15E148 Safari/604.1";
 const IOS18 = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1";
 const IPADOS = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
 const WKWEBVIEW = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
@@ -149,6 +150,9 @@ const T = {
         check("Safari 26: ⋯ first, then the share icon", (await page.getByRole("img", { name: "כפתור שלוש הנקודות" }).count()) === 1 && (await page.getByRole("img", { name: "סמל השיתוף" }).count()) === 1);
         check("the arrow at Safari's bar, at the bottom", await visible(page.locator(".inst-arrow.bottom")));
         check("the missing row's hint", (await page.getByText("אין ״הוספה למסך הבית״? כנראה זה לא ספארי.", { exact: false }).count()) === 1);
+        check("Safari 26: the add sheet's switch, said with an if", (await page.getByText("אם בחלון יש מתג, משאירים אותו דלוק.").count()) === 1);
+        const anim = await page.locator(".inst-arrow").evaluate((el) => getComputedStyle(el).animationIterationCount);
+        check("the arrow bobs three times and rests (WCAG 2.2.2)", anim === "3", anim);
         // Step 1: no code yet, so one is made here, then copied.
         await page.getByRole("button", { name: T.make }).click();
         const codeEl = page.locator(".inst-code");
@@ -163,6 +167,7 @@ const T = {
         await page.getByRole("button", { name: T.said }).click();
         await page.getByText(T.saidDone).waitFor({ timeout: 5000 });
         check("הוספתי: the closing line", true);
+        check("הוספתי: the line takes the focus", await page.evaluate(() => document.activeElement?.classList.contains("inst-done") === true));
         check("הוספתי: no arrow after", (await page.locator(".inst-arrow").count()) === 0);
         const im = await mem(page, "study-install");
         check("הוספתי: kept on this browser", Boolean(im?.done) && im.via === "said", JSON.stringify(im));
@@ -186,6 +191,13 @@ const T = {
         const { page, ctx } = await mock.open(browser, "שוהם", { device: IPHONE, userAgent: IOS26, storage: old("שוהם"), path: "/" });
         await homeReady(page);
         const card = page.locator(".inst-card");
+        // One card at a time: while the personal code's prompt is up, the install card waits.
+        const prompt = page.locator(".pc-prompt");
+        if (await prompt.waitFor({ timeout: 8000 }).then(() => true, () => false)) {
+          await page.waitForTimeout(800);
+          check("the code's prompt is up: the install card waits", !(await visible(card)));
+          await prompt.getByRole("button", { name: "אחר כך" }).click();
+        }
         await card.waitFor({ timeout: 10000 });
         check("existing member: the card on Today", (await card.innerText()).includes(T.title));
         check("the card: איך מוסיפים leads to the steps", (await card.getByRole("link", { name: T.how }).getAttribute("href")) === "/?v=install");
@@ -193,6 +205,9 @@ const T = {
         await shot(page, "3-today-card");
         await card.getByRole("button", { name: T.later }).click();
         check("לא עכשיו: gone", (await card.count()) === 0);
+        await page.waitForTimeout(200);
+        const focused = await page.evaluate(() => (document.activeElement && document.activeElement !== document.body ? document.activeElement.textContent.trim().slice(0, 20) : ""));
+        check("לא עכשיו: the focus goes on to what follows (התור שלי)", focused === "התור שלי", focused);
         await page.reload();
         await homeReady(page);
         await page.waitForTimeout(1000);
@@ -205,7 +220,16 @@ const T = {
         const { page: p18, ctx: c18 } = await mock.open(browser, "שוהם", { device: IPHONE, userAgent: IOS18, storage: old("שוהם"), path: "/?v=install" });
         await p18.locator("main.install-screen .inst-step").first().waitFor({ timeout: 10000 });
         check("iOS 18: the share icon, no ⋯", (await p18.getByRole("img", { name: "כפתור שלוש הנקודות" }).count()) === 0 && (await p18.getByRole("img", { name: "סמל השיתוף" }).count()) === 1);
+        check("iOS 18: no switch to speak of", (await p18.getByText("מתג", { exact: false }).count()) === 0);
         await c18.close();
+        // Chrome on an iPhone: its own words, no arrow, no second line about the row.
+        const { page: pc, ctx: cc } = await mock.open(browser, "שוהם", { device: IPHONE, userAgent: CRIOS, storage: old("שוהם"), path: "/?v=install" });
+        await pc.locator("main.install-screen .inst-step").first().waitFor({ timeout: 10000 });
+        check("iPhone Chrome: no arrow (its share icon is elsewhere)", (await pc.locator(".inst-arrow").count()) === 0);
+        check("iPhone Chrome: no 'כנראה זה לא ספארי' and no repeated row line", (await pc.locator(".inst-missing").count()) === 0 && (await pc.getByText("גוללים מטה", { exact: false }).count()) === 0);
+        check("iPhone Chrome: the switch said with an if", (await pc.getByText("אם בחלון יש מתג, משאירים אותו דלוק.").count()) === 1);
+        await shot(pc, "9-iphone-chrome");
+        await cc.close();
         // An iPad says it is a Mac (with touch): the arrow at the top.
         const { page: pad, ctx: cpad } = await mock.open(browser, "שוהם", { userAgent: IPADOS, isMobile: true, hasTouch: true, viewport: { width: 820, height: 1180 }, storage: old("שוהם") });
         await cpad.addInitScript(() => {
@@ -215,6 +239,12 @@ const T = {
         await pad.goto(mock.base + "/?v=install");
         await pad.locator("main.install-screen .inst-step").first().waitFor({ timeout: 10000 });
         check("iPad: the arrow at the top", await visible(pad.locator(".inst-arrow.top")));
+        const clash = await pad.evaluate(() => {
+          const a = document.querySelector(".inst-arrow")?.getBoundingClientRect();
+          const h = document.querySelector(".ph-head h1, .ph-head .ph-title")?.getBoundingClientRect();
+          return a && h ? !(a.bottom <= h.top || a.top >= h.bottom || a.right <= h.left || a.left >= h.right) : null;
+        });
+        check("iPad: the arrow clear of the screen's title", clash === false, String(clash));
         await cpad.close();
       }
 

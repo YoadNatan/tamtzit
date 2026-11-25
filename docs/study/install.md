@@ -40,10 +40,10 @@ and no server record of who installed.
 
 | Where the page runs | What the screen shows |
 |---|---|
-| iPhone or iPad, Safari | 1. the personal code, copied ("העתקת הקוד"; made here if there is none; "קוד חדש" after a confirm when this device does not hold it); 2. Share → Add to Home Screen, with pictures of "⋯" (Safari 26 first) and the share icon, and the line for when the row is missing; 3. Add, then the icon's "כניסה עם הקוד האישי" and paste; "הוספתי". An arrow points at Safari's bar (bottom on an iPhone, top on an iPad). |
-| Chrome, Edge or Firefox on an iPhone | the same, worded for their share icon, with "or open in Safari". |
-| Another app's browser | the code first (members), then "פותחים בספארי" (Android: בכרום) with the way out and the link to copy. |
-| Android Chrome or Edge | the browser's "התקנה" when it offered one (accepted: "הותקנה ✓"; put off: a soft line, then the menu), else the menu's words and "הוספתי"; one line for the icon's join screen. No code: the app shares Chrome's storage. |
+| iPhone or iPad, Safari | 1. the personal code, copied ("העתקת הקוד"; made here if there is none; "קוד חדש" after a confirm when this device does not hold it); 2. Share → Add to Home Screen, with pictures of "⋯" (Safari 26 first) and the share icon, and the line for when the row is missing; 3. Add (on iOS 26, or a version not known, "אם בחלון יש מתג, משאירים אותו דלוק."), then the icon's "כניסה עם הקוד האישי" and paste; "הוספתי", whose line then takes the focus. An arrow points at Safari's bar (bottom on an iPhone; top on an iPad, under the screen's head), bobs three times and rests. |
+| Chrome, Edge or Firefox on an iPhone | the same, worded for their share icon, with "or open in Safari"; no arrow (their share icons sit in different places) and no second line about the row. |
+| Another app's browser | the code first (members), then "פותחים בספארי" (Android: בכרום) with the way out and the link to copy; the fallback names the app's menu as the phone draws it (⋯ on iOS, ⋮ on Android). The join screen names Instagram or Facebook when the browser says so. |
+| Android Chrome or Edge | the browser's "התקנה" when it offered one (accepted: "הותקנה ✓"; put off: a soft line, then the menu), else the menu's words, "אין את זה בתפריט? בוחרים קודם ״פתיחה ב-Chrome״." (a link from Gmail or Telegram opens in a Custom Tab, which looks like Chrome but has no install rows) and "הוספתי"; one line for the icon's join screen, saying where the code is. No code: the app shares Chrome's storage. |
 | Samsung Internet, other Android browsers | their menu's words and "הוספתי". |
 | A computer | "התקנה" when the browser offers it (or `navigator.install`), else "במחשב אפשר פשוט להמשיך בדפדפן." |
 | The home-screen app | "תמצית כבר פתוחה מהאייקון ✓" |
@@ -77,9 +77,18 @@ there from Hebrew screenshots:
 | `samsungMenu` | ☰ | Samsung Internet's menu button |
 | `samsungAddPageTo` | הוספת דף אל | its row (Add page to) |
 | `samsungHome` | מסך הבית | its next row (Home screen) |
+| `androidOpenInChrome` | פתיחה ב-Chrome | a Custom Tab's menu row (Open in Chrome) |
 
-The add sheet's switch (iOS 26's "Open as Web App") is not named: the line
-says "המתג בחלון נשאר דלוק".
+The add sheet's switch (iOS 26's "Open as Web App") is not named: on iOS 26,
+and where the version is not known (Chrome, Edge, Firefox), the line says
+"אם בחלון יש מתג, משאירים אותו דלוק."; on iOS 16-18, which has no switch,
+nothing.
+
+On the home, the install card waits while the personal code's prompt is up
+(`main:has(.pc-prompt)`): one card at a time, and the iPhone's steps start
+from that code anyway. "לא עכשיו" moves the focus on to what follows the
+card (Today's "התור שלי"); "קוד חדש" moves it to the confirm's "ביטול", and
+"ביטול" back to "קוד חדש".
 
 ## The manifest and the page
 

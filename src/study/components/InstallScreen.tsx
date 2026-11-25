@@ -28,6 +28,18 @@ import "../styles/install.css";
  *  - the home-screen app itself: one line.
  * "הוספתי" is the member's word that it was added (iOS cannot tell). */
 
+/** A line that replaces the button just pressed ("הוספתי", "התקנה"): it takes
+ *  the focus, so a screen reader does not fall back to the page's top. */
+export function DoneLine({ children, className = "a-card inst-done" }: { children: ReactNode; className?: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => ref.current?.focus({ preventScroll: true }), []);
+  return (
+    <p ref={ref} className={className} role="status" tabIndex={-1}>
+      {children}
+    </p>
+  );
+}
+
 function Step({ title, children, className = "" }: { title: string; children: ReactNode; className?: string }) {
   return (
     <section className={`a-card inst-step ${className}`.trim()}>
@@ -47,6 +59,15 @@ function CodeStep({ userId, say, title }: { userId: string; say: (t: string) => 
   const [ask, setAsk] = useState(false);
   const [busy, setBusy] = useState(false);
   const field = useRef<HTMLInputElement>(null);
+  const newBtn = useRef<HTMLButtonElement>(null);
+  const askBox = useRef<HTMLDivElement>(null);
+  /** Where the focus goes once "קוד חדש" or "ביטול" has left the screen. */
+  const back = useRef<"" | "ask" | "new">("");
+  useEffect(() => {
+    if (back.current === "ask") askBox.current?.querySelector<HTMLButtonElement>(".confirm-cancel")?.focus({ preventScroll: true });
+    else if (back.current === "new") newBtn.current?.focus({ preventScroll: true });
+    back.current = "";
+  }, [ask]);
   useEffect(() => {
     if (!codes) return;
     let alive = true;
@@ -88,7 +109,12 @@ function CodeStep({ userId, say, title }: { userId: string; say: (t: string) => 
 
   let body: ReactNode;
   if (!codes) body = <p className="a-small a-muted">{INSTALL.codeOff}</p>;
-  else if (!status) body = <p className="a-small a-muted">טוען…</p>;
+  else if (!status)
+    body = (
+      <p className="a-small a-muted" role="status">
+        טוען…
+      </p>
+    );
   else if (code)
     body = (
       <>
@@ -99,7 +125,8 @@ function CodeStep({ userId, say, title }: { userId: string; say: (t: string) => 
             <input ref={field} className="a-input pc-code pc-field" dir="ltr" readOnly value={formatCode(code)} aria-label={INSTALL.codeLabel} onFocus={(e) => e.currentTarget.select()} />
           </>
         ) : (
-          <p className="pc-code inst-code" dir="ltr" aria-label={INSTALL.codeLabel}>
+          <p className="pc-code inst-code" dir="ltr">
+            <span className="sr-only">{INSTALL.codeLabel}: </span>
             {formatCode(code)}
           </p>
         )}
@@ -122,26 +149,41 @@ function CodeStep({ userId, say, title }: { userId: string; say: (t: string) => 
       <>
         <p className="a-small a-muted">{INSTALL.codeElsewhere}</p>
         {ask ? (
-          <div className="a-callout warn confirm" role="alert">
+          <div ref={askBox} className="a-callout warn confirm" role="alert">
             <span>{INSTALL.codeNewAsk}</span>
             <div className="a-row">
               <button type="button" className="a-btn danger" disabled={busy} onClick={() => void make()}>
                 {INSTALL.codeNewYes}
               </button>
-              <button type="button" className="a-btn ghost" onClick={() => setAsk(false)}>
+              <button
+                type="button"
+                className="a-btn ghost confirm-cancel"
+                onClick={() => {
+                  back.current = "new";
+                  setAsk(false);
+                }}
+              >
                 {INSTALL.cancel}
               </button>
             </div>
           </div>
         ) : (
-          <button type="button" className="a-btn inst-new" onClick={() => setAsk(true)}>
+          <button
+            ref={newBtn}
+            type="button"
+            className="a-btn inst-new"
+            onClick={() => {
+              back.current = "ask";
+              setAsk(true);
+            }}
+          >
             {INSTALL.codeNew}
           </button>
         )}
       </>
     );
   return (
-    <Step title={title ?? INSTALL.codeTitle} className="inst-code-step">
+    <Step title={title ?? (codes ? INSTALL.codeTitle : INSTALL.codeOffTitle)} className="inst-code-step">
       {body}
     </Step>
   );
@@ -164,9 +206,11 @@ function Said({ onSaid }: { onSaid: () => void }) {
   );
 }
 
-/** The arrow at Safari's bar (bottom on an iPhone, top on an iPad and in
- *  the other browsers, whose share icon is in the address bar). The text
- *  carries the meaning: the arrow is decoration. */
+/** The arrow at Safari's bar: bottom on an iPhone, top on an iPad (under
+ *  the screen's head, clear of its title). Chrome, Edge and Firefox on an
+ *  iPhone keep their share icon in different places, so none there. It bobs
+ *  three times and rests (WCAG 2.2.2). The text carries the meaning: the
+ *  arrow is decoration. */
 function Pointer({ at }: { at: "top" | "bottom" }) {
   return (
     <div className={`inst-arrow ${at}`} aria-hidden="true">
@@ -180,8 +224,11 @@ function Pointer({ at }: { at: "top" | "bottom" }) {
 function IosSteps({ env, userId, say }: { env: Extract<Env, { kind: "ios-safari" | "ios-browser" }>; userId: string; say: (t: string) => void }) {
   const codes = useCodesOn();
   const [said, setSaid] = useState(false);
-  if (said) return <p className="a-card inst-done" role="status">{INSTALL.saidDone}</p>;
+  if (said) return <DoneLine>{INSTALL.saidDone}</DoneLine>;
   const safari26 = env.kind === "ios-safari" && (env.safari ?? 0) >= 26;
+  // The "Open as Web App" switch: iOS 26; said with an "if" where the version is unknown.
+  const maySwitch = safari26 || env.kind === "ios-browser" || (env.kind === "ios-safari" && env.safari === null);
+  const other = env.kind === "ios-browser";
   return (
     <>
       <CodeStep userId={userId} say={say} />
@@ -204,16 +251,22 @@ function IosSteps({ env, userId, say }: { env: Extract<Env, { kind: "ios-safari"
             {INSTALL.shareIcon} <ShareIcon />
           </p>
         )}
-        <p className="inst-line">
-          {INSTALL.shareScroll} <AddRow />
-        </p>
-        <p className="a-small a-muted inst-missing">{INSTALL.shareMissing}</p>
+        {/* Chrome, Edge or Firefox: shareOther already names the row and the way to Safari. */}
+        {other ? null : (
+          <>
+            <p className="inst-line">
+              {INSTALL.shareScroll} <AddRow />
+            </p>
+            <p className="a-small a-muted inst-missing">{INSTALL.shareMissing}</p>
+          </>
+        )}
       </Step>
       <Step title={INSTALL.addTitle}>
+        {maySwitch ? <p>{INSTALL.addSwitch}</p> : null}
         <p>{codes ? INSTALL.addLine : INSTALL.addLineOff}</p>
         <Said onSaid={() => setSaid(true)} />
       </Step>
-      <Pointer at={env.kind === "ios-browser" || env.ipad ? "top" : "bottom"} />
+      {other ? null : <Pointer at={env.ipad ? "top" : "bottom"} />}
     </>
   );
 }
@@ -244,8 +297,8 @@ function PromptSteps({ env, prompt }: { env: Env; prompt: boolean }) {
     const r = await runPrompt();
     if (r === "accepted" || r === "dismissed") setResult(r);
   };
-  if (result === "accepted") return <p className="a-card inst-done" role="status">{INSTALL.accepted}</p>;
-  if (said) return <p className="a-card inst-done" role="status">{INSTALL.saidDoneAndroid}</p>;
+  if (result === "accepted") return <DoneLine>{INSTALL.accepted}</DoneLine>;
+  if (said) return <DoneLine>{INSTALL.saidDoneAndroid}</DoneLine>;
   if (desktop && !prompt) return <p className="a-card flat inst-none">{INSTALL.desktopNone}</p>;
   const menu = env.kind === "android-samsung" ? INSTALL.samsungMenu : env.kind === "android-other" ? INSTALL.otherMenu : INSTALL.chromeMenu;
   return (
@@ -260,6 +313,7 @@ function PromptSteps({ env, prompt }: { env: Env; prompt: boolean }) {
       ) : (
         <Step title={INSTALL.menuTitle}>
           <p>{menu}</p>
+          {env.kind === "android-chrome" ? <p className="a-small a-muted inst-tab">{INSTALL.chromeTab}</p> : null}
           <Said onSaid={() => setSaid(true)} />
         </Step>
       )}

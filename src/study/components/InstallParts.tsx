@@ -89,7 +89,7 @@ export function EscapeButtons({ env }: { env: Env }) {
           <input ref={field} className="a-input inst-link" dir="ltr" readOnly value={href} aria-label={INSTALL.copyLink} onFocus={(e) => e.currentTarget.select()} />
         </>
       ) : null}
-      <p className="a-small a-muted">{INSTALL.inAppFallback}</p>
+      <p className="a-small a-muted">{INSTALL.inAppFallback(isIos(env))}</p>
     </div>
   );
 }
@@ -97,7 +97,7 @@ export function EscapeButtons({ env }: { env: Env }) {
 /** "שלי": the row to the steps; in the app itself, a line saying so. */
 export function InstallRow({ ctx, standalone, done }: { ctx: Ctx; standalone: boolean; done: boolean }) {
   return (
-    <nav className="a-list links-card inst-links" aria-label={INSTALL.title}>
+    <div className="a-list links-card inst-links">
       {standalone ? (
         <div className="a-li inst-row-here" role="status">
           <div>
@@ -113,7 +113,7 @@ export function InstallRow({ ctx, standalone, done }: { ctx: Ctx; standalone: bo
           {done ? <span className="a-chip ok">{INSTALL.rowDone}</span> : null}
         </RouteLink>
       )}
-    </nav>
+    </div>
   );
 }
 
@@ -121,11 +121,24 @@ export function InstallRow({ ctx, standalone, done }: { ctx: Ctx; standalone: bo
 export function InstallCard({ ctx, env, prompt }: { ctx: Ctx; env: Env; prompt: boolean }) {
   const [gone, setGone] = useState(false);
   const [soft, setSoft] = useState(false);
+  const box = useRef<HTMLElement>(null);
   if (gone) return null;
   const later = () => {
+    // The button leaves with the card: the focus goes on to what follows it (Today's "התור שלי").
+    let next = box.current?.nextElementSibling ?? null;
+    let to: HTMLElement | null = null;
+    while (next && !to) {
+      to = next.matches("h2") ? (next as HTMLElement) : next.querySelector<HTMLElement>("h2, a[href], button");
+      next = next.nextElementSibling;
+    }
     writeInstall({ dismissed: Date.now() });
     setGone(true);
     ctx.say(INSTALL.cardLaterSaid);
+    if (to) {
+      if (to.tagName === "H2" && !to.hasAttribute("tabindex")) to.tabIndex = -1;
+      const el = to;
+      requestAnimationFrame(() => el.focus({ preventScroll: true }));
+    }
   };
   const install = async () => {
     const r = await runPrompt();
@@ -137,7 +150,7 @@ export function InstallCard({ ctx, env, prompt }: { ctx: Ctx; env: Env; prompt: 
   };
   const direct = prompt && !isIos(env);
   return (
-    <section className="a-card inst-card" aria-labelledby="inst-card-h">
+    <section ref={box} className="a-card inst-card" aria-labelledby="inst-card-h">
       <div className="inst-card-head">
         <span className="inst-badge" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -176,7 +189,7 @@ export function JoinInstall({ env }: { env: Env }) {
   if (env.kind === "ios-safari") return <p className="a-small a-muted join-install">{INSTALL.joinIos}</p>;
   return (
     <div className="a-callout warn join-inapp" role="note">
-      <span>{INSTALL.joinInApp(browserOf(env))}</span>
+      <span>{INSTALL.joinInApp(browserOf(env), INSTALL.appName(env.kind === "ios-inapp" || env.kind === "android-inapp" ? env.app : "other"))}</span>
       <EscapeButtons env={env} />
     </div>
   );
