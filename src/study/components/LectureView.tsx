@@ -31,6 +31,7 @@ import { flags } from "../lib/flags";
 import { guideMark } from "../lib/guideMark";
 import { isolateLatin, slidesOf } from "../lib/rich";
 import { afterReading, lectureChips, shareUrl, type At, type Route } from "../lib/route";
+import { useMedia, WIDE_L } from "../lib/useMedia";
 import { useLectureN } from "../features/anchor";
 import { ReaderGuideChip } from "../features/guide";
 import { ParagraphSheet, useLectureK } from "../features/collab";
@@ -267,6 +268,8 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [size, setSize] = useState(readSize);
   const [tocOpen, setTocOpen] = useState(false);
+  // At L the contents are a column beside the text, always there (P2).
+  const tocSide = useMedia(WIDE_L);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [geoOpen, setGeoOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
@@ -769,6 +772,28 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
   }, [followWanted, present, userId, say]);
 
   const chips = lectureChips(lectureId, flags);
+  const tocNav = (className: string) => (
+    <nav className={className} aria-label="תוכן העניינים">
+      <ol>
+        {toc.map((h) => (
+          <li key={h.id} className={`lvl${h.level}`}>
+            <a
+              href={`#${h.id}`}
+              onClick={(e) => {
+                e.preventDefault();
+                // Closed first: the top bar it sat in is shorter by then, so the heading lands under it.
+                setTocOpen(false);
+                requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(h.id)?.scrollIntoView({ behavior: "smooth", block: "start" })));
+              }}
+              dir="rtl"
+            >
+              {isolateLatin(h.text, `toc${h.id}`)}
+            </a>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
   const after = afterReading(lectureId, flags);
   const markOf = (idx: number) => (readerPart === idx ? readerAnchor : deepMark?.part === idx ? deepMark.anchor : null);
 
@@ -778,9 +803,11 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
         <div className="ph-head">
           {back}
           <div className="head-tools">
-            <button className="a-btn ghost" onClick={() => setTocOpen((o) => !o)} aria-expanded={tocOpen}>
-              תוכן
-            </button>
+            {tocSide ? null : (
+              <button className="a-btn ghost" onClick={() => setTocOpen((o) => !o)} aria-expanded={tocOpen}>
+                תוכן
+              </button>
+            )}
             <button className="a-btn ghost" onClick={() => setFont(-1)} aria-label="טקסט קטן יותר">
               א-
             </button>
@@ -822,29 +849,9 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
           />
         ) : null}
         {/* In the sticky top bar: wherever the reader has scrolled, the contents open in view (WP6). */}
-        {tocOpen ? (
-          <nav className="a-card flat toc" aria-label="תוכן העניינים">
-            <ol>
-              {toc.map((h) => (
-                <li key={h.id} className={`lvl${h.level}`}>
-                  <a
-                    href={`#${h.id}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      // Closed first: the top bar it sat in is shorter by then, so the heading lands under it.
-                      setTocOpen(false);
-                      requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(h.id)?.scrollIntoView({ behavior: "smooth", block: "start" })));
-                    }}
-                    dir="rtl"
-                  >
-                    {isolateLatin(h.text, `toc${h.id}`)}
-                  </a>
-                </li>
-              ))}
-            </ol>
-          </nav>
-        ) : null}
+        {tocOpen && !tocSide ? tocNav("a-card flat toc") : null}
       </header>
+      {tocSide && toc.length ? tocNav("toc toc-side") : null}
 
       <article className="lecture-body">
         <header className="lecture-title">

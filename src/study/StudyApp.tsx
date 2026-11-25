@@ -28,7 +28,7 @@ import type { Ctx, Go, Say } from "./features/types";
 import Join from "./components/Join";
 import Library from "./components/Library";
 import LectureView from "./components/LectureView";
-import Shell, { applySize, BackLink, ConnectionGate, Loading, placeNow, readSize, type Place } from "./components/Shell";
+import Shell, { applySize, BackLink, ConnectionGate, Loading, placeNow, storedSize, type Place } from "./components/Shell";
 
 /* ── תמצית ──
  * /            the home: Today once flags.today is on, the group's
@@ -132,7 +132,11 @@ export default function StudyApp() {
   const welcome = useRef(WELCOME_AT_START);
 
   // The text size is the whole app's (review UX-15).
-  useEffect(() => applySize(readSize()), []);
+  useEffect(() => {
+    // A chosen size; without one, tokens.css's default (bigger on a tablet).
+    const chosen = storedSize();
+    if (chosen) applySize(chosen);
+  }, []);
 
   const readSession = useCallback(() => {
     void getSessionState().then((r) => {

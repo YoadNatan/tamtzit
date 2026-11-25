@@ -199,6 +199,15 @@
   color-scheme: light;
 }
 
+/* A tablet or a desktop is read from further away: until a member picks a
+   size ("שלי", the reader's א+), the text starts a step bigger (P2). A
+   chosen size is set on the root's own style and wins. */
+@media (min-width: 768px) {
+  :root {
+    --reading-size: 19px;
+  }
+}
+
 /* Dark: a deep indigo night, not an inverted day. Surfaces step up in
    lightness; the lanes glow (their text colours are the light ends); the
    edge is a lighter indigo step than the page (near black on near black

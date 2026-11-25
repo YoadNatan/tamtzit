@@ -22,13 +22,29 @@ import ErrorBoundary from "./ErrorBoundary";
 export const SIZE_KEY = "study-font-size";
 export const SIZES = [15, 17, 19, 21];
 
-export function readSize(): number {
+/** The size a member chose ("שלי", the reader's א- א+), or null. */
+export function storedSize(): number | null {
   try {
     const v = Number(localStorage.getItem(SIZE_KEY));
-    return SIZES.includes(v) ? v : 17;
+    return SIZES.includes(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The size until a member chooses one: 19 px on a tablet or a desktop
+ *  (768 px and up, read from further away), 17 on a phone (P2). tokens.css
+ *  says the same, so a window that changes width follows it. */
+export function defaultSize(): number {
+  try {
+    return matchMedia("(min-width: 768px)").matches ? 19 : 17;
   } catch {
     return 17;
   }
+}
+
+export function readSize(): number {
+  return storedSize() ?? defaultSize();
 }
 
 /** Applies a text size to the whole app (--reading-size on the root, review UX-15). */

@@ -589,6 +589,45 @@ a.pc-wa {
   color: var(--muted);
   font-size: var(--text-btn);
 }
+/* The contents as a column beside the text (L, P2): the screen widens to
+   --measure-wide, the column sits at the start (the right) under the top
+   bar and stays in view while the text scrolls; it scrolls on its own when
+   longer than the screen. The rows have no gap of their own (a column that
+   spans them would add each gap below the text): the blocks keep the
+   screen's rhythm by a margin instead. */
+@media (min-width: 1024px) {
+  main.lecture {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    align-items: start;
+    max-width: var(--measure-wide);
+    column-gap: var(--sp-16);
+    row-gap: 0;
+  }
+  main.lecture > * {
+    grid-column: 2;
+  }
+  main.lecture > :not(:first-child) {
+    margin-top: var(--sp-5);
+  }
+  main.lecture > .reader-top {
+    grid-column: 1 / -1;
+  }
+  main.lecture > .toc-side {
+    grid-column: 1;
+    grid-row: 2 / span 30;
+    position: sticky;
+    top: calc(var(--study-banner-h, 0px) + var(--study-head-h, var(--head-h)) + var(--sp-6));
+    max-height: calc(100vh - var(--study-banner-h, 0px) - var(--study-head-h, var(--head-h)) - var(--sp-12));
+    max-height: calc(100dvh - var(--study-banner-h, 0px) - var(--study-head-h, var(--head-h)) - var(--sp-12));
+    margin-top: var(--sp-6);
+    padding-inline-end: var(--sp-2);
+    overscroll-behavior: contain;
+  }
+  .toc-side li a {
+    font-size: var(--text-btn);
+  }
+}
 .lecture-title {
   display: grid;
   gap: var(--sp-2);
@@ -716,7 +755,7 @@ a.pc-wa {
 }
 .summary p,
 .summary li {
-  max-width: 68ch;
+  max-width: var(--measure-read);
 }
 .summary p {
   margin: 0.55em 0;
@@ -824,7 +863,7 @@ a.pc-wa {
    frame sits 10 px from the words and the action pills (a callout or a
    table keeps its own box and padding). */
 .summary :is(p, li).blk.blk-selected {
-  max-width: calc(68ch + 2 * var(--sp-5));
+  max-width: calc(var(--measure-read) + 2 * var(--sp-5));
 }
 .summary :is(p, li, h1, h2, h3).blk.blk-selected {
   margin-inline: calc(-1 * var(--sp-5));
