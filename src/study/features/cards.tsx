@@ -192,7 +192,9 @@ export function ReviewHomeSetting({ ctx }: { ctx: Ctx }) {
           באפליקציה
         </button>
         <button type="button" className="a-btn small" role="radio" aria-checked={s.home === "anki"} onClick={() => choose("anki")}>
-          ב-<bdi dir="ltr">Anki</bdi>
+          <span>
+            ב-<bdi dir="ltr">Anki</bdi>
+          </span>
         </button>
       </div>
       <small>בית אחד לחזרות. ב-Anki כאן לא יופיעו כרטיסיות לחזרה.</small>

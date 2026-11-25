@@ -58,12 +58,16 @@
 .live-slot.is-shown {
   display: flex;
 }
+/* Who is in takes two lines before it is cut (an SE's banner fit no names). */
 .live-text {
   flex: 1;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
 }
 .live-act {
   flex: none;
@@ -86,6 +90,11 @@
    (WCAG 2.4.11). */
 html {
   scroll-padding-top: calc(var(--study-banner-h, 0px) + var(--study-head-h, var(--head-h)));
+}
+/* A tab's home has a taller top bar (its big title, about 70 px): what is
+   brought into view under it is not hidden 14 px behind it (P3). */
+html:has(:is(main.today:not(.t-session), main.library, main.group-screen, main.me-screen) > .ph-head) {
+  scroll-padding-top: calc(var(--study-banner-h, 0px) + var(--study-head-h, 72px));
 }
 html:has(body.has-tabs) {
   scroll-padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-4));

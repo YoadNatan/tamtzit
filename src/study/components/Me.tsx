@@ -52,10 +52,14 @@ export function spendLine(spent: number, cap: number | undefined): ReactNode {
   const capText = "$" + (Number.isInteger(cap) ? String(cap) : cap.toFixed(2));
   return (
     <>
-      {head + " מתוך " + capText + " ("}
-      <span aria-hidden="true">≈</span>
-      <span className="sr-only">בערך</span>
-      {" ₪" + Math.round(spent * ILS_PER_USD) + ")"}
+      {head + " מתוך " + capText + " "}
+      {/* One unit: "(≈ ₪45)" never breaks inside its brackets. */}
+      <span style={{ whiteSpace: "nowrap" }}>
+        {"("}
+        <span aria-hidden="true">≈</span>
+        <span className="sr-only">בערך</span>
+        {" ₪" + Math.round(spent * ILS_PER_USD) + ")"}
+      </span>
     </>
   );
 }

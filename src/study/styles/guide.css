@@ -99,6 +99,26 @@
 .g-step > div {
   flex: 1;
 }
+/* A 320 px phone: the list loses its inner frame and "להראות" goes under
+   the step's words, so a step reads in two lines, not four (P3). */
+@media (max-width: 374px) {
+  .g-steps .a-list {
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .g-step {
+    flex-wrap: wrap;
+    row-gap: var(--sp-3);
+  }
+  .g-step > div {
+    flex-basis: calc(100% - 24px - var(--sp-5));
+  }
+  .g-step > .a-btn {
+    margin-inline-start: calc(24px + var(--sp-5));
+  }
+}
 .g-check {
   flex: none;
   display: grid;
