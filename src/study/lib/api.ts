@@ -159,6 +159,85 @@ export async function signOut(): Promise<void> {
   forgetOtherUsers(null);
 }
 
+/* ── The personal code (SQL section I; docs/study/personal-code.md) ──
+ * The same member on any device: /api/study/code turns the code into a
+ * session of that member's own (anonymous) user, which replaces this
+ * device's. No account, no email. */
+
+export type CodeStatus = { has_code: boolean; created_at: string | null; by_opener: boolean; by_name: string | null; notice: boolean };
+
+/** Signs this device in as the code's member. Throws "code not found", "too
+ *  many tries", "codes off", "sign-in failed" or "network". Another member's
+ *  session on this device is signed out here first (their entries leave with
+ *  claimDevice once the new session is in); the same member's is replaced. */
+export async function redeemPersonalCode(code: string): Promise<{ userId: string; same: boolean }> {
+  const c = client();
+  let res: Response;
+  try {
+    res = await fetch("/api/study/code", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new Error("network");
+  }
+  let body: { error?: string; access_token?: string; refresh_token?: string; user_id?: string } = {};
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    /* not json: by its status */
+  }
+  if (!res.ok) {
+    if (res.status === 401 || body.error === "code not found") throw new Error("code not found");
+    if (res.status === 429 || body.error === "too many tries") throw new Error("too many tries");
+    if (res.status === 503 || body.error === "codes off") throw new Error("codes off");
+    throw new Error("sign-in failed");
+  }
+  if (!body.access_token || !body.refresh_token || !body.user_id) throw new Error("sign-in failed");
+  const before = (await c.auth.getSession()).data.session;
+  const same = before?.user.id === body.user_id;
+  if (before && !same) await c.auth.signOut({ scope: "local" }).catch(() => undefined);
+  const { data, error } = await c.auth.setSession({ access_token: body.access_token, refresh_token: body.refresh_token });
+  if (error || !data.session) throw new Error(isAuthRetryableFetchError(error) ? "network" : "sign-in failed");
+  return { userId: data.session.user.id, same };
+}
+
+/** A new personal code for this member; the one before stops working. */
+export async function newPersonalCode(): Promise<string> {
+  const { data, error } = await client().rpc("study_code_new");
+  if (error) fail(error);
+  return String(data ?? "");
+}
+
+/** Whether this member has a code, since when, and whether the group's opener made it. */
+export async function personalCodeStatus(): Promise<CodeStatus> {
+  const { data, error } = await client().rpc("study_code_status");
+  if (error) fail(error);
+  const r = ((data ?? []) as CodeStatus[])[0];
+  return r ?? { has_code: false, created_at: null, by_opener: false, by_name: null, notice: false };
+}
+
+/** "הבנתי" on the opener's notice. */
+export async function personalCodeSeen(): Promise<void> {
+  const { error } = await client().rpc("study_code_seen");
+  if (error) fail(error);
+}
+
+/** The group's opener makes a member a new personal code (shown once). */
+export async function issuePersonalCode(groupId: string, userId: string): Promise<string> {
+  const { data, error } = await client().rpc("study_code_issue", { p_group: groupId, p_user: userId });
+  if (error) fail(error);
+  return String(data ?? "");
+}
+
+/** Signs this member out on every other device ("ניתוק המכשירים האחרים"). */
+export async function signOutOthers(): Promise<void> {
+  const { error } = await client().auth.signOut({ scope: "others" });
+  if (error) throw new Error(isAuthRetryableFetchError(error) ? "network" : "sign-in failed");
+}
+
 /* ── Storage on the device (spec §5.9; §12.2.5) ──
  * Keys that hold a person's own material carry their user id. When the
  * device's session belongs to another user than the stored one, or on
@@ -177,6 +256,9 @@ const PERSONAL: Array<[prefix: string, store: "local" | "session"]> = [
   ["study-guide:", "local"],
   // A simulation left open on this phone (past exams, sources.md phase 2): its attempt.
   ["study-mock:", "local"],
+  // The personal code made on this device, and "אחר כך" on its prompt (docs/study/personal-code.md).
+  ["study-code:", "local"],
+  ["study-code-later:", "local"],
 ];
 
 /** Deletes every personal entry that is not `userId`'s (all of them for null),
@@ -288,7 +370,7 @@ export async function removeMember(groupId: string, userId: string): Promise<voi
   if (error) fail(error);
 }
 
-/** Which members saved their account (the "שמור" mark). */
+/** Which members have a personal code, or a saved account (the "יש קוד" chip). */
 export async function memberSaved(groupId: string): Promise<Record<string, boolean>> {
   const { data, error } = await client().rpc("study_member_saved", { p_group: groupId });
   if (error) fail(error);
@@ -1038,6 +1120,8 @@ export type Health = {
   schema?: Record<string, number> | null;
   schemaOk?: boolean;
   features?: Record<string, boolean> | null;
+  /** The personal code works end to end (section I, the server key, the switch, Auth's email sign-in). */
+  codes?: boolean;
 };
 
 /** GET /api/study/health, or null when it does not answer in 6 s. */

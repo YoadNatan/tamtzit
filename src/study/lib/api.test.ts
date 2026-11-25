@@ -342,3 +342,47 @@ test("another user's entries leave the device: also the wall's drafts and Today'
     g.sessionStorage = before.session;
   }
 });
+
+/** A token shaped as Auth's (setSession reads its expiry). */
+const jwt = (exp: number) => {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ sub: USER.id, exp, role: "authenticated" })}.c2ln`;
+};
+
+test("the personal code: /api/study/code's session goes in with setSession, without a member token on the call", async () => {
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  const coded = jwt(exp);
+  routes["POST /api/study/code"] = () => ({ status: 200, body: { access_token: coded, refresh_token: "r-coded", expires_at: exp, user_id: USER.id } });
+  assert.equal(await api.getSession(), null);
+  const r = await api.redeemPersonalCode("K7QM-3XRP-W9TD-H4NA");
+  assert.deepEqual(r, { userId: USER.id, same: false });
+  const call = log.find((l) => l.path === "/api/study/code")!;
+  assert.deepEqual(JSON.parse(call.body), { code: "K7QM-3XRP-W9TD-H4NA" });
+  assert.equal(call.auth, null, "no member token: a device without a session calls it");
+  assert.ok(log.some((l) => l.path === "/auth/v1/user" && l.auth === `Bearer ${coded}`), "setSession checks the token with Auth");
+  const s = await api.getSession();
+  assert.equal(s?.access_token, coded);
+  assert.equal(s?.refresh_token, "r-coded");
+  // The same member again (another link tapped): replaced, not signed out first.
+  log = [];
+  const again = await api.redeemPersonalCode("K7QM3XRPW9TDH4NA");
+  assert.equal(again.same, true);
+  assert.equal(log.filter((l) => l.path === "/auth/v1/logout").length, 0);
+});
+
+test("the personal code's refusals: 401 code not found, 429 too many tries, 503 codes off, else sign-in failed", async () => {
+  const cases: Array<[Reply, string]> = [
+    [{ status: 401, body: { error: "code not found" } }, "code not found"],
+    [{ status: 429, body: { error: "too many tries" } }, "too many tries"],
+    [{ status: 503, body: { error: "codes off" } }, "codes off"],
+    [{ status: 502, body: { error: "sign-in failed" } }, "sign-in failed"],
+    [{ status: 500, body: "<html>", type: "text/html" }, "sign-in failed"],
+    [{ status: 200, body: { access_token: jwt(Math.floor(Date.now() / 1000) + 3600) } }, "sign-in failed"],
+  ];
+  for (const [reply, code] of cases) {
+    routes["POST /api/study/code"] = () => reply;
+    await assert.rejects(api.redeemPersonalCode("K7QM-3XRP-W9TD-H4NA"), isError(code), code);
+    assert.ok(failText(code) !== failText("something new"), `${code} has a line of its own`);
+  }
+  assert.equal(await api.getSession(), null, "a refusal leaves the device as it was");
+});
