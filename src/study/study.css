@@ -99,6 +99,15 @@ html:has(body.has-tabs):has(.ph-foot) {
   scroll-padding-bottom: calc(var(--tabbar-h) + 96px + env(safe-area-inset-bottom, 0px) + var(--sp-4));
 }
 
+/* A line of prose stops at about 70 letters on a tablet or a desktop (P2):
+   a help line, an empty state's words, a setting's note, a callout. Weak
+   (:where): a screen's own measure wins, as the reader's 36em does. */
+@media (min-width: 600px) {
+  main :where(.a-para, .a-small, .pq-vignette, .a-callout p) {
+    max-inline-size: 70ch;
+  }
+}
+
 /* The toast: over everything, clear of the tab bar and of a bottom bar. A
    tap on its words reaches what is under it; only its action takes a tap. */
 .shell > .a-toast {
@@ -446,6 +455,18 @@ a.pc-wa {
   position: relative;
   padding-top: var(--sp-4);
   border-top: 1px solid var(--line);
+}
+/* A desktop (XL, P2): the lectures in two columns of cards, the screen as
+   wide as the reader with its contents; the head, the ask bar and the
+   courses' headings stay one column. */
+@media (min-width: 1280px) {
+  main.library {
+    max-width: var(--measure-wide);
+  }
+  main.library .lecture-list {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    align-items: start;
+  }
 }
 .ask-bar {
   position: relative;

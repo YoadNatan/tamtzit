@@ -697,6 +697,15 @@ button.a-tag::after,
   flex: 1;
   width: auto;
 }
+/* On a tablet or a desktop (600 and up, P2) a wide button on its own in a
+   screen stops at 480 px, at the start of its row: a 700 px button reads as
+   a banner, not a button. The bottom bar's, a row's and a sheet's keep
+   their width. */
+@media (min-width: 600px) {
+  main .a-btn.wide:not(.ph-foot *, .a-row > *, .a-sheet *) {
+    max-width: 480px;
+  }
+}
 
 /* A text action: "תשובה", "לסמן שנענתה", "עוד כרטיסיות". */
 .a-link {
@@ -1807,6 +1816,38 @@ input[type="radio"]:disabled {
   border-radius: var(--r-pill);
   background: var(--line);
   pointer-events: none;
+}
+/* With a mouse nothing is dragged: no grip. */
+@media (pointer: fine) {
+  .a-sheet::before {
+    display: none;
+  }
+}
+/* A tablet or a desktop (768 wide and 560 tall and up, P2): the sheet is a
+   dialog in the middle of the screen, 560 wide, its four corners rounded,
+   with no grip (it is not pulled from the bottom). A sheet of a picture (a
+   slide, a question's drawing, the labels on one) takes the screen's
+   width. Its behaviour is the sheet's: Escape, the scrim, the history entry
+   and the focus kept inside (useSheet). */
+@media (min-width: 768px) and (min-height: 560px) {
+  .a-scrim {
+    align-items: center;
+    padding: var(--sp-12) var(--sp-12) max(var(--sp-12), var(--kb, 0px));
+  }
+  .a-sheet {
+    max-width: var(--sheet-w);
+    max-height: min(85dvh, 760px);
+    padding-bottom: calc(var(--sp-8) + var(--sp-1));
+    border: var(--b) solid var(--line);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow-pop);
+  }
+  .a-sheet::before {
+    display: none;
+  }
+  .a-sheet:is(.slide-sheet, .qf-sheet, .geo-sheet, .fix-sheet) {
+    max-width: var(--measure);
+  }
 }
 .a-sheet:focus {
   outline: none;
