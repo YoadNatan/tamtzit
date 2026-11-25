@@ -56,7 +56,7 @@ const SCHEMA_SQL = sqlSchema();
  *  "j" (wave 4's J: the SQL's J 1), "m" (wave 4's M: the SQL's M 1) and "w4"
  *  (all of wave 4), every section for the sets that turn on what is not
  *  built yet. */
-const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2"];
+const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i"];
 const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_ALL) });
 /** The flag set a build was made with, as the e2e scripts name it: "off", "rel1"
  *  (release 1: VITE_STUDY_QUESTIONS, VITE_STUDY_PRACTICE and VITE_STUDY_CARDS;
@@ -107,17 +107,20 @@ const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_A
  *  "s2" (past exams, sources.md phase 2: "s1" with VITE_STUDY_EXAMS, which
  *  needs section S at 2: the upload, the reading, the review, replaying an
  *  exam and the simulation; e2e/study/exams.cjs and mocks/exams.cjs);
+ *  "i" ("s2" with VITE_STUDY_INSTALL: adding the app to the home screen,
+ *  docs/study/install.md; e2e/study/install.cjs; it needs no section);
  *  E2E_ANCHOR=1 says a release's build has
  *  VITE_STUDY_ANCHOR too (package N: a paragraph's comments show in its chip
  *  row, not the dot). `any`: a package's flag is on, so the "תרגול" tab shows
  *  (questions or cards); the others name the features the scripts look for. */
 function flagSetOf(name) {
   const set = name || process.env.E2E_FLAGS || "off";
-  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2"].includes(set))
-    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1, prod, s1 or s2`);
+  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i"].includes(set))
+    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1, prod, s1, s2 or i`);
   if (set === "guide1") return { ...flagSetOf("rel1"), set, guide: true };
   if (set === "s1") return { ...flagSetOf("prod"), set, courses: true };
   if (set === "s2") return { ...flagSetOf("s1"), set, exams: true };
+  if (set === "i") return { ...flagSetOf("s2"), set, install: true };
   const every = set === "all" || set === "notoday";
   const w5x = set === "w5x" || set === "guide" || set === "prod";
   const h5 = set === "h5" || w5x;
@@ -820,10 +823,33 @@ async function createMock(o) {
   await new Promise((ok) => server.listen(0, ok));
   const base = `http://localhost:${server.address().port}`;
 
-  /** A member's (or a visitor's, for null) browser context on a path. */
+  /** A member's (or a visitor's, for null) browser context on a path.
+   *  opt.device: a Playwright device preset (its user agent, viewport, touch
+   *  and mobile; the browser stays Chromium); opt.userAgent, opt.isMobile,
+   *  opt.hasTouch and opt.permissions (e.g. clipboard-read/-write) as
+   *  newContext takes them; opt.standalone: the page runs as the home-screen
+   *  app (display-mode: standalone and iOS's navigator.standalone, by an init
+   *  script: Chromium's emulated media has no display-mode). */
   const open = async (browser, who, opt = {}) => {
     const m = who ? people[who] : null;
-    const ctx = await browser.newContext({ viewport: opt.viewport ?? { width: 390, height: 844 }, deviceScaleFactor: 1, colorScheme: opt.colorScheme ?? "light" });
+    const device = opt.device ?? {};
+    const ctx = await browser.newContext({
+      ...device,
+      viewport: opt.viewport ?? device.viewport ?? { width: 390, height: 844 },
+      deviceScaleFactor: 1,
+      colorScheme: opt.colorScheme ?? "light",
+      ...(opt.userAgent ? { userAgent: opt.userAgent } : {}),
+      ...(opt.isMobile !== undefined ? { isMobile: opt.isMobile } : {}),
+      ...(opt.hasTouch !== undefined ? { hasTouch: opt.hasTouch } : {}),
+      ...(opt.permissions ? { permissions: opt.permissions } : {}),
+    });
+    if (opt.standalone) {
+      await ctx.addInitScript(() => {
+        const real = window.matchMedia.bind(window);
+        window.matchMedia = (q) => (/display-mode:\s*standalone/.test(q) ? Object.create(real("all"), { matches: { value: true }, media: { value: q }, addEventListener: { value() {} }, removeEventListener: { value() {} } }) : real(q));
+        Object.defineProperty(Navigator.prototype, "standalone", { get: () => true, configurable: true });
+      });
+    }
     const storage = { ...(opt.storage ?? {}) };
     if (m) {
       storage["study-auth"] = JSON.stringify({ access_token: m.token, token_type: "bearer", expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: `r-${m.token}`, user: m.user });
