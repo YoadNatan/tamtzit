@@ -1,0 +1,217 @@
+/* ── Adding תמצית to the home screen (docs/study/install.md) ──
+   The screen's numbered cards, the pictures of Safari's buttons drawn
+   inline, the arrow at Safari's bar, the row in "שלי", the home's card and
+   the join screen's lines. Only the kit's tokens; logical properties (RTL). */
+
+.install-screen .inst-steps {
+  gap: var(--sp-6);
+}
+.inst-intro {
+  margin-block: 0 var(--sp-4);
+}
+.inst-step {
+  display: grid;
+  gap: var(--sp-4);
+}
+.inst-step-h {
+  font-size: var(--text-h2);
+}
+.inst-step > p {
+  margin: 0;
+  line-height: 1.55;
+}
+/* A line with a picture of the button it names, the picture in the flow. */
+.inst-line {
+  display: block;
+}
+.inst-line > .inst-ico,
+.inst-line > .inst-more,
+.inst-line > .inst-addrow {
+  vertical-align: middle;
+  margin-inline: var(--sp-1);
+}
+.inst-ico {
+  inline-size: 28px;
+  block-size: 28px;
+  color: var(--accent);
+  flex: none;
+}
+.inst-ico.small {
+  inline-size: 20px;
+  block-size: 20px;
+}
+/* iOS 26's "⋯": a small pill as Safari draws it. */
+.inst-more {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 40px;
+  block-size: 28px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-weight: 800;
+  line-height: 1;
+}
+/* The share sheet's row, drawn small. */
+.inst-addrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-block: var(--sp-1);
+  padding-inline: var(--sp-4) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: var(--text-small);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.inst-code {
+  margin: 0;
+}
+.inst-done {
+  font-weight: 700;
+  line-height: 1.55;
+}
+.inst-missing,
+.inst-safety {
+  margin: 0;
+}
+.inst-acts {
+  flex-wrap: wrap;
+}
+.inst-acts > .a-btn {
+  flex: 1 1 auto;
+}
+a.inst-open,
+a.inst-how {
+  text-decoration: none;
+}
+.inst-link {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-size: var(--text-small);
+}
+.inst-said {
+  margin: 0;
+  color: var(--ok);
+  font-weight: 600;
+}
+.inst-escape > p {
+  margin: 0;
+}
+
+/* The arrow at Safari's bar: over the page, never in the way of a tap. */
+.inst-arrow {
+  position: fixed;
+  inset-inline: 0;
+  margin-inline: auto;
+  inline-size: 40px;
+  block-size: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-pill);
+  background: var(--accent-fill);
+  color: var(--accent-fill-ink);
+  box-shadow: var(--shadow-pop);
+  pointer-events: none;
+  z-index: 30;
+}
+.inst-arrow svg {
+  inline-size: 24px;
+  block-size: 24px;
+}
+/* On the tab bar's top edge, between its middle tabs: it points down
+   through the bar to Safari's own, and covers as little as it can. */
+.inst-arrow.bottom {
+  inset-block-end: calc(var(--tabbar-h, 64px) + env(safe-area-inset-bottom, 0px) - 22px);
+}
+.inst-arrow.top {
+  inset-block-start: calc(env(safe-area-inset-top, 0px) + var(--sp-3));
+}
+.inst-arrow.top svg {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .inst-arrow.bottom {
+    animation: inst-bob-down 1.4s ease-in-out infinite;
+  }
+  .inst-arrow.top {
+    animation: inst-bob-up 1.4s ease-in-out infinite;
+  }
+}
+@keyframes inst-bob-down {
+  50% {
+    transform: translateY(6px);
+  }
+}
+@keyframes inst-bob-up {
+  50% {
+    transform: translateY(-6px);
+  }
+}
+/* Room under the last card, so the arrow never covers "הוספתי". */
+.install-screen[data-env="ios-safari"] .inst-steps,
+.install-screen[data-env="ios-browser"] .inst-steps {
+  padding-block-end: calc(44px + var(--sp-6));
+}
+
+/* "שלי": the row. */
+.inst-links {
+  margin-block: 0;
+}
+.inst-row-here b {
+  color: var(--ok);
+}
+
+/* The home's card. */
+.inst-card {
+  display: grid;
+  gap: var(--sp-4);
+}
+.inst-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+}
+.inst-card-head > div {
+  display: grid;
+  gap: var(--sp-1);
+  min-inline-size: 0;
+}
+.inst-card-head p {
+  margin: 0;
+}
+.inst-badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.inst-badge svg {
+  inline-size: 24px;
+  block-size: 24px;
+}
+
+/* The join screen. */
+.join-inapp {
+  display: grid;
+  gap: var(--sp-4);
+  margin-block-end: var(--sp-5);
+}
+.join-install {
+  margin-block: var(--sp-4) 0;
+  text-align: center;
+}
+
+/* A computer: a stand-alone button no wider than a phone. */
+@media (min-width: 768px) {
+  .install-screen .a-btn.wide {
+    max-inline-size: 480px;
+  }
+}

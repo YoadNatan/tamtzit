@@ -4,6 +4,7 @@ import { claimDevice, configured, getSession, listLectures, members, myGroups, o
 import { failText } from "./lib/failText";
 import { cacheCode, cachedCode, takeLinkCode, takeWelcome, welcomeNext } from "./lib/personalCode";
 import { flags } from "./lib/flags";
+import { markRestored } from "./lib/guideMark";
 import { allowed, APP_PATH, parseRoute, routeUrl, screenKey, type Route } from "./lib/route";
 import { AccountLayer, accountStartup, openAccount, type PendingLink } from "./features/account";
 import { BossScreen } from "./features/boss";
@@ -12,6 +13,7 @@ import { CourseScreen } from "./features/courses";
 import { AskScreen } from "./features/collab";
 import { TrapScreen } from "./features/extras";
 import { GuideHowTo, TryScreen } from "./features/guide";
+import { InstallScreen } from "./features/install";
 import { CatchupScreen, MeetingScreen } from "./features/meeting";
 import { PlanScreen } from "./features/plan";
 import { ExamsScreen, MockScreen, PracticeScreen } from "./features/practice";
@@ -184,6 +186,7 @@ export default function StudyApp() {
         say(ALREADY_IN);
         return;
       }
+      markRestored(r.userId); // the guide: a member who knows the app, not a new one (no tour offer)
       setPendingLink(null);
       welcomeNext();
       location.replace(APP_PATH);
@@ -415,6 +418,8 @@ function renderRoute(route: Route, ctx: Ctx, courses: string[]) {
       return <TryScreen route={route} ctx={ctx} />;
     case "course":
       return <CourseScreen route={route} ctx={ctx} />;
+    case "install":
+      return <InstallScreen route={route} ctx={ctx} />;
     case "library":
       return <Library ctx={ctx} />;
     default:

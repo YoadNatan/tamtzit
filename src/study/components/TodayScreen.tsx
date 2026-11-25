@@ -17,6 +17,7 @@ import { MeetingBand } from "../features/meeting";
 import { QuizBannerLine } from "../features/quiz";
 import { GuideHome } from "../features/guide";
 import { AccountBanners } from "../features/account";
+import { InstallHomeCard } from "../features/install";
 import { EveCard } from "../features/plan";
 import { NeedsMeCard } from "../features/today";
 import type { Ctx, ScreenProps } from "../features/types";
@@ -120,6 +121,8 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
       {flags.guide ? <GuideHome ctx={ctx} home="today" queue={ready ? cut.items.length : null} /> : null}
       {/* The personal code: the opener's notice, or the prompt for a member without one (the home is where everyone looks). */}
       <AccountBanners ctx={ctx} />
+      {/* Adding the app to the home screen (VITE_STUDY_INSTALL): once, while the guide's card is not here. */}
+      <InstallHomeCard ctx={ctx} />
 
       <div className="a-sec t-sec">
         <span className="a-row">

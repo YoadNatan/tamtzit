@@ -20,6 +20,7 @@ import { AccountCard, CodeSheet, openAccount, useCodesOn } from "../features/acc
 import { issuedMessage } from "../lib/personalCode";
 import { ReviewHomeSetting } from "../features/cards";
 import { GuideMeRows } from "../features/guide";
+import { InstallMeRow } from "../features/install";
 import { MyLaneRows } from "../features/plan";
 import { MeRows } from "../features/progress";
 import { PulseSettingRow } from "../features/pulse";
@@ -193,6 +194,8 @@ export default function Me({ ctx }: ScreenProps<"me">) {
         </nav>
       ) : null}
       <MyLaneRows ctx={ctx} />
+      {/* Adding the app to the home screen (VITE_STUDY_INSTALL), high on the screen as the owner asked. */}
+      <InstallMeRow ctx={ctx} />
       {/* The guide's own section, high on the screen so it is found (the owner's request). */}
       <GuideMeRows ctx={ctx} />
 

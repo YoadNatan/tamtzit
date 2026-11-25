@@ -209,6 +209,7 @@ const ALL_ROUTES: Route[] = [
   { v: "trap", l: ID, at: { part: 1, anchor: 2 }, d: ID2 },
   { v: "try" }, // the guide's sandbox (docs/study/guide.md)
   { v: "try", s: "b" },
+  { v: "install" }, // adding the app to the home screen (docs/study/install.md)
 ];
 
 test("routeUrl writes every route of §5.2 and §12.2.1 so parseRoute reads it back exactly", () => {

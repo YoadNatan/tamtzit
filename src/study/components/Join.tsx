@@ -4,6 +4,7 @@ import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { markFresh } from "../lib/guideMark";
 import { CodeEntry, openAccount, useCodesOn } from "../features/account";
+import { JoinInstallNote } from "../features/install";
 import { formatCode, parseCode, standalone } from "../lib/personalCode";
 
 /* ── Getting in ──
@@ -142,6 +143,8 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
             </button>
           </div>
         ) : null}
+        {/* Another app's built-in browser: the way out to the real one first (VITE_STUDY_INSTALL). */}
+        <JoinInstallNote place="top" />
         <p className="join-kicker">סיכום מלא לכל הרצאה</p>
         <h1 className="join-name">תמצית</h1>
         {flags.guide && initialCode ? <p className="a-small a-muted join-invited">יש הזמנה. נשאר רק להקליד שם.</p> : null}
@@ -211,6 +214,8 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
             </button>
           </form>
         </div>
+        {/* An iPhone's Safari: one quiet line that the home screen comes after joining. */}
+        <JoinInstallNote place="bottom" />
         {flags.account ? (
           <button type="button" className="a-link join-signin" onClick={() => openAccount("signin")}>
             כבר שמרת חשבון? כניסה עם מייל

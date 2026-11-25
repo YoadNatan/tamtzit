@@ -55,7 +55,8 @@ export type Route =
   | { v: "boss"; isNew?: true; l?: string } // H (a battle itself is ?v=quiz&q=)
   | { v: "eve"; l: string } // A2 (PR6)
   | { v: "trap"; l: string; at?: At; d?: string } // E (P11)
-  | { v: "try"; s?: "b" }; // the guide's sandbox (s=b: a question with a bet); nothing in it is saved
+  | { v: "try"; s?: "b" } // the guide's sandbox (s=b: a question with a bet); nothing in it is saved
+  | { v: "install" }; // adding the app to the home screen (docs/study/install.md), its steps for this device
 
 export type Tab = "today" | "library" | "practice" | "group" | "me";
 
@@ -241,6 +242,8 @@ export function parseRoute(search: string, _hash?: string): Route {
     }
     case "try":
       return clean({ v: "try" as const, s: oneOf(g("s"), ["b"] as const) });
+    case "install":
+      return { v: "install" };
     case null: {
       const l = id(g("l"));
       return l ? lecture(l, q) : { ...HOME };
@@ -443,6 +446,7 @@ export function tabOf(r: Route, f: Flags): Tab | null {
     case "me":
     case "progress":
     case "help":
+    case "install":
       return "me";
     default:
       return null;
@@ -549,6 +553,9 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
       // Without the guide "?v=try" is what it always was, an unknown screen:
       // the library, with no notice (the build behaves as before the guide).
       return f.guide ? ok : { route: { v: "library" } };
+    case "install":
+      // Without its flag "?v=install" is an unknown screen, as before: the library, with no notice.
+      return f.install ? ok : { route: { v: "library" } };
     default:
       return ok;
   }

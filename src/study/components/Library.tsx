@@ -20,6 +20,7 @@ import { AccountBanners } from "../features/account";
 import { useCardsChip } from "../features/cards";
 import { BatchResumeLine, CourseHeading, useCourseLinks } from "../features/courses";
 import { GuideHome } from "../features/guide";
+import { InstallHomeCard } from "../features/install";
 import { useAsksLeft, useEditsChip } from "../features/collab";
 import { usePracticeChip } from "../features/practice";
 import type { Ctx } from "../features/types";
@@ -182,6 +183,8 @@ export default function Library({ ctx }: { ctx: Ctx }) {
       </div>
       {/* The guide's first steps, when the library is the home (before Today). */}
       {flags.guide && !flags.today ? <GuideHome ctx={ctx} home="library" /> : null}
+      {/* Adding the app to the home screen, when the library is the home (before Today). */}
+      {flags.install && !flags.today ? <InstallHomeCard ctx={ctx} /> : null}
 
       {flags.ask ? (
         <div className="ask-bar" role="search">
