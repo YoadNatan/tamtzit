@@ -17,7 +17,10 @@ export const LATIN_RUN = /[([]?[A-Za-z0-9Ͱ-Ͽ½¼¾µ][^֐-׿]*/g;
  *  מנגנון" keeps its dot between the two, not inside the English), and no
  *  closing bracket it did not open. */
 export function trimRun(run: string): string {
-  let s = run.replace(/[\s,;:.!?·]+$/u, "");
+  // A spaced operator after the English ("NKCC2 = שני", "Furosemide → ")
+  // belongs to the sentence, not the run: inside it, it would show at the
+  // run's far end ("= NKCC2"). Unspaced signs stay ("Na+", "K⁺").
+  let s = run.replace(/(\s+[=≈~→←↔⇒<>|/+\-–—]+)+\s*$/u, "").replace(/[\s,;:.!?·]+$/u, "");
   for (;;) {
     const opens = (s.match(/[([]/g) ?? []).length;
     const closes = (s.match(/[)\]]/g) ?? []).length;

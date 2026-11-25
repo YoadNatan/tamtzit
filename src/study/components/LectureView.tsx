@@ -29,7 +29,7 @@ import {
 } from "../lib/api";
 import { flags } from "../lib/flags";
 import { guideMark } from "../lib/guideMark";
-import { slidesOf } from "../lib/rich";
+import { isolateLatin, slidesOf } from "../lib/rich";
 import { afterReading, lectureChips, shareUrl, type At, type Route } from "../lib/route";
 import { useLectureN } from "../features/anchor";
 import { ReaderGuideChip } from "../features/guide";
@@ -834,9 +834,9 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
                     document.getElementById(h.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
                     setTocOpen(false);
                   }}
-                  dir="auto"
+                  dir="rtl"
                 >
-                  {h.text}
+                  {isolateLatin(h.text, `toc${h.id}`)}
                 </a>
               </li>
             ))}

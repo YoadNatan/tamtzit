@@ -50,9 +50,16 @@ export function useCourseLinks(ctx: Ctx, stamp: string): (course: string) => str
 
 /** A course's heading in the library: a link to its page when it has one. */
 export function CourseHeading({ ctx, course, id }: { ctx: Ctx; course: string; id: string | null }): ReactNode {
-  if (!id) return <h2 dir="auto">{course}</h2>;
+  // Right to left, the name in its own <bdi>: dir="auto" skips a <bdi>, so an
+  // English course name turned the heading (and its chevron) left to right.
+  if (!id)
+    return (
+      <h2 dir="rtl">
+        <bdi>{course}</bdi>
+      </h2>
+    );
   return (
-    <h2 dir="auto">
+    <h2 dir="rtl">
       <RouteLink to={{ v: "course", c: id }} go={ctx.go} className="lib-course">
         <bdi>{course}</bdi>
         <span className="lib-course-go" aria-hidden="true">

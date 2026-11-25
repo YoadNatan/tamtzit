@@ -22,6 +22,7 @@ import { addLater } from "../lib/later";
 import { baseName, deckSize, figuresOf, fileProblem, readDeck } from "../lib/readDeck";
 import { afterUpload, writingHelp } from "../features/writing";
 import type { Ctx } from "../features/types";
+import { softBreaks } from "../lib/rich";
 import { BackLink, Head, RouteLink, StickyActions } from "./Shell";
 import "../styles/courses.css";
 
@@ -550,8 +551,8 @@ function FileRow({ row: r, waits, queued, onRemove }: { row: Row; waits: boolean
   return (
     <div className="u-row" data-file={r.file.name}>
       <div>
-        <div className="u-name" dir="auto">
-          {e ? r.file.name.slice(0, -e.length) : r.file.name}
+        <div className="u-name" dir="rtl">
+          <bdi>{softBreaks(e ? r.file.name.slice(0, -e.length) : r.file.name, "un")}</bdi>
         </div>
         <span className={`m${r.state === "bad" || r.state === "failed" ? " bad" : ""}`}>{meta}</span>
       </div>

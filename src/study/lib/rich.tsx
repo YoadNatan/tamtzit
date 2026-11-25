@@ -51,9 +51,34 @@ export function barLabel(text: string, keyBase = "b"): ReactNode[] {
   return isolateLatin(text.replace(/(?<=[A-Za-z0-9\u2070-\u209f])-(?=[A-Za-z])/g, "\u2011"), keyBase);
 }
 
-/** Wraps every Latin run of a Hebrew string in <bdi dir="ltr">. */
+/** A number range's hyphen ("1-8%", "3-4 h") made non-breaking, so a line
+ *  never ends in "1-" with "8%" on the next. */
+export function keepRange(run: string): string {
+  return run.replace(/(?<=\d)-(?=\d)/g, "\u2011");
+}
+
+/** Wraps every Latin run of a Hebrew string in <bdi dir="ltr">. A string
+ *  with no Hebrew at all (a table cell "1 h", a bold "Proximal tubule:",
+ *  a heading) is one run: inside the summary's right-to-left blocks its
+ *  numbers and units would otherwise swap ("h 1", "½t", "3%≈"). Its spaces
+ *  and closing punctuation stay outside, as for any run. */
 export function isolateLatin(text: string, keyBase = "b"): ReactNode[] {
-  if (!HEBREW.test(text)) return [text];
+  if (!HEBREW.test(text)) {
+    LATIN_RUN.lastIndex = 0;
+    if (!LATIN_RUN.test(text)) return [text];
+    const run = trimRun(text.trim());
+    const at = run ? text.indexOf(run) : -1;
+    if (at < 0) return [text];
+    const out: ReactNode[] = [];
+    if (at > 0) out.push(text.slice(0, at));
+    out.push(
+      <bdi key={`${keyBase}${at}`} dir="ltr">
+        {keepRange(run)}
+      </bdi>,
+    );
+    if (at + run.length < text.length) out.push(text.slice(at + run.length));
+    return out;
+  }
   const out: ReactNode[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
@@ -67,13 +92,28 @@ export function isolateLatin(text: string, keyBase = "b"): ReactNode[] {
     if (idx > last) out.push(text.slice(last, idx));
     out.push(
       <bdi key={`${keyBase}${idx}`} dir="ltr">
-        {run}
+        {keepRange(run)}
       </bdi>,
     );
     last = idx + run.length;
     LATIN_RUN.lastIndex = last;
   }
   if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+/** A title that may be a file's name ("Lecture_07_Pharmacology_Renal-…"):
+ *  a line may break after each "_" and "-" (<wbr>), so a long name wraps
+ *  between its words, not inside one. */
+export function softBreaks(text: string, keyBase = "w"): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(/[_-](?=\S)/g)) {
+    const end = (m.index ?? 0) + 1;
+    out.push(text.slice(last, end), <wbr key={`${keyBase}${end}`} />);
+    last = end;
+  }
+  out.push(text.slice(last));
   return out;
 }
 

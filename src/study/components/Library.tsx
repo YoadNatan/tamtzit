@@ -16,6 +16,7 @@ import {
 import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { hueOf } from "../lib/hue";
+import { softBreaks } from "../lib/rich";
 import { AccountBanners } from "../features/account";
 import { useCardsChip } from "../features/cards";
 import { BatchResumeLine, CourseHeading, useCourseLinks } from "../features/courses";
@@ -289,8 +290,8 @@ export default function Library({ ctx }: { ctx: Ctx }) {
                   <li key={l.id} className="a-card lc" data-anchor={`lecture-${l.id}`} data-hue={hueOf(l.id)}>
                     {/* The whole card opens the lecture; the chips under it are links of their own. */}
                     <RouteLink to={{ v: "lecture", l: l.id }} go={ctx.go} className="lecture-card">
-                      <span className="lc-title" dir="auto">
-                        {l.title}
+                      <span className="lc-title" dir="rtl">
+                        <bdi>{softBreaks(l.title, `lt${l.id}`)}</bdi>
                       </span>
                       <span className="lc-meta a-small a-muted">
                         {[l.lecturer, formatDate(l.lecture_date), nameOf(l.created_by) && `הועלה ע״י ${nameOf(l.created_by)}`].filter(Boolean).join(" · ")}

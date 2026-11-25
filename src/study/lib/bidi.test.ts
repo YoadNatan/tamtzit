@@ -24,3 +24,17 @@ test("a date or time field takes the phone language's direction, so \"19 Nov 202
   assert.equal(pickerDir(""), "ltr");
   assert.equal(pickerDir("hr-HR"), "ltr", "Croatian is not Hebrew");
 });
+
+test("a spaced operator after the English stays outside its run: \"NKCC2 = שני\" isolates \"NKCC2\" only", () => {
+  assert.deepEqual(runs("NKCC2 = שני כ׳ ושני סודיום"), ["NKCC2"]);
+  assert.deepEqual(runs("Furosemide → מגביר הפרשה"), ["Furosemide"]);
+  assert.deepEqual(runs("ADH / וזופרסין"), ["ADH"]);
+  assert.deepEqual(runs("GFR ≈ פינוי קראטינין"), ["GFR"]);
+  assert.deepEqual(runs("Loop – לולאה"), ["Loop"]);
+  // An unspaced sign is the run's own: "Na+", "K⁺", "pH<7".
+  assert.deepEqual(runs("יון Na+ נכנס"), ["Na+"]);
+  assert.deepEqual(runs("ריכוז K⁺ בדם"), ["K⁺"]);
+  assert.deepEqual(runs("כש-pH<7 בשתן"), ["pH<7"]);
+  // Inside the English an operator stays ("a = b" is the run's own sentence).
+  assert.deepEqual(runs("הנוסחה C = U × V / P בשתן"), ["C = U × V / P"]);
+});
