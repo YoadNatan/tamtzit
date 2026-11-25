@@ -318,8 +318,9 @@ that take turns to light up (still under reduced motion).
 
 `.a-btn` is secondary; `.primary` is the screen's one action; `.ghost` a
 quiet one; `.danger` deletes; `.wide` fills its row (52 px; from 600 px
-wide, one alone in a screen stops at 480 px, at the start; in the bottom
-bar, a row or a sheet it keeps filling); `.small` sits
+wide, one alone in a screen stops at 480 px, at the start, as does any
+button its card or stack stretches; in the bottom bar, a row or a sheet it
+keeps filling); `.small` sits
 in a list row or a line of text (32 px); `.icon` is a square ✕, ?, ⋯. Every
 size is 44 × 44 to the finger: a smaller one grows an invisible `::after`.
 

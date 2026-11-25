@@ -701,12 +701,14 @@ button.a-tag::after,
   flex: 1;
   width: auto;
 }
-/* On a tablet or a desktop (600 and up, P2) a wide button on its own in a
-   screen stops at 480 px, at the start of its row: a 700 px button reads as
-   a banner, not a button. The bottom bar's, a row's and a sheet's keep
-   their width. */
+/* On a tablet or a desktop (600 and up, P2) a button on its own in a screen
+   stops at 480 px, at the start of its row: a 700 px button reads as a
+   banner, not a button. That is a ".wide" one, and also one stretched by
+   its card or stack ("לקבוע את הפגישה הבאה", "יצירת קוד אישי"). The bottom
+   bar's, a row's and a sheet's keep their width; a button narrower than 480
+   is untouched. */
 @media (min-width: 600px) {
-  main .a-btn.wide:not(.ph-foot *, .a-row > *, .a-sheet *) {
+  main .a-btn:not(.ph-foot *, .a-row > *, .a-sheet *) {
     max-width: 480px;
   }
 }

@@ -101,10 +101,11 @@ New tokens: `--measure-read` (36em), `--measure-wide` (1040 px), `--sheet-w`
 
 ## WP12. Using the width
 
-- **Wide buttons** (`kit.css`): from 600, `main .a-btn.wide` alone in a
-  screen stops at 480 px at the start of its row; in the bottom bar, an
-  `.a-row` or a sheet it keeps filling. The course page's 674 px buttons
-  are 480.
+- **Wide buttons** (`kit.css`): from 600, a `main .a-btn` alone in a
+  screen (a `.wide` one, or one its card or stack stretches) stops at
+  480 px at the start of its row; in the bottom bar, an `.a-row` or a sheet
+  it keeps filling. The course page's 674 px buttons are 480, and so are
+  "לקבוע את הפגישה הבאה", "יצירת קוד אישי" and "מבחן קבוצתי חדש".
 - **The library** at 1280: `--measure-wide`, the lectures in
   `repeat(auto-fill, minmax(340px, 1fr))`; the head, the ask bar and the
   courses' headings stay one column.
