@@ -230,6 +230,18 @@ member's own code is "הקוד האישי", never "סיסמה", "חשבון" or 
   SQL checks the technique's name in stored rows.
 - **״עברנו״, ״ניצחון״, ״שיא״**: the quiz's own plain words.
 
+### The home screen (docs/study/install.md)
+
+- **״להוסיף למסך הבית״** is the act everywhere (the row in ״שלי״, the guide's
+  step, help); **״התקנה״** only on the button that opens the browser's own
+  install dialog (Android, computers). Never ״להוריד את האפליקציה״: nothing
+  is downloaded from a store.
+- **״האייקון״** is the home-screen app; **״כניסה עם הקוד האישי״** is named
+  exactly as the join screen shows it.
+- The phones' own menu words (״שיתוף״, ״הוספה למסך הבית״, ״הוספה״, ״התקנת
+  אפליקציה״…) are in one block, `OS` in `src/study/lib/installCopy.ts`, until
+  Hebrew screenshots confirm them.
+
 ## Server-made text
 
 The SQL writes some text into rows. New rows use the new words; the file
