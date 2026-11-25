@@ -226,6 +226,7 @@ const T = {
         const { page, ctx } = await mock.open(browser, null, { userAgent: ua, isMobile: true, hasTouch: true, permissions: CLIP, path: "/?join=ABC123" });
         await page.locator(".code-input").waitFor({ timeout: 15000 });
         const callout = page.locator(".join-inapp");
+        await callout.waitFor({ timeout: 5000 }).catch(() => undefined); // its words come with a lazy chunk, after the field
         check(`${label}: the join screen's callout`, await visible(callout));
         const href = await callout.getByRole("link", { name: T.safari }).getAttribute("href");
         check(`${label}: פתיחה בספארי keeps ?join=`, href === `x-safari-${mock.base}/?join=ABC123`, href);
