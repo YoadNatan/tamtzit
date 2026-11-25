@@ -199,7 +199,7 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
     check("A3 the note stays while a part waits for its automatic retry", (await p3.locator(".server-note").count()) === 1, "");
     a11y.push(...(await snap(p3, out, "writing-4-stopped")));
     const before = db.queueCalls.length;
-    await p3.getByRole("button", { name: "המשך כתיבה" }).click();
+    await p3.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).click();
     await p3.getByText("השרת ממשיך לכתוב.").waitFor({ timeout: 10000 });
     const tap = db.queueCalls.slice(before);
     check("A3 the tap restarts through study_queue, and the server goes on", tap.length === 1 && tap[0].p_retry_failed === true && tap[0].p_lecture === L2 && apiCalls("section").length === 0, JSON.stringify(tap));
@@ -258,11 +258,11 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
       "A6 an outline the budget stopped says why, offers המשך כתיבה, and no note says writing goes on",
       alert7 === "הקבוצה הגיעה לתקרת התקציב של החודש. אפשר להעלות אותה ב-Vercel (STUDY_MONTHLY_USD)." &&
         (await p7.locator(".server-note").count()) === 0 &&
-        (await p7.getByRole("button", { name: "המשך כתיבה" }).count()) === 1,
+        (await p7.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).count()) === 1,
       JSON.stringify({ alert7, note: await p7.locator(".server-note").count() }),
     );
     a11y.push(...(await snap(p7, out, "writing-5b-outline-stopped")));
-    await p7.getByRole("button", { name: "המשך כתיבה" }).click();
+    await p7.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).click();
     await p7.getByText("השרת ממשיך לכתוב.").waitFor({ timeout: 10000 });
     await p7.getByText("מתכננים את מבנה הסיכום לפי נושאי ההרצאה… (בשרת)").waitFor({ timeout: 10000 });
     const q7 = db.queueCalls.filter((c) => c.p_lecture === L7);
@@ -295,7 +295,7 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
       Object.assign(s, { status: "pending", markdown: "", updated_at: now() });
       mock.notify("study_sections", "UPDATE", s);
       await placeholder(page, 2).waitFor({ timeout: 10000 });
-      await page.getByRole("button", { name: "המשך כתיבה" }).click();
+      await page.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).click();
       await page.locator('[data-part="2"]').waitFor({ timeout: 20000 });
     }
     const taps9 = db.queueCalls.slice(before9).filter((c) => c.p_lecture === L9);
@@ -314,7 +314,7 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
     await page.goto(`${mock.base}/?l=${L6}`);
     await placeholder(page, 1).waitFor({ timeout: 10000 });
     check("R a part that failed 4 times says so", (await placeholder(page, 1).innerText()).includes("נעצר אחרי 4 ניסיונות. אפשר ללחוץ ״המשך כתיבה״."), await placeholder(page, 1).innerText());
-    await page.getByRole("button", { name: "המשך כתיבה" }).click();
+    await page.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).click();
     await page.locator('[data-part="1"]').waitFor({ timeout: 20000 });
     const r1 = db.queueCalls.filter((c) => c.p_lecture === L6);
     check("R with the server off, the tap restarts it and this phone writes it", r1.length === 1 && r1[0].p_retry_failed === true && db.sectionCalls.some((c) => c.lectureId === L6 && c.idx === 1), JSON.stringify(r1));
@@ -325,7 +325,7 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
     mock.notify("study_sections", "UPDATE", s2);
     await placeholder(page, 2).waitFor({ timeout: 10000 });
     const sectionsBefore = db.sectionCalls.length;
-    await page.getByRole("button", { name: "המשך כתיבה" }).click();
+    await page.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).click();
     await page.getByText("״המשך כתיבה״ הופעל כבר שלוש פעמים היום בהרצאה הזו. אפשר לנסות שוב מחר.").waitFor({ timeout: 10000 });
     check("R a fourth tap in a day shows the retry limit, and nothing is written", db.sectionCalls.length === sectionsBefore, "");
     a11y.push(...(await snap(page, out, "writing-6-retry-limit")));
@@ -361,11 +361,11 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
     Object.assign(ph2, { status: "ready", markdown: fx.parts[2], updated_at: now() });
     mock.notify("study_sections", "UPDATE", ph2);
     await h1.getByText("נעצר אחרי 4 ניסיונות").waitFor({ timeout: 10000 });
-    check("H1 lost after four dead writers: the reason, the button, and no note says writing goes on", (await h1.locator(".server-note").count()) === 0 && (await h1.getByRole("button", { name: "המשך כתיבה" }).count()) === 1, "");
+    check("H1 lost after four dead writers: the reason, the button, and no note says writing goes on", (await h1.locator(".server-note").count()) === 0 && (await h1.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).count()) === 1, "");
     await placeholder(h1, 1).scrollIntoViewIfNeeded();
     a11y.push(...(await snap(h1, out, "writing-h1-lost")));
     const beforeH1 = db.queueCalls.length;
-    await h1.getByRole("button", { name: "המשך כתיבה" }).click();
+    await h1.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).click();
     await h1.getByText("השרת ממשיך לכתוב.").waitFor({ timeout: 10000 });
     await h1.locator(".server-note").waitFor({ timeout: 10000 });
     const tapH1 = db.queueCalls.slice(beforeH1);
@@ -376,7 +376,7 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
     // ── H2 (W2): double dispatch: two phones tap at once, one of them twice ──
     const LH2 = lecture(32, "שתי לחיצות", { queued_at: now() }, [{ status: "ready", markdown: fx.parts[0] }, { status: "failed", error: "refusal", attempts: 1 }, { status: "ready", markdown: fx.parts[2] }]);
     const [{ page: h2a }, { page: h2b }] = await Promise.all([mock.open(browser, "שוהם", { path: `/?l=${LH2}` }), mock.open(browser, "נועה", { path: `/?l=${LH2}` })]);
-    await Promise.all([h2a, h2b].map((pg) => pg.getByRole("button", { name: "המשך כתיבה" }).waitFor({ timeout: 10000 })));
+    await Promise.all([h2a, h2b].map((pg) => pg.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).waitFor({ timeout: 10000 })));
     const beforeH2 = db.queueCalls.length;
     // Both taps leave before either answer comes back (the restart's realtime
     // update follows the first answer), as two phones tapping at once.
@@ -401,7 +401,7 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
     const waitLines = await Promise.all([h2a, h2b].map((pg) => placeholder(pg, 1).innerText()));
     check(
       "H2 on both phones the part started over waits its turn, and nothing is left to tap",
-      waitLines.every((t) => t.includes("ממתין לתורו") && t.includes("בתור")) && (await h2a.getByRole("button", { name: "המשך כתיבה" }).count()) + (await h2b.getByRole("button", { name: "המשך כתיבה" }).count()) === 0,
+      waitLines.every((t) => t.includes("ממתין לתורו") && t.includes("בתור")) && (await h2a.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).count()) + (await h2b.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).count()) === 0,
       JSON.stringify(waitLines),
     );
     await h2a.context().close();
@@ -438,7 +438,7 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
     check(
       "H4 deleted while written: the run stops at the part in flight, nothing is offered, every part says why",
       inFlight() === 1 &&
-        (await h4.getByRole("button", { name: "המשך כתיבה" }).count()) === 0 &&
+        (await h4.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).count()) === 0 &&
         h4Lines.every((t) => t.includes("הכתיבה נעצרה: ההרצאה נמחקה.") && t.includes("נעצר")) &&
         (await h4.locator(".a-error[role=alert]").allInnerTexts()).join("|") === "ההרצאה הזו נמחקה או לא נמצאה. אפשר לבדוק ב״נמחקו לאחרונה״.",
       JSON.stringify({ calls: inFlight(), h4Lines }),
@@ -462,8 +462,8 @@ const pdfName = (title) => `${title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").
     db.sectionDelayMs = 0;
     Object.assign(lh4, { deleted_at: null, deleted_by: null });
     mock.notify("study_lectures", "UPDATE", lh4);
-    await h4.getByRole("button", { name: "המשך כתיבה" }).waitFor({ timeout: 10000 });
-    await h4.getByRole("button", { name: "המשך כתיבה" }).click();
+    await h4.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).waitFor({ timeout: 10000 });
+    await h4.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).click();
     await h4.locator('[data-part="3"]').waitFor({ timeout: 30000 });
     check(
       "H4 restored: המשך כתיבה writes the rest, no alert stays, and the footer's read mark and delete are back",

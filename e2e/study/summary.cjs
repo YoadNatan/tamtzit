@@ -74,7 +74,7 @@ const flags = flagSetOf();
       await page.getByText(/החלק לקח יותר מדי זמן לשרת/).waitFor({ timeout: 60000 });
       steps.timeoutMessage = true;
       steps.progressAfterTimeout = await page.getByText(/נכתבו \d+ מתוך \d+ חלקים/).textContent();
-      await page.getByRole("button", { name: "המשך כתיבה" }).click();
+      await page.locator(".lecture-foot").getByRole("button", { name: "המשך כתיבה" }).click();
       steps.retried = true;
     }
     await page.getByText(/חלקים · 20 שקפים/).waitFor({ timeout: 60000 });

@@ -926,14 +926,15 @@ a.pc-wa {
 .room-status.following {
   color: var(--accent);
 }
-/* 320 px (an iPhone SE): one line cut "מעקב: שוהם" to "מעק…"; the room
-   wraps instead, the status and its button on a line of their own (WP6). */
+/* 320 px (an iPhone SE): one line cut "מעקב: שוהם" to "מעק…"; while
+   following, the room wraps instead, the status and its button on a line of
+   their own (WP6). The reader's own room keeps its one line. */
 @media (max-width: 373.98px) {
-  .room-bar {
+  .room-bar:has(.room-status.following) {
     flex-wrap: wrap;
     row-gap: var(--sp-2);
   }
-  .room-action {
+  .room-bar:has(.room-status.following) .room-action {
     flex: 1 1 100%;
   }
 }
@@ -1003,9 +1004,10 @@ a.pc-wa {
   padding-top: var(--sp-4);
   border-top: 1px solid var(--line);
 }
-/* In a sheet the composer stays at its bottom while the thread scrolls, so
-   the keyboard never hides "לשלוח" (WP5). */
-.a-sheet .composer {
+/* In a sheet, while its field is typed in, the composer stays at the sheet's
+   bottom, so the keyboard never hides "לשלוח" (WP5). Only then: otherwise
+   it would sit over the thread's own buttons. */
+.a-sheet .composer:has(textarea:focus) {
   position: sticky;
   bottom: 0;
   z-index: 1;
