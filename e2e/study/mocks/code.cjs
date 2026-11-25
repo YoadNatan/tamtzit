@@ -41,7 +41,8 @@ module.exports = {
     const member = (id) => db.members.some((m) => m.user_id === id);
     const set = (userId, by) => {
       const code = makeCode();
-      db.codes.byUser.set(userId, { hash: norm(code), created_at: now(), issued_by: by, seen_at: null });
+      const replaced = db.codes.byUser.has(userId);
+      db.codes.byUser.set(userId, { hash: norm(code), created_at: now(), issued_by: by, seen_at: null, replaced, used_at: null, uses: 0 });
       return code;
     };
     switch (fn) {
@@ -52,7 +53,18 @@ module.exports = {
         const c = db.codes.byUser.get(who.id);
         const byOpener = Boolean(c && c.issued_by !== who.id);
         const byName = byOpener ? (db.members.find((m) => m.user_id === c.issued_by)?.name ?? null) : null;
-        return json([{ has_code: Boolean(c), created_at: c?.created_at ?? null, by_opener: byOpener, by_name: byName, notice: byOpener && !c.seen_at }]);
+        return json([
+          {
+            has_code: Boolean(c),
+            created_at: c?.created_at ?? null,
+            by_opener: byOpener,
+            by_name: byName,
+            notice: byOpener && !c.seen_at,
+            replaced: Boolean(c?.replaced),
+            used_at: c?.used_at ?? null,
+            uses: c?.uses ?? 0,
+          },
+        ]);
       }
       case "study_code_seen": {
         const c = db.codes.byUser.get(who.id);
@@ -85,11 +97,14 @@ module.exports = {
     }
     if (p !== "/api/study/code") return undefined;
     if (req.method !== "POST") return send(405, { error: "POST only" });
+    if (!/^application\/json\b/i.test(req.headers["content-type"] ?? "")) return send(415, { error: "json only" });
     if (req.headers.authorization) db.codes.redeems.push({ withToken: true });
     const code = norm(body?.code);
     const hit = code ? [...db.codes.byUser.entries()].find(([, c]) => c.hash === code) : undefined;
     db.codes.redeems.push({ code, found: Boolean(hit) });
     if (!hit || !db.members.some((m) => m.user_id === hit[0])) return send(401, { error: "code not found" });
+    hit[1].used_at = now();
+    hit[1].uses += 1;
     return send(200, auth.issue(hit[0]));
   },
 };

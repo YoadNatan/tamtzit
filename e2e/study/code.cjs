@@ -1,8 +1,13 @@
 // The personal code (docs/study/personal-code.md; SQL section I): a member
 // who joins gets a code to keep; entering it in another browser (typed, or
-// the #k= link) brings back the same member, never a new one; a new code
-// stops the old one; the group's opener makes a member a new code, and the
-// member sees who did. The mock's plugin (mocks/code.cjs) plays the server.
+// the #k= link) brings back the same member, never a new one, on a fresh
+// page; a new code stops the old one; the group's opener makes a member a new
+// code, and the member sees who did and that it was used; a member's own
+// link on their own device asks nothing; another member's link asks first,
+// and says when the member signed in here has no code to come back with; a
+// personal code pasted into the group's code field opens the code's panel;
+// "name taken" points to the code. The mock's plugin (mocks/code.cjs) plays
+// the server.
 //
 //   NODE_PATH=$(npm root -g) node e2e/study/code.cjs <dist> [set]
 //   E2E_SHOTS=<dir>   also saves the four screens, light and dark (390×844)
@@ -19,6 +24,9 @@ const SHOTS = process.env.E2E_SHOTS || "";
 const CODE_RE = /^[2-9A-HJ-NP-Z]{4}(-[2-9A-HJ-NP-Z]{4}){3}$/;
 const NOT_FOUND = "הקוד הזה לא נמצא. כדאי לבדוק אותו שוב, או לבקש קוד חדש ממי שפתחו את הקבוצה.";
 const GROUP_HINT = "זה נראה כמו קוד הקבוצה. הקוד האישי ארוך יותר: 16 תווים.";
+const ALREADY_IN = "הכניסה כבר פעילה במכשיר הזה.";
+const NO_CODE = "לכניסה בשם נועה אין קוד אישי, ואי אפשר יהיה לחזור אליה.";
+const NAME_TAKEN = "השם הזה כבר בשימוש בקבוצה. זה השם שלך? נכנסים עם הקוד האישי. אחרת אפשר להוסיף אות או שם משפחה.";
 const steps = {};
 let ok = true;
 const check = (name, pass, detail) => {
@@ -85,6 +93,10 @@ const check = (name, pass, detail) => {
     await mine.waitFor({ timeout: 15000 });
     check("entry: שלי says דנה (החשבון שלך)", (await mine.innerText()).includes("דנה"), await mine.innerText());
     check("entry: no new member, no join", mock.db.members.length === membersBefore && joins() === joinsBefore, `${mock.db.members.length} ${joins()}`);
+    // The device keeps the code it came in with: "שלי" can show it again (review product 6).
+    const cardB = b.locator(".pc-card");
+    await cardB.waitFor({ timeout: 15000 });
+    check("entry: שלי can show the code here", (await cardB.getByRole("button", { name: "הצגה" }).count()) === 1 && (await cardB.innerText()).includes("כניסה אחרונה עם הקוד:"), await cardB.innerText());
 
     // 3. The #k= link in a third browser: in as דנה, and the code leaves the address.
     const { page: c } = await mock.open(browser, null, { path: `/#k=${code.replace(/-/g, "")}` });
@@ -104,6 +116,24 @@ const check = (name, pass, detail) => {
     await d.getByRole("button", { name: "כניסה", exact: true }).click();
     check("group code: refused before any call", (await d.locator(".a-error").innerText()).trim() === GROUP_HINT);
     check("back to joining", await d.getByRole("button", { name: "חזרה להצטרפות לקבוצה" }).isVisible());
+    // The personal code pasted into the group's code field: the code's panel, with it.
+    await d.getByRole("button", { name: "חזרה להצטרפות לקבוצה" }).click();
+    await d.locator(".code-input").fill(code.toLowerCase());
+    const f4b = d.getByRole("textbox", { name: "הקוד האישי" });
+    await f4b.waitFor({ timeout: 10000 });
+    check("group field: a personal code opens its panel", (await f4b.inputValue()) === code, await f4b.inputValue());
+    await d.getByRole("button", { name: "חזרה להצטרפות לקבוצה" }).click();
+    // "name taken": the returning member is pointed at the code.
+    await d.getByRole("tab", { name: "יש לי קוד קבוצה" }).click();
+    await d.getByRole("textbox", { name: "השם שלך" }).fill("דנה");
+    await d.locator(".code-input").fill("ABC123");
+    await d.getByRole("button", { name: "הצטרפות" }).click();
+    await d.locator(".a-error").waitFor({ timeout: 10000 });
+    check("name taken: points to the code", (await d.locator(".a-error").innerText()).trim() === NAME_TAKEN, await d.locator(".a-error").innerText());
+    check("name taken: the way in under it", (await d.getByRole("button", { name: "כניסה עם הקוד האישי", exact: true }).count()) === 1);
+    // A body that is not JSON: 415, nothing counted.
+    const plain = await d.evaluate(async () => (await fetch("/api/study/code", { method: "POST", headers: { "content-type": "text/plain" }, body: '{"code":"x"}' })).status);
+    check("redeem: JSON only (415)", plain === 415, String(plain));
 
     // 5. שלי → "קוד חדש": the old code stops working.
     await a.goto(`${mock.base}/?v=me`);
@@ -143,12 +173,49 @@ const check = (name, pass, detail) => {
     await a.goto(`${mock.base}/?v=me`);
     const notice = a.locator(".pc-notice");
     await notice.waitFor({ timeout: 15000 });
-    check("דנה: the notice names שוהם", (await notice.innerText()).includes("מי שפתחו את הקבוצה (שוהם) יצרו לך קוד אישי חדש"), await notice.innerText());
+    const noticeText = await notice.innerText();
+    check("דנה: the notice names שוהם", noticeText.includes("מי שפתחו את הקבוצה (שוהם) יצרו לך קוד אישי חדש"), noticeText);
+    check("דנה: the notice says the code before stopped and the new one was used", noticeText.includes("הקוד הקודם כבר לא עובד.") && noticeText.includes("הקוד החדש כבר שימש לכניסה ב-"), noticeText);
     await notice.getByRole("button", { name: "הבנתי" }).click();
     await notice.waitFor({ state: "detached", timeout: 10000 });
     check("דנה: הבנתי clears it", (await a.locator(".pc-notice").count()) === 0);
 
-    // 7. Nothing the schema refuses, no error on any page; no member token on a redeem.
+    // 7. Own link, own device: nothing to ask. (a holds code2 from step 5; make it current again.)
+    await a.goto(`${mock.base}/?v=me`);
+    const cardA = a.locator(".pc-card");
+    await cardA.waitFor({ timeout: 15000 });
+    await cardA.getByRole("button", { name: "קוד חדש" }).click();
+    await cardA.getByRole("button", { name: "יצירה" }).click();
+    await cardA.locator(".pc-code").waitFor({ timeout: 10000 });
+    const code4 = (await cardA.locator(".pc-code").innerText()).trim();
+    const redeemsBefore = mock.db.codes.redeems.length;
+    await a.goto(`${mock.base}/?v=library#k=${code4.replace(/-/g, "")}`);
+    await a.locator(".a-toast", { hasText: ALREADY_IN }).waitFor({ timeout: 15000 });
+    check("own link: one line, no question", (await a.getByRole("dialog").count()) === 0);
+    check("own link: no redeem", mock.db.codes.redeems.length === redeemsBefore);
+
+    // 8. נועה (no code) on her phone, the home first: the prompt is on Today.
+    const { page: n } = await mock.open(browser, "נועה", { path: "/" });
+    await n.locator(".pc-prompt").waitFor({ timeout: 15000 });
+    check("home: the prompt for a member without a code", (await n.locator(".pc-prompt").innerText()).includes("חדש: קוד אישי."));
+    // דנה's link on נועה's phone: asked first, with what is lost.
+    await n.goto(`${mock.base}/?v=library#k=${code4.replace(/-/g, "")}`); // a new page load, as a tapped link is
+    const ask = n.getByRole("dialog", { name: "כניסה עם הקוד האישי" });
+    await ask.waitFor({ timeout: 15000 });
+    await ask.locator(".pc-nocode").waitFor({ timeout: 10000 });
+    check("other link: asks first, and says נועה has no code", (await ask.locator(".pc-nocode").innerText()).trim() === NO_CODE, await ask.innerText());
+    check("other link: offers a code first", (await ask.getByRole("button", { name: "יצירת קוד קודם" }).count()) === 1);
+    await shot(n, "5-link-other-member");
+    await n.evaluate(() => (window.__pageBefore = true));
+    await ask.getByRole("button", { name: "כניסה עם הקוד" }).click();
+    await n.locator(".a-toast", { hasText: "חזרה לקבוצה בתור דנה." }).waitFor({ timeout: 15000 });
+    check("other link: in as דנה", (await userOf(n)) === dana);
+    // A fresh page: nothing of נועה's (the cards' outbox, its timer) keeps running with דנה's session.
+    check("other link: on a fresh page", (await n.evaluate(() => window.__pageBefore)) !== true);
+    await n.waitForTimeout(1500);
+    check("other link: the question does not come back", (await n.getByRole("dialog").count()) === 0);
+
+    // 9. Nothing the schema refuses, no error on any page; no member token on a redeem.
     check("redeem: never with a member token", !mock.db.codes.redeems.some((r) => r.withToken));
     check("no problems", mock.problems.length === 0, mock.problems.join(" | "));
   } catch (e) {
