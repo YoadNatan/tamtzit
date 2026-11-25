@@ -293,7 +293,11 @@ main.join {
 }
 @media (max-width: 359px) {
   .join .a-seg > .a-btn {
-    font-size: 0.78rem;
+    font-size: 0.8125rem;
+  }
+  /* 13 px (the smallest label) needs the card's side room for the tiles. */
+  .join-form {
+    padding-inline: var(--sp-6);
   }
 }
 /* A field's own width (the code field's letter spacing) never widens the form. */
@@ -302,6 +306,38 @@ main.join {
   font-weight: 700;
   letter-spacing: 0.3em;
   text-align: center;
+}
+/* The code's placeholder is lighter than a typed code, so "ABC123" never reads as filled in. */
+.code-input::placeholder {
+  font-weight: 400;
+  opacity: 0.7;
+}
+/* A short screen (an iPhone SE, a phone held sideways): a compact hero, so
+   the name, the code and "הצטרפות" show without scrolling. */
+@media (max-height: 640px) {
+  main.join {
+    justify-content: flex-start;
+    padding-top: calc(var(--sp-8) + env(safe-area-inset-top, 0px));
+  }
+  .join-card {
+    gap: var(--sp-4);
+  }
+  .join-kicker::before {
+    width: 16px;
+    height: 16px;
+    margin-bottom: var(--sp-4);
+    border-radius: 5px;
+    box-shadow:
+      -22px 0 0 var(--group-pop),
+      -44px 0 0 var(--fun-pop),
+      -66px 0 0 var(--ok-pop);
+  }
+  .join-name {
+    font-size: 2.25rem;
+  }
+  .join-form {
+    gap: var(--sp-4);
+  }
 }
 .join-signin {
   justify-self: start;

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { createGroup, joinGroup, type Group } from "../lib/api";
 import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
@@ -26,6 +26,8 @@ type Props = {
 };
 
 const NAME_KEY = "study-my-name";
+/** The server is not set up for joining yet (its cause goes to the console). */
+const JOIN_NOT_READY = "ההצטרפות לא זמינה כרגע. אפשר לנסות שוב בעוד כמה דקות.";
 /** "name taken" once the personal code is offered: a returning member is
  *  pointed at their code before a second "דנה 2" is made. */
 const NAME_TAKEN_CODE = "השם הזה כבר בשימוש בקבוצה. זה השם שלך? נכנסים עם הקוד האישי. אחרת אפשר להוסיף אות או שם משפחה.";
@@ -53,17 +55,29 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [taken, setTaken] = useState(false);
+  // Which field the error is about (it gets aria-invalid, the error's id and the focus), or none.
+  const [bad, setBad] = useState<"name" | "code" | "group" | null>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
+  const groupRef = useRef<HTMLInputElement>(null);
+  const fail = (text: string, field: "name" | "code" | "group" | null) => {
+    setError(text);
+    setBad(field);
+    const ref = field === "name" ? nameRef : field === "code" ? codeRef : field === "group" ? groupRef : null;
+    ref?.current?.focus();
+  };
   // The guide (VITE_STUDY_GUIDE): was a code ever here? Picking "פתיחת קבוצה
   // חדשה" without one is how a member ends up alone in a new group.
   const [hadCode] = useState(() => Boolean(initialCode));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return setError("מה השם שלך?");
-    if (mode === "join" && code.trim().length < 6) return setError("הקוד הוא 6 תווים. אפשר לבקש אותו מהקבוצה.");
-    if (mode === "create" && !groupName.trim()) return setError("איך נקרא לקבוצה?");
+    if (!name.trim()) return fail("מה השם שלך?", "name");
+    if (mode === "join" && code.trim().length < 6) return fail("הקוד הוא 6 תווים. אפשר לבקש אותו מהקבוצה.", "code");
+    if (mode === "create" && !groupName.trim()) return fail("איך נקרא לקבוצה?", "group");
     setBusy(true);
     setError("");
+    setBad(null);
     setTaken(false);
     try {
       try {
@@ -76,14 +90,16 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
       onJoined(g);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      if (/wrong code/i.test(msg)) setError(failText("wrong code"));
+      if (/wrong code/i.test(msg)) fail(failText("wrong code"), "code");
       else if (msg === "name taken") {
-        setError(failText("name taken"));
+        fail(failText("name taken"), "name");
         setTaken(true);
-      } else if (/groups closed/i.test(msg)) setError(failText("groups closed"));
-      else if (/anonymous/i.test(msg)) setError("הכניסה עוד לא הופעלה בשרת. צריך להפעיל Anonymous sign-ins ב-Supabase.");
-      else if (/study_/i.test(msg) || /does not exist/i.test(msg)) setError("מסד הנתונים עוד לא הוכן. צריך להריץ את study-schema.sql ב-Supabase.");
-      else setError("משהו השתבש בכניסה. אפשר לנסות שוב בעוד רגע.");
+      } else if (/groups closed/i.test(msg)) fail(failText("groups closed"), null);
+      else if (/anonymous/i.test(msg) || /study_/i.test(msg) || /does not exist/i.test(msg)) {
+        // The server is not set up (anonymous sign-ins off, or the SQL not run): words for a member, the cause for whoever runs it.
+        console.warn("join: the server is not ready:", msg);
+        fail(JOIN_NOT_READY, null);
+      } else fail("משהו השתבש בכניסה. אפשר לנסות שוב בעוד רגע.", null);
     } finally {
       setBusy(false);
     }
@@ -91,6 +107,7 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
 
   const toCode = () => {
     setError("");
+    setBad(null);
     setPanel(true);
   };
 
@@ -172,16 +189,31 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
           <form onSubmit={submit} className="a-stack">
             <label className="a-field">
               <span>השם שלך</span>
-              <input className="a-input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="given-name" maxLength={60} placeholder="למשל: שוהם" />
+              <input
+                ref={nameRef}
+                className="a-input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoComplete="given-name"
+                enterKeyHint={mode === "join" && code.trim().length >= 6 ? "go" : "next"}
+                maxLength={60}
+                placeholder="למשל: שוהם"
+                aria-invalid={bad === "name" || undefined}
+                aria-describedby={bad === "name" ? "join-error" : undefined}
+              />
             </label>
             {mode === "join" ? (
               <label className="a-field">
                 <span>קוד הקבוצה</span>
                 <input
+                  ref={codeRef}
                   value={code}
                   onChange={(e) => typeCode(e.target.value)}
                   dir="ltr"
                   inputMode="text"
+                  enterKeyHint="go"
+                  aria-invalid={bad === "code" || undefined}
+                  aria-describedby={bad === "code" ? "join-error" : undefined}
                   autoCapitalize="characters"
                   maxLength={codes ? 300 : 8}
                   placeholder="ABC123"
@@ -191,11 +223,21 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
             ) : (
               <label className="a-field">
                 <span>שם הקבוצה</span>
-                <input className="a-input" value={groupName} onChange={(e) => setGroupName(e.target.value)} maxLength={80} placeholder="למשל: קבוצת הלמידה של שנה ג׳" />
+                <input
+                  ref={groupRef}
+                  className="a-input"
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  maxLength={80}
+                  enterKeyHint="go"
+                  placeholder="למשל: קבוצת הלמידה של שנה ג׳"
+                  aria-invalid={bad === "group" || undefined}
+                  aria-describedby={bad === "group" ? "join-error" : undefined}
+                />
               </label>
             )}
             {error ? (
-              <p className="a-error" role="alert">
+              <p className="a-error" role="alert" id="join-error">
                 {taken && codes ? NAME_TAKEN_CODE : error}
               </p>
             ) : null}
