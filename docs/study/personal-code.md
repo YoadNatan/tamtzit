@@ -19,25 +19,41 @@ Owner steps: [`RELEASE-I1.md`](RELEASE-I1.md).
 - **Right after joining or opening a group:** "הקוד האישי שלך", with
   "שליחה לעצמי בוואטסאפ", "העתקה", "שיתוף" (where the browser has a share
   sheet) and "שמרתי, ממשיכים".
-- **On the join screen:** "כבר בקבוצה? כניסה עם הקוד האישי" under the form,
-  "זה השם שלך? כניסה עם הקוד האישי" under "name taken", and in the
-  home-screen app a callout at the top. The field takes the code in any case,
-  with spaces or dashes, the whole link, or the whole WhatsApp message. Six
-  characters get a hint that this looks like the group's code.
+- **On the join screen:** "כבר בקבוצה? כניסה עם הקוד האישי" above the form
+  (above the fold at 320×568), "name taken" worded for a returning member
+  ("…זה השם שלך? נכנסים עם הקוד האישי. אחרת…") with "כניסה עם הקוד האישי"
+  under it, and in the home-screen app a callout at the top instead of the
+  link. The field takes the code in any case, with spaces or dashes, the
+  whole link, or the whole WhatsApp message, and shows it as
+  XXXX-XXXX-XXXX-XXXX once it reads as one. Six characters get a hint that
+  this looks like the group's code. The tab is "יש לי קוד קבוצה"; a personal
+  code pasted into the group's code field opens the code's panel with it.
 - **The saved link (`#k=`):** on a device with no member, it signs in at once
   ("נכנסים עם הקוד האישי…", then "חזרה לקבוצה בתור …"). Where another member
-  is signed in, it asks first. The fragment leaves the address bar as the
-  app loads.
-- **"שלי" → "הקוד האישי":** create one; "הצגה" (only for a code made on this
-  device and not replaced since); "קוד חדש" (the old one stops working,
-  devices already signed in stay signed in); "ניתוק המכשירים האחרים" (signs
-  out every other device and makes a new code).
-- **Above the library:** a prompt for a member without a code ("אחר כך"
-  hides it for 3 days), or the opener's notice.
+  is signed in, it asks first; when that member has no code, the question
+  says so ("לכניסה בשם … אין קוד אישי, ואי אפשר יהיה לחזור אליה.") and offers
+  "יצירת קוד קודם". The code this device already holds (its own link, tapped
+  to test it) only says "הכניסה כבר פעילה במכשיר הזה.". The fragment leaves
+  the address bar as the app loads.
+- **Every sign-in with the code ends with a fresh page** (`location.replace`):
+  nothing of the member signed in before (the cards' outbox and its timer,
+  channels) keeps running with the new member's session. The toast waits in
+  sessionStorage across the reload. The device keeps the code it came in
+  with, so "שלי" can show it again there.
+- **"שלי" → "הקוד האישי":** create one; "הצגה" (only for a code made or
+  entered on this device and not replaced since); "קוד חדש" (the old one
+  stops working, devices already signed in stay signed in); "ניתוק המכשירים
+  האחרים" (makes a new code first, then signs out every other device, so the
+  old code cannot slip in between); "כניסה אחרונה עם הקוד: …" once it was used.
+- **On the home (היום) and above the library:** a prompt for a member without
+  a code ("אחר כך" hides it for 3 days), or the opener's notice.
 - **The group's opener:** "קוד אישי חדש" beside each member, a confirm, then
   a sheet with the code to send privately ("הקוד מוצג רק עכשיו"). The
   member then sees "מי שפתחו את הקבוצה (…) יצרו לך קוד אישי חדש ב-…" until
-  "הבנתי". The chip "יש קוד" shows who has one.
+  "הבנתי", with "הקוד הקודם כבר לא עובד." only when there was one, "הקוד
+  החדש כבר שימש לכניסה ב-…" once it was used, and where to cut off other
+  devices. The chip "יש קוד" shows who has one. Making the first code after
+  joining never replaces a code the member already has.
 - **"יציאה מהמכשיר הזה"** asks first, and says that coming back needs the
   code.
 
@@ -95,9 +111,14 @@ Vercel changes either.
   bias), stored only as `sha256('tamtzit-code-v1:' || code)`. It is never
   logged; the link carries it in the fragment, which browsers do not send to
   servers.
-- **Guessing**: 10 wrong tries per address per 15 minutes and 100 in all per
-  hour, on top of Auth's own limit. That is at most about 2,400 tries a day
-  against 2^80 codes.
+- **Guessing**: 10 wrong tries per address per 15 minutes and 1,000 in all
+  per hour, on top of Auth's own limit: at most 24,000 tries a day against
+  2^80 codes (about 1e-16 a year for one of 6 codes). The overall cap is only
+  a backstop (a leaked server key could forge addresses); lower, a few
+  addresses could lock every member out. `/api/study/code` takes only
+  `application/json` (415 otherwise), so another site cannot spend the limit
+  from its visitors' browsers with a preflight-free cross-site post. The
+  address is stored as a sha256 keyed with the server key, kept a day.
 - **The one-time sign-in**: a random undeliverable address
   (`c-<18 hex>@code.tamtzit.invalid`) and a 192-bit random password, bcrypt at
   cost 10, on one user, for about a second (3 minutes at most), never sent to
@@ -109,13 +130,35 @@ Vercel changes either.
   study member with no address of its own (or only our synthetic one), so a
   user of another app in the shared project is never touched. Row Level
   Security is unchanged.
-- **The opener can take over any member** (Yoad's choice: a lost code must be
-  replaceable). The visible notice, `issued_by` and `code_log` are the
-  mitigations; the member can answer with "ניתוק המכשירים האחרים".
+- **The opener can act as any member** (Yoad's choice: a lost code must be
+  replaceable, and the opener sees the code they make). Mitigations: the
+  member's notice names the opener, says when the new code was already used
+  ("הקוד החדש כבר שימש לכניסה ב-…"), "שלי" shows the last use of every code,
+  `issued_by` and `code_log` keep the record, and the member can answer with
+  "ניתוק המכשירים האחרים". `study_code_issue` refuses a member who is also in
+  a group the caller did not open (one group today; a guard for later).
 - **A stolen code**: the opener makes a new code (or the member does), and the
   member uses "ניתוק המכשירים האחרים". A device signed out that way keeps an
   access token for up to an hour (the same gap `study_remove_member`
-  accepts); `/api/study/*` refuses it at once.
+  accepts); `/api/study/*` refuses it at once, and so do the code functions:
+  `study_code_new`, `study_code_issue` and `study_code_seen` need a session
+  Auth still has (`auth.sessions`, the token's `session_id`), so that token
+  cannot make a new code and undo the rotation.
+- **The link and the message are a password.** The `#k=` link leaves the
+  address bar at once, but a browser's own history database may still hold
+  the visited URL; the code sits in plain text in the member's WhatsApp
+  message and, after it was made or entered here, in this device's
+  `localStorage` (`study-code:<user>`, beside the session's refresh token,
+  removed when the member leaves the device).
+- **"שליחה לעצמי בוואטסאפ" uses `https://wa.me/?text=…`** (accepted risk,
+  review security 4): the code is in that URL's query string, so it can reach
+  WhatsApp's own request logs when the page loads instead of handing off to
+  the app (on iPhone and Android with WhatsApp installed, the link opens the
+  app). Yoad asked for exactly this button; "שיתוף" (the system share sheet,
+  where the browser has one) sends the same text without that URL.
+- **A link to someone else's code** signs a device with no member in as that
+  member without asking (the toast "חזרה לקבוצה בתור …" names them). Where a
+  member is signed in, it asks first and warns when that member has no code.
 - **Unsupported write**: section I writes `auth.users` directly (four columns
   of one study member for seconds). It checks at install that it may (and
   stops before creating anything if not), fails closed (nobody gets in), and
@@ -175,7 +218,7 @@ everything of theirs that cascades.
 ## For the ~6 members already in the group
 
 No data moves. After part 9 and the deploy, each member's device shows the
-prompt above the library; "יצירת הקוד" opens the sheet. The opener's member
+prompt on the home (היום) and above the library; "יצירת הקוד" opens the sheet. The opener's member
 list shows who has "יש קוד".
 
 A member already split in two (say "דנה" with no device and "דנה 2"): the

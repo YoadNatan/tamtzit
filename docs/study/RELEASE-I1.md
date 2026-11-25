@@ -23,8 +23,10 @@ no Auth setting changes, and no service-role key.
 0. **Before anything (1 minute, read only).** In the Supabase SQL Editor:
    ```sql
    select r.rolbypassrls,
-          has_column_privilege('auth.users','encrypted_password','UPDATE') pw,
-          has_column_privilege('auth.users','email_change','UPDATE') ec,
+          (select bool_and(has_column_privilege('auth.users', c, 'UPDATE'))
+             from unnest(array['email','encrypted_password','email_confirmed_at','updated_at','email_change',
+                               'email_change_token_new','email_change_token_current','email_change_confirm_status']) c) auth_columns,
+          has_table_privilege('auth.sessions', 'SELECT') sessions,
           to_regprocedure('extensions.crypt(text,text)') is not null pgcrypto
      from pg_roles r where r.rolname = current_user;
    select tgname, pg_get_triggerdef(oid) from pg_trigger
@@ -37,8 +39,14 @@ no Auth setting changes, and no service-role key.
    - **If anything is false: stop** and tell Claude; the fallback design
      needs a service-role key instead.
 1. **Before the merge:** run `supabase/parts/9.sql` once (parts 1 to 8 are
-   unchanged; running them again is harmless as long as the run goes on
-   through `9.sql`). Then `select study_schema()->'I';` returns `1`.
+   unchanged but for comments; running them again is harmless as long as the
+   run goes on through `9.sql`). Then:
+   ```sql
+   select study_schema()->'I';                                        -- 1
+   select count(*) from cron.job where jobname = 'study-code-restore';  -- 1
+   ```
+   (No pg_cron: 0, and the sweep still runs on every redeem and every status
+   read.)
 2. **Merge and deploy** `dev` as usual. No Vercel variable changes.
 3. **Check** `https://<app>/api/study/health`: `"codes": true`.
 4. **Smoke test**, on your own phone:

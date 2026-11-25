@@ -25,7 +25,10 @@ are: a row that only its owner may read stays owner-only.
 > and `is_anonymous` stays true: the code reaches Auth's password sign-in
 > only through a one-time random address and password that the server uses
 > and removes within seconds. A lost code: the group's opener makes a new
-> one, and the member sees who did. A member is now the anonymous user,
+> one, and the member sees who did, and when that code was used. This means
+> **the opener can act as any member** (they see the code they make): an
+> accepted trade for a group of six, mitigated by the notice, the last-use
+> line and "ניתוק המכשירים האחרים". A member is now the anonymous user,
 > on as many devices as they enter the code on, not only the first device.
 
 ### What it changes in the addendum
