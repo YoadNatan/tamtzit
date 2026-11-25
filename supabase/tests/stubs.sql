@@ -144,3 +144,9 @@ alter table auth.users add column if not exists email_change_confirm_status smal
 create unique index if not exists users_email_partial_key on auth.users (email) where is_sso_user = false;
 create table if not exists auth.one_time_tokens (id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade, token_type text not null, token_hash text not null);
+-- Auth's sessions (one row per signed-in device; signOut deletes rows), as
+-- section I reads them: a code needs a session Auth still has.
+create table if not exists auth.sessions (id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade, created_at timestamptz default now(),
+  updated_at timestamptz, not_after timestamptz);
+create index if not exists sessions_user_id_idx on auth.sessions (user_id);

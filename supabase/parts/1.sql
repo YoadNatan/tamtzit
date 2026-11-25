@@ -875,6 +875,8 @@ end;
 $$;
 
 -- Which members saved their account (the "שמור" mark next to a name).
+-- Section I (part 9) redefines it to count a personal code too: a rerun of
+-- this part alone must be followed by part 9 again.
 create or replace function public.study_member_saved(p_group uuid)
 returns table (user_id uuid, saved boolean) language sql stable security definer set search_path = public as $$
   select m.user_id, not coalesce(u.is_anonymous, true)

@@ -9198,6 +9198,10 @@ insert into auth.users (id, email, raw_user_meta_data, is_anonymous, encrypted_p
  ('19000000-0000-4000-8000-000000000003', null, '{"app":"study","full_name":"זרה"}', true, ''),
  ('19000000-0000-4000-8000-000000000004', 'real@example.com', '{}', false, '$2a$10$abcdefghijklmnopqrstuuOrigOrigOrigOrigOrigOrigOrigOrig'),
  ('19000000-0000-4000-8000-000000000005', null, '{"app":"study","full_name":"אורי"}', true, '');
+-- Each member's one session (auth.sessions; the JWT's session_id names it).
+insert into auth.sessions (id, user_id)
+select ('29000000-0000-4000-8000-00000000000' || n)::uuid, ('19000000-0000-4000-8000-00000000000' || n)::uuid
+  from generate_series(1, 5) n;
 -- A group of its own for these checks (study_create_group allows one group: made directly).
 insert into public.study_groups (id, name, join_code, created_by)
 values ('19000000-0000-4000-8000-0000000000a1', 'קבוצת הקוד', 'ICODE1', '19000000-0000-4000-8000-000000000001');
@@ -9214,28 +9218,62 @@ select 'I1b. ' || case when count(distinct ch) = 32 then 'ok' else 'FAIL' end ||
   from (select regexp_split_to_table(replace(study_private.code_make(), '-', ''), '') ch from generate_series(1, 500)) s;
 
 set role authenticated;
-set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000002"}';
 select 'I2. ' || case when not has_code then 'ok' else 'FAIL' end || ': no code before' from public.study_code_status();
 select public.study_code_new() as dana_code \gset
-select 'I2b. ' || case when s.has_code and not s.by_opener and not s.notice then 'ok' else 'FAIL' end || ': Dana has her own code'
+select 'I2b. ' || case when s.has_code and not s.by_opener and not s.notice and not s.replaced and s.uses = 0 and s.used_at is null
+  then 'ok' else 'FAIL' end || ': Dana has her own code (her first: it replaced none, never used)'
   from public.study_code_status() s;
+-- "ניתוק המכשירים האחרים" deleted this session: its token, still valid for up to an hour, makes no code.
+reset role;
+delete from auth.sessions where id = '29000000-0000-4000-8000-000000000002';
+set role authenticated;
+do $$ begin perform public.study_code_new(); raise notice 'I2c. FAIL: an ended session made a code';
+exception when others then raise notice 'I2c. %: an ended session makes no code (%)', case when sqlerrm = 'session ended' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000001"}';
+do $$ begin perform public.study_code_new(); raise notice 'I2d. FAIL: another user''s session made a code';
+exception when others then raise notice 'I2d. %: nor another user''s session (%)', case when sqlerrm = 'session ended' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claims = '{}';
+do $$ begin perform public.study_code_new(); raise notice 'I2e. FAIL: a token without a session made a code';
+exception when others then raise notice 'I2e. %: nor a token without session_id (%)', case when sqlerrm = 'session ended' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+insert into auth.sessions (id, user_id) values ('29000000-0000-4000-8000-000000000002', '19000000-0000-4000-8000-000000000002');
+set role authenticated; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000002"}';
 do $$ begin perform count(*) from study_private.member_codes; raise notice 'I3. FAIL: a member reads the codes';
 exception when insufficient_privilege then raise notice 'I3. ok: the codes are closed to members'; end $$;
 do $$ begin perform public.study_code_redeem('X', '1.1.1.1', 'k-0123456789abcdef0123456789abcdef'); raise notice 'I3b. FAIL: a member calls redeem';
 exception when insufficient_privilege then raise notice 'I3b. ok: only the server (anon key + server key) redeems'; end $$;
 
 -- Not a member: no code. Not the opener: no codes for others. Never a real address.
-set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000003';
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000003'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000003"}';
 do $$ begin perform public.study_code_new(); raise notice 'I4. FAIL: a stranger got a code';
 exception when others then raise notice 'I4. %: a stranger gets no code (%)', case when sqlerrm = 'no code here' then 'ok' else 'FAIL' end, sqlerrm; end $$;
-set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000002"}';
 do $$ begin perform public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000005'); raise notice 'I5. FAIL';
 exception when others then raise notice 'I5. %: only the opener makes codes for others (%)', case when sqlerrm = 'not the creator' then 'ok' else 'FAIL' end, sqlerrm; end $$;
-set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000001';
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000001'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000001"}';
 do $$ begin perform public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000003'); raise notice 'I5b. FAIL';
 exception when others then raise notice 'I5b. %: not for someone outside the group (%)', case when sqlerrm = 'member not found' then 'ok' else 'FAIL' end, sqlerrm; end $$;
 do $$ begin perform public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000004'); raise notice 'I5c. FAIL';
 exception when others then raise notice 'I5c. %: never on a user with a real address (%)', case when sqlerrm = 'no code here' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+-- Ori is also in a group someone else opened: the opener makes Ori no code.
+reset role;
+insert into public.study_groups (id, name, join_code, created_by)
+values ('19000000-0000-4000-8000-0000000000a2', 'קבוצה אחרת', 'ICODE2', '19000000-0000-4000-8000-000000000003');
+insert into public.study_members (group_id, user_id, name) values
+ ('19000000-0000-4000-8000-0000000000a2', '19000000-0000-4000-8000-000000000003', 'זרה'),
+ ('19000000-0000-4000-8000-0000000000a2', '19000000-0000-4000-8000-000000000005', 'אורי');
+set role authenticated;
+do $$ begin perform public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000005'); raise notice 'I5d. FAIL';
+exception when others then raise notice 'I5d. %: not for a member of a group the caller did not open (%)', case when sqlerrm = 'not the creator' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+delete from public.study_groups where id = '19000000-0000-4000-8000-0000000000a2';
+set role authenticated;
+-- The opener's own session ended: no code for anyone.
+reset role; delete from auth.sessions where id = '29000000-0000-4000-8000-000000000001'; set role authenticated;
+do $$ begin perform public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000005'); raise notice 'I5e. FAIL';
+exception when others then raise notice 'I5e. %: an ended session of the opener makes no code (%)', case when sqlerrm = 'session ended' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role; insert into auth.sessions (id, user_id) values ('29000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000001'); set role authenticated;
 
 -- The server's call, as the anon key.
 reset role; reset request.jwt.claim.sub; set role anon;
@@ -9246,7 +9284,9 @@ reset role;
 select 'I7b. ' || case when count(*) = 1 then 'ok' else 'FAIL' end || ': and its try stays counted (' || count(*) || ')' from study_private.code_tries where not ok;
 select 'I7c. ' || case when count(*) = 0 then 'ok' else 'FAIL' end || ': no code is stored as text'
   from study_private.member_codes c where position(replace(:'dana_code', '-', '') in encode(c.code_hash, 'escape')) > 0;
-select 'I7d. ' || case when count(*) = 1 and bool_and(ip !~ '1\.1\.1\.1') then 'ok' else 'FAIL' end || ': the address is kept only as a hash'
+select 'I7d. ' || case when count(*) = 1 and bool_and(ip !~ '1\.1\.1\.1')
+                          and bool_and(ip <> encode(sha256(convert_to('tamtzit-ip:1.1.1.1', 'UTF8')), 'hex'))
+  then 'ok' else 'FAIL' end || ': the address is kept only as a hash, keyed with the server key'
   from study_private.code_tries;
 set role anon;
 select public.study_code_redeem(lower(replace(:'dana_code', '-', ' ')), '1.1.1.1', :'ikey') as r \gset
@@ -9271,7 +9311,7 @@ reset role;
 select 'I8d. ' || case when (:'r2')::jsonb ->> 'email' <> (:'r')::jsonb ->> 'email' and p.prev_pw = '' and p.prev_email is null
   then 'ok' else 'FAIL' end || ': a second redeem gets new values; the first "before" is kept'
   from study_private.code_pending p where p.user_id = '19000000-0000-4000-8000-000000000002';
-set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000002"}';
 select public.study_code_finish();
 reset role;
 select 'I9. ' || case when email is null and encrypted_password = '' and email_confirmed_at is null and is_anonymous
@@ -9295,7 +9335,7 @@ select 'I10c. ' || case when count(*) = 1 then 'ok' else 'FAIL' end || ': pg_cro
   from cron.job where jobname = 'study-code-restore' and schedule = '*/5 * * * *';
 
 -- A new code: the old one stops at once.
-set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000002"}';
 select public.study_code_new() as dana_code2 \gset
 reset role; set role anon;
 select 'I11. ' || case when public.study_code_redeem(:'dana_code', '1.1.1.1', :'ikey') ->> 'error' = 'code not found' then 'ok' else 'FAIL' end || ': the old code no longer opens';
@@ -9303,10 +9343,11 @@ reset role;
 select study_private.code_restore();
 
 -- The opener makes a new code for Dana: Dana is told, by name, once.
-set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000001';
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000001'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000001"}';
 select public.study_code_issue('19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000002') as dana_code3 \gset
-set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002';
-select 'I12. ' || case when s.by_opener and s.notice and s.by_name = 'פותחת' then 'ok' else 'FAIL' end || ': Dana sees that the opener made it'
+set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000002"}';
+select 'I12. ' || case when s.by_opener and s.notice and s.by_name = 'פותחת' and s.replaced and s.uses = 0 then 'ok' else 'FAIL' end
+  || ': Dana sees that the opener made it, in place of her code'
   from public.study_code_status() s;
 select public.study_code_seen();
 select 'I12b. ' || case when s.by_opener and not s.notice then 'ok' else 'FAIL' end || ': once seen, the notice goes' from public.study_code_status() s;
@@ -9316,6 +9357,10 @@ select 'I12c. ' || case when public.study_code_redeem(:'dana_code2', '1.1.1.1', 
   then 'ok' else 'FAIL' end || ': the code before it dies, the opener''s works';
 reset role;
 select study_private.code_restore('19000000-0000-4000-8000-000000000002');
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000002'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000002"}';
+select 'I12e. ' || case when s.uses = 1 and s.used_at is not null then 'ok' else 'FAIL' end || ': and that the opener''s code already brought a device in'
+  from public.study_code_status() s;
+reset role;
 select 'I12d. ' || string_agg(event, ',' order by id) from study_private.code_log where user_id = '19000000-0000-4000-8000-000000000002';
 
 -- The limits: 10 wrong tries from one address in 15 minutes, 100 in all per hour.
@@ -9330,9 +9375,15 @@ reset role;
 select study_private.code_restore('19000000-0000-4000-8000-000000000002');
 update study_private.code_tries set at = now() - interval '20 minutes';
 set role anon;
-select count(*) from (select public.study_code_redeem('CCCC-CCCC-CCCC-CCCC', '5.5.5.' || g, :'ikey') from generate_series(1, 90) g) s \gset
-select 'I13c. ' || case when public.study_code_redeem(:'dana_code3', '6.6.6.6', :'ikey') ->> 'error' = 'too many tries' then 'ok' else 'FAIL' end
-  || ': 100 wrong tries in an hour close it for everyone';
+select count(*) from (select public.study_code_redeem('CCCC-CCCC-CCCC-CCCC', '5.5.' || (g / 200) || '.' || (g % 200), :'ikey') from generate_series(1, 899) g) s \gset
+select 'I13c. ' || case when public.study_code_redeem(:'dana_code3', '6.6.6.6', :'ikey') ? 'password' then 'ok' else 'FAIL' end
+  || ': 909 wrong tries in an hour from many addresses still let a member in';
+reset role;
+select study_private.code_restore('19000000-0000-4000-8000-000000000002');
+set role anon;
+select count(*) from (select public.study_code_redeem('CCCC-CCCC-CCCC-CCCC', '8.8.' || (g / 200) || '.' || (g % 200), :'ikey') from generate_series(1, 91) g) s \gset
+select 'I13e. ' || case when public.study_code_redeem(:'dana_code3', '6.6.6.7', :'ikey') ->> 'error' = 'too many tries' then 'ok' else 'FAIL' end
+  || ': 1000 wrong tries in an hour close it for everyone (the backstop)';
 reset role;
 delete from study_private.code_tries;
 select 'I13d. ' || case when (public.study_code_redeem('', '7.7.7.7', :'ikey') ->> 'error') = 'code not found'
@@ -9340,8 +9391,24 @@ select 'I13d. ' || case when (public.study_code_redeem('', '7.7.7.7', :'ikey') -
   then 'ok' else 'FAIL' end || ': empty or missing input is a wrong code, not an error';
 delete from study_private.code_tries;
 
+-- A one-time address left on the user (a sweep that raced a redeem, before
+-- the lock) is never taken for the member's own "before".
+update auth.users set email = 'c-0123@code.tamtzit.invalid', encrypted_password = '$2a$10$leftoverleftoverleftoverleftoverleftoverleftoverleft',
+                      email_confirmed_at = now() where id = '19000000-0000-4000-8000-000000000002';
+set role anon;
+select public.study_code_redeem(:'dana_code3', '9.9.9.9', :'ikey') ? 'password' as x \gset
+reset role;
+select 'I19. ' || case when p.prev_email is null and p.prev_pw = '' and p.prev_conf is null then 'ok' else 'FAIL' end
+  || ': a leftover one-time address is no "before"' from study_private.code_pending p where p.user_id = '19000000-0000-4000-8000-000000000002';
+select study_private.code_restore('19000000-0000-4000-8000-000000000002');
+select 'I19b. ' || case when email is null and encrypted_password = '' and email_confirmed_at is null then 'ok' else 'FAIL' end
+  || ': and the user ends with no address and no password' from auth.users where id = '19000000-0000-4000-8000-000000000002';
+select 'I19c. ' || case when not exists (select 1 from study_private.code_pending where prev_email like 'c-%@code.tamtzit.invalid')
+  then 'ok' else 'FAIL' end || ': no pending row keeps a one-time address as "before"';
+delete from study_private.code_tries;
+
 -- "שמור" now says "has a code".
-set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000001';
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000001'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000001"}';
 select 'I14. ' || string_agg(m.name || '=' || s.saved, ', ' order by m.name)
   from public.study_member_saved('19000000-0000-4000-8000-0000000000a1') s join public.study_members m on m.user_id = s.user_id and m.group_id = '19000000-0000-4000-8000-0000000000a1';
 
@@ -9360,7 +9427,7 @@ insert into study_private.features (name, enabled) values ('codes', false)
 on conflict (name) do update set enabled = excluded.enabled;
 select 'I15c. ' || case when public.study_code_redeem('AAAA-AAAA-AAAA-AAAA', '1.1.1.1', :'ikey') ->> 'error' = 'codes off'
   and not exists (select 1 from study_private.code_tries) then 'ok' else 'FAIL' end || ': switched off, a redeem is "codes off" and counts no try';
-set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000005';
+set role authenticated; set request.jwt.claim.sub = '19000000-0000-4000-8000-000000000005'; set request.jwt.claims = '{"session_id":"29000000-0000-4000-8000-000000000005"}';
 do $$ begin perform public.study_code_new(); raise notice 'I15d. FAIL: a code while switched off';
 exception when others then raise notice 'I15d. %: no new code while switched off (%)', case when sqlerrm = 'off' then 'ok' else 'FAIL' end, sqlerrm; end $$;
 reset role;
@@ -9380,5 +9447,6 @@ select 'I17. ' || case when public.study_schema() ->> 'I' = '1' then 'ok' else '
 delete from study_private.code_log where user_id::text like '19000000-%';
 delete from study_private.code_tries;
 delete from public.study_groups where id = '19000000-0000-4000-8000-0000000000a1';
+delete from auth.sessions where id::text like '29000000-%';
 delete from auth.users where id::text like '19000000-%';
 -- ════ END SECTION I ════
