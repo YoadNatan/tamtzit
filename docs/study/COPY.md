@@ -265,6 +265,25 @@ member's own code is "הקוד האישי", never "סיסמה", "חשבון" or 
   their words, and the reader's contents column has no title of its own
   (its label is ״תוכן העניינים״, as before).
 
+### Polish (docs/study/ux-p3.md)
+
+- Join, when the server is not set up for joining (anonymous sign-ins off,
+  or the SQL not run): **״ההצטרפות לא זמינה כרגע. אפשר לנסות שוב בעוד כמה
+  דקות.״** The cause goes to the console for whoever runs the server; no
+  setting's name on the member's screen.
+- An exam with pages that were not read, at the top of its summary:
+  **״חלק אחד מהמבחן לא נקרא, אז חסרות כאן שאלות.״** /
+  **״N חלקים מהמבחן לא נקראו, אז חסרות כאן שאלות.״**, with **״לנסות שוב״**
+  (the same paid re-read as the row's, its cost line kept under the rows).
+- A simulation's result: the questions left with no pick have their own
+  list, **״לא נענו (N)״**, after **״הטעויות (N)״** (wrong picks only).
+- A live quiz's end: the footer's way out is **״חזרה ליחד״**, as the top bar's
+  and the challenge's (was ״חזרה לספרייה״).
+- The library: a stuck lecture's card has the chip-link **״המשך כתיבה״**
+  (to the lecture, where the button is).
+- A picture in the summary is a button: its name **״הגדלה: שקף N״** (it
+  opens the slide's sheet).
+
 ## Server-made text
 
 The SQL writes some text into rows. New rows use the new words; the file
