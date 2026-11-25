@@ -304,6 +304,13 @@ a.x-zoom {
     justify-self: stretch;
   }
 }
+/* A tablet or a desktop (600 and up, P2): the page beside the text is big
+   enough to check against, 42% of the card and at least 220 px. */
+@media (min-width: 600px) {
+  .r-split {
+    grid-template-columns: minmax(220px, 42%) minmax(0, 1fr);
+  }
+}
 .r-crop {
   display: grid;
   gap: var(--sp-2);
