@@ -3,6 +3,7 @@ import { Head, Loading, RouteLink } from "../components/Shell";
 import { flags } from "../lib/flags";
 import { BlankTableSession } from "./extras";
 import { MakeProgress, MakeScreen } from "./qsets";
+import { SheetUpload } from "./sheets";
 import "../styles/practice.css";
 import type { Ctx, ScreenProps } from "./types";
 
@@ -76,7 +77,11 @@ export function ExamsScreen({ route, ctx }: ScreenProps<"exams">) {
       {route.e ? (
         <ExamView key={route.e} route={route} ctx={ctx} />
       ) : route.isNew && route.c ? (
-        <ExamUpload key={route.c} route={route} ctx={ctx} />
+        flags.sheets ? (
+          <SheetUpload key={route.c} route={route} ctx={ctx} />
+        ) : (
+          <ExamUpload key={route.c} route={route} ctx={ctx} />
+        )
       ) : (
         <ExamsHome ctx={ctx} />
       )}

@@ -520,6 +520,11 @@ export const TARGETS = {
   batchCost: ".upload-many .u-cost",
   batchResume: ".upload-many .u-resume",
   examMode: '.exam-new .a-seg[aria-label="איך מעלים"]',
+  // Uploaded sheets (docs/study/sheets.md): the upload of a past exam or an exercise sheet, and the wide review.
+  sheetZone: ".sheet-new .sx-zone",
+  sheetKinds: ".sheet-new .sx-kinds",
+  sheetPages: ".sheet-new .sx-pages",
+  sheetSplit: ".exam-review .rw-page",
   examKeys: ".exam-new .x-keys",
   examGo: ".exam-new .ph-foot .a-btn.primary",
   examProg: ".exam-review .x-prog",
@@ -1010,6 +1015,17 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
     case "exams":
       // Decision 1 (sources.md): the upload says nothing about where the exam goes.
       // The upload is on screen only with its course (ExamsScreen: isNew and c); miniScreen says the same.
+      if (r.isNew && r.c && !r.e && f.sheets)
+        return {
+          screen: "העלאת מבחן או דף תרגילים",
+          steps: [
+            m(T.sheetZone, "קובץ PDF, או צילום של הדפים: עמוד אחד בכל תמונה, ישר ובאור טוב. במחשב אפשר גם לגרור לכאן קבצים, או להדביק. קובץ Word צריך קודם לשמור כ-PDF."),
+            m(T.sheetPages, "הדפים לפי הסדר: מזיזים, מסובבים או מסירים. דף מטושטש או חשוך מסומן, ו״לצלם שוב״ מחליף אותו."),
+            m(T.sheetKinds, "מבחן קודם (עם שנה ומועד, גם לסימולציה), או דף תרגילים (עם שם והרצאה, לא חובה). מאגר שאלות הוא דף תרגילים בלי הרצאה."),
+            m(T.examKeys, "איפה התשובות: מסומנות על הדף, בקובץ נפרד, או אין. בלי תשובות, האפליקציה מציעה תשובה לרוב השאלות, והקבוצה בודקת אותן. זה עולה קצת יותר."),
+            m(T.examGo, "המחיר על הכפתור, ומתחתיו כמה עמודים וכמה זמן זה לוקח. נספר בתקציב החודשי של הקבוצה. מעלים רק חומר מצוות הקורס או חומר של הקבוצה."),
+          ],
+        };
       if (r.isNew && r.c && !r.e)
         return {
           screen: "העלאת מבחן קודם",

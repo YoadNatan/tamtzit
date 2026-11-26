@@ -6,7 +6,7 @@ import type { Flags } from "./flags";
  * entry), so the button never shows where the guide has nothing to say.
  * guide.test.ts checks the two agree on every screen. */
 
-export type MiniRoute = { v: string; l?: string; s?: string; x?: string; run?: boolean; c?: string; e?: string; isNew?: boolean; many?: boolean };
+export type MiniRoute = { v: string; l?: string; s?: string; x?: string; run?: boolean; c?: string; e?: string; isNew?: boolean | string; many?: boolean };
 
 export function miniScreen(r: MiniRoute, f: Flags): boolean {
   switch (r.v) {

@@ -1,0 +1,283 @@
+/* Uploaded sheets, release A0 (docs/study/sheets.md; design-exams §5.2-5.7):
+   the upload of a past exam or an exercise sheet, the wide review and its
+   page. Tokens and kit classes only (tokens.css, kit.css); exams.css keeps
+   the past exams' own pieces, which these screens reuse. */
+
+/* ── the upload: step 1, the drop zone and its two tiles ── */
+.sx-grid {
+  display: grid;
+  gap: var(--sp-6);
+  align-items: start;
+}
+.sx-col {
+  min-width: 0;
+  gap: var(--sp-5);
+}
+.sx-zone {
+  display: grid;
+  gap: var(--sp-5);
+  padding: var(--sp-6);
+  border: 2px dashed var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+.sx-zone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.sx-zone.small {
+  padding: var(--sp-4) var(--sp-5);
+}
+.sx-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-5);
+}
+.sx-tile {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--sp-3);
+  min-height: 132px;
+  padding: var(--sp-6) var(--sp-4);
+  border: 1px solid var(--btn-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: 0 var(--press) 0 var(--edge);
+  color: var(--ink);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.sx-tile .icon {
+  color: var(--accent);
+}
+.sx-tile b {
+  font-size: var(--text-body);
+}
+.sx-tile:not(:disabled):active {
+  transform: translateY(var(--press));
+  box-shadow: none;
+}
+@media (hover: hover) {
+  .sx-tile:not(:disabled):hover {
+    border-color: var(--accent);
+  }
+}
+.sx-tile:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.sx-tile:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.sx-zone p {
+  margin: 0;
+  text-align: center;
+}
+/* Dragging is a computer's: a phone's zone does not offer it. */
+.sx-drophint {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .sx-drophint {
+    display: block;
+  }
+  .sx-more .sx-drophint {
+    display: inline;
+  }
+}
+.sx-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.sx-more .a-btn .icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* ── the pages, in order ── */
+.sx-count {
+  align-items: center;
+}
+.sx-pages {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: var(--sp-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sx-page {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.sx-thumb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--r-sm);
+  background: #fbfaf6;
+  box-shadow: inset 0 0 0 1px rgba(28, 24, 56, 0.12);
+  overflow: hidden;
+}
+.sx-page.warn .sx-thumb {
+  box-shadow: inset 0 0 0 2px var(--warn-line);
+}
+.sx-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.sx-pdf {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  color: #1c1838;
+}
+.sx-pdfname {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: var(--text-tag);
+  font-weight: 600;
+  text-align: center;
+}
+.sx-thumb .n {
+  position: absolute;
+  inset-block-end: 6px;
+  inset-inline-start: 6px;
+  min-width: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: #1c1838;
+  color: #ffffff;
+  font: 700 var(--text-chip) / 1.6 var(--font-body);
+  text-align: center;
+}
+.sx-bad {
+  position: absolute;
+  inset-block-start: 6px;
+  inset-inline-end: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-pill);
+  background: var(--warn-line);
+  color: #ffffff;
+  font: 800 var(--text-chip) / 24px var(--font-body);
+  text-align: center;
+}
+.sx-cap {
+  text-align: center;
+}
+/* Two by two, each its own 44 px target. */
+.sx-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-1);
+}
+.sx-tools .a-btn {
+  min-width: 0;
+  min-height: var(--hit);
+  padding: 0;
+}
+.sx-warn {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sx-warn li {
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  border-inline-start: 3px solid var(--warn-line);
+  border-radius: var(--r-sm);
+  background: var(--warn-bg);
+  color: var(--ink);
+}
+.sx-cover,
+.sx-ask,
+.sx-big {
+  display: grid;
+  gap: var(--sp-4);
+}
+.sx-cover-off {
+  margin: 0;
+}
+
+/* ── the details ── */
+.sx-field {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.sx-label {
+  padding: 0;
+  font-weight: 700;
+}
+.sx-keys .a-choice {
+  min-height: var(--hit);
+}
+.sx-keyadd {
+  justify-self: start;
+}
+.sx-help summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.sx-help ul {
+  margin: var(--sp-3) 0 0;
+  padding-inline-start: var(--sp-8);
+}
+
+/* From 760 px (iPad portrait and wider): the pages and the details side by
+   side, the details first (on the right, in reading order). */
+@media (min-width: 760px) {
+  main.sheet-new.has-pages .sx-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "details files";
+  }
+  main.sheet-new.has-pages .sx-files {
+    grid-area: files;
+  }
+  main.sheet-new.has-pages .sx-details {
+    grid-area: details;
+    position: sticky;
+    top: var(--sp-8);
+  }
+  .sx-tile {
+    min-height: 168px;
+  }
+}
+@media (min-width: 1024px) {
+  main.sheet-new.has-pages {
+    max-width: var(--measure-wide);
+  }
+}
+
+/* ── an upload's link opened without a member (DeepLinkCard, §5.12) ── */
+.join-deep {
+  display: grid;
+  gap: var(--sp-4);
+  justify-items: start;
+}
+.join-deep-how {
+  margin: 0;
+  padding-inline-start: var(--sp-8);
+}
+
+/* The answers file's pages: smaller, inside its card. */
+.sx-keys .sx-pages {
+  grid-template-columns: repeat(auto-fill, minmax(88px, 112px));
+}

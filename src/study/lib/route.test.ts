@@ -869,3 +869,23 @@ test("VITE_STUDY_SETS: practice sets' shelf, set page and set sessions, on make,
   assert.deepEqual(tabLinks(flagsFrom({ ...today, VITE_STUDY_SETS: "1" })), tabLinks(flagsFrom(today)));
   assert.equal(BACK_LABEL.sets, "→ סטים של הקבוצה");
 });
+
+test("VITE_STUDY_SHEETS: uploaded sheets (release A0) on past exams, with section O 1; new=sheet and its lecture", () => {
+  const base = { VITE_STUDY_QUESTIONS: "1", VITE_STUDY_PRACTICE: "1", VITE_STUDY_COURSES: "1", VITE_STUDY_EXAMS: "1" };
+  const off = flagsFrom(base);
+  const on = flagsFrom({ ...base, VITE_STUDY_SHEETS: "1" });
+  assert.equal(off.sheets, false);
+  assert.equal(on.sheets, true);
+  assert.deepEqual({ ...on, sheets: false }, off, "it changes nothing else");
+  assert.deepEqual(requiredSchema(on), { ...requiredSchema(off), O: 1 }, "section O 1");
+  assert.equal(flagsFrom({ ...base, VITE_STUDY_EXAMS: "", VITE_STUDY_SHEETS: "1" }).sheets, false, "it needs past exams");
+  assert.equal(flagsFrom({ VITE_STUDY_QUESTIONS: "1", VITE_STUDY_PRACTICE: "1", VITE_STUDY_SHEETS: "1" }).sheets, false, "and the course pages");
+  // The upload's address: a past exam (new=1) or a sheet (new=sheet), from a lecture's page with its lecture (l).
+  assert.deepEqual(parseRoute(`?v=exams&new=sheet&c=${ID}&l=${ID2}`), { v: "exams", c: ID, isNew: "sheet", l: ID2 });
+  assert.deepEqual(parseRoute(`?v=exams&new=1&c=${ID}`), { v: "exams", c: ID, isNew: true });
+  assert.deepEqual(parseRoute(`?v=exams&new=other&c=${ID}&l=nope`), { v: "exams", c: ID }, "new is 1 or sheet; l is an id");
+  assert.equal(routeUrl({ v: "exams", c: ID, isNew: "sheet", l: ID2 }), `/?v=exams&c=${ID}&new=sheet&l=${ID2}`);
+  assert.deepEqual(allowed({ v: "exams", c: ID, isNew: "sheet" }, on), { route: { v: "exams", c: ID, isNew: "sheet" } });
+  // No tab of its own: the tab bar is the same with the flag.
+  assert.deepEqual(tabLinks(on), tabLinks(off));
+});

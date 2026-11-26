@@ -187,7 +187,7 @@ export const KINDS: Record<string, Kind> = {
   },
   exam_failed: {
     cat: "mine",
-    title: () => "קריאת המבחן לא הצליחה",
+    title: ({ a }) => (a.kind === "sheet" ? "קריאת דף התרגילים לא הצליחה" : "קריאת המבחן לא הצליחה"),
     body: ({ a }) => {
       const s = stopped(code(a, "why"));
       const name = [str(a, "course"), num(a, "year") || str(a, "year")].filter(Boolean).join(" ");

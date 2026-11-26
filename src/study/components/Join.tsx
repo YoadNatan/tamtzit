@@ -6,6 +6,7 @@ import { markFresh } from "../lib/guideMark";
 import { CodeEntry, openAccount, useCodesOn } from "../features/account";
 import { JoinInstallNote } from "../features/install";
 import { SetJoinNote } from "../features/qsets";
+import { SheetJoinNote } from "../features/sheets";
 import { formatCode, parseCode, standalone } from "../lib/personalCode";
 
 /* ── Getting in ──
@@ -163,6 +164,8 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
         ) : null}
         {/* A practice set's link opened signed out (VITE_STUDY_SETS): how a member reaches it. */}
         <SetJoinNote />
+        {/* An uploaded exam's or sheet's link opened signed out (VITE_STUDY_SHEETS): the landing card. */}
+        <SheetJoinNote onCode={codes ? toCode : undefined} />
         {/* Another app's built-in browser: the way out to the real one first (VITE_STUDY_INSTALL). */}
         <JoinInstallNote place="top" />
         <p className="join-kicker">סיכום מלא לכל הרצאה</p>

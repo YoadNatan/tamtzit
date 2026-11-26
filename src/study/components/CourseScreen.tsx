@@ -108,13 +108,41 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
 
   const when = examWhen(course.exam_date, course.days_left);
   const length = examLength(course.exam_n, course.exam_minutes);
-  const exams = course.exams.length;
-  // Past exams (phase 2): the newest ready exam is the simulation's and the replay's default.
-  const examRows = course.exams as CourseExam[];
-  const ready = flags.exams ? examRows.filter((e) => e.status === "ready" && (e.questions ?? 0) > 0).sort((a, b) => ((a.created_at ?? "") < (b.created_at ?? "") ? 1 : -1)) : [];
+  // Uploaded sheets (section O 1) are listed only with their flag; a build without it lists past exams only.
+  const uploads = (course.exams as CourseExam[]).filter((e) => flags.sheets || e.kind !== "sheet");
+  const examRows = uploads.filter((e) => e.kind !== "sheet");
+  const sheetRows = uploads.filter((e) => e.kind === "sheet");
+  const exams = examRows.length;
+  // Past exams (phase 2): the newest ready exam is the simulation's and the replay's default (never a sheet: OD9).
+  const readyAll = flags.exams ? uploads.filter((e) => e.status === "ready" && (e.questions ?? 0) > 0).sort((a, b) => ((a.created_at ?? "") < (b.created_at ?? "") ? 1 : -1)) : [];
+  const ready = readyAll.filter((e) => e.kind !== "sheet");
   const simulation = ready.some((e) => (e.questions ?? 0) >= 5);
-  // "184 שאלות": what a course session may ask, the exams' items too once they are on (s=c includes them).
-  const free = course.questions + ready.reduce((n, e) => n + (e.questions ?? 0), 0);
+  // "184 שאלות": what a course session may ask, the uploads' items too once they are on (s=c includes them).
+  const free = course.questions + readyAll.reduce((n, e) => n + (e.questions ?? 0), 0);
+  const lectureTitle = new Map((list ?? []).map((l) => [l.id, l.title]));
+  const uploadRow = (e: CourseExam) => {
+    const st = EXAM_STATUS[e.status] ?? { label: "בקריאה", cls: "a-chip busy" };
+    const meta = e.status === "ready" ? examLengthLine(e) : e.status === "reading" || e.status === "linking" ? "מעתיקים את השאלות…" : "";
+    const lec = e.lecture_id ? lectureTitle.get(e.lecture_id) : undefined;
+    return (
+      <li key={e.id}>
+        <RouteLink to={{ v: "exams", e: e.id, c: course.id }} go={ctx.go} className="a-li c-row c-exam-row">
+          <div>
+            <b>
+              <bdi>{e.title}</bdi>
+            </b>
+            {meta ? <span className="m">{meta}</span> : null}
+            {lec ? (
+              <span className="m">
+                <bdi>{lec}</bdi>
+              </span>
+            ) : null}
+          </div>
+          <span className={st.cls}>{st.label}</span>
+        </RouteLink>
+      </li>
+    );
+  };
   // The course question reads ready parts: none while no lecture is ready or
   // being written (a lecture being written may have ready parts already).
   const noSummary = course.ready === 0 && list !== null && !list.some((l) => l.status === "writing");
@@ -133,6 +161,12 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
           <>
             <span aria-hidden="true">·</span>
             <span>{exams === 1 ? "מבחן קודם אחד" : `${exams} מבחנים קודמים`}</span>
+          </>
+        ) : null}
+        {sheetRows.length ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{sheetRows.length === 1 ? "דף תרגילים אחד" : `${sheetRows.length} דפי תרגילים`}</span>
           </>
         ) : null}
       </p>
@@ -200,7 +234,7 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
       {flags.exams ? (
         <div className="a-seg c-seg" role="tablist" aria-label="מה בקורס">
           <button type="button" className="a-btn small" role="tab" aria-selected={seg === "exams"} onClick={() => ctx.go({ v: "course", c: course.id, seg: "exams" }, { replace: true })}>
-            מבחנים קודמים
+            {flags.sheets ? "מבחנים ותרגילים" : "מבחנים קודמים"}
           </button>
           <button type="button" className="a-btn small" role="tab" aria-selected={seg === "lectures"} onClick={() => ctx.go({ v: "course", c: course.id, seg: "lectures" }, { replace: true })}>
             הרצאות
@@ -208,28 +242,39 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
         </div>
       ) : null}
 
-      {seg === "exams" ? (
+      {seg === "exams" && flags.sheets ? (
+        // Uploaded sheets (design-exams §5.1): one segment for both kinds, the upload first, then each kind under its heading.
+        <section className="a-stack c-uploads" aria-label="מבחנים ותרגילים">
+          <RouteLink to={{ v: "exams", isNew: true, c: course.id }} go={ctx.go} className="a-btn primary wide">
+            העלאת מבחן או דף תרגילים
+          </RouteLink>
+          {uploads.length ? (
+            <>
+              {examRows.length ? (
+                <>
+                  <div className="a-sec">
+                    <h2>מבחנים קודמים</h2>
+                  </div>
+                  <ul className="a-list">{examRows.map(uploadRow)}</ul>
+                </>
+              ) : null}
+              {sheetRows.length ? (
+                <>
+                  <div className="a-sec">
+                    <h2>דפי תרגילים</h2>
+                  </div>
+                  <ul className="a-list">{sheetRows.map(uploadRow)}</ul>
+                </>
+              ) : null}
+            </>
+          ) : (
+            <p className="a-para a-muted">עוד אין כאן מבחנים או דפי תרגילים. מעלים PDF או צילום, ואז אפשר לתרגל אותם כמו בדף.</p>
+          )}
+        </section>
+      ) : seg === "exams" ? (
         <section className="a-stack" aria-label="מבחנים קודמים">
-          {course.exams.length ? (
-            <ul className="a-list">
-              {examRows.map((e) => {
-                const st = EXAM_STATUS[e.status] ?? { label: "בקריאה", cls: "a-chip busy" };
-                const meta = e.status === "ready" ? examLengthLine(e) : e.status === "reading" || e.status === "linking" ? "מעתיקים את השאלות…" : "";
-                return (
-                  <li key={e.id}>
-                    <RouteLink to={{ v: "exams", e: e.id, c: course.id }} go={ctx.go} className="a-li c-row c-exam-row">
-                      <div>
-                        <b>
-                          <bdi>{e.title}</bdi>
-                        </b>
-                        {meta ? <span className="m">{meta}</span> : null}
-                      </div>
-                      <span className={st.cls}>{st.label}</span>
-                    </RouteLink>
-                  </li>
-                );
-              })}
-            </ul>
+          {examRows.length ? (
+            <ul className="a-list">{examRows.map(uploadRow)}</ul>
           ) : (
             <p className="a-para a-muted">עוד אין מבחנים קודמים בקורס. מעלים PDF או צילום של מבחן משנים קודמות, ואז אפשר לתרגל אותו או לעשות סימולציה עם שעון.</p>
           )}

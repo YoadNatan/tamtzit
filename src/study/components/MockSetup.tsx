@@ -42,7 +42,11 @@ export default function MockSetup({ route, ctx }: ScreenProps<"mock">) {
         .catch(() => rememberAttempt(ctx.userId, null));
   }, [route.c, ctx.userId]);
 
-  const exams = useMemo(() => ((course?.exams ?? []) as CourseExam[]).filter((e) => e.status === "ready" && (e.questions ?? 0) >= 5).sort(byNewest), [course]);
+  // Past exams only (OD9): an uploaded sheet (kind 'sheet', section O 1) is never a simulation, whatever the build's flags.
+  const exams = useMemo(
+    () => ((course?.exams ?? []) as CourseExam[]).filter((e) => e.kind !== "sheet" && e.status === "ready" && (e.questions ?? 0) >= 5).sort(byNewest),
+    [course],
+  );
   const exam = exams.find((e) => e.id === examId) ?? exams[0] ?? null;
   const lengths = useMemo(() => (exam ? lengthsFor({ questions: exam.questions ?? 0, minutes: exam.minutes ?? null, printed: exam.printed }, course ?? undefined) : []), [exam, course]);
   const chosen = lengths.find((l) => l.key === len) ?? lengths[0] ?? null;

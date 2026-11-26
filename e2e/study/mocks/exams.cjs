@@ -27,16 +27,29 @@
 //     study_mock_progress, study_mock_answer (false once the time is up, 10 s
 //     of grace), study_mock_finish (the score; each counted pick a
 //     study_answers row with mode 'exam' and attempt_id; a blank writes none)
+// Uploaded sheets (docs/study/sheets.md, section O 1; VITE_STUDY_SHEETS):
+//   - each upload has a kind ('exam' | 'sheet') and one lecture; the course
+//     page's rows carry them (study_course_overview at O 1)
+//   - rpc/study_sheet_create ({exam_id, prefix}; 'off' while sheetsOn is false,
+//     'bad sheet', 'lecture not found'); a sheet is hidden from the course's style
+//   - op exam_read on a sheet: at most 40 pages and an answers file of 10 (400
+//     too many pages), 402 sheets_cap while sheetsCap is set, 409 confirm above
+//     a usual $3 without confirmBig; a sheet is read with the synthetic sheet's
+//     replies as the exam reader gives them (fixtures/sheet/sheet6.json, a0)
+//   - rpc/study_exam_key_set: any choice item keyed by hand (true/false and
+//     match too), logged with the statements (old_seq, new_seq)
 // Levers, on db.examsMock:
 //   offset   ms added to the server's clock (the script moves the page's fake clock by the same)
 //   pace     ms between units (default 600)
 //   fail     (unit) => true fails that unit once
 //   seed(o)  a ready exam of the course with n synthetic items (the simulation's lengths)
 //   calls    every exams RPC and op (fn, who, body)
+//   sheetsOn the switch 'sheets' (default true); sheetsCap: a sheet's start is refused 402 sheets_cap
 const fs = require("fs");
 const path = require("path");
 
 const FIXTURE = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "fixtures", "exam", "exam12.json"), "utf8"));
+const SHEET = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "fixtures", "sheet", "sheet6.json"), "utf8"));
 const hex = (prefix, n) => `${prefix}-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const keyOf = (s) => String(s ?? "").replace(/[​-‏‪-‮⁠⁦-⁩]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 const userOfToken = (token) => {
@@ -61,6 +74,8 @@ module.exports = {
       pace: 600,
       fail: () => false,
       failed: new Set(),
+      sheetsOn: true,
+      sheetsCap: false,
     };
     M.now = () => Date.now() + M.offset;
     db.examsMock = M;
@@ -71,7 +86,10 @@ module.exports = {
     M.overviewRows = (nameKey) =>
       M.examsOf(nameKey)
         .sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || (a.created_at < b.created_at ? 1 : -1))
-        .map((e) => ({ id: e.id, title: e.title, year: e.year, status: e.status, moed: e.moed, minutes: e.minutes, key_source: e.key_source, hidden: e.hide_from_profile, created_at: e.created_at, questions: itemsOf(e).length, printed: itemsOf(e).length + (e.skipped_open ?? 0) }));
+        .map((e) => ({
+          id: e.id, title: e.title, year: e.year, status: e.status, moed: e.moed, minutes: e.minutes, key_source: e.key_source, hidden: e.hide_from_profile, created_at: e.created_at,
+          questions: itemsOf(e).length, printed: itemsOf(e).length + (e.skipped_open ?? 0), kind: e.kind ?? "exam", lecture_id: e.lecture_id ?? null,
+        }));
     const keyRow = (q) => P().keys.get(q.id) ?? null;
     const hasKey = (q) => {
       const k = keyRow(q);
@@ -83,13 +101,13 @@ module.exports = {
     const save = (e, it, n) => {
       const Q = P();
       let q = Q.questions.find((x) => x.exam_id === e.id && x.exam_no === it.no);
-      const fig = it.no === 3 ? "pg:3:40,80,920,520" : "";
+      const fig = e.kind === "sheet" ? (it.figure?.page ? `pg:${it.figure.page}:${it.figure.x},${it.figure.y},${it.figure.w},${it.figure.h}` : "") : it.no === 3 ? "pg:3:40,80,920,520" : "";
       const row = {
         group_id: e.group_id, lecture_id: null, batch_id: null, exam_id: e.id, exam_no: it.no, ref_lecture: null, source: "exam", part_idx: null,
         kind: it.kind, difficulty: 2, vignette: it.vignette || "", question: it.question, options: it.options, slides: [], topic: "", aspect: "other",
         model: "mock", created_by: e.created_by, retired_at: null, retired_by: null, retire_note: "", anchor: null, quote: "", part_gen: null, teaser: "",
         figure: fig, option_tags: [], hidden_at: null, stale_at: null, fixed_at: null, style: null, form: it.form, layout: it.form === "match" ? { kind: "match", prompts: it.prompts } : null,
-        series: null, step: null, parse_conf: it.no === 10 ? 1 : (it.parse_conf ?? 2), page: it.page ?? null,
+        series: null, step: null, parse_conf: e.kind !== "sheet" && it.no === 10 ? 1 : (it.parse_conf ?? 2), page: it.page ?? null,
       };
       if (!q) {
         q = { id: hex("e1e00000", ++M.seq), created_at: iso(M.now() + n), has_key: false, ...row };
@@ -114,14 +132,16 @@ module.exports = {
         Object.assign(u, { status: "failed", error: "unreadable" });
         return;
       }
+      const fx = e.kind === "sheet" ? SHEET.a0 : FIXTURE;
       if (u.kind === "read") {
-        for (const f of FIXTURE.units) {
+        for (const f of fx.units) {
           if (!f.pages.some((p) => u.pages.includes(p))) continue;
-          f.reply.questions.forEach((it, i) => save(e, it, i));
+          // As the exam reader's save path: 2-6 options (the sheet's 8-option item is not saved, release A0).
+          f.reply.questions.filter((it) => it.options.length <= 6).forEach((it, i) => save(e, it, i));
           e.skipped_open = (e.skipped_open ?? 0) + (f.reply.skipped_open ?? 0);
         }
       } else if (u.kind === "key") {
-        e.sheet = new Map(FIXTURE.key.reply.keys.map((k) => [k.no, k.answer]));
+        e.sheet = new Map(fx.key.reply.keys.filter((k) => k.answer >= 0).map((k) => [k.no, k.answer]));
         for (const q of itemsOf(e)) {
           const a = e.sheet.get(q.exam_no);
           const k = keyRow(q);
@@ -129,13 +149,13 @@ module.exports = {
           q.has_key = hasKey(q);
         }
       } else if (u.kind === "solve") {
-        const by = new Map(FIXTURE.solve.reply.answers.map((a) => [a.no, a]));
+        const by = new Map((fx.solve ?? FIXTURE.solve).reply.answers.map((a) => [a.no, a]));
         for (const id of u.items) {
           const q = P().questions.find((x) => x.id === id);
           const a = q && by.get(q.exam_no);
           const k = q && keyRow(q);
           if (!a || !k || hasKey(q)) continue;
-          if (q.form === "one" && a.answer >= 0) Object.assign(k, { answer: a.answer, origin: "solved", conf: a.conf });
+          if (q.form === "one" && a.answer >= 0 && a.answer < q.options.length) Object.assign(k, { answer: a.answer, origin: "solved", conf: a.conf });
           if (q.form !== "one" && a.seq?.length) Object.assign(k, { seq: a.seq, origin: "solved", conf: a.conf });
           q.has_key = hasKey(q);
         }
@@ -215,7 +235,7 @@ module.exports = {
       return json(rows.map((e) => Object.fromEntries(cols.map((c) => [c, e[c] ?? null]))));
     }
 
-    const m = /^\/rest\/v1\/rpc\/(study_exam_[a-z_]+|study_set_exam_key|study_mock_[a-z_]+)$/.exec(p);
+    const m = /^\/rest\/v1\/rpc\/(study_exam_[a-z_]+|study_set_exam_key|study_mock_[a-z_]+|study_sheet_create)$/.exec(p);
     if (!m) return undefined;
     const fn = m[1];
     check.rpc(fn, body, `${method} ${p}`);
@@ -247,6 +267,45 @@ module.exports = {
           status: "uploading", error: null, skipped_open: 0, hide_from_profile: false, deleted_at: null, n_questions: 0, created_by: me, created_at: iso(now), retries: 0, pages: 0, key_pages: 0,
         });
         return json({ exam_id: id, prefix: `${db.group.id}/exams/${id}/` });
+      }
+      case "study_sheet_create": {
+        const c = db.coursesMock?.rows.find((r) => r.id === body.p_course && !r.deleted_at);
+        if (!c || !member) return refuse("course not found");
+        if (!M.sheetsOn) return refuse("off");
+        const meta = body.p_meta ?? {};
+        const t = String(meta.title ?? "").replace(/\s+/g, " ").trim();
+        const ks = meta.key_source ?? "none";
+        if (typeof meta.title !== "string" || t.length < 1 || t.length > 120 || !["marked", "separate", "none"].includes(ks)) return refuse("bad sheet");
+        const lid = meta.lecture || null;
+        if (lid && !db.lectures.some((l) => l.id === lid && !l.deleted_at)) return refuse("lecture not found");
+        const id = hex("e0e00000", ++M.seq);
+        M.exams.push({
+          id, group_id: db.group.id, course: c.name, title: t, year: null, moed: null, minutes: null, key_source: ks, kind: "sheet", lecture_id: lid,
+          status: "uploading", error: null, skipped_open: 0, hide_from_profile: true, deleted_at: null, n_questions: 0, created_by: me, created_at: iso(now), retries: 0, pages: 0, key_pages: 0,
+        });
+        return json({ exam_id: id, prefix: `${db.group.id}/exams/${id}/` });
+      }
+      case "study_exam_key_set": {
+        const q = qOf(body.p_question);
+        if (!q || !member) return refuse("question not found");
+        const a = body.p_answer ?? null;
+        const sq = body.p_seq ?? null;
+        const n = q.form === "match" ? (q.layout?.prompts ?? []).length : q.options.length;
+        if (a !== null || sq !== null) {
+          if ((q.form === "one") !== (a !== null) || (q.form === "one" ? sq !== null : a !== null)) return refuse("bad answer");
+          if (q.form === "one" && !(a >= 0 && a < q.options.length)) return refuse("bad answer");
+          if (q.form === "tf" && (!Array.isArray(sq) || sq.length !== n || sq.some((v) => v !== 0 && v !== 1))) return refuse("bad answer");
+          if (q.form === "match" && (!Array.isArray(sq) || sq.length !== n || new Set(sq).size !== sq.length || sq.some((v) => !(v >= 0 && v < q.options.length)))) return refuse("bad answer");
+        }
+        const k = P.keys.get(q.id);
+        const keyed = a !== null || sq !== null;
+        M.keyLog.push({
+          id: M.keyLog.length + 1, question_id: q.id, exam_id: q.exam_id, old: k.answer ?? null, new: a, origin_old: k.origin ?? null, origin_new: keyed ? "member" : null, conf_old: k.conf ?? null,
+          by_old: k.by ?? null, undo_of: null, member_id: me, at: iso(now), old_seq: q.form === "one" ? null : (k.seq ?? []), new_seq: q.form === "one" ? null : (sq ?? []),
+        });
+        Object.assign(k, { answer: a, seq: sq, origin: keyed ? "member" : null, conf: null, by: me });
+        q.has_key = keyed;
+        return json({ answer: a, seq: sq, origin: keyed ? "member" : null });
       }
       case "study_exam_status": {
         const e = examOf(body.p_exam);
@@ -338,6 +397,14 @@ module.exports = {
         const l = [...M.keyLog].reverse().find((x) => x.question_id === q.id && x.undo_of === null && !undone.has(x.id));
         if (!l) return refuse("nothing to undo");
         const k = P.keys.get(q.id);
+        if (l.new_seq) {
+          // A set item's hand key (O 1): its statements come back too.
+          if (JSON.stringify(k.seq ?? []) !== JSON.stringify(l.new_seq) || (k.origin ?? null) !== l.origin_new) return refuse("changed");
+          M.keyLog.push({ id: M.keyLog.length + 1, question_id: q.id, exam_id: q.exam_id, old: k.answer ?? null, new: l.old, origin_old: k.origin, origin_new: l.origin_old, conf_old: k.conf, by_old: k.by, undo_of: l.id, member_id: me, at: iso(now), old_seq: k.seq ?? [], new_seq: l.old_seq });
+          Object.assign(k, { answer: l.old, seq: l.old_seq?.length ? l.old_seq : null, origin: l.origin_old, conf: l.conf_old, by: l.by_old });
+          q.has_key = M.hasKey(q);
+          return json({ answer: l.old, seq: k.seq, origin: l.origin_old });
+        }
         if ((k.answer ?? null) !== l.new || (k.origin ?? null) !== l.origin_new) return refuse("changed");
         M.keyLog.push({ id: M.keyLog.length + 1, question_id: q.id, exam_id: q.exam_id, old: k.answer ?? null, new: l.old, origin_old: k.origin, origin_new: l.origin_old, conf_old: k.conf, by_old: k.by, undo_of: l.id, member_id: me, at: iso(now) });
         Object.assign(k, { answer: l.old, origin: l.origin_old, conf: l.conf_old, by: l.by_old });
@@ -514,6 +581,15 @@ module.exports = {
     const pages = Array.isArray(b.pages) ? b.pages : [];
     if (!pages.length) return send(400, { error: "bad request" });
     if (pages.length > 120) return send(400, { error: "too many pages" });
+    if (e.kind === "sheet") {
+      // A sheet's bounds (op exam_read, OD13): 40 pages and an answers file of 10, the switch, the line, the confirmation above $3.
+      const keyN = pages.filter((x) => x.key).length;
+      if (pages.length - keyN > 40 || keyN > 10) return send(400, { error: "too many pages" });
+      if (!M.sheetsOn) return send(403, { error: "off" });
+      const usual = 0.06 * (pages.length - keyN) + (e.key_source === "none" ? 0.02 * (pages.length - keyN) : 0);
+      if (usual > 3 && b.confirmBig !== true) return send(409, { error: "confirm" });
+      if (M.sheetsCap) return send(402, { error: "sheets_cap" });
+    }
     M.reads.push({ who: me, at: M.now() });
     if (M.reads.filter((r) => r.who === me).length > 3) return send(429, { error: "daily_limit" });
     const prefix = `${e.group_id}/exams/${e.id}/`;

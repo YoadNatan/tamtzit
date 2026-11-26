@@ -38,7 +38,7 @@ export type Route =
   //      Practice sets (flags.make): new is "סט חדש", also without l (the screen picks the lecture);
   //      from=m (with new): the member's mistakes' parts prefilled
   //   s=k.<set> (flags.sets): solving a practice set, its questions in the set's order
-  | { v: "exams"; e?: string; c?: string; isNew?: true }
+  | { v: "exams"; e?: string; c?: string; isNew?: true | "sheet"; l?: string } // new=sheet (flags.sheets): a sheet, with its lecture (l)
   | { v: "quiz"; q?: string; l?: string; c?: string; isNew?: true; mk?: string; m?: string; preset?: "end" | "coffee" | "stop"; pf?: number; pt?: number } // m, preset, pf, pt: Z/M, from a meeting or a part range
   | { v: "cards"; l?: string; s?: string } // s: today · l.<lecture> · c.<course>
   | { v: "ask"; l?: string; at?: At; first?: string; c?: string } // first: the library ask bar's text, sent once; c: a course's id ("לשאול על כל הקורס")
@@ -179,7 +179,7 @@ export function parseRoute(search: string, _hash?: string): Route {
       });
     }
     case "exams":
-      return clean({ v: "exams", e: id(g("e")), c: text(g("c"), 200), isNew: one(g("new")) });
+      return clean({ v: "exams", e: id(g("e")), c: text(g("c"), 200), isNew: g("new") === "sheet" ? "sheet" : one(g("new")), l: id(g("l")) });
     case "quiz":
       return clean({
         v: "quiz",
@@ -310,6 +310,7 @@ export function routeUrl(r: Route): string {
       put("e", r.e);
       put("c", r.c);
       put("new", r.isNew);
+      put("l", r.l);
       break;
     case "quiz":
       put("v", r.v);

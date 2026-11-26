@@ -213,7 +213,8 @@ export default function StudyApp() {
       welcomeNext();
       // A set's link opened signed out (practice sets, §5.6): the sign-in lands on that set.
       const here = parseRoute(location.search);
-      location.replace(flags.sets && here.v === "sets" && here.k ? routeUrl(here) : APP_PATH);
+      // An uploaded exam's or sheet's link too (VITE_STUDY_SHEETS, design-exams §5.12).
+      location.replace((flags.sets && here.v === "sets" && here.k) || (flags.sheets && here.v === "exams" && here.e) ? routeUrl(here) : APP_PATH);
       await new Promise<never>(() => undefined);
     },
     [say],

@@ -109,6 +109,9 @@ export type CourseExam = {
   questions?: number;
   /** All the exam printed as far as its reading knows (items, open questions skipped, numbers not saved): the clock's pace. */
   printed?: number;
+  /** Section O 1: a past exam or an uploaded sheet (absent before O 1: a past exam), and its one lecture. */
+  kind?: "exam" | "sheet";
+  lecture_id?: string | null;
 };
 
 /* ── The upload ── */

@@ -49,7 +49,14 @@ export function usableLines(lines: readonly string[]): string[] {
 
 /** An exam's PDF, opened once when picked: its page count at once (the price
  *  shows before anything is drawn), and its pages drawn one at a time on upload. */
-export type ExamPdf = { name: string; count: number; pages(key: boolean, onPage?: (done: number, total: number) => void): Promise<ExamPageFile[]> };
+export type ExamPdf = {
+  name: string;
+  count: number;
+  /** Page 1's text lines (an uploaded sheet's cover check), cleaned. */
+  firstLines: string[];
+  /** The pages drawn, from page skip + 1 (a sheet's cover page left out). */
+  pages(key: boolean, onPage?: (done: number, total: number) => void, skip?: number): Promise<ExamPageFile[]>;
+};
 
 export async function openExamPdf(file: File): Promise<ExamPdf> {
   const { readPdf } = await import("./pdf");
@@ -59,12 +66,13 @@ export async function openExamPdf(file: File): Promise<ExamPdf> {
   return {
     name: file.name,
     count,
-    async pages(key, onPage) {
+    firstLines: (deck.slides[0]?.lines ?? []).map((l) => cleanText(l)).filter(Boolean),
+    async pages(key, onPage, skip = 0) {
       const out: ExamPageFile[] = [];
-      for (const s of deck.slides) {
+      for (const s of deck.slides.slice(skip)) {
         const img = await deck.pageImage(s.n, EXAM_PAGE_SIDE);
         out.push({ blob: img.blob, w: img.width, h: img.height, lines: usableLines(s.lines), key });
-        onPage?.(out.length, count);
+        onPage?.(out.length, count - skip);
       }
       return out;
     },
