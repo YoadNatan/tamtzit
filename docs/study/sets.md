@@ -17,7 +17,7 @@ a view over bank questions.
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
 | A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | Built (WP0-WP8): docs, bundle owner, shared planning and price, the server's `plan`, the flag and routes, the create and generating screens, the entry points and the fixes of the practice screens, and slice A's e2e (§14 steps 1-4, 12-13) |
-| B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | SQL section L 1 (WP9, part 10) and the server's `create` with a set (WP10) built; the client (WP11-WP15) not yet |
+| B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | SQL section L 1 (WP9, part 10), the server's `create` with a set (WP10), the flag, routes and `lib/sets.ts` (WP11), the shelf, the set page and its numbers (WP12) and set sessions (WP13) built; the entry points for sets (WP14) and the rest of the e2e and docs (WP15) not yet |
 | C | The notices `set_shared` and `set_solved` (WP17), with section R | (R's) | L 1, R | not built yet |
 
 Not in this build: auto-keep turned on (WP16: it ships off, OD15), sheet sets
@@ -53,6 +53,16 @@ design's static share of it is capped at **2,000 B**: bundle owner `QS` in
 `QS` keeps only its slot module in the entry chunk (`SLOT_ONLY`), and the
 check fails when its share passes 2,000 B. The tool also turns on
 `VITE_STUDY_MAKE` and `VITE_STUDY_SETS` with every other flag.
+
+Measured on 26 Nov 2026 with WP11-WP13 (the flag, the routes, the shelf,
+the set page and set sessions): the entry chunk is **403,532 B** with every
+flag on (6,468 B left; +1,152 B: `?v=sets` and `k.` in `route.ts`, the flag,
+the help row's privacy line, and the slot's two new parts), QS's share
+**1,631 B** of its 2,000 (the slot: `SetsRoute`, one `lazy()` stub for the
+shelf and the set page together, `components/SetsScreen.tsx`, and
+`SetJoinNote`, the condition for the line above Join, whose words load
+lazily), and 402,747 B with every flag off. WP14's entry points have 369 B
+of QS's cap left, so they must stay conditions and stubs.
 
 Measured on 26 Nov 2026 with WP9-WP10 (section L and the server; no
 client screen): the entry chunk is **402,380 B** with every flag on (7,620 B
@@ -499,6 +509,123 @@ in [`practice-2-api.md`](practice-2-api.md) ("A practice set"):
   characters.
 - `POLICY` is unchanged: the daily limit stays `SETS_DAILY` outside it (WP3:
   `POLICY` holds ledger kinds, and nothing reserves a call as "qsets").
+
+## The flag, the routes and the set's data on the phone (WP11)
+
+- **`flags.sets`** = `practice && VITE_STUDY_MAKE && VITE_STUDY_SETS`
+  (`shared/study/flags.ts`); `requiredSchema` gains `L: 1`, so
+  `/api/study/health` asks section L 1 of the database with the flag.
+- **Routes** (`src/study/lib/route.ts`): `?v=sets` is the group's shelf
+  (`l`: the sets on a lecture), `?v=sets&k=<set>` a set (being made, then
+  its page), `?v=practice&s=k.<set>` solving it (`k.` is a keyed session
+  key, an id). Without the flag `allowed()` sends all three to the practice
+  hub (or the lecture's practice) with the usual line. No tab of its own
+  (OD1): the shelf belongs where the hub does ("היום" with Today), a set's
+  page has a back arrow ("→ סטים של הקבוצה").
+- **`practiceSession.ts`**: the scope `{ kind: "set", set }`, recorded as a
+  lecture's answers; its queue is the set's questions in the set's order,
+  every one whatever `n` (no tiers); the session keeps its `attempt`; and
+  `appendQueue` adds questions that became ready while solving at the end
+  of the round, each with its own showing's order and clock, never twice.
+  `r.` stays "another wording", and exams' `d.` is untouched.
+- **Answers** (`lib/practice.ts`, `lib/answering.ts`): inside an attempt a
+  one-answer question goes through `study_qset_answer` and a set question
+  (tf, match, order) through `study_qset_answer_seq`, with `p_attempt`;
+  otherwise Q's and X's functions as before.
+- **`lib/sets.ts`**: section L's member RPCs (`shelf`, `openSet`,
+  `setProgress`, `setStats`, `markSeen`, `hideSet`, `deleteSet`,
+  `renameSet`, `attemptStart`, `attemptFinish`, `setNamesPref`, and the
+  reads of `study_qset_requests` and the member's own `study_qset_prefs`),
+  Realtime on `study_qsets` and `study_qset_items`, and the pure rules:
+  the shelf's grouping, "paused" as L computes it, the average as "x/n"
+  (one decimal), a band's words, a set's date ("היום 14:20", "אתמול",
+  "12.11") and the share link (`?v=sets&k=`, text without a title or a
+  lecture). Tests: `sets.test.ts`, `practiceSession.test.ts`,
+  `route.test.ts`.
+
+## The shelf, the set page and the group's numbers (WP12)
+
+- **"סטים של הקבוצה"** (`SetsShelf.tsx`, `?v=sets[&l=]`): the sets a member
+  has not opened first ("חדשים", with "חדש"), then by lecture (the lecture
+  with the latest activity first), each a card (`SetCard.tsx`: the lecture
+  with its hue, "10 שאלות · מאת שוהם · היום 14:20", "פותרים: 3 · שלי: עוד
+  לא" or "בהכנה 6/10", "לפתור"); hidden sets fold at the end ("הוסתרו (n)",
+  each with "להחזיר"); the filter "שלי" only above 20 sets; live. Empty:
+  "עוד אין סטים בקבוצה · סט חדש ‹". Offline, what is loaded stays.
+- **A set** (`SetPage.tsx`, `?v=sets&k=`): while it is made, or while checked
+  questions still wait for "להתחיל לפתור" (auto-keep ships off), the
+  generating screen for the set's request (`MakeProgress` with `set`:
+  "להתחיל לפתור" solves the set, Back goes to the shelf, another member's
+  screen says "מאת {name}"). Then its page: the title, the author's avatar
+  and "מאת {name} · {when}", the lecture and size, the group's numbers,
+  "לעבור על השאלות (n)" (the stems, one line each), "{n} שאלות לא נבדקו ·
+  לאשר או להסיר" (practice 2.0's review of the request), "איך" (the same
+  choice as "סבב חדש", remembered on the device) and at the bottom "לפתור"
+  and "לשלוח קישור" (the share sheet with "סט תרגול בתמצית · 10 שאלות
+  {url}", else the clipboard: "הקישור הועתק"). The menu (⋯): "לשנות שם"
+  (the author), "להסתיר אצלי" / "להחזיר" (anyone), "למחוק את הסט" (the
+  author or the group's creator, with "למחוק את הסט? השאלות נשארות בבנק של
+  הקבוצה."). Opening it clears "חדש". A deleted set: "הסט לא נמצא · אולי
+  נמחק".
+- **The group's numbers** (`SetStats.tsx`, OD5): "פותרים: k" and "שלי: r/n"
+  (a meter in the member's lane) always; "ממוצע הקבוצה x/n" and "איך הלך
+  לקבוצה בכל שאלה" (רוב צדקו · חלק צדקו · רוב טעו, "קשה לקבוצה" on the
+  lowest band) only when at least 3 other members finished, as the server
+  sends them; otherwise "הממוצע והתוצאות לפי שאלה מופיעים מ-3 פותרים
+  נוספים". No best score. "מי פתרו: …" only of members who chose it, never
+  with a score.
+- **"ליצור" with the flag**: `create` carries `set: { want }` (and `force`
+  for a second set), and "ליצור" opens the set's page; when the lecture
+  must be read first, the generating screen reads it and then creates the
+  set (so a set is never left "reading" by this phone). A 409 "already
+  making" shows the open set ("יש סט בהכנה על ההרצאה · מאת שוהם · 6/10")
+  with "לפתוח את הסט" and "ליצור סט נוסף בכל זאת" (OD20). The preview says
+  "הסט ישותף עם הקבוצה" ("…כמו כל סט, בלי לציין שהוא על טעויות" from the
+  mistakes).
+- **A set's link opened signed out** (`SetJoinNote.tsx`, through the slot):
+  above Join, "הסט נמצא בקבוצה. מי שכבר בקבוצה: כניסה עם הקוד האישי, או
+  פתיחה מהאייקון ← סטים של הקבוצה"; the address keeps `k`.
+- **Privacy** (help's "סט חדש" row, with the flag): a set and its
+  questions are visible to the whole group with the author's name; answers
+  and scores stay private.
+
+## Solving a set (WP13)
+
+`PracticeSession.tsx` with `s=k.<set>`:
+
+- The set's questions in its order; the round begins an attempt
+  (`study_qset_attempt_start`: the member's open one of the last 12 hours,
+  or a new one) and every answer carries it. An attempt that ended
+  elsewhere is replaced once, and the answer is sent again.
+- While the set is still being made, the screen asks
+  `study_qset_progress` every 10 s: questions kept since join the end of
+  the round ("נוספו n שאלות לסט"); checked ones not yet in the bank are
+  offered once per count ("n שאלות חדשות מוכנות · להוסיף לסט", whose
+  "להוסיף" runs the existing keep-all and adds them).
+- **The round's end** (§5.10): the attempt is finished once (scored on the
+  first answer per question), "רק אצלי" beside the score, the group's
+  numbers (compact: no bands), the name opt-in asked once, at the member's
+  first finished set ("להציג את השם שלי ברשימת מי פתרו": "להציג" · "לא
+  עכשיו"), "לחזור על הטעויות" as the free primary (then "סבב נוסף", which
+  begins a new attempt; the group counts the first), "שאלות חדשות על
+  הטעויות ‹" (the create screen from the mistakes, whose button carries the
+  price) and "לשלוח קישור ‹".
+- `PracticeRound.tsx`: its "איך" is now `HowChoice`, which the set's page
+  offers before "לפתור".
+
+**e2e** (`e2e/study/sets-b.cjs`, flag set `ps`, two members, with
+`mocks/sets.cjs`: section L's member RPCs in memory, and the practice
+mock's hooks for `create` with a set, its 409, L's trigger on keep and the
+answers' wrappers): create → the set's page as "סט בהכנה" → "להתחיל לפתור"
+→ every answer through `study_qset_answer` with the attempt → the round's
+end ("רק אצלי", "פותרים: 1", the floor's line, the opt-in, "לחזור על
+הטעויות") → the second member's shelf ("חדשים", "מאת שוהם"), the set's
+page and menu (no delete), hide and "להחזיר" → with 3 more finishers the
+average and the bands → the link signed out → D6's callout, "לפתוח את
+הסט" with "מאת שוהם" → the author renames and deletes. Not yet (WP14-WP15):
+Today's row, the hub's and the lecture page's sets, the mistakes end's paid
+secondary on "הטעויות שלי", the `show_name` row in "שלי", and the e2e of
+those, of a paused set and of the sign-in that lands on the set.
 
 ## The owner's snippets (from section L 1)
 

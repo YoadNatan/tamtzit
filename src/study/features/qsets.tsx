@@ -37,20 +37,21 @@ export function MakeLectureRow(p: { ctx: Ctx; lectureId: string }) {
   ) : null;
 }
 
-const SetPage = lazy(() => import("../components/SetPage"));
-const SetsShelf = lazy(() => import("../components/SetsShelf"));
+const Sets = lazy(() => import("../components/SetsScreen"));
 const JoinNote = lazy(() => import("../components/SetJoinNote"));
 
 /** ?v=sets[&l=…] and ?v=sets&k=… (allowed() sends them to the hub without the flag). */
-export function SetsRoute({ route, ctx }: ScreenProps<"sets">) {
-  return <Suspense fallback={<Loading />}>{route.k ? <SetPage key={route.k} route={route} ctx={ctx} /> : <SetsShelf key={route.l ?? ""} route={route} ctx={ctx} />}</Suspense>;
+export function SetsRoute(p: ScreenProps<"sets">) {
+  return (
+    <Suspense fallback={<Loading />}>
+      <Sets {...p} />
+    </Suspense>
+  );
 }
 
 /** Above Join when the address is a set's link; nothing otherwise. */
 export function SetJoinNote() {
-  if (!flags.sets || typeof location === "undefined") return null;
-  const q = new URLSearchParams(location.search);
-  return q.get("v") === "sets" && q.get("k") ? (
+  return flags.sets && /[?&]v=sets\b/.test(location.search) && /[?&]k=/.test(location.search) ? (
     <ErrorBoundary reset="set-join" fallback="none">
       <Suspense fallback={null}>
         <JoinNote />
