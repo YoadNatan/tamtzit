@@ -755,3 +755,13 @@ test("F's words promise a return tomorrow only where something brings it back (d
   // The pattern is not empty.
   assert.ok(PROMISE.test("השאלה חוזרת אליך מחר.") && PROMISE.test("טעות · ׳נראה לי׳ חוזרת מחר בניסוח אחר"));
 });
+
+test("VITE_STUDY_NOTIFY: its own flag, which needs section R at 1 and changes nothing else", () => {
+  const off = flagsFrom({ VITE_STUDY_GUIDE: "1", VITE_STUDY_INSTALL: "1" });
+  const on = flagsFrom({ VITE_STUDY_GUIDE: "1", VITE_STUDY_INSTALL: "1", VITE_STUDY_NOTIFY: "1" });
+  assert.equal(off.notify, false);
+  assert.equal(on.notify, true);
+  assert.deepEqual({ ...on, notify: false }, off);
+  assert.deepEqual(requiredSchema(on), { ...requiredSchema(off), R: 1 });
+  assert.equal(requiredSchema(off).R, undefined);
+});

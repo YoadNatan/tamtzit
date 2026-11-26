@@ -79,6 +79,11 @@ export function flagsFrom(e: Record<string, unknown>) {
     // home and the guide's step. Its memory stays on the device, so it needs
     // no SQL section (requiredSchema is unchanged).
     install: on(e.VITE_STUDY_INSTALL),
+    // Notifications (docs/study/DECISIONS-2026-11-26.md): the bell and the
+    // inbox, and where the device can, pushes to the phone or computer.
+    // Section R at 1; sending is decided on the server (the switches
+    // `notify` and `notify_hooks`, and the VAPID keys).
+    notify: on(e.VITE_STUDY_NOTIFY),
   } as const;
 }
 
@@ -161,5 +166,7 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     ...(f.courses ? { S: 1 } : {}),
     ...(f.exams ? { S: 2 } : {}),
     // f.guide and f.install need nothing: both keep their memory on the device.
+    // Notifications: the inbox, the devices and the settings are section R's.
+    ...(f.notify ? { R: 1 } : {}),
   };
 }
