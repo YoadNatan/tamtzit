@@ -318,8 +318,18 @@ export default function MakeProgress({ route, ctx, set }: ScreenProps<"practice"
       stop();
     };
   }, [lectureId, load]);
+  // A part lost to the connection can still be failing when the connection is
+  // back (its request was in flight): then the phone writes on once the round stops.
+  const resumeWhenStopped = useRef(false);
   useEffect(() => {
-    if (round && !round.running) void load().catch(() => undefined);
+    if (!round || round.running) return;
+    const again = resumeWhenStopped.current;
+    resumeWhenStopped.current = false;
+    void load()
+      .then(() => {
+        if (again && navigator.onLine !== false) resumeRef.current();
+      })
+      .catch(() => undefined);
   }, [round?.running]);
   // Back online: read again, and when this phone was writing the set and its
   // round stopped meanwhile (a part lost to the connection), write on.
@@ -335,6 +345,7 @@ export default function MakeProgress({ route, ctx, set }: ScreenProps<"practice"
       .then(() => {
         const r = roundRef.current;
         if (r && !r.running) resumeRef.current();
+        else if (r?.running) resumeWhenStopped.current = true;
       })
       .catch(() => undefined);
   }, [online]);
