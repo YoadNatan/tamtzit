@@ -67,7 +67,8 @@ npm run dev                  # http://localhost:5173/
 מצמצם שתי הרשאות שהחלקים הקודמים פותחים (העלאה לתיקיית `exams/` ושינוי ישיר
 של מצב מבחן), והן נשארות פתוחות עד שחלק 8 רץ שוב; חלק 9 (סעיף I, הקוד האישי)
 מגדיר מחדש את `study_member_saved` (הסימון "יש קוד"), שחלק 1 מחזיר לגרסה הישנה;
-חלק 10 (סעיף L, סטים של תרגול) מגדיר את `kind_on` באותו נוסח שבחלק 1.
+חלק 10 (סעיף L, סטים של תרגול) מגדיר את `kind_on` באותו נוסח שבחלק 1; אחריו
+באותו חלק סעיף O (דפי תרגילים שמעלים), שמגדיר מחדש שלוש פונקציות של חלק 8 ואחת נוספת.
 אחרי כל שינוי בקובץ: `npm run sql:parts` (בדיקת היחידה נכשלת אם החלקים לא
 מעודכנים). מריצים את ה-SQL **לפני** שהקוד החדש עולה.
 
@@ -210,7 +211,11 @@ chip), which part 1 puts back to its older form; it also holds section R
 (notifications: the inbox, pushes and their minute job, with the switch
 `notify` inserted off, [`docs/study/notify.md`](docs/study/notify.md)). Part 10
 is section L (practice sets, [`docs/study/sets.md`](docs/study/sets.md)), which
-would have taken part 9 past 170 KB. After editing the schema, run `npm run sql:parts`; a unit test
+would have taken part 9 past 170 KB, and then section O (uploaded exams and
+exercise sheets, [`docs/study/sheets.md`](docs/study/sheets.md), the switch
+`sheets` inserted off), which redefines four of part 8's functions (the course
+page, the library's count, simulations, the key's undo); O moves to a part 11
+of its own if part 10 would pass 170 KB. After editing the schema, run `npm run sql:parts`; a unit test
 fails while the parts are stale, or while one is over 170 KB (the SQL Editor's
 limit). Run the SQL **before** the code that needs
 it deploys: until then `/api/study/health` says `"schemaOk":false`.

@@ -692,3 +692,75 @@ in the fix, for Yoad to confirm or change:
   `x=new` without a lecture and `x=review` with MAKE off; "רק לך" stays the
   app's wording outside the set screens; the lecture sheet has no coverage
   percentage (it would need a plan call per lecture).
+
+## Uploaded sheets (design-exams, revision 2)
+
+Yoad's answers decide OD3, OD5 (changed), OD20 and OD21, and Yoad's
+instructions for the build change OD17, OD18 and OD19; every other open
+decision takes the design's recommended default. Where the exams design and
+the practice sets design (§13.2) disagree, §13.2 and the built section L
+win. The build is on `dev` in the design's slices: A0 (sheets with the exam
+reader as it is, SQL O 1, flag `VITE_STUDY_SHEETS`), A1 (the sheet reader,
+open and numeric forms, O 2, `VITE_STUDY_SHEETS_FORMS`) and B (similar
+questions, O 3, `VITE_STUDY_SIMILAR`). What is built, the numbers and the
+owner's queries are in [`sheets.md`](sheets.md); the steps in
+[`RELEASE-O.md`](RELEASE-O.md).
+
+| OD | Decision |
+|---|---|
+| OD1 | **Yoad's check, read only**: is the switch `exams` on in production? The query is in `sheets.md` and `RELEASE-O.md`; this build never queried production. Release A0 turns `exams` and `sheets` on together, or Yoad keeps both off and O ships dark |
+| OD2 | **Yoad's check, read only**: `STUDY_MONTHLY_USD` set to 33 in Vercel (the code's default is 40), and the spend by kind for October and November (queries in `sheets.md` and `RELEASE-O.md`) before release A1 |
+| OD3 | **Yoad:** sheets (reading, answers files, solving) at most **$6 a month** (`STUDY_SHEETS_MONTHLY_USD`, default 6); similar questions at most **$5 a month** (`STUDY_SIMILAR_MONTHLY_USD`, default 5). Both lines are checked before anything is spent; summaries stay protected; the total stays $33 |
+| OD4 | Two kinds: "מבחן קודם" and "דף תרגילים"; a question bank is a sheet with no lecture |
+| OD5 | **Changed by Yoad:** other providers (OpenAI, Gemini, Chinese models) may see everything, past exams, sheets and similar generation included. Every route stays on the current default model for now (the models package, Y, is not built); no refusal of non-Anthropic models is built for these kinds; the route keys `sheet_read` and `similar` are left for Y. One informational line in the help screen's privacy text (not a gate): uploaded material may be processed by the AI providers the app uses |
+| OD6 | Only course-staff material and the group's own; the upload's help says so (the app cannot check it) |
+| OD7 | Numeric answers and answers to similar questions go to `study_answers` (they count like any practice answer); open answers stay personal, in a private table |
+| OD8 | Open answers are self-marked and personal: never in group, topic or simulation figures |
+| OD9 | **Simulations only of past exams**, and only their choice items (built in O 1: `study_mock_create`) |
+| OD10 | **Yes:** one practice set per sheet, kind `sheet` (L's `qset_for_similar`, `qset_add_items`, `qset_similar_done`), shared like every set (L's OD3), solved through `s=k.`. Per practice sets §13.2: no `study_similar_share`, no set page of O's own (`?v=sets&k=` instead), no `set_shared` notice of O's own (L's), and the copy "מאת {name}" and "לפתור" |
+| OD11 | Any member may start a whole-sheet run: at most **24 items** (one similar question each), **1 run per sheet per day**, within the member's 40% share and the similar line |
+| OD12 | The whole-sheet offer at the end of practising a sheet and in the sheet's "⋯" menu, never at the top of the review |
+| OD13 | **Sheet reading is group work** (no member share, like past exams), with a **40-page cap**, a **second confirmation above $3**, the sheets line (OD3) and a **headroom check** (a start is refused when the 80% line minus this month's spend is below the sheet's worst case) |
+| OD14 | **Yes:** a link opened without a session shows a landing card, reusing L's signed-out line and the install steps (`?v=install`) |
+| OD15 | Yes: a priced row "להעתיק גם N שאלות פתוחות" on exams and A0 sheets with skipped open questions |
+| OD16 | **DOCX later:** the upload says "קובץ Word? צריך קודם לשמור אותו כ-PDF." |
+| OD17 | **The current default model** for reading, solving and similar (not pinned to a provider, OD5); Y routes them later |
+| OD18 | **Changed by Yoad's build instructions:** section O follows section L in `study-schema.sql` (the order is … I, R, L, O). O is in part 10 after L while part 10 stays at most 170 KB; otherwise O starts part 11 (`STARTS` gains `"O"`, and the tests, the parts' headers, the README and the docs say 11 parts). In-place edits in Q, Z, H, M, T, E and F as the design lists are allowed in the later versions; their release notes then say exactly which parts to run |
+| OD19 | **Changed by Yoad's build instructions:** the entry chunk's limit is 410,000 B (notifications' OD2; about 403,227 B used before O). O's share of it is capped at **1,500 B** (bundle owner `O`, free in `tools/study-bundle.mjs`); everything else loads lazily; at least 1,500 B stay free for the models package after O |
+| OD20 | $5 a month for similar questions (part of OD3) |
+| OD21 | $6 a month for sheets (part of OD3) |
+
+Also decided for this build:
+
+- **`study_set_solution` is renamed `study_item_solution`** (practice sets
+  §13.2: `study_set_*` reads as a set function).
+- **O's version goes to 3 across the slices** (O 1 for A0, O 2 for A1, O 3 for
+  B), and each flag asks for its own: `sheets` O 1, `sheetForms` O 2,
+  `similar` O 3 with L 1.
+- **e2e flag sets `o` and `os`** in `e2e/study/mock.cjs`; `os` builds on L's
+  `ps`. `exams.cjs` keeps passing.
+- **Fixtures are synthetic only** (`e2e/study/fixtures/sheet/`,
+  `make-sheet.cjs`); `e2e/study/fixtures/real/` is ignored by git.
+
+### Uploaded sheets, O0 and O1 (the fixture, the measurement, SQL O 1), built on 26 November 2026
+
+- **The fixture** (O0): a synthetic 6-page exercise sheet with a cover page
+  and a 2-page answers file, made into a PDF and photos at test time;
+  `server/study/sheetFixture.test.ts` keeps it consistent and checks that
+  release A0's exam-reader replies save as the design says (6 saved, the
+  8-option item rejected, 4 open or numeric items counted).
+- **The time measurement** (O0) is on the fixture only and costs $0
+  (`tools/sheet-timing.mjs`); the design's paid measurement is replaced by a
+  read-only query of production's ledger that Yoad runs. Its finding: read
+  units of 3 pages fit the 120 s budget at any likely speed, but a solve unit
+  of 8 items fits only above about 115 tokens a second, because thinking
+  dominates; the solver (O6) takes `min(8, what fits)` at the measured slow
+  speed. Details in `sheets.md`.
+- **SQL O 1** is in part 10 after L (part 10 is 91 KB). Beyond the design's
+  list of S's functions O redefines, O 1 also redefines
+  **`study_exam_key_undo`**, so an undo of a true/false or match item keyed by
+  hand brings its statements back (the key log gains `old_seq` and
+  `new_seq`). `study_sheet_create`'s answers default to `none` when not said.
+- **R's `exam_ready` and `exam_failed` notices carry `args.kind`** once
+  `study_exams.kind` exists (R's hook already read it); R's test R38 now
+  checks it. The notice's words for a sheet come with the client slice.
