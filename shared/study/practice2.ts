@@ -12,6 +12,7 @@
  * Imports end in ".js" (spec §2.2). */
 
 import { canStyle, emptyFacts, NEW_STYLES, weightOf, type Form, type Layout, type PartFacts } from "./forms.js";
+import { DEFAULT_MODEL, priceOf } from "./prices.js";
 
 // ── Points to know ──
 
@@ -177,37 +178,47 @@ export function shareOut(total: number, weights: readonly number[], caps?: reado
   return out;
 }
 
-export type PartCount = { part_idx: number; points: number; red_flags: number };
+/** A part's points and red flags; `uncovered`, when the bank's coverage is
+ *  known (fresh first, practice sets D5), the points no active bank question
+ *  tests yet. */
+export type PartCount = { part_idx: number; points: number; red_flags: number; uncovered?: number };
 
-/** Each chosen part's points and red flags, in part order. */
-export function partCounts(points: readonly PlanPoint[], parts?: readonly number[]): PartCount[] {
+/** Each chosen part's points and red flags, in part order; with `covered`
+ *  (the point ids active bank questions test), its uncovered points too. */
+export function partCounts(points: readonly PlanPoint[], parts?: readonly number[], covered?: ReadonlySet<string>): PartCount[] {
   const chosen = parts ? new Set(parts) : null;
   const by = new Map<number, PartCount>();
   for (const p of points) {
     if (chosen && !chosen.has(p.part_idx)) continue;
-    const c = by.get(p.part_idx) ?? { part_idx: p.part_idx, points: 0, red_flags: 0 };
+    const c = by.get(p.part_idx) ?? { part_idx: p.part_idx, points: 0, red_flags: 0, ...(covered ? { uncovered: 0 } : {}) };
     c.points += 1;
     if (p.red_flag) c.red_flags += 1;
+    if (covered && !covered.has(p.id)) c.uncovered = (c.uncovered ?? 0) + 1;
     by.set(p.part_idx, c);
   }
   return [...by.values()].sort((a, b) => a.part_idx - b.part_idx);
 }
 
+/** A part's weight when questions are shared out: its uncovered points when
+ *  the coverage is known (at least 1, so a covered part can still get a
+ *  question when the size needs it), else all its points. */
+const freshWeight = (c: PartCount) => (c.uncovered === undefined ? c.points : Math.max(1, c.uncovered));
+
 /** The questions of each chosen part for a level (and for משלי, `count`),
- *  at most REQUEST_MAX in all: over it, shared out by the largest remainder. */
+ *  at most REQUEST_MAX in all: over it, shared out by the largest remainder.
+ *  משלי's share, and a level's over REQUEST_MAX, weight each part by its
+ *  uncovered points when the counts carry them (fresh first); without them
+ *  every count is as before. */
 export function questionsPerPart(level: Level, counts: readonly PartCount[], count?: number): number[] {
+  const fresh = counts.some((c) => c.uncovered !== undefined);
   if (level === "custom") {
     const room = counts.map((c) => c.points * CUSTOM_PER_POINT);
     const want = Math.max(0, Math.min(Math.floor(count ?? 0), REQUEST_MAX, room.reduce((s, x) => s + x, 0)));
-    return shareOut(
-      want,
-      counts.map((c) => c.points),
-      room,
-    );
+    return shareOut(want, counts.map(freshWeight), room);
   }
   const raw = counts.map((c) => partQuestions(level, c.points, c.red_flags));
   const total = raw.reduce((s, x) => s + x, 0);
-  return total <= REQUEST_MAX ? raw : shareOut(REQUEST_MAX, raw, raw);
+  return total <= REQUEST_MAX ? raw : shareOut(REQUEST_MAX, fresh ? counts.map((c, i) => (raw[i] > 0 ? freshWeight(c) : 0)) : raw, raw);
 }
 
 /** The setup screen's three numbers ("ממוקד 12 · מלא 24 · מקיף 40"). */
@@ -219,17 +230,26 @@ export function levelCounts(points: readonly PlanPoint[], parts?: readonly numbe
 
 // ── The plan: batches, their points and their styles ──
 
-/** Points in the order a level takes them: red flags, then weight, then the paragraphs' order. */
-const priority = (a: PlanPoint, b: PlanPoint) => Number(b.red_flag) - Number(a.red_flag) || b.weight - a.weight || a.n - b.n;
+/** Points in the order a level takes them: red flags, then (fresh first,
+ *  practice sets D5) the points no active bank question tests yet, then
+ *  weight, then the paragraphs' order. */
+const priorityOf =
+  (covered?: ReadonlySet<string>) =>
+  (a: PlanPoint, b: PlanPoint): number =>
+    Number(b.red_flag) - Number(a.red_flag) ||
+    (covered ? Number(covered.has(a.id)) - Number(covered.has(b.id)) : 0) ||
+    b.weight - a.weight ||
+    a.n - b.n;
 
 /** The points of a part a request covers: ממוקד the most important, one per
  *  question (every red flag first); מלא and מקיף all of them; משלי the most
- *  important two per question. In the paragraphs' order. */
-export function chosenPoints(level: Level, partPoints: readonly PlanPoint[], questions: number): PlanPoint[] {
+ *  important two per question. With `covered`, the uncovered ones before
+ *  the covered (after red flags). In the paragraphs' order. */
+export function chosenPoints(level: Level, partPoints: readonly PlanPoint[], questions: number, covered?: ReadonlySet<string>): PlanPoint[] {
   if (questions <= 0) return [];
   const take = level === "focused" ? questions : level === "custom" ? questions * CUSTOM_PER_POINT : partPoints.length;
   return [...partPoints]
-    .sort(priority)
+    .sort(priorityOf(covered))
     .slice(0, Math.max(take, level === "focused" ? partPoints.filter((p) => p.red_flag).length : 0))
     .sort((a, b) => a.n - b.n);
 }
@@ -237,6 +257,8 @@ export function chosenPoints(level: Level, partPoints: readonly PlanPoint[], que
 export type PlannedBatch = { part_idx: number; seq: number; wanted: number; points: string[]; styles: Style[] };
 export type Plan = {
   total: number;
+  /** `covers`: the points its questions are planned to cover that no active
+   *  bank question tests yet (all of them when the coverage is not known). */
   parts: Array<{ part_idx: number; points: number; red_flags: number; questions: number; covers: number }>;
   batches: PlannedBatch[];
 };
@@ -266,7 +288,10 @@ export function styleQuota(style: Style, f: PartFacts): number {
  *  picture), or whose quota in the part is used up, takes the next style; a
  *  label item in a part with pictures but no labels becomes an image item.
  *  A part none of the request's styles fits gets no questions. `tableParts`
- *  is the older form of the facts (tables only). */
+ *  is the older form of the facts (tables only). `covered` (the point ids
+ *  the lecture's active bank questions test) plans fresh first: uncovered
+ *  points before covered ones, parts weighted by their uncovered points, and
+ *  `covers` counting only new points. Without it the plan is as before. */
 export function planRequest(o: {
   points: readonly PlanPoint[];
   level: Level;
@@ -275,7 +300,9 @@ export function planRequest(o: {
   styles: readonly Style[];
   tableParts?: ReadonlySet<number>;
   partFacts?: ReadonlyMap<number, PartFacts>;
+  covered?: Iterable<string>;
 }): Plan {
+  const covered = o.covered ? new Set(o.covered) : undefined;
   const styles = STYLES.filter((s) => o.styles.includes(s));
   const factsOf = (part: number): PartFacts | null => {
     if (o.partFacts) return o.partFacts.get(part) ?? emptyFacts();
@@ -287,7 +314,7 @@ export function planRequest(o: {
     return !f || canStyle(s, f) || (s === "label" && canStyle("image", f));
   };
   const usableParts = o.parts.filter((p) => styles.some((s) => fits(s, p)));
-  const counts = partCounts(o.points, usableParts);
+  const counts = partCounts(o.points, usableParts, covered);
   // A part whose every fitting style has a quota (only pictures, only staged cases) writes at most their sum.
   const room = (part: number) => {
     const f = factsOf(part);
@@ -308,8 +335,14 @@ export function planRequest(o: {
   counts.forEach((c, i) => {
     const questions = perPart[i];
     const partPoints = o.points.filter((p) => p.part_idx === c.part_idx);
-    const cover = chosenPoints(o.level, partPoints, questions);
-    parts.push({ ...c, questions, covers: cover.length });
+    const cover = chosenPoints(o.level, partPoints, questions, covered);
+    parts.push({
+      part_idx: c.part_idx,
+      points: c.points,
+      red_flags: c.red_flags,
+      questions,
+      covers: covered ? cover.filter((p) => !covered.has(p.id)).length : cover.length,
+    });
     const sizes = batchSizes(questions);
     const shares = shareOut(cover.length, sizes, sizes.map(() => cover.length));
     const f = factsOf(c.part_idx);
@@ -343,6 +376,34 @@ export function planRequest(o: {
 
 /** Every planned item's style, for the weighted estimate. */
 export const plannedStyles = (plan: Pick<Plan, "batches">): Style[] => plan.batches.flatMap((b) => b.styles);
+
+/** How many items of each style a plan writes ("6 אמריקאית · 3 מקרה"), only
+ *  the styles it has (plan.styles of action "plan"; the preview's tiles). */
+export function styleCounts(plan: Pick<Plan, "batches">): Partial<Record<Style, number>> {
+  const out: Partial<Record<Style, number>> = {};
+  for (const s of plannedStyles(plan)) out[s] = (out[s] ?? 0) + 1;
+  return out;
+}
+
+/** The lecture's coverage by the bank before and after a plan (the preview's
+ *  "אחרי הסט: {p}% מההרצאה מכוסים בבנק"): of all the lecture's current
+ *  points, those active bank questions test, plus the new points the plan
+ *  covers. `percent` reads 100 only when every point is covered; `full`:
+ *  the bank already covers every point ("הסט יחזור על נושאים"). A part read
+ *  again has new point ids, so its coverage starts again at 0. */
+export function coverageAfter(
+  points: readonly Pick<PlanPoint, "id">[],
+  covered: Iterable<string>,
+  plan: Pick<Plan, "parts">,
+): { total: number; before: number; after: number; percent: number; full: boolean } {
+  const ids = new Set(points.map((p) => p.id));
+  const known = new Set(covered);
+  const before = [...ids].filter((id) => known.has(id)).length;
+  const total = ids.size;
+  const after = Math.min(total, before + plan.parts.reduce((n, p) => n + p.covers, 0));
+  const percent = total === 0 ? 0 : after >= total ? 100 : Math.min(99, Math.round((100 * after) / total));
+  return { total, before, after, percent, full: total > 0 && before >= total };
+}
 
 // ── The options of a request ──
 
@@ -420,17 +481,39 @@ export function readOptions(raw: unknown): { ok: true; options: Options } | { ok
 
 // ── What it costs (shown before anything is spent) ──
 
-/** Full-price estimates in USD, shown before a member creates anything. The
- *  approved figures (DECISIONS.md: 12 ≈ $0.30, 24 ≈ $0.60, 40 ≈ $1.00 a
- *  lecture) are $0.025 a question: its share of the writing call, the
- *  blind solver's check and the automatic rewrites. Calibrate against the
- *  ledger (study_usage, kinds practice, solver, points, reword, style) once
- *  the first lectures are written; the reservations are separate and always
- *  the worst case (budget.ts estimateUsd). Batch mode (section B) halves them. */
+/** One question written, checked by the blind solver and rewritten when it
+ *  failed, at full price on the default model: **$0.04 until the ledger
+ *  calibration** (practice sets OD11; docs/study/sets.md has the owner's
+ *  read-only query). The approved $0.025 (DECISIONS.md: 12 ≈ $0.30) was
+ *  never checked against the ledger and is likely about 45% low: a writing
+ *  batch on claude-opus-5-5 costs about $0.16 for 5 questions, and its
+ *  solver call about $0.027. Calibrated, this becomes the observed mean. */
+export const QUESTION_USD = 0.04;
+
+/** A writing batch of 5 questions in tokens (cache hits, input, output), as
+ *  the models design measured it: what a model's price is compared on. */
+export const QUESTION_BATCH_TOKENS = { hit: 8_000, in: 4_000, out: 7_000 } as const;
+
+const batchUsd = (model: string) => {
+  const p = priceOf(model);
+  return (QUESTION_BATCH_TOKENS.hit * p.hit + QUESTION_BATCH_TOKENS.in * p.in + QUESTION_BATCH_TOKENS.out * p.out) / 1_000_000;
+};
+
+/** The expected cost of one question (QUESTION_USD) on `model`: scaled by
+ *  that model's price for a writing batch against the default model's
+ *  (claude-opus-5-5). No model, or the default: QUESTION_USD. An unknown
+ *  model is priced at the dearest rates (prices.ts), never cheaper. */
+export function expectedQuestionUsd(model?: string | null): number {
+  if (!model || model === DEFAULT_MODEL) return QUESTION_USD;
+  return Math.round(QUESTION_USD * (batchUsd(model) / batchUsd(DEFAULT_MODEL)) * 1e6) / 1e6;
+}
+
+/** Full-price estimates in USD, shown before a member creates anything,
+ *  besides a question (expectedQuestionUsd). The reservations are separate
+ *  and always the worst case (budget.ts estimateUsd). Batch mode (section B)
+ *  halves them. */
 export const EXPECTED_USD = {
-  /** One question written, checked by the blind solver, rewritten when it failed. */
-  question: 0.025,
-  /** The blind solver's share of a question (in `question`, shown apart). */
+  /** The blind solver's share of a question (in expectedQuestionUsd, shown apart). */
   solver: 0.005,
   /** One member's "↻ לנסח מחדש": a question written again and checked. */
   reword: 0.03,
@@ -456,8 +539,9 @@ export function pointsUsd(summaryChars: number, parts = 1): number {
 
 /** A request of `questions` questions, at full price: a number of plain
  *  questions, or the planned styles, each weighted (forms.ts STYLE_WEIGHT: a
- *  label item half, a staged case 2.5). */
-export const requestUsd = (questions: number | readonly string[]): number => round2(Math.max(0, weighted(questions)) * EXPECTED_USD.question);
+ *  label item half, a staged case 2.5), on `model` (expectedQuestionUsd). */
+export const requestUsd = (questions: number | readonly string[], model?: string | null): number =>
+  round2(Math.max(0, weighted(questions)) * expectedQuestionUsd(model));
 /** The blind solver's part of that (already in requestUsd; label items have none). */
 export const solverUsd = (questions: number | readonly string[]): number =>
   round2(Math.max(0, typeof questions === "number" ? questions : weighted(questions.filter((s) => s !== "label"))) * EXPECTED_USD.solver);

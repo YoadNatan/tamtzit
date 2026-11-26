@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 import {
   type CreateAnswer,
   EXPECTED_USD,
+  expectedQuestionUsd,
   levelCounts,
   type Options,
   planRequest,
@@ -283,7 +284,7 @@ export const planAction: Op = async (req, body) => {
       // The blind solver's part of questionsUsd, shown apart ("כל שאלה נבדקת בידי פותר עיוור").
       solverUsd: solverUsd(planned),
       totalUsd: Math.round((readUsd + requestUsd(planned)) * 100) / 100,
-      perQuestionUsd: EXPECTED_USD.question,
+      perQuestionUsd: expectedQuestionUsd(MODEL),
       levels: { focused: requestUsd(levels.focused), full: requestUsd(levels.full), deep: requestUsd(levels.deep) },
       rewordUsd: EXPECTED_USD.reword,
       styleUsd: EXPECTED_USD.style,

@@ -78,7 +78,7 @@ screens read the shared vocabulary and numbers from
    ("ככה השאלות ייכתבו: …"), the example as text, and a `sig`. Keep all three
    and send them back unchanged in `options.style`.
 2. The focus line is `options.focus` (at most 200 characters).
-3. The cost line ("24 שאלות · כמו במבחן · כ-$0.60") is `plan.estimate`.
+3. The cost line ("24 שאלות · כמו במבחן · כ-$0.96") is `plan.estimate`.
 
 ### הבנק נבנה
 
@@ -184,8 +184,8 @@ gives 12, 24 and 40, as the approved screen shows.
   "levels": { "focused": 12, "full": 24, "deep": 40 },
   "plan": { "level": "full", "total": 24,
             "parts": [{ "part_idx": 0, "points": 6, "red_flags": 1, "questions": 3, "covers": 6 }], "batches": 6 },
-  "estimate": { "readUsd": 0, "questionsUsd": 0.6, "solverUsd": 0.12, "totalUsd": 0.6, "perQuestionUsd": 0.025,
-                "levels": { "focused": 0.3, "full": 0.6, "deep": 1 }, "rewordUsd": 0.03, "styleUsd": 0.01 },
+  "estimate": { "readUsd": 0, "questionsUsd": 0.96, "solverUsd": 0.12, "totalUsd": 0.96, "perQuestionUsd": 0.04,
+                "levels": { "focused": 0.48, "full": 0.96, "deep": 1.6 }, "rewordUsd": 0.03, "styleUsd": 0.01 },
   "spent": { "groupUsd": 3.21, "mineUsd": 0.42, "capUsd": 33, "share": 0.8, "memberShare": 0.4 }
 }
 ```
@@ -245,7 +245,7 @@ a correction.
                "styles": ["case", "mechanism", "drug_choice", "adverse_contra"], "difficulty": "exam" },
   "batches": [{ "id": "…", "part_idx": 0, "seq": 0, "wanted": 3 }, { "id": "…", "part_idx": 2, "seq": 1, "wanted": 4 }],
   "plan": [{ "part_idx": 0, "points": 6, "red_flags": 1, "questions": 3, "covers": 6 }],
-  "estimate": { "questionsUsd": 0.6 }
+  "estimate": { "questionsUsd": 0.96 }
 }
 ```
 
@@ -464,8 +464,8 @@ at 40% of the cap for one member.
 | Kind (POLICY) | Call | Daily limit a member | Reserved (worst, a typical lecture) | Expected |
 |---|---|---|---|---|
 | `points` | one call per stale part (the read's first, ref `read`, is the one the daily limit counts) | 20 reads | ≈ $0.17 a part of 4,000 characters (max_tokens 8,000) | ≈ $0.24 a lecture of five parts, once for the group |
-| `practice` | one batch of up to 5 questions; the automatic rewrite | none | ≈ $0.41 a batch of 5 | with the solver, $0.025 a question |
-| `solver` | the blind solver after each writer's call | none | ≈ $0.10 for 5 questions | ≈ $0.005 a question (in the $0.025) |
+| `practice` | one batch of up to 5 questions; the automatic rewrite | none | ≈ $0.41 a batch of 5 | with the solver, $0.04 a question until calibrated |
+| `solver` | the blind solver after each writer's call | none | ≈ $0.10 for 5 questions | ≈ $0.005 a question (in the $0.04) |
 | `reword` | a member's "↻ לנסח מחדש" (and its one automatic rewrite) | 40 | ≈ $0.22 | ≈ $0.03 |
 | `style` | an example read back | 10 | ≈ $0.05 ($0.06 with a photo) | ≈ $0.01 |
 
@@ -480,14 +480,18 @@ table):
 
 | Level | The example (46 points) | Questions, with the blind solver | Reading the points (once, if not read yet) |
 |---|---|---|---|
-| ממוקד | 12 | ≈ $0.30 | + ≈ $0.14 |
-| מלא | 24 | ≈ $0.60 | + ≈ $0.14 |
-| מקיף | 40 | ≈ $1.00 | + ≈ $0.14 |
-| משלי | the member's number | $0.025 a question | + ≈ $0.14 |
+| ממוקד | 12 | ≈ $0.48 | + ≈ $0.14 |
+| מלא | 24 | ≈ $0.96 | + ≈ $0.14 |
+| מקיף | 40 | ≈ $1.60 | + ≈ $0.14 |
+| משלי | the member's number | $0.04 a question | + ≈ $0.14 |
 
-The $0.025 a question is the approved figure (`EXPECTED_USD.question`);
-calibrate it, and `pointsUsd()`, against the ledger after the first
-lectures:
+The approved figure was $0.025 a question (12 ≈ $0.30, 24 ≈ $0.60, 40 ≈
+$1.00). It was never checked against the ledger and is likely about 45% low,
+so until the calibration every estimate uses **$0.04 a question**
+(`QUESTION_USD`, read through `expectedQuestionUsd(model)`, which scales it
+by another model's price for a writing batch; practice sets OD11). The
+calibration query that sets the base rate is in `sets.md` ("What a set
+costs"); the per-kind summary below is still useful for `pointsUsd()`:
 
 ```sql
 select kind, count(*), round(avg(cost_usd), 4) as avg_usd, round(sum(cost_usd), 2) as total_usd

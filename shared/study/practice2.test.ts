@@ -2,16 +2,22 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   batchSizes,
+  chosenPoints,
   CUSTOM_PER_POINT,
   coverage,
+  coverageAfter,
   DEFAULT_STYLES,
-  EXPECTED_USD,
+  expectedQuestionUsd,
   keepable,
   levelCounts,
+  partCounts,
   partQuestions,
   planRequest,
+  plannedStyles,
   type PlanPoint,
   pointsUsd,
+  QUESTION_BATCH_TOKENS,
+  QUESTION_USD,
   questionsPerPart,
   readOptions,
   REQUEST_MAX,
@@ -21,8 +27,10 @@ import {
   sessionCount,
   shareOut,
   sourceCounts,
+  styleCounts,
   STYLES,
 } from "./practice2.js";
+import { ANTHROPIC_PRICES, DEFAULT_MODEL } from "./prices.js";
 
 /* Practice 2.0's shared numbers (docs/study/proposal/practice-2/DECISIONS.md;
  * docs/study/practice-2-api.md): the count by level from the points to know,
@@ -247,13 +255,15 @@ test("options: each refusal has its code", () => {
   assert.equal(code([]), "ok", "not an object: the defaults");
 });
 
-test("estimates: $0.025 a question, as DECISIONS.md's table (12 ≈ $0.30, 24 ≈ $0.60, 40 ≈ $1.00)", () => {
-  assert.equal(EXPECTED_USD.question, 0.025);
-  assert.equal(solverUsd(24), 0.12, "the blind solver's part of מלא, already in its $0.60");
+test("estimates: $0.04 a question until the ledger calibration (practice sets OD11), so 12 ≈ $0.48, 24 ≈ $0.96, 40 ≈ $1.60", () => {
+  assert.equal(QUESTION_USD, 0.04);
+  assert.equal(expectedQuestionUsd(), 0.04);
+  assert.equal(solverUsd(24), 0.12, "the blind solver's part of מלא, already in its $0.96");
   const { focused, full, deep } = levelCounts(EXAMPLE);
-  assert.deepEqual([requestUsd(focused), requestUsd(full), requestUsd(deep)], [0.3, 0.6, 1]);
+  assert.deepEqual([requestUsd(focused), requestUsd(full), requestUsd(deep)], [0.48, 0.96, 1.6]);
   assert.equal(requestUsd(0), 0);
-  assert.equal(requestUsd(7), 0.18, "rounded up to the cent");
+  assert.equal(requestUsd(7), 0.28);
+  assert.equal(requestUsd(10), 0.4, "a set of 10: the design's ≈ $0.40");
   // Reading the points: about $0.14 for an 18,000-character summary, once per lecture for the group.
   assert.equal(pointsUsd(18_000), 0.14);
   assert.equal(pointsUsd(0), 0.04);
@@ -304,4 +314,123 @@ test("סבב חדש: the union of the chosen sources, within the parts and style
   assert.equal(sessionCount(rows, { sources: [] }), 0);
   assert.equal(sessionCount(rows, { sources: ["all"], lectures: ["other"] }), 0);
   assert.equal(STYLES.length, 13);
+});
+
+// ── Practice sets (docs/study/sets.md; design-practice §8.1): fresh first, covers, the price ──
+
+/** The example with מלריה's first 10 points (its 4 red flags among them) and all of אמבות already in the bank. */
+const COVERED = new Set([...part(0, 6).map((p) => p.id), ...part(2, 10).map((p) => p.id)]);
+
+test("fresh first: with no coverage given, every count and every plan is what it was", () => {
+  for (const level of ["focused", "full", "deep"] as const) {
+    const a = planRequest({ points: EXAMPLE, level, parts: [0, 1, 2, 3], styles: [...DEFAULT_STYLES] });
+    const b = planRequest({ points: EXAMPLE, level, parts: [0, 1, 2, 3], styles: [...DEFAULT_STYLES], covered: [] });
+    assert.deepEqual(b, a, `${level}: an empty bank plans as before`);
+  }
+  const c = planRequest({ points: EXAMPLE, level: "custom", count: 10, parts: [0, 1, 2, 3], styles: ["case"] });
+  assert.deepEqual(planRequest({ points: EXAMPLE, level: "custom", count: 10, parts: [0, 1, 2, 3], styles: ["case"], covered: [] }), c);
+  assert.deepEqual(partCounts(EXAMPLE)[0], { part_idx: 0, points: 6, red_flags: 1 }, "no uncovered count without coverage");
+  assert.deepEqual(partCounts(EXAMPLE, [0], COVERED)[0], { part_idx: 0, points: 6, red_flags: 1, uncovered: 0 });
+  // The levels' counts do not depend on the bank (they say how much of the lecture a level asks).
+  assert.deepEqual(levelCounts(EXAMPLE), { focused: 12, full: 24, deep: 40 });
+});
+
+test("fresh first: red flags first, then the points no bank question tests, then weight, then order", () => {
+  const malaria = part(2, 22, 4);
+  // ממוקד, 6 questions: the 4 red flags (all covered) and then two uncovered ones (weight 3 first: n = 13, 16).
+  assert.deepEqual(
+    chosenPoints("focused", malaria, 6, COVERED).map((p) => p.id),
+    ["p2-1", "p2-2", "p2-3", "p2-4", "p2-13", "p2-16"],
+  );
+  // Without the bank: the weightiest (n = 7, 10), as before.
+  assert.deepEqual(
+    chosenPoints("focused", malaria, 6).map((p) => p.id),
+    ["p2-1", "p2-2", "p2-3", "p2-4", "p2-7", "p2-10"],
+  );
+  // משלי, 3 questions = 6 points: the red flags, then only uncovered points.
+  const custom = chosenPoints("custom", malaria, 3, COVERED).map((p) => p.id);
+  assert.deepEqual(custom.slice(0, 4), ["p2-1", "p2-2", "p2-3", "p2-4"]);
+  for (const id of custom.slice(4)) assert.ok(!COVERED.has(id), `${id} is new`);
+});
+
+test("fresh first: משלי shares its questions by uncovered points (at least 1 a part)", () => {
+  const counts = partCounts(EXAMPLE, [0, 1, 2, 3], COVERED);
+  assert.deepEqual(
+    counts.map((c) => c.uncovered),
+    [0, 9, 12, 9],
+  );
+  // 10 questions: אמבות (fully covered) weighs 1, not 6, and מלריה 12 (its uncovered), not 22.
+  assert.deepEqual(questionsPerPart("custom", counts, 10), [1, 3, 3, 3]);
+  assert.deepEqual(questionsPerPart("custom", partCounts(EXAMPLE, [0, 1, 2, 3]), 10), [1, 2, 5, 2], "by all points without the bank");
+  // A level over the 40: by uncovered points too, never above the level's own count.
+  const deep = questionsPerPart("deep", counts);
+  assert.equal(
+    deep.reduce((a, b) => a + b, 0),
+    REQUEST_MAX,
+  );
+  assert.ok(deep[0] <= 6 && deep[0] < 5, `a covered part gives way: ${deep}`);
+});
+
+test("covers: only the new points, and up to two a question at the custom level", () => {
+  const plan = planRequest({ points: EXAMPLE, level: "full", parts: [0, 1, 2, 3], styles: ["case"], covered: COVERED });
+  assert.deepEqual(
+    plan.parts.map((p) => [p.part_idx, p.questions, p.covers]),
+    [
+      [0, 3, 0],
+      [1, 5, 9],
+      [2, 11, 12],
+      [3, 5, 9],
+    ],
+    "מלא still asks a level's count; it covers only what the bank does not",
+  );
+  const custom = planRequest({ points: EXAMPLE, level: "custom", count: 4, parts: [1], styles: ["case"], covered: COVERED });
+  assert.deepEqual([custom.total, custom.parts[0].covers], [4, 4 * CUSTOM_PER_POINT], "4 questions cover 8 new points, never assumed one each");
+  const small = planRequest({ points: part(1, 3), level: "custom", count: 4, parts: [1], styles: ["case"], covered: [] });
+  assert.deepEqual([small.total, small.parts[0].covers], [4, 3], "never more than the part's points");
+});
+
+test("coverageAfter: the preview's percentage of the lecture covered in the bank after the set", () => {
+  const plan = planRequest({ points: EXAMPLE, level: "custom", count: 10, parts: [0, 1, 2, 3], styles: ["case"], covered: COVERED });
+  const c = coverageAfter(EXAMPLE, COVERED, plan);
+  assert.deepEqual([c.total, c.before], [46, 16]);
+  assert.equal(c.after, 16 + plan.parts.reduce((n, p) => n + p.covers, 0));
+  assert.equal(c.percent, Math.round((100 * c.after) / 46));
+  assert.equal(c.full, false);
+  // Covered ids of a part read again (new ids) count for nothing.
+  assert.equal(coverageAfter(EXAMPLE, ["old-id-1", "old-id-2"], { parts: [] }).before, 0);
+  // Everything in the bank: "הסט יחזור על נושאים".
+  const all = coverageAfter(EXAMPLE, EXAMPLE.map((p) => p.id), planRequest({ points: EXAMPLE, level: "custom", count: 5, parts: [2], styles: ["case"], covered: EXAMPLE.map((p) => p.id) }));
+  assert.deepEqual([all.percent, all.full, all.after], [100, true, 46]);
+  // 99% stays 99 until the last point is covered.
+  const many = Array.from({ length: 200 }, (_, i) => ({ id: `x${i}` }));
+  assert.equal(coverageAfter(many, many.slice(1).map((p) => p.id), { parts: [] }).percent, 99);
+  assert.deepEqual(coverageAfter([], [], { parts: [] }), { total: 0, before: 0, after: 0, percent: 0, full: false });
+});
+
+test("styleCounts: how many of each style a plan writes (the preview's tiles, plan.styles)", () => {
+  const plan = planRequest({ points: EXAMPLE, level: "custom", count: 10, parts: [0, 1, 2, 3], styles: ["case", "mechanism", "not_true"] });
+  const counts = styleCounts(plan);
+  assert.deepEqual(counts, { case: 4, mechanism: 3, not_true: 3 });
+  assert.equal(
+    Object.values(counts).reduce((a, b) => a + (b ?? 0), 0),
+    plannedStyles(plan).length,
+  );
+  assert.deepEqual(styleCounts({ batches: [] }), {});
+});
+
+test("expectedQuestionUsd: $0.04 on the default model, scaled by another model's price for a writing batch", () => {
+  assert.equal(DEFAULT_MODEL, "claude-opus-5-5");
+  assert.equal(expectedQuestionUsd(DEFAULT_MODEL), QUESTION_USD);
+  assert.equal(expectedQuestionUsd(null), QUESTION_USD);
+  // Opus 5.5's batch: 8,000 × $0.20 + 4,000 × $4 + 7,000 × $20 a million = $0.1576 (the design's ≈ $0.16 for 5).
+  const opus = ANTHROPIC_PRICES[DEFAULT_MODEL];
+  assert.equal(Math.round((QUESTION_BATCH_TOKENS.hit * opus.hit + QUESTION_BATCH_TOKENS.in * opus.in + QUESTION_BATCH_TOKENS.out * opus.out) / 100) / 10_000, 0.1576);
+  // Sonnet 5.5 is half Opus 5.5's price on every rate: half the question.
+  assert.equal(expectedQuestionUsd("claude-sonnet-5-5"), 0.02);
+  assert.equal(expectedQuestionUsd("claude-sonnet-5-5-20260101"), 0.02, "a dated id is the same model");
+  assert.ok(expectedQuestionUsd("claude-haiku-5-5") < 0.01);
+  assert.ok(expectedQuestionUsd("claude-fable-5-2") > QUESTION_USD);
+  // A model nobody lists: the dearest rates, never cheaper than the default.
+  assert.ok(expectedQuestionUsd("claude-opus-5-5-fast") > QUESTION_USD);
+  assert.equal(requestUsd(10, "claude-sonnet-5-5"), 0.2);
 });

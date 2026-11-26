@@ -94,7 +94,7 @@ test("weights: a label item half, a staged case 2.5; the estimate is weighted", 
   assert.equal(styleWeight("case"), 1);
   assert.equal(weightOf(["case", "tf", "label", "steps"]), 1 + 1.2 + 0.5 + 2.5);
   assert.equal(requestUsd(["case", "case"]), requestUsd(2));
-  assert.equal(requestUsd(["steps", "steps"]), 0.13, "5 × $0.025, rounded up");
+  assert.equal(requestUsd(["steps", "steps"]), 0.2, "5 × $0.04 (practice sets OD11)");
   assert.equal(solverUsd(["label", "label"]), 0, "label items are never solved");
 });
 

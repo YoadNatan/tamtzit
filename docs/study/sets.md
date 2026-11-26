@@ -16,7 +16,7 @@ a view over bank questions.
 
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
-| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | WP0 (docs) and WP1 (bundle owner) built; WP2, WP3 and the screens follow |
+| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | WP0-WP2 built (docs, bundle owner, shared planning and price); WP3 and the screens follow |
 | B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | not built yet |
 | C | The notices `set_shared` and `set_solved` (WP17), with section R | (R's) | L 1, R | not built yet |
 
@@ -73,12 +73,85 @@ notifications, 1 exams, 1 models).
 
 ## What a set costs (WP2)
 
-To come with WP2: the planning rate ($0.04 a question until calibrated,
-OD11) and the owner's read-only calibration query.
+**The price per question is not calibrated yet.** Until it is, every plan
+uses **$0.04 a question** (OD11): `QUESTION_USD` in
+`shared/study/practice2.ts`, read through `expectedQuestionUsd(model?)`. The
+old constant, $0.025, was never checked against the ledger and is likely
+about 45% low: a practice batch's token profile on `claude-opus-5-5` (8,000
+cached tokens read, 4,000 in and 7,000 out) costs about $0.16 for 5 questions,
+plus about $0.027 a solver call, so about $0.035-0.037 a question before
+automatic rewrites. `expectedQuestionUsd(model)` scales the base by a
+model's price for that same profile against `claude-opus-5-5` (once section Y
+routes practice to another model).
 
-## Planning (WP2)
+| What | Cost at $0.04 a question |
+|---|---|
+| A 10-question set | ≈ $0.40 |
+| + a stale lecture read (package B usually reads ahead) | + ≈ $0.10-0.24, once for the group |
+| + an example read | + ≈ $0.01 |
+| A 20-question set with a stale read | ≈ $1.00 (above $1: a confirmation, OD17) |
 
-To come with WP2: fresh first, parts weighted by uncovered points, `covers`.
+**Calibration (the owner, once, read-only).** In the Supabase SQL editor, on
+production, after about a month of practice writing. It reads the ledger and
+the drafts and changes nothing (checked on a local copy of the schema; it was
+not run on production):
+
+```sql
+-- What a written question cost in the last 30 days: the writing calls
+-- (practice), the blind solver (solver) and the members' rewrites (reword),
+-- per question that reached a decision or is still waiting (a draft that a
+-- rewrite replaced is not counted again: its rewrite is).
+with spend as (
+  select kind, count(*) as calls, sum(cost_usd) as usd
+    from public.study_usage
+   where kind in ('practice', 'solver', 'reword')
+     and settled_at is not null
+     and created_at >= now() - interval '30 days'
+   group by kind
+), made as (
+  select count(*) filter (where status in ('kept', 'removed', 'rejected', 'pending')) as questions,
+         count(*) filter (where status = 'kept') as kept,
+         count(*) filter (where status in ('removed', 'rejected')) as dropped
+    from public.study_question_drafts
+   where created_at >= now() - interval '30 days'
+)
+select (select jsonb_object_agg(kind, jsonb_build_object('calls', calls, 'usd', round(usd, 2))) from spend) as by_kind,
+       m.questions, m.kept, m.dropped,
+       round((select sum(usd) from spend) / nullif(m.questions, 0), 4) as usd_per_question
+  from made m;
+```
+
+`usd_per_question` is the base rate. It replaces `QUESTION_USD` (a
+one-line change with its test) and is recorded here. Until then the base stays $0.04, which errs high. The old generator's
+screens show the same $0.04 (its levels: ממוקד 12 ≈ $0.48, מלא 24 ≈ $0.96,
+מקיף 40 ≈ $1.60). If design-models
+moves the solver to Haiku (its O9), the rate falls to about $0.032.
+
+## Planning (WP2, `shared/study/practice2.ts`)
+
+- **Fresh first, always** (D5): the points no active bank question tests
+  come first, after red flags (red flag → not covered → weight → the
+  paragraphs' order). `planRequest({ …, covered })` takes the covered point
+  ids (`plan` sends them, §"The server's plan").
+- **Parts weighted by their uncovered points** (at least 1, so a covered part
+  can still get a question when the size needs it): the custom level's share,
+  and a level's share when it passes `REQUEST_MAX`. With no `covered`, every
+  count is what it was.
+- **`covers`** (`plan.parts[].covers`): the new points each part's questions
+  are planned to cover; the custom level covers up to `CUSTOM_PER_POINT` (2)
+  a question, so coverage comes from the plan, never one point a question.
+- **`coverageAfter(points, covered, plan)`**: the preview's percentage of the
+  lecture's points covered in the bank after the set ("אחרי הסט: {p}%
+  מההרצאה מכוסים בבנק"), and whether the bank already covers everything
+  ("הבנק כבר מכסה את כל ההרצאה"). It reads 100 only when every point is
+  covered.
+- **`styleCounts(plan)`**: how many items of each type a plan writes (the
+  preview's tiles; the server's `plan.styles`).
+- **A re-read part starts again at 0**: reading a part again gives its points
+  new ids (the rows that were not kept are deleted, and
+  `study_questions.points` has no foreign key), so its old questions no
+  longer count as covering it. The create screen's help text says so (with
+  the screens, WP4-WP5).
 
 ## The server's plan (WP3)
 

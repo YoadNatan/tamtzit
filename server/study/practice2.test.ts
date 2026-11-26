@@ -728,7 +728,7 @@ test("plan: the setup screen's numbers, free: parts and points, the three levels
   assert.deepEqual(j.levels, { focused: 2, full: 3, deep: 6 }, "ממוקד: a quarter, half up, every red flag; מלא: a half; מקיף: all");
   assert.deepEqual([j.plan.level, j.plan.total, j.plan.batches], ["full", 3, 2]);
   assert.deepEqual(j.estimate.readUsd, 0);
-  assert.deepEqual([j.estimate.questionsUsd, j.estimate.solverUsd, j.estimate.totalUsd, j.estimate.perQuestionUsd, j.estimate.levels], [0.08, 0.02, 0.08, 0.025, { focused: 0.05, full: 0.08, deep: 0.15 }]);
+  assert.deepEqual([j.estimate.questionsUsd, j.estimate.solverUsd, j.estimate.totalUsd, j.estimate.perQuestionUsd, j.estimate.levels], [0.12, 0.02, 0.12, 0.04, { focused: 0.08, full: 0.12, deep: 0.24 }]);
   assert.deepEqual(j.spent, { groupUsd: 3.21, mineUsd: 0.42, capUsd: 33, share: 0.8, memberShare: 0.4 });
   assert.equal(rpcs("study_reserve").length + models().length, 0, "nothing spent");
   // A stale part: its reading's estimate, and the stale list.
@@ -828,7 +828,7 @@ test("create: the plan saved as a request and its batches (study_request_create,
   assert.deepEqual(c.p_batches[1].styles, ["case", "blank_table"]);
   assert.deepEqual(r.json.request, { id: REQ, round: 3, level: "deep", count: 6, parts: [0, 1], styles: ["case", "blank_table"], difficulty: "hard" });
   assert.equal(r.json.batches.length, 2);
-  assert.deepEqual(r.json.estimate, { questionsUsd: 0.15 });
+  assert.deepEqual(r.json.estimate, { questionsUsd: 0.24 }, "6 × $0.04 (practice sets OD11)");
   assert.equal(models().length, 0, "no model: the batches are written one by one afterwards");
 });
 
