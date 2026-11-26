@@ -15,6 +15,7 @@ import { AskScreen } from "./features/collab";
 import { TrapScreen } from "./features/extras";
 import { GuideHowTo, TryScreen } from "./features/guide";
 import { InstallScreen } from "./features/install";
+import { NotifyRoute } from "./features/notify";
 import { CatchupScreen, MeetingScreen } from "./features/meeting";
 import { PlanScreen } from "./features/plan";
 import { ExamsScreen, MockScreen, PracticeScreen } from "./features/practice";
@@ -454,6 +455,8 @@ function renderRoute(route: Route, ctx: Ctx, courses: string[]) {
       return <CourseScreen route={route} ctx={ctx} />;
     case "install":
       return <InstallScreen route={route} ctx={ctx} />;
+    case "notify":
+      return <NotifyRoute route={route} ctx={ctx} />;
     case "library":
       return <Library ctx={ctx} />;
     default:

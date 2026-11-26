@@ -4,6 +4,7 @@ import { flags } from "../lib/flags";
 import { guideMark } from "../lib/guideMark";
 import { BACK_LABEL, routeUrl, shareUrl, tabLinks, tabOf, type Route, type Tab } from "../lib/route";
 import { GuideButton, GuideSlot } from "../features/guide";
+import { Bell, NotifySlot } from "../features/notify";
 import { MarathonBannerLine } from "../features/progress";
 import { QuizBannerLine } from "../features/quiz";
 import type { Ctx, Go } from "../features/types";
@@ -184,6 +185,7 @@ export function Head({ back, title, children }: { back?: ReactNode; title?: Reac
       {back}
       {title !== undefined ? <h1 className="t">{title}</h1> : null}
       {children}
+      {flags.notify ? <Bell /> : null}
       {flags.guide ? <GuideButton /> : null}
     </header>
   );
@@ -652,6 +654,11 @@ export default function Shell({ route, ctx, toast, children }: ShellProps) {
       {flags.guide ? (
         <ErrorBoundary reset={routeUrl(route)} fallback="none">
           <GuideSlot route={route} ctx={ctx} />
+        </ErrorBoundary>
+      ) : null}
+      {flags.notify ? (
+        <ErrorBoundary reset={routeUrl(route)} fallback="none">
+          <NotifySlot route={route} ctx={ctx} />
         </ErrorBoundary>
       ) : null}
       {toast ? (

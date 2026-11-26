@@ -1,0 +1,121 @@
+/* ── Notifications (section R): the bell and the inbox ──
+   Tokens only (docs/study/design-system.md). The bell sits at the end of a
+   tab screen's top bar, before the guide's "?"; the inbox is a list of
+   links, each a row with a dot when unread, an icon, the notice's two lines
+   and its time. */
+
+.ph-head .bell {
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--hit);
+  min-height: var(--hit);
+  border-radius: 50%;
+  color: var(--ink);
+  text-decoration: none;
+}
+@media (hover: hover) {
+  .ph-head .bell:hover {
+    background: var(--surface-2);
+  }
+}
+.bell-n {
+  position: absolute;
+  top: 4px;
+  inset-inline-end: 2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--badge-bg);
+  color: var(--badge-ink);
+  font: 800 0.75rem / 18px var(--font-body);
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--paper);
+}
+
+.notify-inbox .inbox-day {
+  display: grid;
+  gap: var(--sp-3);
+}
+.notify-inbox .inbox-day + .inbox-day {
+  margin-top: var(--sp-6);
+}
+.inbox-list {
+  padding-block: 0;
+}
+.inbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  min-width: 0;
+  min-height: var(--hit);
+  padding: var(--sp-5) 0;
+  color: inherit;
+  text-decoration: none;
+}
+a.inbox-row {
+  cursor: pointer;
+}
+.inbox-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.inbox-row:not(.unseen) {
+  padding-inline-start: 12px; /* the dot's room, so the icons line up */
+}
+.inbox-ic {
+  flex: none;
+  margin-top: 1px;
+  color: var(--muted);
+}
+.inbox-row.unseen .inbox-ic {
+  color: var(--accent);
+}
+.inbox-main {
+  display: grid;
+  flex: 1;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.inbox-t {
+  font-size: var(--text-para);
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.inbox-row.unseen .inbox-t {
+  font-weight: 800;
+}
+.inbox-b {
+  color: var(--muted);
+  font-size: var(--text-small);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.inbox-time {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--text-small);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.inbox-empty,
+.inbox-fail {
+  margin-top: var(--sp-4);
+}
+.inbox-fail {
+  justify-items: start;
+}
+.inbox-fail p {
+  margin: 0;
+}
+.inbox-more {
+  justify-self: center;
+  margin-top: var(--sp-6);
+}
