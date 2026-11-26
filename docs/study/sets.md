@@ -16,7 +16,7 @@ a view over bank questions.
 
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
-| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | WP0-WP3 built (docs, bundle owner, shared planning and price, the server's `plan`); the screens follow |
+| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | WP0-WP6 built (docs, bundle owner, shared planning and price, the server's `plan`, the flag and routes, the create and generating screens); the entry points and the fixes of the practice screens (WP7) and the rest of slice A's e2e (WP8) follow |
 | B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | not built yet |
 | C | The notices `set_shared` and `set_solved` (WP17), with section R | (R's) | L 1, R | not built yet |
 
@@ -53,6 +53,13 @@ design's static share of it is capped at **2,000 B**: bundle owner `QS` in
 `QS` keeps only its slot module in the entry chunk (`SLOT_ONLY`), and the
 check fails when its share passes 2,000 B. The tool also turns on
 `VITE_STUDY_MAKE` and `VITE_STUDY_SETS` with every other flag.
+
+Measured on 26 Nov 2026 with WP4-WP6 (the flag, the routes, the slot and
+the two screens): the entry chunk is **401,180 B** with every flag on (8,820
+B left under the limit; +782 B), QS's share **291 B** of its 2,000 (the two
+`lazy()` stubs), and 400,415 B with every flag off. Everything else of the
+screens loads with them (MakeScreen, MakeParts, MakeProgress, make.ts,
+setsCopy.ts, sets.css).
 
 Measured on 26 Nov 2026, before any of the package's code (`npm run
 test:bundle`, every flag on):
@@ -181,6 +188,134 @@ them in `planInputs` behind `schemaHas({ L: 1 })`. The server's numbers for
 them are ready: `setsMonthlyCap()` (`STUDY_SETS_MONTHLY_USD`, default 12),
 `SETS_LINE_KINDS` and `SETS_DAILY` (5) in `server/study/budget.ts`. The
 fields are in `practice-2-api.md` (`plan` → `inputs`).
+
+## The flag, the routes and the words (WP4)
+
+- **`flags.make`** = `practice && VITE_STUDY_MAKE` (`shared/study/flags.ts`).
+  It needs no SQL section: the screens call practice 2.0's actions
+  (`requiredSchema` is unchanged). Without it every route below is practice
+  2.0's, so "flags off" is the app as it was (OD22 keeps the old screens one
+  release).
+- **Routes** (`src/study/lib/route.ts`): `?v=practice&x=new` may come
+  without `l` (the screen opens on the last lecture the member marked read,
+  else the newest written one, and writes it into the address), and with
+  `from=m` (the member's open mistakes' parts prefilled). Both need
+  `flags.make`; without it `allowed()` sends them to the hub or the
+  lecture's old setup, with the usual line. A new step, **`x=review&r=`**,
+  keeps the request's drafts one by one (practice 2.0's "הבנק נבנה" screen,
+  with keep, reword and remove) reachable while `x=bank&r=` is "סט בהכנה".
+  No tab changes (OD1).
+- **`src/study/lib/make.ts`**: the sizes (5 · 10 · 20, 10 by default; "מספר
+  אחר" 1-40), the device's memory of the last size and types
+  (`study-make:<user>`; never the parts or the focus), the default lecture,
+  the lecture sheet's grouping, the types a lecture offers, **the preview**
+  (`previewOf`: the shared planner at the custom level, fresh first, so the
+  phone shows the plan the server will make; the price is the planned
+  questions weighted by type at `inputs.perQuestionUsd`, plus a stale read
+  and an example's read), **what blocks the button** (`blockOf`: a summary
+  still written, 150 questions, the 80% line, the 40% share, the sets line,
+  the day's sets, a set too big for what is left with its $1.00 margin, no
+  type, no material), the quiet lines (under $3 of headroom; 2 or fewer sets
+  left today), the $1 confirmation (OD17), the keyboard rule and the
+  generating screen's tiles. `make.test.ts` checks the preview against the
+  server's `planRequest` for the same inputs.
+- **`src/study/lib/setsCopy.ts`**: every string of the design's §6.1 except
+  the notices (section R's `notifyCopy.ts`), imported only by the lazy
+  screens. `setsCopy.test.ts` pins them and rejects second-person and
+  gendered forms, model names and "נקודות".
+- **`src/study/features/qsets.tsx`**: the slot, two `lazy()` stubs and no
+  words (291 B of QS's 2,000). Package Q's slot (`features/practice.tsx`)
+  routes `x=new` and `x=bank&r=` to them while the flag is on.
+
+## The create screen, "סט חדש" (WP5)
+
+`src/study/components/MakeScreen.tsx` and `MakeParts.tsx`
+(`?v=practice&x=new[&l=…][&from=m]`). One screen, two decisions:
+
+1. **The lecture**: one row with its hue, title and course, and "להחליף ‹",
+   which opens **"איזו הרצאה"** (`LectureSheet`: a search, the group's
+   lectures by course as radios, each with its bank's size or "אין שאלות
+   עדיין"; the kit's sheet, a 560 px dialog from 768 px).
+2. **How many**: `5 · 10 · 20` (an `a-seg`; ←/→ on a computer).
+
+Under them, **the preview** (`PreviewCard`), computed on the phone from one
+free `plan` with `inputs: true`, asked on open and when the lecture changes,
+never on a size or a type (D13): "10 שאלות · {lecture}", a small tile per
+question coloured by type with the legend ("6 אמריקאית · 2 מקרה · 1
+תמונה"), "כל שאלה נבדקת לפני שהיא נכנסת לבנק", the coverage bar "אחרי הסט:
+p% מההרצאה מכוסים בבנק" (or "הבנק כבר מכסה את כל ההרצאה"), "כולל קריאת
+ההרצאה" when the points must be read first, and the bank line. **The price
+is on the button**: "ליצור 10 שאלות · כ-$0.40". "בבנק יש N שאלות שעוד לא
+נענו · לפתור בחינם ‹" (from 5) opens "סבב חדש". Everything else is closed
+under **"עוד אפשרויות"** (its state remembered on the device): the level
+(קלה · כמו במבחן · קשה), the types as one chip group ("ברירת מחדל" or
+"מהפעם הקודמת" with "לחזור לברירת המחדל"; types the chosen parts cannot have
+are hidden), the parts (names only), an example (paste or photograph, "לצלם
+רק את השאלה, בלי שם או מספר זהות"; read later, as a phase), the focus (200
+characters) and "מספר אחר (1–40)".
+
+Whatever blocks the button says so in a callout with the way still open
+(`blockOf`); a refusal of `create` maps to the same words (`blockOfCode`).
+Offline the preview says "אין חיבור כרגע. התצוגה תתעדכן כשהחיבור יחזור."
+and the button waits; a first load that fails shows "המסך לא נטען…" with
+"לנסות שוב". A set above $1 asks first ("סט גדול · כ-$1.10 מתקציב
+הקבוצה"). At L (≥ 1024 px) the screen has two columns inside
+`--measure-wide`: the choices at the start, the preview sticky at the end
+with the button inside it, and no bottom bar. The keyboard: ←/→ change the
+size (← is bigger, right to left), Enter creates from the page's body or the
+button, and nothing happens while a field has focus.
+
+In slice A the preview's group line is "השאלות נכנסות לבנק של הקבוצה" (there
+are no sets yet); slice B replaces it with "הסט ישותף עם הקבוצה".
+
+## The generating screen, "סט בהכנה" (WP6)
+
+`src/study/components/MakeProgress.tsx`.
+
+- **Phase 0** (`MakeJob`): when the lecture's points must be read first, or
+  an example was given, "ליצור" opens this screen before any request
+  exists. It reads the points with the existing stream, once for the group
+  ("קוראים את ההרצאה · כ-2 דקות, פעם אחת לכל הקבוצה"; another phone's read is
+  waited for), then the example with action `style` ("קוראים את הדוגמה…";
+  a failed or refused read says "הדוגמה לא נקראה · השאלות נכתבות בסגנון
+  הרגיל" and the set is written in the usual style, D4), then creates the
+  request and replaces itself with the second part. A refusal there (a
+  budget line, a part that could not be read) is said in words, with
+  "לנסות שוב".
+- **The set being written** (`?v=practice&l=…&x=bank&r=<request>`): a ring
+  and one line ("6 מוכנות · עוד 4 בדרך"), the callout "היצירה רצה מהמכשיר
+  הזה…" while this phone writes (until server-driven writing, OD19), and
+  **"להתחיל לפתור (k)"** as soon as one question is ready: one tap keeps the
+  checked questions (the existing keep-all, D3; auto-keep ships off) and
+  starts a round of the lecture's new questions in the request's parts.
+  "פרטים" (open from 1024 px) has a tile per question (בדרך · מוכנה · לא
+  יצאה, each with its word for screen readers), the ready ones (type, a
+  one-line stem, "שקף N") and "לעבור על השאלות אחת-אחת ‹" (`x=review`).
+- **States**: a batch that failed: "N שאלות לא יצאו" with "לנסות שוב"; a
+  budget line reached in the middle: "הסט נעצר כי התקציב נגמר · k שאלות
+  מוכנות" and the line's own words, never "לנסות שוב"; nobody writing any
+  more (a closed phone): "היצירה נעצרה באמצע" with "להמשיך ליצור" (and "העלות
+  נרשמת על מי שממשיך" for another member, OD16); offline: "אין חיבור. מה
+  שכבר נטען נשאר כאן." with the tiles kept, and the set goes on when the
+  connection is back (the phone that was writing it writes on by itself:
+  a part the connection cut is written again). The screen follows Realtime and reads again every
+  10 s. Its live region says the first ready question, each quarter and
+  the end.
+
+## The e2e (WP5-WP6)
+
+`e2e/study/sets.cjs` with the flag set **`pm`** (`notify` with
+`VITE_STUDY_MAKE`; `ps` adds `VITE_STUDY_SETS` for slice B; both in
+`e2e/study/mock.cjs`'s `flagSetOf` and `SQL_SETS`) covers the design's §14
+steps 1-4 and 12: the lecture page to "ליצור" in two interactions with the
+price on the button, the read as a phase, the three tile states, a failed
+batch and "לנסות שוב", "להתחיל לפתור" keeping and starting, a budget stop, a
+failed example read, offline on both screens, and at 1280 px the keyboard,
+the sticky preview and the 560 px sheet; each screen in light and dark
+through `a11y.cjs`. The mock's action `plan` answers `inputs` (steered by
+`db.practice.inputs`), and `db.practice.styleFail` refuses an example's read.
+The build for it: every s2 flag with `VITE_STUDY_INSTALL`, `VITE_STUDY_NOTIFY`,
+`VITE_STUDY_MAKE` and `VITE_STUDY_SETS`.
 
 ## The owner's snippets (from section L 1)
 
