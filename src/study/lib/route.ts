@@ -56,7 +56,8 @@ export type Route =
   | { v: "eve"; l: string } // A2 (PR6)
   | { v: "trap"; l: string; at?: At; d?: string } // E (P11)
   | { v: "try"; s?: "b" } // the guide's sandbox (s=b: a question with a bet); nothing in it is saved
-  | { v: "install" }; // adding the app to the home screen (docs/study/install.md), its steps for this device
+  | { v: "install" } // adding the app to the home screen (docs/study/install.md), its steps for this device
+  | { v: "notify"; x?: "set" }; // notifications (section R): the inbox; x=set its settings
 
 export type Tab = "today" | "library" | "practice" | "group" | "me";
 
@@ -244,6 +245,8 @@ export function parseRoute(search: string, _hash?: string): Route {
       return clean({ v: "try" as const, s: oneOf(g("s"), ["b"] as const) });
     case "install":
       return { v: "install" };
+    case "notify":
+      return clean({ v: "notify" as const, x: oneOf(g("x"), ["set"] as const) });
     case null: {
       const l = id(g("l"));
       return l ? lecture(l, q) : { ...HOME };
@@ -397,6 +400,10 @@ export function routeUrl(r: Route): string {
     case "try":
       put("v", r.v);
       put("s", r.s);
+      break;
+    case "notify":
+      put("v", r.v);
+      put("x", r.x);
       break;
     default:
       put("v", r.v);
@@ -556,6 +563,9 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
     case "install":
       // Without its flag "?v=install" is an unknown screen, as before: the library, with no notice.
       return f.install ? ok : { route: { v: "library" } };
+    case "notify":
+      // Without its flag a notice's link goes home, with no notice.
+      return f.notify ? ok : { route: f.today ? { v: "today" } : { v: "library" } };
     default:
       return ok;
   }
@@ -628,4 +638,5 @@ export const BACK_LABEL: Record<string, string> = {
   mock: "→ לסימולציה",
   group: "→ יחד",
   me: "→ שלי",
+  notify: "→ להתראות",
 };

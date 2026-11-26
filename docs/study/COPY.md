@@ -218,6 +218,25 @@ member's own code is "הקוד האישי", never "סיסמה", "חשבון" or 
 | התאמה | נוגעים במקום ואז בתשובה, או בתשובה ואז במקום.; then: עכשיו נוגעים במקום. / עכשיו נוגעים בתשובה. (never "לגעת…") |
 | A staged case's story so far | המקרה עד כאן; folded: המקרה עד כאן (להראות), with a chevron |
 
+### New words: notifications (`DECISIONS-2026-11-26.md`; the bell and the inbox)
+
+Every line is impersonal or plural. A notice's own words (its title and body)
+are written by `shared/study/notifyCopy.ts`; the screens' words are
+`src/study/lib/notifyText.ts`.
+
+| Concept | Words |
+|---|---|
+| The bell's name, for a screen reader | התראות; with one new: התראות, אחת חדשה; with more: התראות, {n} חדשות (the badge shows 1-9, then 9+) |
+| The inbox's title | התראות |
+| Back to the inbox | → להתראות |
+| An unread row, for a screen reader | חדש |
+| The inbox's days | היום · קודם |
+| An empty inbox | אין התראות חדשות. כשמשהו יקרה בקבוצה, הוא יופיע כאן. |
+| The inbox did not load | לא הצלחנו לטעון את ההתראות. · לנסות שוב |
+| More rows | עוד |
+| A live notice that is over | הסתיים; a group quiz: הסתיים · לתוצאות |
+| A row's time | עכשיו · לפני {m} ד׳ · {HH:MM} (today) · {d.m} (earlier) |
+
 ### Kept, on purpose
 
 - **״על בטוח״, ״נראה לי״, ״ניחוש״** (how sure an answer is): plain Hebrew, and Yoad's own

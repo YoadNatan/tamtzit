@@ -40,6 +40,7 @@ const KEYS: Record<string, readonly string[]> = {
   boss: ["isNew", "l"],
   trap: ["l", "at", "d"],
   try: ["s"],
+  notify: ["x"],
 };
 
 type Json = Record<string, unknown>;

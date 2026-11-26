@@ -1,0 +1,125 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { bellCount, bellLabel, israelDate, NT, quietRow, rowTime, since } from "./notifyText";
+
+/* The notifications' screen words (section R, the design's §6.2), pinned:
+ * a change to a line is a change to this test too. */
+
+const flat = (o: unknown, at = ""): Array<[string, string]> =>
+  typeof o === "string" ? [[at, o]] : Object.entries(o as Record<string, unknown>).flatMap(([k, v]) => flat(v, at ? `${at}.${k}` : k));
+
+test("every line, as the design's table writes it", () => {
+  assert.deepEqual(Object.fromEntries(flat(NT)), {
+    "me.row": "הגדרות התראות",
+    "me.state.on": "פועלות ✓",
+    "me.state.off": "כבויות",
+    "me.state.denied": "חסומות",
+    "me.state.here": "לא במכשיר הזה",
+    "set.title": "הגדרות התראות",
+    "set.back": "→ להתראות",
+    "device.h": "במכשיר הזה",
+    "device.on": "ההתראות פועלות במכשיר הזה ✓",
+    "device.ask": "אפשר לקבל התראה כשמבחן קבוצתי נפתח, כשהפגישה מתחילה וכשמה שהעלית מוכן. רק מה שמסומן כאן למטה.",
+    "device.enable": "להפעיל התראות במכשיר הזה",
+    "device.enabling": "מפעילים…",
+    "device.enabledToast": "ההתראות פועלות: ",
+    "device.test": "שליחת התראת ניסיון",
+    "device.testToast": "ההתראה תגיע בעוד כמה שניות. אפשר לנעול את המסך או לצאת מהאפליקציה.",
+    "device.testDesktop": "לא הגיעה? כדאי לבדוק שההתראות של הדפדפן מותרות בהגדרות המחשב.",
+    "device.iosInstall": "באייפון, התראות מגיעות רק כשפותחים את תמצית מהאייקון במסך הבית.",
+    "device.iosInstallBtn": "להוספה למסך הבית",
+    "device.iosInstallHas": "כבר יש אייקון? פותחים ממנו ומפעילים כאן.",
+    "device.unsupported": "הדפדפן הזה לא תומך בהתראות. הכל מופיע ברשימת ההתראות.",
+    "device.denied": "ההתראות חסומות במכשיר הזה.",
+    "device.broken": "ההרשמה להתראות לא הצליחה.",
+    "device.retry": "לנסות שוב",
+    "device.offline": "אין חיבור. אפשר לנסות שוב כשהחיבור חוזר.",
+    "cats.h": "מה שולחים",
+    "cats.live.title": "עכשיו בקבוצה",
+    "cats.live.desc": "מבחן קבוצתי שנפתח, פגישה שמתחילה, מפגש למידה",
+    "cats.mine.title": "בשבילך",
+    "cats.mine.desc": "תשובות אליך, תרגול ששיתפו איתך, ומה שהעלית כשהוא מוכן",
+    "cats.digest.title": "תזכורת יומית",
+    "cats.digest.desc": "פעם ביום: מה מחכה לחזרה היום",
+    "cats.digestAt": "בשעה",
+    "cats.security": "כניסה עם הקוד האישי תמיד שולחת התראה.",
+    "cats.disabled": "יחולו כשההתראות יופעלו באחד המכשירים.",
+    "cats.all": "ההגדרות חלות על כל המכשירים שלך.",
+    "quiet.h": "מתי לא לשלוח",
+    "quiet.note": "מה שמגיע בשעות האלה מחכה ברשימת ההתראות.",
+    "quiet.change": "לשנות שעות",
+    "quiet.fromAria": "תחילת שעות השקט",
+    "quiet.toAria": "סוף שעות השקט",
+    "quiet.shabbat": "לא לשלוח בשבת",
+    "quiet.shabbatNote": "משישי 16:00 עד מוצאי שבת 20:30",
+    "devices.h": "המכשירים שמקבלים התראות",
+    "devices.this": "המכשיר הזה",
+    "devices.remove": "להסיר",
+    "inbox.title": "התראות",
+    "inbox.gearAria": "הגדרות התראות",
+    "inbox.new": "חדש",
+    "inbox.today": "היום",
+    "inbox.earlier": "קודם",
+    "inbox.empty": "אין התראות חדשות. כשמשהו יקרה בקבוצה, הוא יופיע כאן.",
+    "inbox.fail": "לא הצלחנו לטעון את ההתראות.",
+    "inbox.retry": "לנסות שוב",
+    "inbox.more": "עוד",
+    "inbox.ended": "הסתיים",
+    "inbox.results": "לתוצאות",
+    "inbox.offBar": "ההתראות לא פועלות במכשיר הזה.",
+    "inbox.offBarBtn": "להפעיל",
+    "inbox.now": "עכשיו",
+    "ask.homeH": "תמצית פתוחה מהאייקון ✓",
+    "ask.home": "עכשיו אפשר גם לקבל התראות: כשמבחן קבוצתי נפתח, כשעונים בשרשור שלך וכשהסיכום מוכן.",
+    "ask.upload": "להודיע כשהסיכום מוכן?",
+    "ask.uploadMore": "אפשר לבחור מה מקבלים בשלי ← הגדרות התראות.",
+    "ask.yes": "להפעיל התראות",
+    "ask.no": "לא עכשיו",
+    "quiz.notify": "להודיע לקבוצה",
+    "quiz.desc": "התראה לחברי הקבוצה כשהמבחן נפתח",
+    guideS10: "לקבל התראות",
+    "help.row": "התראות",
+    "help.text": "מה שולחים, איך מפעילים, ולמה באייפון רק מהאייקון",
+    "help.howto": "להפעיל התראות",
+    errSave: "לא הצלחנו לשמור. אפשר לנסות שוב.",
+  });
+});
+
+test("the bell: its name for a screen reader and its count", () => {
+  assert.equal(bellLabel(0), "התראות");
+  assert.equal(bellLabel(1), "התראות, אחת חדשה");
+  assert.equal(bellLabel(2), "התראות, 2 חדשות");
+  assert.equal(bellLabel(11), "התראות, 11 חדשות");
+  assert.equal(bellCount(0), "");
+  assert.equal(bellCount(1), "1");
+  assert.equal(bellCount(9), "9");
+  assert.equal(bellCount(10), "9+");
+  assert.equal(bellCount(99), "9+");
+  assert.equal(quietRow("23:00", "07:30"), "לא לשלוח בלילה (23:00–07:30)");
+  assert.equal(since("26.11"), "מאז 26.11");
+});
+
+test("a row's time: now, minutes, today's clock, an earlier day (Israel time)", () => {
+  const now = Date.parse("2026-11-26T10:00:00Z"); // 12:00 in Israel
+  assert.equal(rowTime(now - 10_000, now), "עכשיו");
+  assert.equal(rowTime(now - 20 * 60_000, now), "לפני 20 ד׳");
+  assert.equal(rowTime(now - 59 * 60_000, now), "לפני 59 ד׳");
+  assert.equal(rowTime(Date.parse("2026-11-26T07:12:00Z"), now), "09:12");
+  assert.equal(rowTime(Date.parse("2026-11-25T21:30:00Z"), now), "25.11", "23:30 on the 25th in Israel is yesterday");
+  assert.equal(rowTime(Date.parse("2026-11-25T22:30:00Z"), now), "00:30", "00:30 on the 26th in Israel is today");
+  assert.equal(rowTime(Date.parse("2026-11-24T08:00:00Z"), now), "24.11");
+  assert.equal(israelDate(Date.parse("2026-11-25T22:30:00Z")), "2026-11-26");
+});
+
+test("no gendered forms; the words COPY.md gives the inbox", () => {
+  const text = flat(NT).map(([, v]) => v).join(" ");
+  for (const w of [/(^|\s)אתה(\s|$)/, /לחצי|לחץ(\s|$)/, /תוכלי|תוכל(\s|$)/, /היכנסי|היכנס(\s|$)/, /מוזמנ/, /(^|\s)בואי?(\s|$)/, /הפעילי|הפעל(\s|$)/]) {
+    assert.ok(!w.test(text), `${w}`);
+  }
+  const copy = readFileSync(join(process.cwd(), "docs", "study", "COPY.md"), "utf8");
+  const notify = copy.slice(copy.indexOf("### New words: notifications"));
+  for (const w of [NT.inbox.title, NT.set.back, NT.inbox.empty, NT.inbox.fail, NT.inbox.ended, NT.inbox.results, NT.inbox.new, NT.inbox.more])
+    assert.ok(notify.includes(w), `COPY.md has "${w}"`);
+});

@@ -73,7 +73,7 @@ const VALID: Record<string, (x: string, v: string) => boolean> = {
   preset: (x) => ["end", "coffee", "stop"].includes(x),
   pf: (x) => /^\d{1,3}$/.test(x) && Number(x) <= 199,
   pt: (x) => /^\d{1,3}$/.test(x) && Number(x) <= 199,
-  x: (x, v) => (v === "wall" ? ["drafts", "post", "moment"].includes(x) : v === "practice" ? ["new", "example", "bank", "round"].includes(x) : x === "danger"),
+  x: (x, v) => (v === "wall" ? ["drafts", "post", "moment"].includes(x) : v === "practice" ? ["new", "example", "bank", "round"].includes(x) : v === "notify" ? x === "set" : x === "danger"),
   r: UUID,
   lane: (x) => ["group", "mine"].includes(x),
   d: (x, v) => (v === "wall" ? x.length <= 60 : v === "plan" ? /^\d{4}-\d{2}-\d{2}$/.test(x) : UUID(x)),
@@ -103,6 +103,7 @@ const PARAMS: Record<string, string[]> = {
   boss: ["new", "l"],
   eve: ["l"],
   trap: ["l", "at", "d"],
+  notify: ["x"],
 };
 
 /** The plain copy pass (docs/study/COPY.md) rewords some of the spec's sentences:
@@ -210,6 +211,8 @@ const ALL_ROUTES: Route[] = [
   { v: "try" }, // the guide's sandbox (docs/study/guide.md)
   { v: "try", s: "b" },
   { v: "install" }, // adding the app to the home screen (docs/study/install.md)
+  { v: "notify" }, // notifications (section R): the inbox
+  { v: "notify", x: "set" }, // and its settings
 ];
 
 test("routeUrl writes every route of §5.2 and §12.2.1 so parseRoute reads it back exactly", () => {
@@ -330,6 +333,8 @@ test("tabOf: the spec's four tabs, Today's set, and immersive screens with none"
     [{ v: "course", c: ID }, "library", "library"],
     [{ v: "ask", c: ID }, null, null],
     [{ v: "quiz", q: ID }, null, null],
+    [{ v: "notify" }, null, null], // the inbox: a screen with a back arrow
+    [{ v: "notify", x: "set" }, null, null],
   ];
   for (const [r, without, withToday] of cases) {
     assert.equal(tabOf(r, off), without, `${routeUrl(r)} without Today`);
@@ -764,4 +769,21 @@ test("VITE_STUDY_NOTIFY: its own flag, which needs section R at 1 and changes no
   assert.deepEqual({ ...on, notify: false }, off);
   assert.deepEqual(requiredSchema(on), { ...requiredSchema(off), R: 1 });
   assert.equal(requiredSchema(off).R, undefined);
+});
+
+test("?v=notify: the inbox and its settings with the flag; without it, the home, with no notice", () => {
+  const on = flagsFrom({ VITE_STUDY_TODAY: "1", VITE_STUDY_NOTIFY: "1" });
+  const offToday = flagsFrom({ VITE_STUDY_TODAY: "1" });
+  const offNone = flagsFrom({});
+  for (const r of [{ v: "notify" } as Route, { v: "notify", x: "set" } as Route]) {
+    assert.deepEqual(allowed(r, on), { route: r });
+    assert.deepEqual(allowed(r, offToday), { route: { v: "today" } }, "Today is the home");
+    assert.deepEqual(allowed(r, offNone), { route: { v: "library" } }, "the library is the home until Today");
+  }
+  assert.deepEqual(parseRoute("?v=notify&x=other"), { v: "notify" }, "x is only set");
+  assert.deepEqual(parseRoute("?v=notify&nt=7"), { v: "notify" }, "a push's marker is not part of the route");
+  assert.deepEqual(parseRoute("?nt=7"), { v: "today" });
+  assert.equal(routeUrl({ v: "notify", x: "set" }), "/?v=notify&x=set");
+  assert.equal(BACK_LABEL.notify, "→ להתראות");
+  assert.equal(tabOf({ v: "notify" }, on), null, "a screen with a back arrow");
 });

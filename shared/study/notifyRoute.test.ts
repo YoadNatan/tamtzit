@@ -47,6 +47,8 @@ const ROUTES: Route[] = [
   { v: "trap", l: L, at: { part: 3, anchor: 2 }, d: D },
   { v: "try", s: "b" },
   { v: "install" },
+  { v: "notify" },
+  { v: "notify", x: "set" },
 ];
 
 test("routeQuery writes exactly what routeUrl writes, for every kind of screen", () => {
