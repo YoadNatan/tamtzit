@@ -161,7 +161,7 @@ the page's build stamp, an old `/study/` link, `/api/study/health` and
 | `VITE_STUDY_SUPABASE_URL`, `VITE_STUDY_SUPABASE_ANON_KEY` | build and server | optional: the app in its own Supabase project |
 | `ANTHROPIC_API_KEY` | server | **secret** |
 | `STUDY_WORKER_KEY` | server | **secret**, 32+ characters, the same value as the Vault secret `study_worker_key` |
-| `STUDY_MONTHLY_USD` | server | the monthly budget in dollars (approved 33; default 40) |
+| `STUDY_MONTHLY_USD` | server | the monthly budget in dollars (approved 33; 33 when unset) |
 | `SEND_EMAIL_HOOK_SECRET`, `STUDY_TRANSCRIBE_KEY` | server | **secret**; for packages not built yet |
 | `VITE_STUDY_*` | build (and health on the server) | release flags, `1` or unset; the list is in [`.env.example`](.env.example) |
 

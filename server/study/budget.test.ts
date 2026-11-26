@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_MODEL } from "../../shared/study/models.js";
-import { costUsd, estimateUsd, fallbackUsd, floorUsage, imageTokens, POLICY, reserve, settle, unsettledCount, type UsageLike } from "./budget.js";
+import { costUsd, estimateUsd, fallbackUsd, floorUsage, imageTokens, monthlyCap, POLICY, reserve, settle, unsettledCount, type UsageLike } from "./budget.js";
 import { HttpError, MODEL, serverKey } from "./study.js";
 
 /* F-4 (spec §7.F): prices, usage.iterations, cache writes by TTL, an unknown
@@ -129,6 +129,20 @@ test("Sonnet 5 and Haiku 4.5 are priced as themselves, no longer at the dearest 
 test("the default model is Opus 5.5, the one study.ts calls", () => {
   assert.equal(DEFAULT_MODEL, "claude-opus-5-5");
   assert.equal(MODEL, DEFAULT_MODEL);
+});
+
+test("the monthly cap defaults to $33 when STUDY_MONTHLY_USD is not set", () => {
+  const was = process.env.STUDY_MONTHLY_USD;
+  try {
+    delete process.env.STUDY_MONTHLY_USD;
+    assert.equal(monthlyCap(), 33, "not set");
+    process.env.STUDY_MONTHLY_USD = "";
+    assert.equal(monthlyCap(), 33, "empty");
+    process.env.STUDY_MONTHLY_USD = "36";
+    assert.equal(monthlyCap(), 36, "set");
+  } finally {
+    process.env.STUDY_MONTHLY_USD = was;
+  }
 });
 
 test("estimateUsd: characters ÷ 2.5 plus pictures' tokens as input, all of max_tokens as output", () => {

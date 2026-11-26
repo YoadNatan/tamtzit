@@ -139,8 +139,9 @@ export const POLICY: Record<string, Policy> = {
   reword: { share: 0.8, memberShare: 0.4, daily: 40 },
 };
 
-/** STUDY_MONTHLY_USD: the group's monthly cap in USD. */
-export const monthlyCap = (): number => Number(process.env.STUDY_MONTHLY_USD || 40);
+/** STUDY_MONTHLY_USD: the group's monthly cap in USD; 33 when it is not set
+ *  (the approved cap, ₪20 a person; design-models OD16). */
+export const monthlyCap = (): number => Number(process.env.STUDY_MONTHLY_USD || 33);
 /** The cap passed for a kind that costs nothing (the PDF's $0 rows). */
 const NO_CAP = 1_000_000;
 
