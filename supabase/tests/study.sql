@@ -9455,8 +9455,8 @@ delete from auth.users where id::text like '19000000-%';
 -- ════ END SECTION I ════
 
 -- ════ BEGIN SECTION R ════ (checks for supabase/tests/study.sql)
--- Notifications and the inbox (R 1): who sees which rows, the devices, the
--- hooks, coalescing, the claim's decisions (off, none, held, capped, quiet,
+-- Notifications and the inbox (R 1 and R 2): who sees which rows, the
+-- devices, the hooks, coalescing, the claim's decisions (off, none, held, capped, quiet,
 -- nosub), the worker's report, the minute job's sign-in scan, the kick and
 -- its breaker, seen, and loading the section twice. All titles are invented.
 -- (Giving up on a lock after 200 ms needs two sessions: notify-concurrency.sh.)
@@ -9492,19 +9492,19 @@ insert into public.study_lectures (id, group_id, title, source_kind, slides, cre
 insert into public.study_notify_prefs (user_id, quiet) values (:'ru1', false), (:'ru2', false), (:'ru3', false);
 
 -- ── The section, its switches and loading it twice ──
-select pg_temp.rok('R1', public.study_schema() ->> 'R' = '1', 'the registry has R 1');
+select pg_temp.rok('R1', public.study_schema() ->> 'R' = '2', 'the registry has R 2');
 select pg_temp.rok('R1b', (select bool_and(case name when 'notify' then not enabled else enabled end) and count(*) = 2
                              from study_private.features where name in ('notify', 'notify_hooks')),
   'the switches: notify inserted off, notify_hooks on');
 select pg_temp.rok('R1c',
   (select count(*) from pg_policies where tablename in ('study_notices', 'study_notify_prefs', 'study_push_subs')) = 2
-  and (select count(*) from pg_trigger where tgname like 'study\_r\_%' and not tgisinternal) = 4
+  and (select count(*) from pg_trigger where tgname like 'study\_r\_%' and not tgisinternal) = 12
   and (select count(*) from cron.job where jobname = 'study-notify' and schedule = '* * * * *') = 1
   and (select count(*) from cron.job where jobname = 'study-notify-clean' and schedule = '41 3 * * *') = 1
   and (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'study_notices') = 1
-  and (select count(*) from study_private.notice_kinds) = 10
+  and (select count(*) from study_private.notice_kinds) = 25
   and (select count(*) from study_private.notify_kick) = 1,
-  'loaded twice: one policy each, four hooks, two jobs, published once, ten kinds, one kick row');
+  'loaded twice: one policy each, twelve hooks, two jobs, published once, 25 kinds, one kick row');
 select pg_temp.rok('R1d', (select count(*) from pg_publication_tables where pubname = 'supabase_realtime'
                             and tablename in ('study_push_subs', 'study_notify_prefs')) = 0,
   'devices and settings are never published');
@@ -10082,6 +10082,218 @@ select pg_temp.rok('R23f', study_private.notify_dispatch(true) = 1
          from public.study_notify_claim(:'rkey') c),
   'due within 20 s: the kick comes now and the worker is told how long to wait');
 update study_private.notify_outbox set state = 'none' where state in ('due', 'sending');
+
+-- ── R 2: the remaining hooks and the minute job's new steps ──
+update study_private.notify_outbox set state = 'none' where state in ('due', 'sending');
+update public.study_quizzes set state = 'ended', ended_at = now() where group_id = :'rg' and state not in ('ended', 'cancelled');
+\set rm '1a000000-0000-4000-8000-0000000000d1'
+\set rk '1a000000-0000-4000-8000-0000000000d2'
+\set ra '1a000000-0000-4000-8000-0000000000d3'
+\set rp '1a000000-0000-4000-8000-0000000000d4'
+\set rd '1a000000-0000-4000-8000-0000000000d5'
+\set re1 '1a000000-0000-4000-8000-0000000000d6'
+\set re2 '1a000000-0000-4000-8000-0000000000d7'
+\set rx '1a000000-0000-4000-8000-0000000000d8'
+\set rl3 '1a000000-0000-4000-8000-0000000000b3'
+set request.jwt.claim.sub = :'ru1';
+insert into public.study_meetings (id, group_id, day, starts_at, lecture_id, part_from, part_to, created_by)
+values (:'rm', :'rg', (now() at time zone 'Asia/Jerusalem')::date, now() + interval '14 minutes', :'rl1', 0, 0, :'ru1');
+select pg_temp.rok('R30', (select string_agg(m.name, ',' order by m.name) from public.study_notices n
+                             join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                            where n.kind = 'meeting_set') = 'בני,גל,הדר'
+  and (select bool_and(cat = 'inapp' and obj = 'meet:' || :'rm' and route = jsonb_build_object('v', 'meeting', 'm', :'rm')
+                       and args ->> 'lecture' = 'הרצאה בדויה על Invented Kinetics'
+                       and (args ->> 'at')::timestamptz = (select starts_at from public.study_meetings where id = :'rm'))
+         from public.study_notices where kind = 'meeting_set')
+  and not exists (select 1 from study_private.notify_outbox where kind = 'meeting_set'),
+  'a meeting set: the rest of the group, in the inbox only, with its lecture and time');
+update public.study_meetings set starts_at = now() + interval '14 minutes 30 seconds', updated_by = :'ru2' where id = :'rm';
+select pg_temp.rok('R30b', (select string_agg(m.name || '=' || n.count, ',' order by m.name) from public.study_notices n
+                              join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                             where n.kind = 'meeting_set') = 'אלה=1,בני=1,גל=2,הדר=2',
+  'moved: the rest of the group again (the mover not), one row each counting');
+insert into public.study_meeting_presence (meeting_id, user_id) values (:'rm', :'ru5');
+select study_private.notify_plan() as x \gset
+select study_private.notify_plan() as x \gset
+select pg_temp.rok('R31', (select string_agg(m.name || '=' || n.count, ',' order by m.name) from public.study_notices n
+                             join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                            where n.kind = 'meeting_soon') = 'אלה=1,בני=1,גל=1'
+  and (select bool_and(cat = 'live' and obj = 'meet:' || :'rm' and dedupe = 'meet15:' || :'rm' and lecture_id = :'rl1'
+                       and ends_at = (select starts_at + interval '1 hour' from public.study_meetings where id = :'rm'))
+         from public.study_notices where kind = 'meeting_soon')
+  and (select string_agg(o.user_id::text, ',' order by o.user_id) from study_private.notify_outbox o where o.notice_id in (select id from public.study_notices where dedupe = 'meet15:' || :'rm') and o.state = 'due')
+      = :'ru1' || ',' || :'ru3',
+  'the meeting in 15 minutes: every member not already in it, once (twice run); pushes for those with a device');
+set request.jwt.claim.sub = :'ru2';
+update public.study_meetings set reading = true, reader_id = :'ru2', started_at = now() where id = :'rm';
+select pg_temp.rok('R32', (select string_agg(m.name, ',' order by m.name) from public.study_notices n
+                             join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                            where n.kind = 'reading') = 'אלה,גל'
+  and (select bool_and(args = jsonb_build_object('lecture', 'הרצאה בדויה על Invented Kinetics', 'name', 'בני') and cat = 'live'
+                       and route = jsonb_build_object('v', 'meeting', 'm', :'rm'))
+         from public.study_notices where kind = 'reading'),
+  'the reading started: those not in the meeting, not the reader (the name is for the inbox)');
+update study_private.notify_outbox o set state = 'sent', pushed_at = now() where o.notice_id in (select id from public.study_notices where dedupe = 'meet15:' || :'rm') and o.user_id = :'ru3';
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R32b', (select o.state from study_private.notify_outbox o where o.kind = 'reading' and o.user_id = :'ru3') = 'none',
+  'one push a meeting: no "the reading started" after "the meeting starts in 15 minutes" was pushed');
+update public.study_meetings set reading = false where id = :'rm';
+update public.study_meetings set reading = true where id = :'rm';
+select pg_temp.rok('R32c', (select count(*) = 2 and bool_and(count = 1) from public.study_notices where kind = 'reading'),
+  'reading again in the same meeting: no second notice');
+update study_private.notify_outbox o set state = 'due', not_before = now() where o.notice_id in (select id from public.study_notices where dedupe = 'meet15:' || :'rm') and o.user_id = :'ru1';
+update public.study_meetings set cancelled_at = now(), reading = false where id = :'rm';
+select study_private.notify_plan() as x \gset
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R32d', (select o.state from study_private.notify_outbox o where o.notice_id in (select id from public.study_notices where dedupe = 'meet15:' || :'rm') and o.user_id = :'ru1') = 'held'
+  and (select bool_and(ends_at <= now()) from public.study_notices where kind in ('meeting_soon', 'reading') and seen_at is null),
+  'a meeting cancelled: its waiting push is held and its live rows end');
+
+-- The study day in 30 minutes: those who said in or maybe.
+insert into public.study_marathons (id, group_id, title, starts_at, minutes, created_by)
+values (:'rk', :'rg', 'יום למידה בדוי', now() + interval '29 minutes', 120, :'ru1');
+insert into public.study_marathon_people (marathon_id, user_id, answer) values (:'rk', :'ru2', 'in'), (:'rk', :'ru3', 'maybe'), (:'rk', :'ru5', 'out');
+select study_private.notify_plan() as x \gset
+select study_private.notify_plan() as x \gset
+select pg_temp.rok('R33', (select string_agg(m.name || '=' || n.count, ',' order by m.name) from public.study_notices n
+                             join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                            where n.kind = 'session_soon') = 'בני=1,גל=1'
+  and (select bool_and(args ->> 'title' = 'יום למידה בדוי' and route = jsonb_build_object('v', 'marathon', 'm', :'rk') and cat = 'live'
+                       and ends_at = (select starts_at + interval '120 minutes' from public.study_marathons where id = :'rk'))
+         from public.study_notices where kind = 'session_soon'),
+  'the study day in 30 minutes: in and maybe, once; not "out"');
+
+-- A group challenge (mode boss): "אתגר קבוצתי", held 15 s like a quiz.
+set request.jwt.claim.sub = :'ru1';
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, host_id, created_by)
+values ('1a000000-0000-4000-8000-0000000000e2', :'rg', 'boss', 'אתגר קבוצתי · כותרת בדויה', array[:'rl1']::uuid[], 5, 30, :'ru1', :'ru1');
+select pg_temp.rok('R34', (select string_agg(m.name, ',' order by m.name) from public.study_notices n
+                             join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                            where n.kind = 'boss_open') = 'בני,גל,הדר'
+  and (select bool_and(args = jsonb_build_object('course', 'הרצאה בדויה על Invented Kinetics', 'name', 'אלה') and cat = 'live'
+                       and dedupe = 'quiz:1a000000-0000-4000-8000-0000000000e2')
+         from public.study_notices where kind = 'boss_open')
+  and not exists (select 1 from public.study_notices where kind = 'quiz_open' and dedupe = 'quiz:1a000000-0000-4000-8000-0000000000e2')
+  and (select bool_and(not_before > now() + interval '14 seconds') from study_private.notify_outbox where kind = 'boss_open'),
+  'a challenge: the others get "boss_open" (its course or lecture, never its title on the lock screen), held 15 s');
+update public.study_quizzes set state = 'ended', ended_at = now() where id = '1a000000-0000-4000-8000-0000000000e2';
+
+-- A credit asked, a correction waiting, a dispute opened and decided.
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to) values (:'rl1', 0, 'חלק בדוי', 1, 4) on conflict do nothing;
+insert into public.study_aids (id, group_id, lecture_id, part_idx, anchor, kind, body, fact, named_by)
+values (:'ra', :'rg', :'rl1', 0, 1, 'line', 'דרך בדויה לזכור', 'עובדה בדויה', :'ru1');
+insert into public.study_aid_credits (aid_id, user_id) values (:'ra', :'ru2');
+select pg_temp.rok('R35', (select count(*) = 1 and bool_and(user_id = :'ru2' and cat = 'mine' and obj = 'wall:' || :'rl1'
+                                                         and route = jsonb_build_object('v', 'wall', 'l', :'rl1'))
+                           from public.study_notices where kind = 'credit_ask'),
+  'a credit asked: only the member asked, linked to the wall');
+set request.jwt.claim.sub = :'ru2';
+insert into public.study_edit_proposals (id, lecture_id, part_idx, anchor, gen, base_rev, kind, before_text, after_text, source_kind, source_slides, proposed_by)
+values (:'rp', :'rl1', 0, 1, 0, 0, 'paragraph', 'שורה בדויה', 'שורה בדויה מתוקנת', 'slide', '{1}', :'ru2');
+select pg_temp.rok('R36', (select string_agg(m.name, ',' order by m.name) from public.study_notices n
+                             join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                            where n.kind = 'edit_wait') = 'אלה,גל,הדר'
+  and not exists (select 1 from study_private.notify_outbox where kind = 'edit_wait'),
+  'a correction waiting: the rest of the group, inbox only');
+set request.jwt.claim.sub = :'ru1';
+insert into public.study_disputes (id, lecture_id, part_idx, anchor, proposal_id, claim_a, slides_a, author_a)
+values (:'rd', :'rl1', 0, 1, :'rp', 'טענה בדויה ראשונה', '{1}', :'ru1');
+select pg_temp.rok('R37', (select count(*) = 1 and bool_and(user_id = :'ru2' and obj = 'disp:' || :'rd'
+                                                         and route = jsonb_build_object('v', 'dispute', 'd', :'rd'))
+                           from public.study_notices where kind = 'dispute'),
+  'a dispute about a correction: its proposer');
+set request.jwt.claim.sub = :'ru3';
+update public.study_disputes set author_b = :'ru5', claim_b = 'טענה בדויה שנייה', state = 'accepted', decided_by = :'ru3', decided_at = now()
+ where id = :'rd';
+select pg_temp.rok('R37b', (select string_agg(m.name, ',' order by m.name) from public.study_notices n
+                              join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                             where n.kind = 'dispute_done') = 'אלה,בני,הדר',
+  'a dispute decided: both sides and the proposer, not the one who decided');
+
+-- A past exam read, or not: the member who uploaded it, held 90 s.
+insert into public.study_exams (id, group_id, course, title, year, moed, status, created_by)
+values (:'re1', :'rg', 'קורס בדוי', 'מבחן בדוי', 2025, 'א', 'reading', :'ru2'),
+       (:'re2', :'rg', 'קורס בדוי', 'מבחן בדוי שני', 2024, null, 'reading', :'ru1');
+update public.study_exams set status = 'ready' where id = :'re1';
+update public.study_exams set status = 'failed', error = 'no questions' where id = :'re2';
+select pg_temp.rok('R38', (select args = '{"course": "קורס בדוי", "year": 2025, "moed": "א"}'::jsonb and user_id = :'ru2'
+                                  and route = jsonb_build_object('v', 'exams', 'e', :'re1') and obj = 'exam:' || :'re1'
+                           from public.study_notices where kind = 'exam_ready')
+  and (select args ->> 'why' = 'no questions' and user_id = :'ru1' from public.study_notices where kind = 'exam_failed')
+  and (select bool_and(o.not_before > now() + interval '80 seconds') from study_private.notify_outbox o where o.kind = 'exam_failed')
+  and (select count(*) from public.study_notices where kind in ('exam_ready', 'exam_failed')) = 2,
+  'a past exam ready or failed: its uploader only, with course, year and moed, the push held 90 s');
+
+-- "עדכון": a correction reached a line this member studied (inbox only).
+insert into public.study_edits (id, lecture_id, part_idx, anchor, gen, rev, kind, before_text, after_text, author_id)
+values (:'rx', :'rl1', 0, 1, 0, 1, 'paragraph', 'שורה בדויה', 'שורה בדויה מתוקנת', :'ru1');
+insert into public.study_updates (user_id, edit_id, lecture_id, part_idx, anchor, reason, reason_at)
+values (:'ru3', :'rx', :'rl1', 0, 1, 'card', now()) on conflict do nothing;
+select pg_temp.rok('R39', (select count(*) = 1 and bool_and(cat = 'inapp' and obj = 'lec:' || :'rl1'
+                                                         and route = jsonb_build_object('v', 'lecture', 'l', :'rl1', 'at', jsonb_build_object('part', 0, 'anchor', 1)))
+                           from public.study_notices where kind = 'update' and user_id = :'ru3')
+  and not exists (select 1 from study_private.notify_outbox where kind = 'update'),
+  '"עדכון": its member, inbox only, linked to the line');
+
+-- A new summary: the uploader hears "ready"; the rest see it in the inbox, once.
+insert into public.study_lectures (id, group_id, title, source_kind, slides, created_by, status)
+values (:'rl3', :'rg', 'הרצאה בדויה שלישית', 'pptx', '[]', :'ru2', 'writing');
+update public.study_lectures set status = 'ready' where id = :'rl3';
+update public.study_lectures set status = 'failed' where id = :'rl3';
+update public.study_lectures set status = 'ready' where id = :'rl3';
+select pg_temp.rok('R40', (select string_agg(m.name, ',' order by m.name) from public.study_notices n
+                             join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                            where n.kind = 'lecture_new' and n.lecture_id = :'rl3') = 'אלה,גל,הדר'
+  and not exists (select 1 from study_private.notify_outbox where kind = 'lecture_new')
+  and exists (select 1 from public.study_notices where kind = 'summary_ready' and user_id = :'ru2' and lecture_id = :'rl3'),
+  'a new summary: the rest of the group once, inbox only; its uploader gets "ready"');
+
+-- "שאלה פתוחה שאפשר לעזור בה": once a day from 17:00, asked as each opted-in member.
+select pg_get_functiondef('public.study_needs_me(uuid)'::regprocedure) as nmdef \gset
+create or replace function public.study_needs_me(p_group uuid) returns jsonb language sql stable security definer set search_path = public as $$
+  select case when auth.uid() = '1a000000-0000-4000-8000-000000000001'::uuid
+    then jsonb_build_array(jsonb_build_object('kind', 'question', 'lecture_id', '1a000000-0000-4000-8000-0000000000b1',
+                                              'lecture_title', 'הרצאה בדויה על Invented Kinetics', 'part', 2, 'anchor', 4))
+    else '[]'::jsonb end $$;
+insert into public.study_member_prefs (user_id, group_id, needs_me) values (:'ru1', :'rg', true), (:'ru2', :'rg', true)
+on conflict (user_id, group_id) do update set needs_me = true;
+delete from study_private.notify_cursor where name = 'needs';
+set request.jwt.claim.sub = :'ru3';
+select study_private.notify_needs(((now() at time zone 'Asia/Jerusalem')::date + time '12:00')) as n12,
+       study_private.notify_needs(((now() at time zone 'Asia/Jerusalem')::date + time '17:05')) as n17,
+       study_private.notify_needs(((now() at time zone 'Asia/Jerusalem')::date + time '17:06')) as n17b,
+       current_setting('request.jwt.claim.sub') as sub_after \gset
+:nmdef ;
+select pg_temp.rok('R41', :n12 = 0 and :n17 = 1 and :n17b = 0 and :'sub_after' = :'ru3'
+  and (select count(*) = 1 and bool_and(user_id = :'ru1' and cat = 'mine' and args ->> 'lecture' = 'הרצאה בדויה על Invented Kinetics'
+                                         and route = jsonb_build_object('v', 'lecture', 'l', :'rl1', 'at', jsonb_build_object('part', 2, 'anchor', 4)))
+       from public.study_notices where kind = 'needs_me')
+  and pg_get_functiondef('public.study_needs_me(uuid)'::regprocedure) = :'nmdef',
+  'an open question: not before 17:00, once a day, only where study_needs_me finds one for that member; the caller''s claims are put back');
+
+-- The daily reminder: at the person's hour, once a day, only with something to say.
+update public.study_notify_prefs set digest = true, digest_at = '06:00' where user_id = :'ru2';
+select pg_temp.rok('R42', study_private.notify_digest(((now() at time zone 'Asia/Jerusalem')::date + time '06:10')) = 0,
+  'nothing to say (no cards, the meeting cancelled, no exam): no reminder');
+-- (the past exams above made the course; it gets its exam date)
+insert into public.study_courses (group_id, name, exam_date) values (:'rg', 'קורס בדוי', (now() at time zone 'Asia/Jerusalem')::date + 3)
+on conflict (group_id, name_key) do update set exam_date = excluded.exam_date;
+select study_private.notify_digest(((now() at time zone 'Asia/Jerusalem')::date + time '05:50')) as d0,
+       study_private.notify_digest(((now() at time zone 'Asia/Jerusalem')::date + time '06:10')) as d1,
+       study_private.notify_digest(((now() at time zone 'Asia/Jerusalem')::date + time '06:20')) as d2 \gset
+select pg_temp.rok('R42b', :d0 = 0 and :d1 = 1 and :d2 = 0
+  and (select count(*) = 1 and bool_and(user_id = :'ru2' and cat = 'digest' and args = '{"course": "קורס בדוי", "days": 3}'::jsonb
+                                         and route = '{"v": "today"}'::jsonb)
+       from public.study_notices where kind = 'digest'),
+  'the reminder: from its hour, once a day, only for those who turned it on (an exam in 3 days)');
+update public.study_notify_prefs set digest = false, digest_at = '19:30' where user_id = :'ru2';
+update study_private.notify_outbox set state = 'none' where state in ('due', 'sending');
+delete from study_private.notify_cursor where name = 'needs';
 
 -- ── Gone with their lecture and their group ──
 select pg_temp.rok('R24', (select count(*) from public.study_notices where lecture_id = :'rl2') > 0, 'notices about the second lecture exist');

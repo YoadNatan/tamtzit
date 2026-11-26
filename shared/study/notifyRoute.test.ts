@@ -67,6 +67,12 @@ test("the routes section R's hooks write (Today included)", () => {
   assert.equal(routeQuery({ v: "lecture", l: L }), `/?l=${L}`);
   assert.equal(routeQuery({ v: "lecture", l: L, at: { part: 2, anchor: 4 } }), `/?l=${L}&at=2.4`);
   assert.equal(routeQuery({ v: "practice", l: L, n: "10" }), `/?v=practice&l=${L}&n=10`);
+  // R 2
+  assert.equal(routeQuery({ v: "meeting", m: M }), `/?v=meeting&m=${M}`);
+  assert.equal(routeQuery({ v: "marathon", m: M }), `/?v=marathon&m=${M}`);
+  assert.equal(routeQuery({ v: "wall", l: L }), `/?v=wall&l=${L}`);
+  assert.equal(routeQuery({ v: "dispute", d: D }), `/?v=dispute&d=${D}`);
+  assert.equal(routeQuery({ v: "exams", e: E }), `/?v=exams&e=${E}`);
 });
 
 test("the hooks' routes in study-schema.sql are all kinds routeQuery knows", () => {
@@ -75,7 +81,9 @@ test("the hooks' routes in study-schema.sql are all kinds routeQuery knows", () 
   const kinds = new Set([...r.matchAll(/jsonb_build_object\('v', '([a-z]+)'/g)].map((m) => m[1]));
   assert.ok(kinds.size >= 3, [...kinds].join(","));
   for (const v of kinds) assert.notEqual(parseRoute(new URL(routeQuery({ v, l: L, q: Q }), "https://x.test").search).v, undefined, v);
-  for (const v of kinds) assert.ok(["me", "quiz", "lecture", "library"].includes(v), `${v}: add it to ROUTES above`);
+  for (const v of kinds) assert.ok(ROUTES.some((x) => x.v === v), `${v}: add it to ROUTES above`);
+  // R 2's hooks link to these screens too (a meeting, a study day, the wall, a dispute, a past exam, Today).
+  for (const v of ["meeting", "marathon", "wall", "dispute", "exams", "today"]) assert.ok(kinds.has(v), v);
 });
 
 test("a stored route is data: unknown keys, bad values and non-routes write nothing more", () => {

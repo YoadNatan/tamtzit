@@ -381,11 +381,17 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 --  member's phones and computers is only a way of delivering it, kept apart
 --  in study_private.notify_outbox so Realtime never carries push state.
 --
---  R 1 (this version): the tables, the kind registry, notice_add() (the one
---  way any package adds a notice), the member and worker RPCs, the hooks of
---  a group quiz opened, a reply in a thread, a summary ready or stopped, a
---  member leaving, the "someone signed in with your personal code" scan,
---  the minute job and the switches. R 2 adds the remaining hooks.
+--  R 1: the tables, the kind registry, notice_add() (the one way any
+--  package adds a notice), the member and worker RPCs, the hooks of a group
+--  quiz opened, a reply in a thread, a summary ready or stopped, a member
+--  leaving, the "someone signed in with your personal code" scan, the minute
+--  job and the switches.
+--  R 2 (this version): the remaining hooks (a group challenge, the reading
+--  started, a credit asked, a dispute opened and decided, a past exam read,
+--  "עדכון", a correction waiting, a meeting set, a new summary for the rest
+--  of the group) and, in the minute job, the meeting in 15 minutes, the
+--  study day in 30, "שאלה פתוחה שאפשר לעזור בה" at 17:00 and the daily
+--  reminder at each person's hour (off by default).
 --
 --  The database stores no Hebrew: a notice keeps kind, args, count, route
 --  and obj; shared/study/notifyCopy.ts writes the words for the lock screen
@@ -529,6 +535,26 @@ insert into study_private.notice_kinds (kind, cat, ttl, delay, push) values
   ('summary_failed', 'mine',     '2 days',     '90 seconds', true),
   ('code_used',      'security', '1 day',      '0',          true),
   ('test',           'security', '10 minutes', '5 seconds',  true),
+  -- R 2: live in the group (a challenge held 15 s like a quiz; a meeting in
+  -- 15 minutes; the reading started; a study day in 30 minutes)
+  ('boss_open',      'live',     '20 minutes', '15 seconds', true),
+  ('meeting_soon',   'live',     '15 minutes', '0',          true),
+  ('reading',        'live',     '1 hour',     '0',          true),
+  ('session_soon',   'live',     '30 minutes', '0',          true),
+  -- R 2: for this member (a past exam read is held 90 s like a summary)
+  ('credit_ask',     'mine',     '7 days',     '0',          true),
+  ('dispute',        'mine',     '3 days',     '0',          true),
+  ('dispute_done',   'mine',     '3 days',     '0',          true),
+  ('needs_me',       'mine',     '6 hours',    '0',          true),
+  ('exam_ready',     'mine',     '2 days',     '90 seconds', true),
+  ('exam_failed',    'mine',     '2 days',     '90 seconds', true),
+  -- R 2: the daily reminder (only for those who turned it on)
+  ('digest',         'digest',   '12 hours',   '0',          true),
+  -- R 2: inbox only
+  ('update',         'inapp',    '7 days',     '0',          false),
+  ('edit_wait',      'inapp',    '7 days',     '0',          false),
+  ('lecture_new',    'inapp',    '7 days',     '0',          false),
+  ('meeting_set',    'inapp',    '7 days',     '0',          false),
   -- Reserved for packages not built yet (Yoad, 26 Nov 2026): their sections
   -- wire them. A practice set shared with the group, similar questions
   -- ready, a new run of the model comparison.
@@ -747,20 +773,132 @@ begin
 end;
 $$;
 
+-- (R 2) Once a day between 17:00 and 21:00 (Israel time, p_local): an open
+-- question a member could help with ("הקבוצה צריכה אותך", section G), only
+-- for those who turned it on there, at most one a day. study_needs_me()
+-- decides it for the member it is asked as, so each opted-in member is asked
+-- in turn, as that member, inside this transaction only; the caller's own
+-- claims are put back after.
+create or replace function study_private.notify_needs(p_local timestamp)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  v_today date := p_local::date;
+  v_day   bigint := to_char(p_local::date, 'YYYYMMDD')::bigint;
+  r       record;
+  v_q     jsonb;
+  v_e     jsonb;
+  v_sub   text := current_setting('request.jwt.claim.sub', true);
+  v_clm   text := current_setting('request.jwt.claims', true);
+  v_n     int := 0;
+begin
+  if p_local::time not between time '17:00' and time '21:00' or to_regprocedure('public.study_needs_me(uuid)') is null
+     or to_regclass('public.study_member_prefs') is null
+     or coalesce((select c.last_id from study_private.notify_cursor c where c.name = 'needs'), 0) >= v_day then
+    return 0;
+  end if;
+  insert into study_private.notify_cursor (name, last_id) values ('needs', v_day)
+  on conflict (name) do update set last_id = excluded.last_id;
+  for r in select distinct on (p.user_id) p.user_id, p.group_id
+             from public.study_member_prefs p
+             join public.study_members m on m.user_id = p.user_id and m.group_id = p.group_id
+            where p.needs_me
+              and not exists (select 1 from public.study_notices n where n.user_id = p.user_id and n.dedupe = 'needs:' || v_today)
+            order by p.user_id, p.updated_at desc loop
+    perform set_config('request.jwt.claim.sub', r.user_id::text, true);
+    perform set_config('request.jwt.claims', jsonb_build_object('sub', r.user_id, 'role', 'authenticated')::text, true);
+    begin
+      v_q := public.study_needs_me(r.group_id);
+    exception when others then
+      v_q := '[]'::jsonb;
+    end;
+    v_e := null;
+    select e into v_e from jsonb_array_elements(coalesce(v_q, '[]'::jsonb)) e where e ->> 'kind' = 'question' limit 1;
+    if v_e is not null and study_private.notice_add(r.user_id, r.group_id, 'needs_me',
+         jsonb_strip_nulls(jsonb_build_object('lecture', left(v_e ->> 'lecture_title', 120))),
+         jsonb_build_object('v', 'lecture', 'l', v_e ->> 'lecture_id',
+                            'at', jsonb_build_object('part', (v_e ->> 'part')::int, 'anchor', (v_e ->> 'anchor')::int)),
+         null, 'needs:' || v_today, study_private.uuid_or_null(v_e ->> 'lecture_id'), null) is not null then
+      v_n := v_n + 1;
+    end if;
+  end loop;
+  perform set_config('request.jwt.claim.sub', coalesce(v_sub, ''), true);
+  perform set_config('request.jwt.claims', coalesce(v_clm, ''), true);
+  return v_n;
+end;
+$$;
+
+-- (R 2) The daily reminder, at each person's hour (within half an hour of
+-- it; p_local is Israel time), once a day, only for those who turned it on,
+-- and only when there is something to say: cards to review today, today's
+-- meeting still to come, an exam within 14 days (of the person's latest group).
+create or replace function study_private.notify_digest(p_local timestamp)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  v_today date := p_local::date;
+  v_end   timestamptz := (p_local::date + 1)::timestamp at time zone 'Asia/Jerusalem';
+  r       record;
+  v_grp   uuid;
+  v_cards int;
+  v_meet  timestamptz;
+  v_crs   text;
+  v_days  int;
+  v_n     int := 0;
+begin
+  for r in select p.user_id from public.study_notify_prefs p
+            where p.digest and p_local::time >= p.digest_at and p_local::time < p.digest_at + interval '30 minutes'
+              and not exists (select 1 from public.study_notices n where n.user_id = p.user_id and n.dedupe = 'digest:' || v_today) loop
+    v_grp := null;
+    select m.group_id into v_grp from public.study_members m where m.user_id = r.user_id order by m.joined_at desc limit 1;
+    continue when v_grp is null;
+    v_cards := 0; v_meet := null; v_crs := null; v_days := null;
+    if to_regclass('public.study_card_states') is not null then
+      select count(*) into v_cards from public.study_card_states s join public.study_cards c on c.id = s.card_id
+       where s.user_id = r.user_id and c.group_id = v_grp and not s.suspended and s.due is not null and s.due < v_end;
+    end if;
+    if to_regclass('public.study_meetings') is not null then
+      select min(m.starts_at) into v_meet from public.study_meetings m
+       where m.group_id = v_grp and m.cancelled_at is null and m.starts_at >= now() and m.starts_at < v_end;
+    end if;
+    if to_regclass('public.study_courses') is not null then
+      select left(c.name, 120), c.exam_date - v_today into v_crs, v_days from public.study_courses c
+       where c.group_id = v_grp and c.deleted_at is null and c.exam_date between v_today and v_today + 14
+       order by c.exam_date, c.name limit 1;
+    end if;
+    continue when v_cards = 0 and v_meet is null and v_crs is null;
+    if study_private.notice_add(r.user_id, v_grp, 'digest',
+         jsonb_strip_nulls(jsonb_build_object('cards', nullif(v_cards, 0), 'meet', v_meet, 'course', v_crs, 'days', v_days)),
+         jsonb_build_object('v', 'today'), null, 'digest:' || v_today, null, v_end) is not null then
+      v_n := v_n + 1;
+    end if;
+  end loop;
+  return v_n;
+end;
+$$;
+
 -- Every minute (pg_cron), before notify_dispatch():
 --   1. the sign-in scan: each new 'redeemed' row of study_private.code_log
 --      becomes a code_used notice for that member, when the member has a
 --      device to warn (not inside the redeem itself, which stays as it was);
 --      the first run only notes where the log ends;
 --   2. pushes whose worker died go back to 'due'; 3. pushes past their
---      time-to-live are dropped; 4. a quiz that ended ends its inbox row.
+--      time-to-live are dropped; 4. a quiz that ended ends its inbox row, and
+--      so does a meeting cancelled or a reading stopped;
+--   R 2: 5. a meeting starting in 15 minutes (each member once, not those
+--      already in it); 6. a study day starting in 30 minutes (those who said
+--      in or maybe); 7. once a day between 17:00 and 21:00, an open question
+--      a member could help with ("הקבוצה צריכה אותך", only for those who turned it
+--      on, at most one a day); 8. the daily reminder at each person's hour,
+--      only for those who turned it on, and only when there is something to
+--      say (cards to review today, today's meeting, an exam within 14 days).
 create or replace function study_private.notify_plan()
 returns int language plpgsql volatile security definer set search_path = public as $$
 declare
-  v_last bigint;
-  v_max  bigint;
-  r      record;
-  v_n    int := 0;
+  v_last  bigint;
+  v_max   bigint;
+  r       record;
+  u       uuid;
+  v_n     int := 0;
+  v_local timestamp := now() at time zone 'Asia/Jerusalem';
 begin
   if to_regclass('study_private.code_log') is not null then
     select c.last_id into v_last from study_private.notify_cursor c where c.name = 'code' for update;
@@ -789,8 +927,54 @@ begin
    where state = 'due' and expires_at < now();
   update public.study_notices n set ends_at = coalesce(q.ended_at, q.updated_at)
     from public.study_quizzes q
-   where n.kind = 'quiz_open' and n.ends_at is null and n.seen_at is null
+   where n.kind in ('quiz_open', 'boss_open') and n.ends_at is null and n.seen_at is null
      and q.id = study_private.uuid_or_null(n.route ->> 'q') and q.state in ('ended', 'cancelled');
+  if to_regclass('public.study_meetings') is not null then
+    update public.study_notices n set ends_at = now()
+      from public.study_meetings m
+     where n.kind in ('meeting_soon', 'reading') and n.seen_at is null and n.ends_at > now()
+       and m.id = study_private.uuid_or_null(n.route ->> 'm')
+       and (m.cancelled_at is not null or (n.kind = 'reading' and not m.reading));
+
+    -- 5. The meeting in 15 minutes (12 to 15 ahead, so a missed minute is caught).
+    for r in select m.id, m.group_id, m.starts_at, m.lecture_id, left(l.title, 120) as lec
+               from public.study_meetings m join public.study_lectures l on l.id = m.lecture_id and l.deleted_at is null
+              where m.cancelled_at is null and not m.reading
+                and m.starts_at > now() + interval '12 minutes' and m.starts_at <= now() + interval '15 minutes' loop
+      for u in select mm.user_id from public.study_members mm
+                where mm.group_id = r.group_id
+                  and not exists (select 1 from public.study_meeting_presence pr where pr.meeting_id = r.id and pr.user_id = mm.user_id)
+                  and not exists (select 1 from public.study_notices n where n.user_id = mm.user_id and n.dedupe = 'meet15:' || r.id) loop
+        if study_private.notice_add(u, r.group_id, 'meeting_soon', jsonb_build_object('lecture', r.lec, 'at', r.starts_at),
+                                    jsonb_build_object('v', 'meeting', 'm', r.id), 'meet:' || r.id, 'meet15:' || r.id,
+                                    r.lecture_id, r.starts_at + interval '1 hour') is not null then
+          v_n := v_n + 1;
+        end if;
+      end loop;
+    end loop;
+  end if;
+
+  -- 6. The study day in 30 minutes (27 to 30 ahead), to those who said in or maybe.
+  if to_regclass('public.study_marathons') is not null then
+    for r in select k.id, k.group_id, k.starts_at, k.minutes, left(k.title, 120) as title
+               from public.study_marathons k
+              where k.state = 'planned' and k.starts_at > now() + interval '27 minutes' and k.starts_at <= now() + interval '30 minutes' loop
+      for u in select p.user_id from public.study_marathon_people p
+                where p.marathon_id = r.id and p.answer in ('in', 'maybe')
+                  and exists (select 1 from public.study_members mm where mm.group_id = r.group_id and mm.user_id = p.user_id)
+                  and not exists (select 1 from public.study_notices n where n.user_id = p.user_id and n.dedupe = 'mara30:' || r.id) loop
+        if study_private.notice_add(u, r.group_id, 'session_soon', jsonb_build_object('title', r.title, 'at', r.starts_at),
+                                    jsonb_build_object('v', 'marathon', 'm', r.id), null, 'mara30:' || r.id,
+                                    null, r.starts_at + make_interval(mins => r.minutes)) is not null then
+          v_n := v_n + 1;
+        end if;
+      end loop;
+    end loop;
+  end if;
+
+  -- 7, 8. (R 2) Kept apart so a check can give them the hour.
+  v_n := v_n + study_private.notify_needs(v_local) + study_private.notify_digest(v_local);
+
   if v_n > 0 then perform study_private.notify_dispatch(true); end if;
   return v_n;
 end;
@@ -814,15 +998,18 @@ revoke all on function study_private.push_host_ok(text), study_private.notify_pr
   study_private.notify_cat_on(uuid, text), study_private.notify_quiet(uuid, timestamptz),
   study_private.notice_add(uuid, uuid, text, jsonb, jsonb, text, text, uuid, timestamptz),
   study_private.notice_group(uuid, uuid, text, jsonb, jsonb, text, text, uuid, timestamptz),
-  study_private.notify_dispatch(boolean), study_private.notify_plan(), study_private.notify_member(uuid) from public;
+  study_private.notify_dispatch(boolean), study_private.notify_plan(), study_private.notify_member(uuid),
+  study_private.notify_needs(timestamp), study_private.notify_digest(timestamp) from public;
 
 -- ── The worker's RPCs (/api/study/work {notify:true}, the server key) ──
 
 -- Claims up to p_limit due pushes, oldest first, and decides each one now:
 --   off     the switch is off and the person is not in the pilot;
---   none    the category is off, the notice was seen, or a "budget" stop of
---           this lecture was already pushed this month;
---   held    the quiz ended, or its host unchecked "להודיע לקבוצה";
+--   none    the category is off, the notice was seen, a "budget" stop of
+--           this lecture was already pushed this month, or "the reading
+--           started" after "the meeting starts in 15 minutes" was pushed;
+--   held    the quiz ended, or its host unchecked "להודיע לקבוצה"; the
+--           meeting was cancelled, or its reading stopped;
 --   capped  another quiz of the group was pushed in the last 10 minutes, or
 --           of the same host in the last 30; or the person's day is full
 --           (Israel day: 6 in "בשבילך", 12 in all, 3 security notices);
@@ -886,6 +1073,20 @@ begin
                   where o2.kind in ('quiz_open', 'boss_open') and n2.dedupe <> n.dedupe and q2.created_by = q.created_by
                     and ((o2.state = 'sent' and o2.pushed_at > now() - interval '30 minutes') or o2.state = 'sending')) then
         update study_private.notify_outbox set state = 'capped' where notice_id = o.notice_id; continue;
+      end if;
+    end if;
+    -- R 2: a meeting cancelled meanwhile sends nothing; one push a meeting
+    -- a member (no "the reading started" after "the meeting starts in 15
+    -- minutes" was pushed).
+    if o.kind in ('meeting_soon', 'reading') and to_regclass('public.study_meetings') is not null then
+      if exists (select 1 from public.study_meetings m where m.id = study_private.uuid_or_null(n.route ->> 'm')
+                    and (m.cancelled_at is not null or (o.kind = 'reading' and not m.reading))) then
+        update study_private.notify_outbox set state = 'held' where notice_id = o.notice_id; continue;
+      end if;
+      if o.kind = 'reading' and exists (
+           select 1 from study_private.notify_outbox o2 join public.study_notices n2 on n2.id = o2.notice_id
+            where o2.user_id = o.user_id and o2.kind = 'meeting_soon' and n2.obj = n.obj and o2.state in ('sent', 'sending')) then
+        update study_private.notify_outbox set state = 'none' where notice_id = o.notice_id; continue;
       end if;
     end if;
     v_silent := false;
@@ -1265,17 +1466,29 @@ $$;
 
 -- A group quiz opened: every other member, held 15 s (study_quiz_quiet).
 -- The lock screen shows the first lecture's title, never the quiz's title or a name.
+-- R 2: a group challenge (mode 'boss', section H) is "אתגר קבוצתי נפתח
+-- עכשיו" with its course (the lectures' one course, or the first lecture).
 create or replace function study_private.r_quiz()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
   v_who  uuid;
   v_lec  text;
   v_name text;
+  v_crs  text;
 begin
   if not study_private.feature_on('notify_hooks') then return null; end if;
   v_who := coalesce(new.created_by, new.host_id);
   select left(l.title, 120) into v_lec from public.study_lectures l where l.id = new.lecture_ids[1];
   select left(m.name, 60) into v_name from public.study_members m where m.group_id = new.group_id and m.user_id = v_who;
+  if new.mode = 'boss' then
+    select case when count(distinct btrim(l.course)) = 1 and min(btrim(l.course)) <> '' then left(min(btrim(l.course)), 120) end
+      into v_crs from public.study_lectures l where l.id = any (new.lecture_ids);
+    perform study_private.notice_group(new.group_id, v_who, 'boss_open',
+      jsonb_strip_nulls(jsonb_build_object('course', coalesce(v_crs, v_lec), 'name', v_name)),
+      jsonb_build_object('v', 'quiz', 'q', new.id), 'quiz:' || new.id, 'quiz:' || new.id, new.lecture_ids[1], null);
+    perform study_private.notify_dispatch(true);
+    return null;
+  end if;
   perform study_private.notice_group(new.group_id, v_who, 'quiz_open',
     jsonb_strip_nulls(jsonb_build_object('mode', new.mode, 'lecture', v_lec, 'more', nullif(cardinality(new.lecture_ids) - 1, 0),
                                          'title', left(new.title, 120), 'name', v_name)),
@@ -1330,11 +1543,18 @@ end;
 $$;
 
 -- A summary ready, or stopped (why: the stop's code, such as 'budget'), to
--- the member who uploaded it.
+-- the member who uploaded it. R 2: the first time it is ready, the rest of
+-- the group gets "סיכום חדש בספרייה" in the inbox (never pushed).
 create or replace function study_private.r_lecture()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
   if not study_private.feature_on('notify_hooks') then return null; end if;
+  if new.status = 'ready' and new.deleted_at is null
+     and not exists (select 1 from public.study_notices n where n.lecture_id = new.id and n.kind = 'lecture_new') then
+    perform study_private.notice_group(new.group_id, new.created_by, 'lecture_new',
+      jsonb_build_object('lecture', left(new.title, 120)), jsonb_build_object('v', 'lecture', 'l', new.id),
+      'lec:' || new.id, 'new:' || new.id, new.id, null);
+  end if;
   if not exists (select 1 from public.study_members m where m.group_id = new.group_id and m.user_id = new.created_by) then
     return null;
   end if;
@@ -1384,6 +1604,251 @@ begin
     for each row execute function study_private.r_leave();
 end $$;
 
+-- ── The hooks of R 2. Each on another section's table, created only when
+-- that table is there; each stops at its first line when notify_hooks is
+-- off and never fails the write that fired it. ──
+
+-- A member started reading aloud: the members not already in the meeting,
+-- once a meeting (the claim skips the push for those who got "the meeting
+-- starts in 15 minutes"). The inbox says who reads; the lock screen never does.
+create or replace function study_private.r_reading()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_lec  text;
+  v_name text;
+  u      uuid;
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  select left(l.title, 120) into v_lec from public.study_lectures l where l.id = new.lecture_id;
+  select left(m.name, 60) into v_name from public.study_members m where m.group_id = new.group_id and m.user_id = new.reader_id;
+  for u in select mm.user_id from public.study_members mm
+            where mm.group_id = new.group_id and mm.user_id is distinct from new.reader_id
+              and not exists (select 1 from public.study_meeting_presence pr where pr.meeting_id = new.id and pr.user_id = mm.user_id)
+              and not exists (select 1 from public.study_notices n where n.user_id = mm.user_id and n.dedupe = 'read:' || new.id) loop
+    perform study_private.notice_add(u, new.group_id, 'reading',
+      jsonb_strip_nulls(jsonb_build_object('lecture', v_lec, 'name', v_name)),
+      jsonb_build_object('v', 'meeting', 'm', new.id), 'meet:' || new.id, 'read:' || new.id, new.lecture_id, now() + interval '2 hours');
+  end loop;
+  perform study_private.notify_dispatch(true);
+  return null;
+exception when others then
+  raise warning 'study_r_reading %', sqlstate;
+  return null;
+end;
+$$;
+
+-- A meeting set, or moved to another time: the rest of the group, inbox only.
+create or replace function study_private.r_meeting()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_lec text;
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  if new.cancelled_at is not null or new.starts_at <= now()
+     or (tg_op = 'UPDATE' and old.starts_at is not distinct from new.starts_at) then
+    return null;
+  end if;
+  select left(l.title, 120) into v_lec from public.study_lectures l where l.id = new.lecture_id;
+  perform study_private.notice_group(new.group_id,
+    coalesce(case when tg_op = 'UPDATE' then new.updated_by end, new.created_by, auth.uid()), 'meeting_set',
+    jsonb_strip_nulls(jsonb_build_object('lecture', v_lec, 'at', new.starts_at)),
+    jsonb_build_object('v', 'meeting', 'm', new.id), 'meet:' || new.id, 'meetset:' || new.id, new.lecture_id, null);
+  return null;
+exception when others then
+  raise warning 'study_r_meeting %', sqlstate;
+  return null;
+end;
+$$;
+
+-- "בקשה לקרדיט על דרך לזכור": the member asked to share the credit.
+create or replace function study_private.r_credit()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  a     public.study_aids;
+  v_lec text;
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  select * into a from public.study_aids x where x.id = new.aid_id;
+  if not found or new.user_id is not distinct from auth.uid()
+     or not exists (select 1 from public.study_members m where m.group_id = a.group_id and m.user_id = new.user_id) then
+    return null;
+  end if;
+  select left(l.title, 120) into v_lec from public.study_lectures l where l.id = a.lecture_id;
+  perform study_private.notice_add(new.user_id, a.group_id, 'credit_ask', jsonb_strip_nulls(jsonb_build_object('lecture', v_lec)),
+    jsonb_build_object('v', 'wall', 'l', a.lecture_id), 'wall:' || a.lecture_id, 'credit:' || new.aid_id, a.lecture_id, null);
+  return null;
+exception when others then
+  raise warning 'study_r_credit %', sqlstate;
+  return null;
+end;
+$$;
+
+-- A dispute opened about a correction: the member who proposed it (when not
+-- the one disputing).
+create or replace function study_private.r_dispute()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_who uuid;
+  v_grp uuid;
+  v_lec text;
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  if new.proposal_id is null then return null; end if;
+  select p.proposed_by into v_who from public.study_edit_proposals p where p.id = new.proposal_id;
+  if v_who is null or v_who is not distinct from new.author_a then return null; end if;
+  select l.group_id, left(l.title, 120) into v_grp, v_lec from public.study_lectures l where l.id = new.lecture_id;
+  if not exists (select 1 from public.study_members m where m.group_id = v_grp and m.user_id = v_who) then return null; end if;
+  perform study_private.notice_add(v_who, v_grp, 'dispute', jsonb_strip_nulls(jsonb_build_object('lecture', v_lec)),
+    jsonb_build_object('v', 'dispute', 'd', new.id), 'disp:' || new.id, 'disp:' || new.id, new.lecture_id, null);
+  return null;
+exception when others then
+  raise warning 'study_r_dispute %', sqlstate;
+  return null;
+end;
+$$;
+
+-- A dispute decided: both sides and the correction's proposer, except the
+-- member who decided.
+create or replace function study_private.r_dispute_done()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_grp uuid;
+  v_lec text;
+  v_by  uuid;
+  u     uuid;
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  select l.group_id, left(l.title, 120) into v_grp, v_lec from public.study_lectures l where l.id = new.lecture_id;
+  if new.proposal_id is not null then
+    select p.proposed_by into v_by from public.study_edit_proposals p where p.id = new.proposal_id;
+  end if;
+  for u in select distinct x.u from unnest(array[new.author_a, new.author_b, v_by]) as x(u)
+            where x.u is not null and x.u is distinct from coalesce(new.decided_by, auth.uid())
+              and exists (select 1 from public.study_members m where m.group_id = v_grp and m.user_id = x.u) loop
+    perform study_private.notice_add(u, v_grp, 'dispute_done', jsonb_strip_nulls(jsonb_build_object('lecture', v_lec)),
+      jsonb_build_object('v', 'dispute', 'd', new.id), 'disp:' || new.id, 'dispdone:' || new.id, new.lecture_id, null);
+  end loop;
+  return null;
+exception when others then
+  raise warning 'study_r_dispute_done %', sqlstate;
+  return null;
+end;
+$$;
+
+-- A past exam read (or not): the member who uploaded it, held 90 s like a
+-- summary. kind: 'sheet' once uploaded sheets come (section O); why: the
+-- stop's code.
+create or replace function study_private.r_exam()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  j jsonb := to_jsonb(new);
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  if (j ->> 'deleted_at') is not null
+     or not exists (select 1 from public.study_members m where m.group_id = new.group_id and m.user_id = new.created_by) then
+    return null;
+  end if;
+  perform study_private.notice_add(new.created_by, new.group_id,
+    case new.status when 'ready' then 'exam_ready' else 'exam_failed' end,
+    jsonb_strip_nulls(jsonb_build_object('course', nullif(left(new.course, 120), ''), 'year', new.year,
+                                         'moed', nullif(left(j ->> 'moed', 20), ''), 'kind', left(j ->> 'kind', 20),
+                                         'why', case when new.status = 'failed' then left(new.error, 40) end)),
+    jsonb_build_object('v', 'exams', 'e', new.id), 'exam:' || new.id, 'exam:' || new.id || ':' || new.status, null, null);
+  return null;
+exception when others then
+  raise warning 'study_r_exam %', sqlstate;
+  return null;
+end;
+$$;
+
+-- "עדכון": a correction reached a line this member studied (section V
+-- already chose who): inbox only, one row a lecture until seen.
+create or replace function study_private.r_update()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_grp uuid;
+  v_lec text;
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  select l.group_id, left(l.title, 120) into v_grp, v_lec from public.study_lectures l where l.id = new.lecture_id;
+  if not exists (select 1 from public.study_members m where m.group_id = v_grp and m.user_id = new.user_id) then return null; end if;
+  perform study_private.notice_add(new.user_id, v_grp, 'update', jsonb_strip_nulls(jsonb_build_object('lecture', v_lec)),
+    jsonb_build_object('v', 'lecture', 'l', new.lecture_id, 'at', jsonb_build_object('part', new.part_idx, 'anchor', new.anchor)),
+    'lec:' || new.lecture_id, 'upd:' || new.lecture_id, new.lecture_id, null);
+  return null;
+exception when others then
+  raise warning 'study_r_update %', sqlstate;
+  return null;
+end;
+$$;
+
+-- A correction waiting for approval: the rest of the group, inbox only, one
+-- row a lecture until seen.
+create or replace function study_private.r_edit()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_grp uuid;
+  v_lec text;
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  select l.group_id, left(l.title, 120) into v_grp, v_lec from public.study_lectures l where l.id = new.lecture_id;
+  if v_grp is null then return null; end if;
+  perform study_private.notice_group(v_grp, coalesce(new.proposed_by, auth.uid()), 'edit_wait',
+    jsonb_strip_nulls(jsonb_build_object('lecture', v_lec)), jsonb_build_object('v', 'lecture', 'l', new.lecture_id),
+    'lec:' || new.lecture_id, 'edit:' || new.lecture_id, new.lecture_id, null);
+  return null;
+exception when others then
+  raise warning 'study_r_edit %', sqlstate;
+  return null;
+end;
+$$;
+
+revoke all on function study_private.r_reading(), study_private.r_meeting(), study_private.r_credit(),
+  study_private.r_dispute(), study_private.r_dispute_done(), study_private.r_exam(), study_private.r_update(),
+  study_private.r_edit() from public;
+
+do $$
+begin
+  if to_regclass('public.study_meetings') is not null then
+    drop trigger if exists study_r_reading on public.study_meetings;
+    create trigger study_r_reading after update of reading on public.study_meetings
+      for each row when (not old.reading and new.reading and new.cancelled_at is null) execute function study_private.r_reading();
+    drop trigger if exists study_r_meeting on public.study_meetings;
+    create trigger study_r_meeting after insert or update of starts_at on public.study_meetings
+      for each row execute function study_private.r_meeting();
+  end if;
+  if to_regclass('public.study_aid_credits') is not null then
+    drop trigger if exists study_r_credit on public.study_aid_credits;
+    create trigger study_r_credit after insert on public.study_aid_credits
+      for each row when (new.state = 'asked') execute function study_private.r_credit();
+  end if;
+  if to_regclass('public.study_disputes') is not null then
+    drop trigger if exists study_r_dispute on public.study_disputes;
+    create trigger study_r_dispute after insert on public.study_disputes
+      for each row execute function study_private.r_dispute();
+    drop trigger if exists study_r_dispute_done on public.study_disputes;
+    create trigger study_r_dispute_done after update of state, decided_at on public.study_disputes
+      for each row when (old.state is distinct from new.state and new.state in ('accepted', 'overridden', 'closed'))
+      execute function study_private.r_dispute_done();
+  end if;
+  if to_regclass('public.study_exams') is not null then
+    drop trigger if exists study_r_exam on public.study_exams;
+    create trigger study_r_exam after update of status on public.study_exams
+      for each row when (old.status is distinct from new.status and new.status in ('ready', 'failed'))
+      execute function study_private.r_exam();
+  end if;
+  if to_regclass('public.study_updates') is not null then
+    drop trigger if exists study_r_update on public.study_updates;
+    create trigger study_r_update after insert on public.study_updates
+      for each row execute function study_private.r_update();
+  end if;
+  if to_regclass('public.study_edit_proposals') is not null then
+    drop trigger if exists study_r_edit on public.study_edit_proposals;
+    create trigger study_r_edit after insert on public.study_edit_proposals
+      for each row when (new.state = 'pending') execute function study_private.r_edit();
+  end if;
+end $$;
+
 -- ── Who may call what ──
 revoke all on function public.study_notify_claim(text, int), public.study_notify_done(text, jsonb), public.study_notify_ok() from public;
 -- The server calls these with the anon key; claim and done refuse without the server key (F27's allow-list).
@@ -1421,6 +1886,6 @@ begin
   end if;
 end $$;
 
-insert into study_private.schema_sections (section, version) values ('R', 1)
+insert into study_private.schema_sections (section, version) values ('R', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION R ════

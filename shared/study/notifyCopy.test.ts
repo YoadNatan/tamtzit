@@ -149,7 +149,7 @@ test("the copy covers the kinds section R registers, in the same categories", ()
   const r = sql.slice(sql.indexOf("-- ════ BEGIN SECTION R "));
   const block = /insert into study_private\.notice_kinds \(kind, cat, ttl, delay, push\) values([\s\S]*?)on conflict/.exec(r)?.[1] ?? "";
   const rows = [...block.matchAll(/\('([a-z_]+)',\s*'([a-z]+)'/g)].map((m) => [m[1], m[2]] as const);
-  assert.ok(rows.length >= 7, block);
+  assert.equal(rows.length, 25, "R 1 and R 2's kinds, and the three reserved");
   // Reserved for packages not built yet: their packages add their words.
   const reserved = new Set(["set_shared", "similar_ready", "lab_new"]);
   for (const [kind, cat] of rows) {
