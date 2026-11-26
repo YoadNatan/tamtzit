@@ -138,3 +138,46 @@ reads them yet (the inbox client comes next), and nothing is pushed.
   `supabase/tests/notify-concurrency.sh` (a hook gives up on a lock after
   200 ms; the reply is saved). Unit tests for `notifyCopy`, `notifyRoute`,
   `notifyQuiet`, `bidiText` and `b64url`; `VITE_STUDY_NOTIFY` asks for R 1.
+
+### Notifications, the bell and the inbox (slice 1's client), built on 26 November 2026
+
+With `VITE_STUDY_NOTIFY` the tab screens' top bar has a bell (at its end,
+before the guide's "?"), and `?v=notify` is the inbox. Nothing asks for the
+browser's permission and nothing is pushed yet (slice 2).
+
+- **What loads when:** the study entry chunk holds only the slot,
+  `src/study/features/notify.tsx` (972 B of R's 1,200; the entry chunk is
+  400,522 B of the new 410,000). The bell, the core
+  (`components/NotifyParts.tsx`), the inbox (`components/InboxScreen.tsx`),
+  `lib/notices.ts` (every member RPC of section R and the bell's store),
+  `lib/notifyText.ts` (the screens' words) and `styles/notify.css` load
+  lazily. `npm run test:bundle` builds with `NOTIFY` on, fails when R's share
+  passes 1,200 B or when any R module but the slot is in the entry chunk.
+- **The bell:** the count of unseen notices (`study_notices_unseen`),
+  read again 300 ms after Realtime reports a change to the member's own
+  rows, on coming back to the page and on coming back online. 1-9, then 9+;
+  its name for a screen reader says how many are new.
+- **Seen:** opening the inbox sees everything; opening a screen whose
+  object has unseen notices sees those (`lec:<id>`, `quiz:<id>`…), also when
+  one comes while the screen is open; a push's link (`?nt=<id>`) sees its
+  notice and leaves the address, keeping the rest of it.
+- **Choices the design left open, taken here:**
+  - Until pushes come, `?v=notify&x=set` (the settings) opens the inbox and
+    its address becomes `?v=notify`; the inbox has no settings gear yet.
+  - Without the flag, `?v=notify` is the home (Today, or the library before
+    Today) with no notice, as `?v=install` is without its flag.
+  - A notice that comes while the inbox is open joins the top of the list
+    with its dot, and only it is marked seen (by its id); opening the inbox
+    marks everything seen, as the design says.
+  - A group quiz that ended reads "מבחן קבוצתי נפתח" (without "עכשיו") with
+    "הסתיים · לתוצאות", linked to the quiz.
+  - A row's time: "עכשיו", "לפני {m} ד׳", the clock today, "d.m" before;
+    the list is split into "היום" and "קודם" by the row's last change (Israel
+    time).
+  - `?v=notify` has no tab (a back arrow, "→ להתראות" from the screens it
+    opens); COPY.md lists the inbox's words.
+- **Checks:** `e2e/study/notify.cjs` (the design's cases 5-7 and 14-16,
+  with the a11y check and 320 px inside it), its mock
+  `e2e/study/mocks/notify.cjs`, the mock's flag set `notify` ("i" with
+  `VITE_STUDY_NOTIFY`) and its Realtime filter on `user_id`; unit tests for
+  the route and the words.
