@@ -446,6 +446,10 @@ export const STOP_SELECTORS = [
   ".r-acts .a-btn.primary", // "לאשר" a suggested answer (for the whole group)
   ".r-optbtn", // marking an answer (for the whole group)
   ".r-seq + .a-row .a-btn.primary", // a true/false or match item keyed by hand (uploaded sheets; for the whole group)
+  ".se .a-row .a-btn.primary", // the edit sheet's and the answer editor's "לשמור" (uploaded sheets, release A1; for the whole group)
+  ".ss-retire .a-btn.primary", // "להוציא את השאלה" (for the whole group)
+  ".ss-openadd", // "להעתיק גם N שאלות פתוחות" (the budget)
+  ".ss-paused .a-btn", // "להמשיך" / "לסיים בלי תשובות מוצעות" (the budget; for the whole group)
   ".r-acts .r-reread", // "לקרוא שוב את עמוד N" (the budget)
   ".x-units .x-retry", // a unit's "לנסות שוב" (the budget)
   ".c-sheet button[type=submit]", // the course sheet's "לשמור", "לשנות שם", "לאחד" (for the whole group)
@@ -526,6 +530,8 @@ export const TARGETS = {
   sheetKinds: ".sheet-new .sx-kinds",
   sheetPages: ".sheet-new .sx-pages",
   sheetSplit: ".exam-review .rw-page",
+  sheetMore: ".exam-review .ss-more-btn",
+  sheetAdd: ".exam-review .ss-add",
   examKeys: ".exam-new .x-keys",
   examGo: ".exam-new .ph-foot .a-btn.primary",
   examProg: ".exam-review .x-prog",
@@ -1053,6 +1059,12 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
           m(T.examActs, "סימון או אישור של תשובה משנה אותה לכל הקבוצה, עם השם שלך. אפשר לבטל."),
           ...(f.sheets
             ? [m(T.sheetSplit, "העמוד עצמו, ליד ההעתקה. נוגעים באיור כדי לפתוח את השאלה שלו. חצים למעלה ולמטה עוברים בין השאלות, ו-E פותח ״לתקן טקסט״.")]
+            : []),
+          ...(f.sheetForms
+            ? [
+                m(T.sheetMore, "״⋯ עוד״: לתקן את השאלה (מספור, סוג, טקסט, אפשרויות ואיור), לסמן איור על העמוד, או להוציא את השאלה. כל שינוי הוא לכל הקבוצה."),
+                m(T.sheetAdd, "שאלה שלא הועתקה: מוסיפים אותה כאן, עם העמוד שלה."),
+              ]
             : []),
         ],
       };

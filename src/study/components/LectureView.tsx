@@ -37,6 +37,7 @@ import { useLectureN } from "../features/anchor";
 import { ReaderGuideChip } from "../features/guide";
 import { NotifyOffer } from "../features/notify";
 import { MakeLectureRow } from "../features/qsets";
+import { SheetsLectureRow } from "../features/sheets";
 import { ParagraphSheet, useLectureK } from "../features/collab";
 import { useLectureM } from "../features/meeting";
 import { useLectureA } from "../features/progress";
@@ -1023,6 +1024,7 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
                 אחרי הקריאה: תרגול על ההרצאה
               </RouteLink>
             ) : null}
+            <SheetsLectureRow ctx={ctx} lectureId={lectureId} course={lecture.course} />
             {deleteError ? (
               <p className="a-error" role="alert">
                 {deleteError}

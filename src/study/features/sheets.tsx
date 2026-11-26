@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import ErrorBoundary from "../components/ErrorBoundary";
 import { flags } from "../lib/flags";
+import type { Ctx } from "./types";
 
 /* ── Uploaded sheets' slot (docs/study/sheets.md; VITE_STUDY_SHEETS) ──
  * Only these stubs are in the study entry chunk (bundle owner O, capped at
@@ -10,9 +11,23 @@ import { flags } from "../lib/flags";
  * screen (ExamView), which reads the flag itself. On the join screen opened
  * from an upload's link (?v=exams&e=…) with no member on the device, a card
  * says how to reach it (a home-screen app keeps its own storage, so a link
- * that opens in the browser starts signed out). */
+ * that opens in the browser starts signed out). Release A1
+ * (VITE_STUDY_SHEETS_FORMS) adds the lecture page's row, "דפי תרגילים של
+ * ההרצאה", a lazy part with its own boundary. */
 
 export const SheetUpload = lazy(() => import("../components/SheetUpload"));
+const Lecture = lazy(() => import("../components/SheetsLecture"));
+
+/** Release A1: the lecture page's row "דפי תרגילים של ההרצאה"; nothing without the flag. */
+export function SheetsLectureRow(p: { ctx: Ctx; lectureId: string; course: string }) {
+  return flags.sheetForms && p.course ? (
+    <ErrorBoundary reset="sheets-row" fallback="none">
+      <Suspense fallback={null}>
+        <Lecture {...p} />
+      </Suspense>
+    </ErrorBoundary>
+  ) : null;
+}
 const Card = lazy(() => import("../components/DeepLinkCard"));
 
 /** Above Join when the address is an upload's link; nothing otherwise. */
