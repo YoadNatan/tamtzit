@@ -1,6 +1,7 @@
-import { reserve, settle } from "../budget.js";
-import { claimExam, examPriceUsd, runExamUnit, UNIT_STOP_MS } from "../exams.js";
-import { assertSchema, HttpError, json, keyed, memberClient, MODEL } from "../study.js";
+import { SHEET_CONFIRM_USD, sheetSizeProblem, sheetWorstUsd } from "../../../shared/study/sheetPrice.js";
+import { monthlyCap, POLICY, reserve, settle, sheetsMonthlyCap } from "../budget.js";
+import { claimExam, examPriceUsd, examPrompts, runExamUnit, UNIT_STOP_MS } from "../exams.js";
+import { assertSchema, HttpError, json, keyed, memberClient, MODEL, schemaHas, VARIANT_SCHEMA } from "../study.js";
 import type { Op } from "./types.js";
 
 /* Op "exam_read" (docs/study/sources.md B2, B6.2, and its "Built so far"
@@ -17,6 +18,16 @@ import type { Op } from "./types.js";
  *   phone drives the units (below).
  *   400 bad request | too many pages | bad pages | missing pages | bad urls,
  *   403 off, 404 exam not found, 409 already started, 402/429 the budget's.
+ *
+ *   An uploaded sheet (kind 'sheet', section O 1, docs/study/sheets.md;
+ *   release A0 reads it with this same reader) has its own bounds first
+ *   (design-exams OD13): at most 40 pages and an answers file of at most 10
+ *   (400 too many pages); the switch 'sheets' (403 off); a usual price above
+ *   $3 needs the body's confirmBig: true (409 confirm: the phone asked
+ *   "הדף ארוך … להמשיך?" first); and its worst case (sheetWorstUsd) must fit
+ *   both the sheets line, STUDY_SHEETS_MONTHLY_USD less what sheets cost
+ *   this month (402 sheets_cap), and the room under the group's 80% line
+ *   (402 budget), so a sheet that starts can finish.
  *
  * {op:"exam_read", action:"unit", examId}
  *   The phone's fallback when the server does not write: takes the next
@@ -75,6 +86,12 @@ export const examReadOp: Op = async (req, body, started) => {
   const pages = body.pages as Page[];
   const keyPages = pages.filter((p) => p && p.key === true).length;
   const priceUsd = examPriceUsd({ pages: pages.length - keyPages, keyPages, keySource: e.key_source });
+  // An uploaded sheet's bounds (section O 1): the kind is read only where it exists.
+  if (await schemaHas(sb, VARIANT_SCHEMA.sheets)) {
+    const { data: k, error: kindError } = await sb.from("study_exams").select("kind").eq("id", examId).maybeSingle();
+    if (kindError) throw new HttpError(500, kindError.message);
+    if ((k as { kind?: string } | null)?.kind === "sheet") await sheetGate(sb, e, { pages: pages.length - keyPages, keyPages, priceUsd, confirmed: body.confirmBig === true });
+  }
 
   const id = await reserve(sb, { groupId: e.group_id, kind: "exam", ref: "read", estimateUsd: priceUsd });
   await settle(sb, id, { model: MODEL, usage: null }); // the gate only: the units pay for themselves
@@ -85,3 +102,21 @@ export const examReadOp: Op = async (req, body, started) => {
   const r = (data ?? {}) as { units?: number; server?: boolean };
   return json(200, { units: r.units ?? 0, server: r.server === true, priceUsd });
 };
+
+/** A sheet's bounds before it is read (OD13; docs/study/sheets.md). Throws the refusal. */
+export async function sheetGate(
+  sb: Awaited<ReturnType<typeof memberClient>>["sb"],
+  e: { group_id: string; key_source: string },
+  o: { pages: number; keyPages: number; priceUsd: number; confirmed: boolean },
+): Promise<{ worstUsd: number }> {
+  if (sheetSizeProblem(o)) throw new HttpError(400, "too many pages");
+  const { data, error } = await sb.rpc("study_sheet_room", { p_group: e.group_id });
+  if (error) throw new HttpError(error.message === "forbidden" ? 403 : 500, error.message);
+  const room = (Array.isArray(data) ? data[0] : data) as { sheets_on?: boolean; sheets_usd?: unknown; spent_usd?: unknown } | null;
+  if (!room || room.sheets_on !== true) throw new HttpError(403, "off");
+  if (o.priceUsd > SHEET_CONFIRM_USD && !o.confirmed) throw new HttpError(409, "confirm");
+  const worstUsd = sheetWorstUsd({ pages: o.pages, keyPages: o.keyPages, keySource: e.key_source }, MODEL, examPrompts());
+  if (worstUsd > sheetsMonthlyCap() - Number(room.sheets_usd ?? 0)) throw new HttpError(402, "sheets_cap");
+  if (worstUsd > monthlyCap() * POLICY.exam.share - Number(room.spent_usd ?? 0)) throw new HttpError(402, "budget");
+  return { worstUsd };
+}

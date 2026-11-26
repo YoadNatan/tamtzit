@@ -21023,9 +21023,10 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 --  page lists each upload's kind and lecture, the library counts past exams
 --  only, and a simulation takes past exams only and only their choice items.
 --  The op exam_read keeps a sheet to 40 pages and checks the sheets line and
---  the headroom before it calls S's study_exam_pages_done, so release A0's
---  sheets are read by the exam reader as they are. Sheets are created with
---  hide_from_profile, so the course's style examples never learn from them.
+--  the headroom (study_sheet_room) before it calls S's study_exam_pages_done,
+--  so release A0's sheets are read by the exam reader as they are. Sheets
+--  are created with hide_from_profile, so the course's style examples never
+--  learn from them.
 --
 --  O 2 (the sheet reader, open and numeric forms) and O 3 (similar
 --  questions, a set of kind 'sheet' in section L) come later. Every
@@ -21307,8 +21308,32 @@ begin
 end;
 $$;
 
-revoke all on function public.study_sheet_create(uuid, jsonb), public.study_exam_key_set(uuid, int, int[]) from public, anon;
-grant execute on function public.study_sheet_create(uuid, jsonb), public.study_exam_key_set(uuid, int, int[]) to authenticated;
+-- ── The sheets line and the headroom (OD3, OD13) ──
+-- What the op exam_read needs before a sheet is read, which a member cannot
+-- read from the ledger or the private queue: whether the switch 'sheets' is
+-- on, what reading sheets (their read, key and solve units) cost the group
+-- this calendar month (UTC, as study_spent), and the group's whole spend
+-- this month. The op refuses a sheet whose worst case passes the sheets
+-- line ($6 a month, STUDY_SHEETS_MONTHLY_USD) or the room left under the 80%
+-- line. A unit's cost is known when it finishes, so two sheets started
+-- minutes apart may both pass (the design's accepted gap: one sheet's worst
+-- case at most; the 80% line still holds).
+create or replace function public.study_sheet_room(p_group uuid)
+returns table (sheets_on boolean, sheets_usd numeric, spent_usd numeric)
+language plpgsql stable security definer set search_path = public as $$
+declare since timestamptz := date_trunc('month', now() at time zone 'utc') at time zone 'utc';
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  return query
+  select study_private.feature_on('exams') and study_private.feature_on('sheets'),
+         coalesce((select sum(j.cost_usd) from study_private.exam_jobs j join public.study_exams e on e.id = j.exam_id
+                    where j.group_id = p_group and e.kind = 'sheet' and j.updated_at >= since), 0)::numeric,
+         coalesce((select sum(u.cost_usd) from public.study_usage u where u.group_id = p_group and u.created_at >= since), 0)::numeric;
+end;
+$$;
+
+revoke all on function public.study_sheet_create(uuid, jsonb), public.study_exam_key_set(uuid, int, int[]), public.study_sheet_room(uuid) from public, anon;
+grant execute on function public.study_sheet_create(uuid, jsonb), public.study_exam_key_set(uuid, int, int[]), public.study_sheet_room(uuid) to authenticated;
 
 insert into study_private.schema_sections (section, version) values ('O', 1)
 on conflict (section) do update set version = excluded.version, loaded_at = now();

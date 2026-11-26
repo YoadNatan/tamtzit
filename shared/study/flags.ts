@@ -94,6 +94,10 @@ export function flagsFrom(e: Record<string, unknown>) {
     // shelf ("סטים של הקבוצה"), the set page, solving a set (s=k.<set>) and
     // the group's numbers on it. Section L at 1.
     sets: practice && on(e.VITE_STUDY_MAKE) && on(e.VITE_STUDY_SETS),
+    // Uploaded sheets, release A0 (docs/study/sheets.md): "העלאת מבחן או דף
+    // תרגילים", the course page by kind, the wide review, keying by hand,
+    // printed order. A sheet is a past exam's row of kind 'sheet': section O 1.
+    sheets: practice && on(e.VITE_STUDY_COURSES) && on(e.VITE_STUDY_EXAMS) && on(e.VITE_STUDY_SHEETS),
   } as const;
 }
 
@@ -181,5 +185,7 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     ...(f.notify ? { R: 1 } : {}),
     // Practice sets' shelf, set page and set sessions: section L 1.
     ...(f.sets ? { L: 1 } : {}),
+    // Uploaded sheets (release A0): the kind, "a new sheet", keying by hand.
+    ...(f.sheets ? { O: 1 } : {}),
   };
 }

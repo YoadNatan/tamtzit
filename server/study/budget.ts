@@ -150,6 +150,14 @@ export const setsMonthlyCap = (): number => {
   const v = Number(process.env.STUDY_SETS_MONTHLY_USD || 12);
   return Number.isFinite(v) && v >= 0 ? v : 12;
 };
+/** STUDY_SHEETS_MONTHLY_USD: the monthly line for uploaded sheets in USD
+ *  (their read, key and solve units, study_sheet_room); 6 when it is not set
+ *  (Yoad's OD3 and OD21, docs/study/sheets.md). Checked against a sheet's
+ *  worst case before it is read, so a started sheet finishes. */
+export const sheetsMonthlyCap = (): number => {
+  const v = Number(process.env.STUDY_SHEETS_MONTHLY_USD || 6);
+  return Number.isFinite(v) && v >= 0 ? v : 6;
+};
 /** The kinds the sets line counts. */
 export const SETS_LINE_KINDS = ["practice", "solver", "reword", "style"] as const;
 /** New paid sets a member may start a day, Israel time (practice sets OD13;

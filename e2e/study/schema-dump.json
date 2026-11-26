@@ -3082,6 +3082,14 @@
     "required": 2
    }
   ],
+  "study_sheet_room": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
   "study_slide_flag": [
    {
     "args": [

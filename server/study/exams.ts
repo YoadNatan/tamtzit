@@ -44,10 +44,10 @@ import { figureOk } from "./writer.js";
  * op exam_read {action:"unit"} with the member's token. */
 
 export const READ_PAGES = 4;
-const READ_TOKENS = 12_000;
-const KEY_TOKENS = 4_000;
+export const READ_TOKENS = 12_000;
+export const KEY_TOKENS = 4_000;
 /** Thinking counts in max_tokens: 20 medical questions think more than they write. */
-const SOLVE_TOKENS = 16_000;
+export const SOLVE_TOKENS = 16_000;
 /** A unit stops at 200 s (B6.2), well inside the 330-second lease. */
 export const UNIT_STOP_MS = 200_000;
 /** Exam pages are stored at most 1,500 px on the long side (the phone's pdf.ts and images.ts). */
@@ -224,8 +224,10 @@ const pageTokens = (p: Pick<ExamPage, "w" | "h">) => imageTokens(p.w, p.h);
  *  upload, with these prompts' real lengths (exams.test.ts checks that the
  *  phone's copy of them is the same). */
 export function examPriceUsd(o: { pages: number; keyPages?: number; keySource?: string }): number {
-  return sharedExamPriceUsd(o, { read: EXAM_READ_SYSTEM.length, key: EXAM_KEY_SYSTEM.length, solve: EXAM_SOLVE_SYSTEM.length });
+  return sharedExamPriceUsd(o, examPrompts());
 }
+/** The read, key and solve prompts' lengths (the sheets' worst case counts with them too). */
+export const examPrompts = () => ({ read: EXAM_READ_SYSTEM.length, key: EXAM_KEY_SYSTEM.length, solve: EXAM_SOLVE_SYSTEM.length });
 
 type Call = {
   system: string;

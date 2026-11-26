@@ -11251,6 +11251,22 @@ update public.study_exams set deleted_at = now() where id = :'os1';
 select pg_temp.ook('O1i4', pg_temp.oas(:'oa', format('select public.study_exam_key_set(%L, null, %L)', :'otf', '{1,0,1}')) = 'error: question not found',
   'a deleted sheet''s items are not found');
 
+-- ── The sheets line and the headroom (study_sheet_room) ──
+reset role;
+insert into study_private.exam_jobs (group_id, exam_id, kind, status, cost_usd) values
+ (:'og', :'os1', 'read', 'done', 0.25), (:'og', :'os2', 'solve', 'done', 0.10), (:'og', :'ox1', 'read', 'done', 0.40),
+ (:'ozg', null, 'read', 'done', 0.90);
+insert into study_private.exam_jobs (group_id, exam_id, kind, status, cost_usd, updated_at) values (:'og', :'os2', 'read', 'done', 3, now() - interval '40 days');
+insert into public.study_usage (group_id, kind, ref, cost_usd, settled_at) values (:'og', 'exam', 'unit', 0.75, now()), (:'ozg', 'exam', 'unit', 5, now());
+update study_private.features set enabled = true where name = 'sheets';
+select pg_temp.ook('O1j', pg_temp.oas(:'oa', format('select (sheets_on and sheets_usd = 0.35 and spent_usd >= 0.75 and spent_usd < 5)::text from public.study_sheet_room(%L)', :'og')) = 'true',
+  'the sheets line counts this month''s units of the group''s sheets (a deleted sheet''s too, not a past exam''s, not last month''s); the month''s whole spend');
+update study_private.features set enabled = false where name = 'sheets';
+select pg_temp.ook('O1j2', pg_temp.oas(:'ob', format('select (not sheets_on)::text from public.study_sheet_room(%L)', :'og')) = 'true'
+  and pg_temp.oas(:'oz', format('select sheets_usd::text from public.study_sheet_room(%L)', :'og')) = 'error: forbidden'
+  and pg_temp.oas('', format('select sheets_usd::text from public.study_sheet_room(%L)', :'og')) = 'error: forbidden',
+  'the switch off says so; a stranger and no one signed in are refused');
+
 -- ── The fixtures go ──
 reset role;
 set request.jwt.claim.sub = '';

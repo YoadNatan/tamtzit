@@ -8,11 +8,13 @@ import ai from "../../api/study/ai.js";
 import work from "../../api/study/work.js";
 import { costUsd, POLICY } from "./budget.js";
 import { EXAM_PROMPT_CHARS, examPriceUsd as phonePriceUsd } from "../../shared/study/examPrice.js";
-import { examPriceUsd, readUnits, toSaveItems, toSheetKeys, toSolvedKeys, unitCall, type ExamClaim, type SaveItem } from "./exams.js";
+import { EXAM_SOLVE_ITEMS, EXAM_UNIT_TOKENS, SHEET_CONFIRM_USD, sheetMinutes, sheetPriceUsd, sheetWorstUsd } from "../../shared/study/sheetPrice.js";
+import { sheetGate } from "./ops/exams.js";
+import { examPriceUsd, examPrompts, KEY_TOKENS, READ_TOKENS, SOLVE_TOKENS, readUnits, toSaveItems, toSheetKeys, toSolvedKeys, unitCall, type ExamClaim, type SaveItem } from "./exams.js";
 import { courseStyle } from "./practice.js";
 import { EXAM_KEY_SYSTEM, EXAM_READ_SYSTEM, EXAM_SOLVE_SYSTEM } from "./prompts/questions.js";
 import type { ExamItem } from "./questions.js";
-import { MODEL, REQUIRED_SCHEMA } from "./study.js";
+import { MODEL, REQUIRED_SCHEMA, schemaFor } from "./study.js";
 
 /* Past exams on the server (docs/study/sources.md phase 2, B6.2, B7):
  * api/study/work.ts's {exam} branch and op exam_read, bundled and run in Node
@@ -62,6 +64,7 @@ let schemaBody: unknown = { ...REQUIRED_SCHEMA, S: 2 };
 let reserveAnswer: { status: number; body: unknown } | null = null;
 let nextReservation = 100;
 let examRow: unknown = { id: EXAM, group_id: GROUP, key_source: "separate", status: "uploading" };
+let sheetRoom: unknown = [{ sheets_on: true, sheets_usd: 0, spent_usd: 0 }];
 let doneJobs = 0;
 
 type Logged = { seq: number; who: "rest" | "anthropic"; path: string; body: any; auth: string | null };
@@ -156,6 +159,8 @@ const rest = createServer(async (req, res) => {
       return reserveAnswer ? send(res, reserveAnswer.status, reserveAnswer.body) : send(res, 200, ++nextReservation);
     case "/rest/v1/rpc/study_settle":
       return send(res, 200, true);
+    case "/rest/v1/rpc/study_sheet_room":
+      return send(res, 200, sheetRoom);
     case "/rest/v1/rpc/study_exam_pages_done":
       return send(res, 200, { units: 4, server: true });
     case "/rest/v1/rpc/study_exam_status":
@@ -288,6 +293,7 @@ beforeEach(() => {
   mode = "ok";
   doneJobs = 0;
   examRow = { id: EXAM, group_id: GROUP, key_source: "separate", status: "uploading" };
+  sheetRoom = [{ sheets_on: true, sheets_usd: 0, spent_usd: 0 }];
   queueExam();
 });
 
@@ -678,4 +684,84 @@ test("the phone's price before an upload is the server's (shared/study/examPrice
   for (const o of [{ pages: 1 }, { pages: 12 }, { pages: 28 }, { pages: 120 }, { pages: 12, keyPages: 2, keySource: "separate" }, { pages: 30, keySource: "none" }]) {
     assert.equal(phonePriceUsd(o), examPriceUsd(o), JSON.stringify(o));
   }
+});
+
+// ── Uploaded sheets (release A0, section O 1, docs/study/sheets.md) ──
+const sheetBody = (pages: number, keyPages = 0) => ({
+  op: "exam_read",
+  examId: EXAM,
+  pages: Array.from({ length: pages + keyPages }, (_, i) => ({ n: i + 1, path: pathOf(i + 1), w: 1500, h: 2121, ...(i >= pages ? { key: true } : {}) })),
+  urls: Object.fromEntries(Array.from({ length: pages + keyPages }, (_, i) => [pathOf(i + 1), signed(i + 1)])),
+});
+
+test("a sheet's worst case and unit sizes are the exam reader's (shared/study/sheetPrice.ts)", () => {
+  assert.deepEqual(EXAM_UNIT_TOKENS, { read: READ_TOKENS, key: KEY_TOKENS, solve: SOLVE_TOKENS });
+  assert.equal(EXAM_SOLVE_ITEMS, 20, "section S's solve units (exam_advance)");
+  assert.deepEqual(schemaFor("sheets"), { ...schemaFor("exams"), O: 1 });
+  for (const o of [{ pages: 6, keySource: "none" }, { pages: 6, keyPages: 2, keySource: "separate" }, { pages: 40, keySource: "marked" }]) {
+    assert.equal(sheetPriceUsd(o, examPrompts()), examPriceUsd(o), "the usual price is the exam's");
+    const worst = sheetWorstUsd(o, MODEL, examPrompts());
+    assert.ok(worst > examPriceUsd(o) * 2, `${JSON.stringify(o)}: worst ${worst} well above the usual`);
+  }
+  assert.ok(sheetWorstUsd({ pages: 6, keySource: "none" }, MODEL) > sheetWorstUsd({ pages: 6, keySource: "marked" }, MODEL), "no answers: every item is solved");
+  assert.ok(sheetWorstUsd({ pages: 6, keySource: "none" }, MODEL) < 2.5, "a typical sheet's worst case leaves room under the $6 line");
+  assert.ok(sheetWorstUsd({ pages: 40, keySource: "none" }, MODEL) > 6, "a 40-page sheet without answers cannot pass the line (design §11.2)");
+  assert.equal(sheetWorstUsd({ pages: 0 }, MODEL), 0);
+  assert.deepEqual(sheetMinutes({ pages: 6, keySource: "marked" }), { from: 5, to: 10 });
+  assert.ok(sheetMinutes({ pages: 40, keySource: "none" }).to > sheetMinutes({ pages: 6, keySource: "none" }).to);
+});
+
+test("op exam_read on a sheet: within its bounds, read as an exam (the usual price reserved, 3 a day)", async () => {
+  schemaBody = { ...REQUIRED_SCHEMA, Q: 2, S: 2, O: 1 };
+  examRow = { id: EXAM, group_id: GROUP, key_source: "none", status: "uploading", kind: "sheet" };
+  const res = await post(sheetBody(6));
+  assert.equal(res.status, 200);
+  const b = (await res.json()) as { priceUsd: number };
+  assert.equal(b.priceUsd, examPriceUsd({ pages: 6, keyPages: 0, keySource: "none" }));
+  const [room] = rpcs("study_sheet_room");
+  assert.deepEqual([room.body, room.auth], [{ p_group: GROUP }, "Bearer x.y.z"]);
+  const [r] = rpcs("study_reserve");
+  assert.ok(r.seq > room.seq, "the bounds first, then the gate");
+  assert.deepEqual([r.body.p_kind, r.body.p_ref, r.body.p_daily, r.body.p_member_share], ["exam", "read", 3, null], "group work (OD13)");
+  assert.equal(rpcs("study_exam_pages_done").length, 1);
+});
+
+test("op exam_read on a sheet: over 40 pages 400, the switch off 403, the sheets line 402 sheets_cap, the 80% line 402 budget", async () => {
+  schemaBody = { ...REQUIRED_SCHEMA, Q: 2, S: 2, O: 1 };
+  examRow = { id: EXAM, group_id: GROUP, key_source: "none", status: "uploading", kind: "sheet" };
+  const tooMany = await post(sheetBody(41));
+  assert.deepEqual([tooMany.status, await tooMany.json()], [400, { error: "too many pages" }]);
+  const keyTooLong = await post(sheetBody(6, 11));
+  assert.deepEqual([keyTooLong.status, await keyTooLong.json()], [400, { error: "too many pages" }], "an answers file of at most 10 pages");
+  sheetRoom = [{ sheets_on: false, sheets_usd: 0, spent_usd: 0 }];
+  const off = await post(sheetBody(6));
+  assert.deepEqual([off.status, await off.json()], [403, { error: "off" }]);
+  const worst = sheetWorstUsd({ pages: 6, keyPages: 0, keySource: "none" }, MODEL, examPrompts());
+  sheetRoom = [{ sheets_on: true, sheets_usd: 6 - worst + 0.01, spent_usd: 0 }];
+  const line = await post(sheetBody(6));
+  assert.deepEqual([line.status, await line.json()], [402, { error: "sheets_cap" }]);
+  process.env.STUDY_SHEETS_MONTHLY_USD = "10";
+  const raised = await post(sheetBody(6));
+  assert.equal(raised.status, 200, "the line is STUDY_SHEETS_MONTHLY_USD");
+  delete process.env.STUDY_SHEETS_MONTHLY_USD;
+  examRow = { id: EXAM, group_id: GROUP, key_source: "none", status: "uploading", kind: "sheet" };
+  sheetRoom = [{ sheets_on: true, sheets_usd: 0, spent_usd: 33 * 0.8 - worst + 0.01 }];
+  const headroom = await post(sheetBody(6));
+  assert.deepEqual([headroom.status, await headroom.json()], [402, { error: "budget" }], "the worst case must fit under the 80% line");
+  assert.equal(rpcs("study_reserve").length, 1, "only the call within its bounds reserved");
+  // A past exam is not a sheet: none of it applies (and needs no room).
+  examRow = { id: EXAM, group_id: GROUP, key_source: "none", status: "uploading", kind: "exam" };
+  log = [];
+  assert.equal((await post(sheetBody(41))).status, 200);
+  assert.equal(rpcs("study_sheet_room").length, 0);
+});
+
+test("a sheet's usual price above $3 needs the phone's second confirmation (409 confirm)", async () => {
+  const calls: string[] = [];
+  const sb = { rpc: async (fn: string) => (calls.push(fn), { data: [{ sheets_on: true, sheets_usd: 0, spent_usd: 0 }], error: null }) } as never;
+  const e = { group_id: GROUP, key_source: "marked" };
+  await assert.rejects(sheetGate(sb, e, { pages: 30, keyPages: 0, priceUsd: SHEET_CONFIRM_USD + 0.4, confirmed: false }), (x: Error) => x.message === "confirm");
+  const ok = await sheetGate(sb, e, { pages: 30, keyPages: 0, priceUsd: SHEET_CONFIRM_USD + 0.4, confirmed: true });
+  assert.ok(ok.worstUsd > 0);
+  assert.deepEqual(calls, ["study_sheet_room", "study_sheet_room"]);
 });
