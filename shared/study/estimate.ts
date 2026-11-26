@@ -11,6 +11,9 @@ import { CHARS_PER_TOKEN } from "./prices.js";
  *  PDF pages at 1,200 px (pdf.ts). */
 const MAX_PICTURE_SIDE = 1400;
 
+/** The rate card a reservation uses is the one for a prompt this much longer than estimated. */
+export const RESERVE_MARGIN = 1.2;
+
 /** Hebrew characters a token for a model: the registry's factor (Haiku 5.5's
  *  tokenizer counts about 30% more tokens: 1.9), else CHARS_PER_TOKEN (2.5,
  *  calibrated for Claude against the stored usage by §8.5's query). */
@@ -41,6 +44,9 @@ export function imageTokens(w?: number | null, h?: number | null): number {
  *  meaning). */
 export function estimateUsd(model: string, inputChars: number, maxTokens: number, extraInputTokens = 0, opts: { batch?: boolean } = {}): number {
   const input = Math.max(0, inputChars) / charsPerToken(model) + Math.max(0, extraInputTokens);
-  const p = priceOf(model, input);
+  // The card is chosen as if the prompt were a fifth longer: characters ÷ a
+  // factor is an estimate, and a prompt just under the dearer card's line
+  // that turns out just over it must not be reserved at a fifth of its cost.
+  const p = priceOf(model, input * RESERVE_MARGIN);
   return ((input * Math.max(p.in, p.w5m) + Math.max(0, maxTokens) * p.out) / 1_000_000) * (opts.batch ? 0.5 : 1);
 }

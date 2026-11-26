@@ -50,6 +50,14 @@ test("characters a token: 2.5 for Claude, 1.9 for Haiku 5.5 (about 30% more toke
   near(estimateUsd("claude-sonnet-5-5", 2_500, 1_000), (1_000 * 2.5 + 1_000 * 10) / 1_000_000);
 });
 
+test("a reservation never takes the cheaper card for a prompt estimated just under the dearer card's line", () => {
+  const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-12, `${a} vs ${b}`);
+  // About 95k tokens estimated (Haiku 5.5's line is 100k): reserved at the dearer card.
+  near(estimateUsd("claude-haiku-5-5", 95_000 * 1.9, 0), (95_000 * 0.625) / 1_000_000);
+  // About 80k: well under the line, the usual card.
+  near(estimateUsd("claude-haiku-5-5", 80_000 * 1.9, 0), (80_000 * 0.125) / 1_000_000);
+});
+
 test("imageTokens: width × height / 750, unknown sizes at the largest picture stored", () => {
   assert.equal(imageTokens(1200, 800), 1280);
   assert.equal(imageTokens(0, 0), 2614);
