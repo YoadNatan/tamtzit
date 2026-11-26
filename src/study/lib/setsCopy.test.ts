@@ -36,6 +36,15 @@ const LINES = [
   C.genStart(6),
   C.genFailed(3),
   C.genBudgetStop(4),
+  C.genBudgetStop(0),
+  C.genCount(6, 4, true),
+  C.genCount(0, 1, true),
+  C.genDoneTitle("משתנים"),
+  C.statsCounted(3),
+  C.todaySolve("משתנים", 10),
+  C.makeRecent("12.11", 1, ""),
+  C.setFail("set not reading"),
+  C.setFail("attempt finished"),
   C.genTileLabel(4, "coming"),
   C.genAddReady(2),
   C.genAdded(1),
@@ -104,7 +113,17 @@ test("the design's strings, pinned", () => {
   // The entry points (WP14).
   assert.equal(C.todayRow(2), "סטים חדשים בקבוצה (2)");
   assert.equal(C.SETS.today.solveNew, "לפתור סט חדש");
-  assert.equal(C.genResumeMine("משתנים"), "הסט משתנים נעצר באמצע · להמשיך ליצור");
+  assert.equal(C.genResumeMine("משתנים"), "הסט על ״משתנים״ נעצר באמצע · להמשיך ליצור");
+  // The review's fixes: a stopped set never says "בדרך"; a budget stop at 0 says only that; the done title.
+  assert.equal(C.genCount(6, 4, true), "6 מוכנות · 4 עוד לא נכתבו");
+  assert.equal(C.genCount(0, 5, true), "5 שאלות עוד לא נכתבו");
+  assert.equal(C.genBudgetStop(0), "הסט נעצר כי התקציב נגמר");
+  assert.equal(C.genDoneTitle("משתנים"), "הסט מוכן · משתנים");
+  assert.equal(C.makeRecent("אתמול", 10, "נועה"), "יש סט מאתמול על ההרצאה · 10 שאלות · מאת נועה");
+  assert.equal(C.makeRecent("12.11", 10, "נועה"), "יש סט מ-12.11 על ההרצאה · 10 שאלות · מאת נועה");
+  assert.equal(C.todaySolve("משתנים", 10), "לפתור: משתנים · 10 שאלות");
+  assert.equal(C.SETS.make.custom, "מספר אחר (עד 40)");
+  assert.equal(C.setFail("set not found"), "הסט לא נמצא. אולי נמחק.");
   assert.equal(C.lectureSets(3), "סטים על ההרצאה (3)");
   assert.equal(C.mistakesNew("$0.40"), "שאלות חדשות על הטעויות · כ-$0.40");
   assert.equal(C.SETS.me.names, C.SETS.stats.optin, "the same words in שלי as at the round's end");

@@ -437,7 +437,7 @@ const SAMPLES: Array<[Route, (f: Flags) => boolean]> = [
   [{ v: "practice", l: ID, x: "new" }, (f) => f.questions],
   [{ v: "practice", l: ID, x: "example" }, (f) => f.questions],
   [{ v: "practice", l: ID, x: "bank", r: ID2 }, (f) => f.questions],
-  [{ v: "practice", l: ID, x: "review", r: ID2 }, (f) => f.questions],
+  [{ v: "practice", l: ID, x: "review", r: ID2 }, (f) => f.questions && f.make],
   [{ v: "practice", x: "new" }, (f) => f.make],
   [{ v: "practice", l: ID, x: "new", from: "m" }, (f) => f.make],
   [{ v: "practice", l: ID, x: "round" }, (f) => f.practice],
@@ -830,6 +830,8 @@ test("VITE_STUDY_MAKE: practice sets' generator, on practice, with no SQL sectio
   assert.deepEqual(allowed({ v: "practice", l: ID, x: "new", from: "m" }, on), { route: { v: "practice", l: ID, x: "new", from: "m" } });
   assert.deepEqual(allowed({ v: "practice", x: "new" }, off), { route: { v: "practice" }, notice: NOTICE.off }, "the hub");
   assert.deepEqual(allowed({ v: "practice", l: ID, x: "new", from: "m" }, off), { route: { v: "practice", l: ID, x: "new" }, notice: NOTICE.off }, "the old setup");
+  assert.deepEqual(allowed({ v: "practice", l: ID, x: "review", r: ID2 }, off), { route: { v: "practice", l: ID }, notice: NOTICE.off }, "the drafts one by one are practice sets': the lecture's practice");
+  assert.deepEqual(allowed({ v: "practice", l: ID, x: "review", r: ID2 }, on), { route: { v: "practice", l: ID, x: "review", r: ID2 } });
   assert.deepEqual(allowed({ v: "practice", l: ID, x: "new" }, off), { route: { v: "practice", l: ID, x: "new" } }, "a lecture's setup is today's");
   assert.equal(routeUrl({ v: "practice", l: ID, x: "new", from: "m" }), `/?v=practice&l=${ID}&x=new&from=m`);
   assert.equal(routeUrl({ v: "practice", x: "new" }), "/?v=practice&x=new");

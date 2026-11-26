@@ -3,6 +3,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { BOSS_NOT_COUNTED, failCode, failShort, failText, hasText, INTERNAL_CODES, isInternal, type Area } from "./failText";
+import { SET_FAIL_CODES } from "./setsCopy";
+
+/** Practice sets' own codes: worded in setsCopy.ts (setFail, a lazy chunk), shown only by the set screens. */
+const SET_WORDED = new Set(SET_FAIL_CODES);
 
 /* F-13 (review FE-19; §12.2.7, §12.7.4): every exception the SQL can raise
  * reaches a screen as words. Each `raise exception '…'` of §3's SQL
@@ -82,7 +86,7 @@ const auth = packageCodes(
 test("every exception the SQL raises has words, or is listed as internal (F-13, §12.2.7)", () => {
   const codes = raisedIn(SQL);
   assert.ok(codes.size > 150, `${codes.size} codes found in §3's and §12's SQL`);
-  const missing = [...codes].filter((c) => !hasText(c) && !quiz.codes.has(c) && !auth.codes.has(c) && !isInternal(c));
+  const missing = [...codes].filter((c) => !hasText(c) && !quiz.codes.has(c) && !auth.codes.has(c) && !isInternal(c) && !SET_WORDED.has(c));
   assert.deepEqual(missing, [], `codes with no Hebrew (quiz codes from ${quiz.from}, auth codes from ${auth.from})`);
 });
 
@@ -194,7 +198,7 @@ test("every code an op of /api/study/ai can answer has words in its area, or is 
     const codes = new Set([...opCodes(files.map(read).join("\n")), ...shared]);
     for (const c of codes) {
       found.push(`${area}:${c}`);
-      if (!isInternal(c, area) && failText(c, area) === fallbackOf(area)) missing.push(`${area}:${c}`);
+      if (!isInternal(c, area) && failText(c, area) === fallbackOf(area) && !(area === "practice" && SET_WORDED.has(c))) missing.push(`${area}:${c}`);
     }
   }
   // The scan finds them (e.g. the 400s of "לשאול", a part's refusal, a seed's 501), not nothing.

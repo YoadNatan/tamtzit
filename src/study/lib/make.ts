@@ -201,16 +201,22 @@ export type Preview = {
 export const cents = (x: number): number => Math.ceil(Math.max(0, x) * 100 - 1e-9) / 100 || 0;
 
 /** The parts with points, and the parts a set takes. */
-export function partsOf(inputs: Pick<PlanInputs, "points">, chosen: readonly number[] | null): { all: number[]; chosen: number[] } {
-  const all = [...new Set(inputs.points.map((p) => p.part_idx))].sort((a, b) => a - b);
+export function partsOf(inputs: Pick<PlanInputs, "points">, chosen: readonly number[] | null, unread: readonly number[] = []): { all: number[]; chosen: number[] } {
+  // A lecture never read has no points yet: its parts are the ones to be read (`unread`).
+  const fromPoints = [...new Set(inputs.points.map((p) => p.part_idx))];
+  const all = (fromPoints.length ? fromPoints : [...new Set(unread)]).sort((a, b) => a - b);
   const picked = chosen?.filter((p) => all.includes(p)) ?? [];
   return { all, chosen: picked.length ? picked : all };
 }
 
 /** The set the choices make, computed on the phone as the server will plan it
  *  (custom level, `size` questions, fresh first) with its price. */
-export function previewOf(answer: Pick<PlanAnswer, "facts" | "defaults" | "points">, inputs: PlanInputs, choices: MakeChoices, qtypes: boolean): Preview {
-  const parts = partsOf(inputs, choices.parts);
+/** The parts a lecture's points will come from: those with points, and those still to be read. */
+export const partIdxsOf = (answer: { parts?: PlanAnswer["parts"]; points: Pick<PlanAnswer["points"], "stale"> }): number[] =>
+  (answer.parts ?? []).filter((p) => p.points > 0 || answer.points.stale.includes(p.part_idx)).map((p) => p.part_idx);
+
+export function previewOf(answer: Pick<PlanAnswer, "facts" | "defaults" | "points"> & { parts?: PlanAnswer["parts"] }, inputs: PlanInputs, choices: MakeChoices, qtypes: boolean): Preview {
+  const parts = partsOf(inputs, choices.parts, partIdxsOf(answer));
   const facts = factsFor(answer, parts.chosen);
   const offered = offeredStyles(qtypes, facts);
   const { styles, from } = stylesOf(choices, answer, offered);

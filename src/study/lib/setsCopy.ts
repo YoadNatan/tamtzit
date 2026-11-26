@@ -12,6 +12,22 @@
  * as text ("$0.40", practice2.ts usd()) and the screens put them in an LTR
  * <bdi>. The notices' words are section R's (shared/study/notifyCopy.ts). */
 
+import { failText } from "./failText";
+
+/** The set screens' own error codes (failText's "practice" words for the rest). */
+const SET_FAIL: Record<string, string> = {
+  daily_limit: "המכסה היומית של סטים חדשים נוצלה. אפשר שוב מחר.",
+  too_big: "לסט בגודל הזה לא נשאר מספיק תקציב החודש. אפשר סט קטן יותר.",
+  "set not found": "הסט לא נמצא. אולי נמחק.",
+  "set not reading": "הסט כבר לא בשלב הקריאה. אפשר ליצור סט חדש.",
+  "attempt finished": "הפתרון הזה של הסט כבר הסתיים. אפשר לפתור את הסט שוב.",
+  "not in set": "השאלה הזו לא בסט. כדאי לרענן.",
+};
+/** The codes worded here, not in failText (its coverage tests count them as worded for "practice"). */
+export const SET_FAIL_CODES: readonly string[] = Object.keys(SET_FAIL);
+/** An error's words on a set screen. */
+export const setFail = (code: string): string => SET_FAIL[code] ?? failText(code, "practice");
+
 /** "שאלה אחת", "10 שאלות". */
 export const questionsWord = (n: number): string => (n === 1 ? "שאלה אחת" : `${n} שאלות`);
 
@@ -51,7 +67,7 @@ export const SETS = {
     exampleNote: "הדוגמה נקראת בתחילת היצירה",
     focus: "מיקוד",
     focusPlaceholder: "למשל: תופעות לוואי ומינונים",
-    custom: "מספר אחר (1–40)",
+    custom: "מספר אחר (עד 40)",
     computing: "מחשבים…",
     creating: "יוצרים…",
     offline: "אין חיבור כרגע. התצוגה תתעדכן כשהחיבור יחזור.",
@@ -104,6 +120,7 @@ export const SETS = {
     startNote: "השאלות שנבדקו נכנסות לבנק של הקבוצה",
     review: "לעבור על השאלות אחת-אחת",
     done: "הסט מוכן",
+    stoppedNote: "אפשר לנסות להמשיך, או לפתור את מה שמוכן",
     budgetStopLine: "אפשר לפתור את מה שכבר מוכן",
     offline: "אין חיבור. מה שכבר נטען נשאר כאן.",
     offlineGoesOn: "הכתיבה תמשיך כשהחיבור יחזור",
@@ -119,6 +136,10 @@ export const SETS = {
 
   set: {
     solve: "לפתור",
+    solveAgain: "לפתור שוב",
+    linkSheet: "הקישור לסט",
+    linkHint: "אפשר להעתיק את הקישור מכאן",
+    abandonNote: "הסט לא התחיל להיכתב. אפשר למחוק אותו וליצור סט חדש.",
     how: "איך",
     howPlain: "רגיל",
     howExam: "מצב מבחן: שעון, ההסברים בסוף",
@@ -149,6 +170,7 @@ export const SETS = {
     title: "סטים של הקבוצה",
     newHead: "חדשים",
     newBadge: "חדש",
+    ready: "מוכן לפתרון",
     mine: "שלי",
     empty: "עוד אין סטים בקבוצה",
   },
@@ -178,15 +200,19 @@ export const makeBig = (usd: string): string => `סט גדול · כ-${usd} מת
 /** The open set on the lecture (D6): "יש סט בהכנה על ההרצאה · מאת שוהם · 6/10". */
 export const makeOpen = (name: string, made: number, want: number): string => `יש סט בהכנה על ההרצאה · מאת ${name} · ${made}/${want}`;
 /** A recent set on the lecture (≤ 7 days): "יש סט מאתמול על ההרצאה · 10 שאלות · מאת נועה". */
-export const makeRecent = (when: string, n: number, name: string): string => `יש סט מ${when} על ההרצאה · ${questionsWord(n)} · מאת ${name}`;
+export const makeRecent = (when: string, n: number, name: string): string =>
+  `יש סט ${/^\d/.test(when) ? "מ-" : "מ"}${when} על ההרצאה · ${questionsWord(n)}${name ? ` · מאת ${name}` : ""}`;
 
 /** The generating screen's head: "סט בהכנה · משתנים". */
 export const genTitle = (lecture: string): string => (lecture ? `${SETS.gen.title} · ${lecture}` : SETS.gen.title);
-/** "6 מוכנות · עוד 4 בדרך"; one: "שאלה אחת מוכנה · עוד 9 בדרך"; all ready: "10 שאלות מוכנות". */
-export function genCount(ready: number, coming: number): string {
-  const rest = coming === 1 ? "עוד אחת בדרך" : `עוד ${coming} בדרך`;
+/** Once nothing is coming: "הסט מוכן · משתנים". */
+export const genDoneTitle = (lecture: string): string => (lecture ? `${SETS.gen.done} · ${lecture}` : SETS.gen.done);
+/** "6 מוכנות · עוד 4 בדרך"; one: "שאלה אחת מוכנה · עוד 9 בדרך"; all ready: "10 שאלות מוכנות".
+ *  stopped (paused, or stopped by the budget): "6 מוכנות · 4 עוד לא נכתבו". */
+export function genCount(ready: number, coming: number, stopped = false): string {
+  const rest = stopped ? (coming === 1 ? "אחת עוד לא נכתבה" : `${coming} עוד לא נכתבו`) : coming === 1 ? "עוד אחת בדרך" : `עוד ${coming} בדרך`;
   if (coming <= 0) return ready === 1 ? "שאלה אחת מוכנה" : `${ready} שאלות מוכנות`;
-  if (ready === 0) return coming === 1 ? "שאלה אחת בדרך" : `${coming} שאלות בדרך`;
+  if (ready === 0) return stopped ? (coming === 1 ? "שאלה אחת עוד לא נכתבה" : `${coming} שאלות עוד לא נכתבו`) : coming === 1 ? "שאלה אחת בדרך" : `${coming} שאלות בדרך`;
   return ready === 1 ? `שאלה אחת מוכנה · ${rest}` : `${ready} מוכנות · ${rest}`;
 }
 /** "להתחיל לפתור (6)". */
@@ -194,7 +220,8 @@ export const genStart = (k: number): string => `להתחיל לפתור (${k})`;
 /** "3 שאלות לא יצאו" (the button beside it: "לנסות שוב"). */
 export const genFailed = (n: number): string => (n === 1 ? "שאלה אחת לא יצאה" : `${n} שאלות לא יצאו`);
 /** A 402 in the middle: "הסט נעצר כי התקציב נגמר · 4 שאלות מוכנות". */
-export const genBudgetStop = (k: number): string => `הסט נעצר כי התקציב נגמר · ${k === 1 ? "שאלה אחת מוכנה" : `${k} שאלות מוכנות`}`;
+export const genBudgetStop = (k: number): string =>
+  k < 1 ? "הסט נעצר כי התקציב נגמר" : `הסט נעצר כי התקציב נגמר · ${k === 1 ? "שאלה אחת מוכנה" : `${k} שאלות מוכנות`}`;
 /** A tile's name for screen readers: "שאלה 4: בדרך". */
 export const genTileLabel = (n: number, state: keyof typeof SETS.gen.tile): string => `שאלה ${n}: ${SETS.gen.tile[state]}`;
 /** The ring's live line at each 25%: "6 מתוך 10 מוכנות". */
@@ -204,7 +231,7 @@ export const genAddReady = (n: number): string => `${n === 1 ? "שאלה חדש�
 /** "נוספו 4 שאלות לסט". */
 export const genAdded = (n: number): string => (n === 1 ? "נוספה שאלה אחת לסט" : `נוספו ${n} שאלות לסט`);
 /** "הסט משתנים נעצר באמצע · להמשיך ליצור" (Today's row for the member's own paused set). */
-export const genResumeMine = (lecture: string): string => `הסט ${lecture} נעצר באמצע · להמשיך ליצור`;
+export const genResumeMine = (lecture: string): string => `הסט על ״${lecture}״ נעצר באמצע · להמשיך ליצור`;
 /** "שקף 12" (a list's slide: never the short "ש׳"). */
 export const slideWord = (n: number | string): string => `${SETS.gen.slide} ${n}`;
 
@@ -216,6 +243,11 @@ export const setLinkText = (n: number, url: string): string => `סט תרגול 
 export const setReview = (n: number): string => `לעבור על השאלות (${n})`;
 /** "3 שאלות לא נבדקו · לאשר או להסיר". */
 export const setUnchecked = (n: number): string => `${n === 1 ? "שאלה אחת לא נבדקה" : `${n} שאלות לא נבדקו`} · לאשר או להסיר`;
+
+/** "הממוצע: 3 הפותרים הראשונים, בעיגול" (the numbers stay on them until the next 3). */
+export const statsCounted = (n: number): string => `הממוצע והתוצאות: ${n} הפותרים הראשונים, בעיגול`;
+/** Today's primary when the queue is empty: "לפתור: משתנים · 10 שאלות". */
+export const todaySolve = (lecture: string, n: number): string => (lecture ? `לפתור: ${lecture} · ${questionsWord(n)}` : SETS.today.solveNew);
 
 /** "פותרים: 4" (works for every k). */
 export const statsSolvers = (k: number): string => `פותרים: ${k}`;

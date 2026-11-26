@@ -255,13 +255,10 @@ const TEXT: Record<string, string> = {
   "practice:schema": "סוגי השאלות החדשים עוד לא הופעלו במסד הנתונים. אפשר לבחור שאלות אמריקאיות בינתיים.",
   "practice:bad geometry": "לא הצלחנו לקרוא את הסימונים מהקובץ. אפשר לנסות קובץ אחר.",
   "practice:request not found": "הבקשה הזו לא נמצאה. כדאי לרענן.",
-  // Practice sets (section L 1, docs/study/sets.md): the create screen's lines, as setsCopy words them.
+  // Practice sets (section L 1): the sets line also stops the older generator
+  // screens (OD22). The set screens' own codes are worded in setsCopy.ts
+  // (setFail), a lazy chunk, so they stay out of the entry chunk.
   "practice:sets_line": "הסטים של החודש הגיעו לתקרה שנקבעה. אפשר לפתור סטים קיימים, ומתחדש ב-1 בחודש.",
-  "practice:daily_limit": "המכסה היומית של סטים חדשים נוצלה. אפשר שוב מחר.",
-  "practice:too_big": "לסט בגודל הזה לא נשאר מספיק תקציב החודש. אפשר סט קטן יותר.",
-  "practice:set not found": "הסט לא נמצא. אולי נמחק.",
-  "practice:attempt finished": "הפתרון הזה של הסט כבר הסתיים. אפשר לפתור את הסט שוב.",
-  "practice:not in set": "השאלה הזו לא בסט. כדאי לרענן.",
   // Not in §6.3: worded as "question not found".
   "exam:exam not found": "המבחן לא נמצא. כדאי לרענן.",
 

@@ -516,9 +516,12 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
       }
       // סבב חדש starts a session: with practice off, the lecture's practice. Creating questions needs only `questions`.
       if (r.x === "round" && !f.practice) return off(practiceOf(r.l));
-      // "סט חדש" without a lecture, or from the mistakes, is practice sets' (flags.make):
-      // without them, the hub, or the lecture's old setup.
+      // "סט חדש" without a lecture, or from the mistakes, and a request's drafts
+      // one by one (x=review) are practice sets' (flags.make): without them,
+      // the hub, the lecture's old setup or its practice (with the notice:
+      // never a silent jump, review UX-1).
       if (r.x === "new" && !f.make && (!r.l || r.from)) return off(r.l ? { v: "practice", l: r.l, x: "new" } : { v: "practice" });
+      if (r.x === "review" && !f.make) return off(practiceOf(r.l));
       if (!r.s) return ok;
       const l = r.l ?? lectureOfKey(r.s);
       if (!f.practice) return off(practiceOf(l));

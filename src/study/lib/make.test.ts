@@ -13,6 +13,8 @@ import {
   lectureGroups,
   notesOf,
   offeredStyles,
+  partIdxsOf,
+  partsOf,
   previewOf,
   progressStep,
   readSticky,
@@ -235,4 +237,22 @@ test("the live region speaks at the first question, each quarter and the end; th
   assert.equal(progressStep(9, 10), 3);
   assert.equal(progressStep(10, 10), 4);
   assert.deepEqual([1, 5, 6, 10, 11, 20, 21].map(roundSize), ["5", "5", "10", "10", "20", "20", "all"]);
+});
+
+test("partsOf: a lecture never read lists the parts still to be read, all chosen, and a box toggles", () => {
+  const unread = partIdxsOf({
+    parts: [
+      { part_idx: 0, points: 0 },
+      { part_idx: 1, points: 0 },
+      { part_idx: 2, points: 0 },
+    ] as PlanAnswer["parts"],
+    points: { stale: [0, 1, 2] },
+  });
+  assert.deepEqual(unread, [0, 1, 2]);
+  assert.deepEqual(partsOf({ points: [] }, null, unread), { all: [0, 1, 2], chosen: [0, 1, 2] }, "every box checked");
+  assert.deepEqual(partsOf({ points: [] }, [0, 2], unread), { all: [0, 1, 2], chosen: [0, 2] }, "unchecking part 1 is kept");
+  assert.deepEqual(partsOf({ points: [] }, null), { all: [], chosen: [] }, "without the parts, as before");
+  // Points read: they decide, as before.
+  const pts = [{ part_idx: 1 }, { part_idx: 3 }] as PlanPoint[];
+  assert.deepEqual(partsOf({ points: pts }, null, [0, 1, 2]), { all: [1, 3], chosen: [1, 3] });
 });

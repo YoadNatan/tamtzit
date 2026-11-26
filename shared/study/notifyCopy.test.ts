@@ -95,6 +95,7 @@ test("the lock screen never shows a quiz's title or a name", () => {
   for (const n of [1, 2, 7]) {
     const r = render("set_shared", secret, n, "lock", NOW);
     assert.ok(!`${r.title} ${r.body}`.includes(L), `set_shared ×${n}: the lecture on the lock screen`);
+    assert.ok(!`${r.title} ${r.body}`.includes("שם סודי"), `set_shared ×${n}: the author's name on the lock screen`);
   }
   assert.match(render("set_shared", secret, 1, "inbox", NOW).body, /מאת שם סודי/);
 });

@@ -66,7 +66,9 @@ export type Stats = {
   others: number;
   floor: number;
   mine: { answered: number; right_n: number; total: number } | null;
-  /** The share right (0-1) over every finisher's first attempt; only from `floor` others. */
+  /** How many of the others the numbers are over: the first 3 (6, …) of them to finish; 0 below the floor. */
+  counted: number;
+  /** The share right (0-1, to 0.1) over those others' first attempts, never the viewer's; only from `floor` others. */
   avg: number | null;
   per_q: Array<{ question_id: string; pos: number; band: Band | null }> | null;
   names: string[];
@@ -160,6 +162,7 @@ export async function setStats(setId: string): Promise<Stats> {
     solvers: num(d.solvers),
     others: num(d.others),
     floor: num(d.floor) || 3,
+    counted: num(d.counted),
     mine: mine ? { answered: num(mine.answered), right_n: num(mine.right_n), total: num(mine.total) } : null,
     avg: numOrNull(d.avg),
     per_q: Array.isArray(d.per_q)
@@ -354,23 +357,36 @@ export function setWhen(at: string, now = new Date()): string {
 export const setLink = (setId: string): string => shareUrl(`?v=sets&k=${setId}`);
 
 /** "לשלוח קישור": the phone's share sheet with the generic text (no title, no
- *  lecture), else the clipboard. "shared", "copied" ("הקישור הועתק"), or
- *  "none" (closed, or nothing worked). */
-export async function shareSet(setId: string, size: number): Promise<"shared" | "copied" | "none"> {
+ *  lecture) and the link as its url (so link previews work), else the
+ *  clipboard. "shared", "copied" ("הקישור הועתק"), "none" (the sheet was
+ *  closed), or "failed" (neither works: the screen shows the link to copy). */
+export async function shareSet(setId: string, size: number): Promise<"shared" | "copied" | "none" | "failed"> {
   const url = setLink(setId);
-  const text = setLinkText(size, url);
   try {
     if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-      await navigator.share({ text });
+      await navigator.share({ text: setLinkText(size, "").trim(), url });
       return "shared";
     }
   } catch (e) {
     if ((e as { name?: string })?.name === "AbortError") return "none";
   }
   try {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(setLinkText(size, url));
     return "copied";
   } catch {
-    return "none";
+    return "failed";
   }
+}
+
+/** Whether the set has a title of its own: not the default "{lecture} · {n}
+ *  שאלות" (cut with "…" to fit), nor the lecture's title alone. */
+export function renamed(r: { title: string; lecture_title: string | null }): boolean {
+  const t = r.title.trim();
+  const l = (r.lecture_title ?? "").trim();
+  if (!l) return Boolean(t);
+  if (t === l) return false;
+  const m = /^(.*) · \d+ שאלות$/.exec(t);
+  if (!m) return true;
+  const head = m[1];
+  return !(head === l || (head.endsWith("…") && l.startsWith(head.slice(0, -1))));
 }
