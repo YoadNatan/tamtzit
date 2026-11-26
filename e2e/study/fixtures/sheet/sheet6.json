@@ -1,0 +1,586 @@
+{
+ "about": "A synthetic 6-page Hebrew exercise sheet (fictional drugs and patients; no real course text) with a 2-page answers file, for the uploaded sheets package (docs/study/sheets.md). pages[].lines are what each page prints (a text PDF's lines; '| … |' rows are drawn as a table, '[[figure:curve]]' as a graph); truth is every item exactly as printed (the sheet reader's target); a0 is the exam reader's replies for release A0. Made into files by make-sheet.cjs at test time.",
+ "title": "תרגיל 3 · פרמקוקינטיקה (synthetic)",
+ "key_source": "separate",
+ "printed": 11,
+ "pages": [
+  {
+   "n": 1,
+   "cover": true,
+   "lines": [
+    "קורס פרמקולוגיה בדויה (synthetic)",
+    "תרגיל 3 · פרמקוקינטיקה",
+    "שם: ______________   ת.ז.: ______________",
+    "זמן: 90 דקות · מותר מחשבון פשוט",
+    "הדף בדוי לבדיקות האפליקציה. אין בו חומר של קורס אמיתי."
+   ]
+  },
+  {
+   "n": 2,
+   "lines": [
+    "תרגיל 3 · עמוד 2 (synthetic)",
+    "1. איזה מהמשפטים הבאים נכון לגבי Fictazole?",
+    "א. הוא מופרש בעיקר במרה",
+    "ב. זמן מחצית החיים שלו אינו תלוי במינון",
+    "ג. הוא נקשר כולו לחלבון בפלסמה",
+    "ד. הוא חוצה את מחסום הדם-מוח בקלות",
+    "ה. אין לו מטבוליטים פעילים",
+    "2. סמנו נכון או לא נכון לגבי Mockacillin:",
+    "א. הוא מופרש בשתן ללא שינוי",
+    "ב. הוא מעכב את CYP3A4",
+    "ג. מינונו מותאם בירידה בתפקוד הכליות",
+    "ד. הוא ניתן רק בעירוי"
+   ]
+  },
+  {
+   "n": 3,
+   "lines": [
+    "תרגיל 3 · עמוד 3 (synthetic)",
+    "3. מטופל בן 60 (בדוי) מקבל Placebrin בעירוי אחד.",
+    "ריכוז התרופה בפלסמה ירד מ-80 ל-20 מ״ג/ל׳ במשך 6 שעות.",
+    "א. מהו סדר הקינטיקה של הפינוי?",
+    "1) סדר אפס",
+    "2) סדר ראשון",
+    "3) לא ניתן לקבוע מהנתונים",
+    "ב. חשבו את זמן מחצית החיים של Placebrin (בשעות).",
+    "ג. הסבירו מדוע ריכוז התרופה אינו יורד באותה כמות בכל שעה."
+   ]
+  },
+  {
+   "n": 4,
+   "lines": [
+    "תרגיל 3 · עמוד 4 (synthetic)",
+    "4. נפח הפיזור של Stubamide הוא 40 ל׳ וריכוז המטרה 5 מ״ג/ל׳.",
+    "חשבו את מנת ההעמסה (במ״ג).",
+    "5. לפי הטבלה, לאיזו תרופה הפינוי הגבוה ביותר?",
+    "| תרופה | פינוי (מ״ל/דקה) | Vd (ל׳) |",
+    "| Fictazole | 120 | 35 |",
+    "| Mockacillin | 45 | 12 |",
+    "| Placebrin | 300 | 8 |",
+    "א. Fictazole",
+    "ב. Mockacillin",
+    "ג. Placebrin",
+    "ד. אין מספיק נתונים"
+   ]
+  },
+  {
+   "n": 5,
+   "lines": [
+    "תרגיל 3 · עמוד 5 (synthetic)",
+    "6. בגרף שלפניכם ריכוז Testoquine בפלסמה לאורך זמן. מה מייצגת הנקודה המסומנת ב-X?",
+    "[[figure:curve]]",
+    "א. Cmax",
+    "ב. Tmax",
+    "ג. AUC",
+    "ד. ריכוז השפל",
+    "7. התאימו כל תרופה למסלול הפינוי העיקרי שלה:",
+    "Fictazole · Mockacillin · Placebrin",
+    "א. מטבוליזם בכבד",
+    "ב. הפרשה בכליה",
+    "ג. הפרשה במרה"
+   ]
+  },
+  {
+   "n": 6,
+   "lines": [
+    "תרגיל 3 · עמוד 6 (synthetic)",
+    "8. הסבירו בשלושה משפטים את ההבדל בין פינוי לבין זמן מחצית החיים.",
+    "9. איזו מהתרופות הבאות היא פרו-דראג (prodrug)?",
+    "א. Examplomycin",
+    "ב. Sampleomycin",
+    "ג. Dummycycline",
+    "ד. Testoquine",
+    "ה. Fictazole",
+    "ו. Mockacillin",
+    "ז. Placebrin",
+    "ח. Stubamide"
+   ]
+  }
+ ],
+ "answers": {
+  "pages": [
+   {
+    "n": 7,
+    "lines": [
+     "פתרון תרגיל 3 (synthetic) · עמוד 1 מתוך 2",
+     "1. ב",
+     "2. א נכון · ב לא נכון · ג נכון · ד לא נכון",
+     "3א. 2",
+     "3ב. 3 שעות.",
+     "פתרון: מ-80 ל-20 מ״ג/ל׳ הן שתי מחציות חיים, ו-6 שעות לחלק ל-2 הן 3 שעות.",
+     "3ג. תשובה לדוגמה: בסדר ראשון יורד בכל שעה אותו חלק מהריכוז, ולא אותה כמות."
+    ]
+   },
+   {
+    "n": 8,
+    "lines": [
+     "פתרון תרגיל 3 (synthetic) · עמוד 2 מתוך 2",
+     "4. 200 מ״ג.",
+     "פתרון: מנת העמסה = נפח פיזור × ריכוז מטרה = 40 × 5 = 200 מ״ג.",
+     "5. ג",
+     "6. א",
+     "7. Fictazole – א · Mockacillin – ב · Placebrin – ג",
+     "8. תשובה לדוגמה: פינוי הוא נפח הפלסמה שמתנקה בזמן; מחצית החיים תלויה גם בנפח הפיזור; לכן תרופה עם פינוי זהה יכולה להישאר זמן שונה.",
+     "9. ה"
+    ]
+   }
+  ]
+ },
+ "truth": [
+  {
+   "label": "1",
+   "page": 2,
+   "idx": 1,
+   "form": "one",
+   "question": "איזה מהמשפטים הבאים נכון לגבי Fictazole?",
+   "options": [
+    "הוא מופרש בעיקר במרה",
+    "זמן מחצית החיים שלו אינו תלוי במינון",
+    "הוא נקשר כולו לחלבון בפלסמה",
+    "הוא חוצה את מחסום הדם-מוח בקלות",
+    "אין לו מטבוליטים פעילים"
+   ],
+   "answer": 1
+  },
+  {
+   "label": "2",
+   "page": 2,
+   "idx": 2,
+   "form": "tf",
+   "question": "סמנו נכון או לא נכון לגבי Mockacillin:",
+   "options": [
+    "הוא מופרש בשתן ללא שינוי",
+    "הוא מעכב את CYP3A4",
+    "מינונו מותאם בירידה בתפקוד הכליות",
+    "הוא ניתן רק בעירוי"
+   ],
+   "seq": [
+    1,
+    0,
+    1,
+    0
+   ]
+  },
+  {
+   "label": "3א",
+   "parent": "3",
+   "part": "א",
+   "page": 3,
+   "idx": 1,
+   "form": "one",
+   "stem": "מטופל בן 60 (בדוי) מקבל Placebrin בעירוי אחד.\nריכוז התרופה בפלסמה ירד מ-80 ל-20 מ״ג/ל׳ במשך 6 שעות.",
+   "question": "מהו סדר הקינטיקה של הפינוי?",
+   "options": [
+    "סדר אפס",
+    "סדר ראשון",
+    "לא ניתן לקבוע מהנתונים"
+   ],
+   "answer": 1
+  },
+  {
+   "label": "3ב",
+   "parent": "3",
+   "part": "ב",
+   "page": 3,
+   "idx": 2,
+   "form": "numeric",
+   "question": "חשבו את זמן מחצית החיים של Placebrin (בשעות).",
+   "unit_hint": "שעות",
+   "num": 3,
+   "num_unit": "שעות",
+   "num_tol": 0.01,
+   "solution": "מ-80 ל-20 מ״ג/ל׳ הן שתי מחציות חיים, ו-6 שעות לחלק ל-2 הן 3 שעות."
+  },
+  {
+   "label": "3ג",
+   "parent": "3",
+   "part": "ג",
+   "page": 3,
+   "idx": 3,
+   "form": "open",
+   "question": "הסבירו מדוע ריכוז התרופה אינו יורד באותה כמות בכל שעה.",
+   "model_answer": "בסדר ראשון יורד בכל שעה אותו חלק מהריכוז, ולא אותה כמות.",
+   "rubric": [
+    "מזכירים פינוי מסדר ראשון",
+    "אותו חלק (שבר) ולא אותה כמות"
+   ]
+  },
+  {
+   "label": "4",
+   "page": 4,
+   "idx": 1,
+   "form": "numeric",
+   "question": "נפח הפיזור של Stubamide הוא 40 ל׳ וריכוז המטרה 5 מ״ג/ל׳.\nחשבו את מנת ההעמסה (במ״ג).",
+   "unit_hint": "מ״ג",
+   "num": 200,
+   "num_unit": "מ״ג",
+   "num_tol": 0.01,
+   "solution": "מנת העמסה = נפח פיזור × ריכוז מטרה = 40 × 5 = 200 מ״ג."
+  },
+  {
+   "label": "5",
+   "page": 4,
+   "idx": 2,
+   "form": "one",
+   "question": "לפי הטבלה, לאיזו תרופה הפינוי הגבוה ביותר?\n| תרופה | פינוי (מ״ל/דקה) | Vd (ל׳) |\n| Fictazole | 120 | 35 |\n| Mockacillin | 45 | 12 |\n| Placebrin | 300 | 8 |",
+   "options": [
+    "Fictazole",
+    "Mockacillin",
+    "Placebrin",
+    "אין מספיק נתונים"
+   ],
+   "answer": 2
+  },
+  {
+   "label": "6",
+   "page": 5,
+   "idx": 1,
+   "form": "one",
+   "question": "בגרף שלפניכם ריכוז Testoquine בפלסמה לאורך זמן. מה מייצגת הנקודה המסומנת ב-X?",
+   "options": [
+    "Cmax",
+    "Tmax",
+    "AUC",
+    "ריכוז השפל"
+   ],
+   "answer": 0,
+   "figures": [
+    "pg:5:147,188,706,237"
+   ]
+  },
+  {
+   "label": "7",
+   "page": 5,
+   "idx": 2,
+   "form": "match",
+   "question": "התאימו כל תרופה למסלול הפינוי העיקרי שלה:",
+   "prompts": [
+    "Fictazole",
+    "Mockacillin",
+    "Placebrin"
+   ],
+   "options": [
+    "מטבוליזם בכבד",
+    "הפרשה בכליה",
+    "הפרשה במרה"
+   ],
+   "seq": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "label": "8",
+   "page": 6,
+   "idx": 1,
+   "form": "open",
+   "question": "הסבירו בשלושה משפטים את ההבדל בין פינוי לבין זמן מחצית החיים.",
+   "model_answer": "פינוי הוא נפח הפלסמה שמתנקה בזמן; מחצית החיים תלויה גם בנפח הפיזור; לכן תרופה עם פינוי זהה יכולה להישאר זמן שונה.",
+   "rubric": [
+    "פינוי: נפח בזמן",
+    "מחצית חיים תלויה בנפח הפיזור ובפינוי",
+    "דוגמה או מסקנה"
+   ]
+  },
+  {
+   "label": "9",
+   "page": 6,
+   "idx": 2,
+   "form": "one",
+   "question": "איזו מהתרופות הבאות היא פרו-דראג (prodrug)?",
+   "options": [
+    "Examplomycin",
+    "Sampleomycin",
+    "Dummycycline",
+    "Testoquine",
+    "Fictazole",
+    "Mockacillin",
+    "Placebrin",
+    "Stubamide"
+   ],
+   "answer": 4
+  }
+ ],
+ "a0": {
+  "units": [
+   {
+    "pages": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "next": 5,
+    "reply": {
+     "questions": [
+      {
+       "no": 1,
+       "kind": "mcq",
+       "form": "one",
+       "vignette": "",
+       "question": "איזה מהמשפטים הבאים נכון לגבי Fictazole?",
+       "options": [
+        "הוא מופרש בעיקר במרה",
+        "זמן מחצית החיים שלו אינו תלוי במינון",
+        "הוא נקשר כולו לחלבון בפלסמה",
+        "הוא חוצה את מחסום הדם-מוח בקלות",
+        "אין לו מטבוליטים פעילים"
+       ],
+       "prompts": [],
+       "answer": -1,
+       "seq": [],
+       "marked_by": "none",
+       "figure": {
+        "page": 0,
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+       },
+       "parse_conf": 3,
+       "page": 2
+      },
+      {
+       "no": 2,
+       "kind": "mcq",
+       "form": "tf",
+       "vignette": "",
+       "question": "סמנו נכון או לא נכון לגבי Mockacillin:",
+       "options": [
+        "הוא מופרש בשתן ללא שינוי",
+        "הוא מעכב את CYP3A4",
+        "מינונו מותאם בירידה בתפקוד הכליות",
+        "הוא ניתן רק בעירוי"
+       ],
+       "prompts": [],
+       "answer": -1,
+       "seq": [],
+       "marked_by": "none",
+       "figure": {
+        "page": 0,
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+       },
+       "parse_conf": 3,
+       "page": 2
+      },
+      {
+       "no": 3,
+       "kind": "case",
+       "form": "one",
+       "vignette": "מטופל בן 60 (בדוי) מקבל Placebrin בעירוי אחד.\nריכוז התרופה בפלסמה ירד מ-80 ל-20 מ״ג/ל׳ במשך 6 שעות.",
+       "question": "מהו סדר הקינטיקה של הפינוי?",
+       "options": [
+        "סדר אפס",
+        "סדר ראשון",
+        "לא ניתן לקבוע מהנתונים"
+       ],
+       "prompts": [],
+       "answer": -1,
+       "seq": [],
+       "marked_by": "none",
+       "figure": {
+        "page": 0,
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+       },
+       "parse_conf": 3,
+       "page": 3
+      },
+      {
+       "no": 5,
+       "kind": "mcq",
+       "form": "one",
+       "vignette": "",
+       "question": "לפי הטבלה, לאיזו תרופה הפינוי הגבוה ביותר?\n| תרופה | פינוי (מ״ל/דקה) | Vd (ל׳) |\n| Fictazole | 120 | 35 |\n| Mockacillin | 45 | 12 |\n| Placebrin | 300 | 8 |",
+       "options": [
+        "Fictazole",
+        "Mockacillin",
+        "Placebrin",
+        "אין מספיק נתונים"
+       ],
+       "prompts": [],
+       "answer": -1,
+       "seq": [],
+       "marked_by": "none",
+       "figure": {
+        "page": 0,
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+       },
+       "parse_conf": 3,
+       "page": 4
+      }
+     ],
+     "skipped_open": 3
+    }
+   },
+   {
+    "pages": [
+     5,
+     6
+    ],
+    "next": null,
+    "reply": {
+     "questions": [
+      {
+       "no": 6,
+       "kind": "mcq",
+       "form": "one",
+       "vignette": "",
+       "question": "בגרף שלפניכם ריכוז Testoquine בפלסמה לאורך זמן. מה מייצגת הנקודה המסומנת ב-X?",
+       "options": [
+        "Cmax",
+        "Tmax",
+        "AUC",
+        "ריכוז השפל"
+       ],
+       "prompts": [],
+       "answer": -1,
+       "seq": [],
+       "marked_by": "none",
+       "figure": {
+        "page": 5,
+        "x": 147,
+        "y": 188,
+        "w": 706,
+        "h": 237
+       },
+       "parse_conf": 3,
+       "page": 5
+      },
+      {
+       "no": 7,
+       "kind": "mcq",
+       "form": "match",
+       "vignette": "",
+       "question": "התאימו כל תרופה למסלול הפינוי העיקרי שלה:",
+       "options": [
+        "מטבוליזם בכבד",
+        "הפרשה בכליה",
+        "הפרשה במרה"
+       ],
+       "prompts": [
+        "Fictazole",
+        "Mockacillin",
+        "Placebrin"
+       ],
+       "answer": -1,
+       "seq": [],
+       "marked_by": "none",
+       "figure": {
+        "page": 0,
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+       },
+       "parse_conf": 3,
+       "page": 5
+      },
+      {
+       "no": 9,
+       "kind": "mcq",
+       "form": "one",
+       "vignette": "",
+       "question": "איזו מהתרופות הבאות היא פרו-דראג (prodrug)?",
+       "options": [
+        "Examplomycin",
+        "Sampleomycin",
+        "Dummycycline",
+        "Testoquine",
+        "Fictazole",
+        "Mockacillin",
+        "Placebrin",
+        "Stubamide"
+       ],
+       "prompts": [],
+       "answer": -1,
+       "seq": [],
+       "marked_by": "none",
+       "figure": {
+        "page": 0,
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+       },
+       "parse_conf": 3,
+       "page": 6
+      }
+     ],
+     "skipped_open": 1
+    }
+   }
+  ],
+  "key": {
+   "pages": [
+    7,
+    8
+   ],
+   "reply": {
+    "versions": [],
+    "keys": [
+     {
+      "no": 1,
+      "answer": 1,
+      "seq": [],
+      "state": ""
+     },
+     {
+      "no": 2,
+      "answer": -1,
+      "seq": [
+       1,
+       0,
+       1,
+       0
+      ],
+      "state": ""
+     },
+     {
+      "no": 3,
+      "answer": 1,
+      "seq": [],
+      "state": ""
+     },
+     {
+      "no": 5,
+      "answer": 2,
+      "seq": [],
+      "state": ""
+     },
+     {
+      "no": 6,
+      "answer": 0,
+      "seq": [],
+      "state": ""
+     },
+     {
+      "no": 7,
+      "answer": -1,
+      "seq": [
+       0,
+       1,
+       2
+      ],
+      "state": ""
+     },
+     {
+      "no": 9,
+      "answer": 4,
+      "seq": [],
+      "state": ""
+     }
+    ]
+   }
+  }
+ }
+}

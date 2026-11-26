@@ -13,3 +13,6 @@ dist-ssr
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+
+# real course material (exam or exercise sheets) never enters git; e2e fixtures are synthetic
+e2e/study/fixtures/real/
