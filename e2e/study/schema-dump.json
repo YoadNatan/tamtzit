@@ -1161,6 +1161,14 @@
     "required": 1
    }
   ],
+  "study_lecture_making": [
+   {
+    "args": [
+     "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
   "study_lecture_set_geo": [
    {
     "args": [
@@ -2242,6 +2250,184 @@
     "required": 1
    }
   ],
+  "study_qset_abandon": [
+   {
+    "args": [
+     "p_set"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_answer": [
+   {
+    "args": [
+     "p_attempt",
+     "p_question",
+     "p_choice",
+     "p_mode",
+     "p_ms",
+     "p_confidence"
+    ],
+    "required": 3
+   }
+  ],
+  "study_qset_answer_seq": [
+   {
+    "args": [
+     "p_attempt",
+     "p_question",
+     "p_choices",
+     "p_mode",
+     "p_ms",
+     "p_confidence"
+    ],
+    "required": 3
+   }
+  ],
+  "study_qset_attach": [
+   {
+    "args": [
+     "p_set",
+     "p_request",
+     "p_batches",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_qset_attempt_finish": [
+   {
+    "args": [
+     "p_attempt"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_attempt_start": [
+   {
+    "args": [
+     "p_set"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_autokeep": [
+   {
+    "args": [
+     "p_drafts",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_begin": [
+   {
+    "args": [
+     "p_lecture",
+     "p_set",
+     "p_phase",
+     "p_force",
+     "p_daily",
+     "p_line",
+     "p_key"
+    ],
+    "required": 2
+   }
+  ],
+  "study_qset_delete": [
+   {
+    "args": [
+     "p_set"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_hide": [
+   {
+    "args": [
+     "p_set",
+     "p_hidden"
+    ],
+    "required": 2
+   }
+  ],
+  "study_qset_names_pref": [
+   {
+    "args": [
+     "p_on"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_open": [
+   {
+    "args": [
+     "p_set"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_progress": [
+   {
+    "args": [
+     "p_set"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_rename": [
+   {
+    "args": [
+     "p_set",
+     "p_title"
+    ],
+    "required": 2
+   }
+  ],
+  "study_qset_room": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_seen": [
+   {
+    "args": [
+     "p_sets"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_stats": [
+   {
+    "args": [
+     "p_set"
+    ],
+    "required": 1
+   }
+  ],
+  "study_qset_style": [
+   {
+    "args": [
+     "p_set",
+     "p_sig",
+     "p_key"
+    ],
+    "required": 2
+   }
+  ],
+  "study_qsets_shelf": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture",
+     "p_limit"
+    ],
+    "required": 1
+   }
+  ],
   "study_question_claim": [
    {
     "args": [
@@ -3120,7 +3306,8 @@
    "answered_at",
    "confidence",
    "choices",
-   "attempt_id"
+   "attempt_id",
+   "set_attempt"
   ],
   "study_boss_battles": [
    "id",
@@ -3790,6 +3977,57 @@
    "seen_at",
    "ok_at",
    "fails"
+  ],
+  "study_qset_attempts": [
+   "id",
+   "set_id",
+   "user_id",
+   "started_at",
+   "finished_at",
+   "total",
+   "answered",
+   "right_n"
+  ],
+  "study_qset_items": [
+   "set_id",
+   "question_id",
+   "pos",
+   "added_at",
+   "auto_kept_at"
+  ],
+  "study_qset_marks": [
+   "user_id",
+   "set_id",
+   "seen_at",
+   "hidden_at"
+  ],
+  "study_qset_prefs": [
+   "user_id",
+   "show_name",
+   "asked_at"
+  ],
+  "study_qset_requests": [
+   "set_id",
+   "request_id"
+  ],
+  "study_qsets": [
+   "id",
+   "group_id",
+   "kind",
+   "title",
+   "lecture_id",
+   "plan_id",
+   "exam_id",
+   "similar_run",
+   "want",
+   "options",
+   "state",
+   "notified_at",
+   "created_by",
+   "created_at",
+   "updated_at",
+   "deleted_at",
+   "deleted_by"
   ],
   "study_question_batches": [
    "id",
@@ -4542,6 +4780,36 @@
    "delete": false
   },
   "study_push_subs": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_qset_attempts": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_qset_items": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_qset_marks": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_qset_prefs": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_qset_requests": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_qsets": {
    "insert": [],
    "update": [],
    "delete": false

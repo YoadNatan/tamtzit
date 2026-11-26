@@ -10,13 +10,13 @@ import { pathToFileURL } from "node:url";
 const tool = (): Promise<{ PART_MAX_BYTES: number; sqlParts: (text: string) => string[] }> =>
   import(pathToFileURL(join(process.cwd(), "tools", "sql-parts.mjs")).href);
 
-// supabase/parts/1.sql … 9.sql are study-schema.sql cut for the SQL Editor
+// supabase/parts/1.sql … 10.sql are study-schema.sql cut for the SQL Editor
 // (tools/sql-parts.mjs). A schema change without `npm run sql:parts` would
 // leave someone running the old SQL in parts.
-test("supabase/parts is study-schema.sql as it is now, in 9 parts", () => {
+test("supabase/parts is study-schema.sql as it is now, in 10 parts", () => {
   const r = spawnSync(process.execPath, [join(process.cwd(), "tools", "sql-parts.mjs"), "--check"], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr || r.stdout);
-  assert.match(r.stdout, /\(9 parts\)/);
+  assert.match(r.stdout, /\(10 parts\)/);
 });
 
 // Supabase's SQL Editor does not run a much bigger paste: every part,
@@ -25,15 +25,32 @@ test("every part is at most 170 KB", async () => {
   const { PART_MAX_BYTES, sqlParts } = await tool();
   assert.equal(PART_MAX_BYTES, 170_000, "the smaller reading of 170 KB");
   const parts = sqlParts(readFileSync(join(process.cwd(), "supabase", "study-schema.sql"), "utf8"));
-  assert.equal(parts.length, 9);
+  assert.equal(parts.length, 10);
   parts.forEach((p, k) => {
     const made = Buffer.byteLength(p);
     const written = readFileSync(join(process.cwd(), "supabase", "parts", `${k + 1}.sql`)).length;
     assert.ok(made <= PART_MAX_BYTES, `part ${k + 1} is ${made} bytes`);
     assert.ok(written <= PART_MAX_BYTES, `parts/${k + 1}.sql is ${written} bytes`);
   });
-  assert.match(parts[7], /^-- ═══ study-schema\.sql, part 8 of 9 \(section S\) ═══/);
+  assert.match(parts[7], /^-- ═══ study-schema\.sql, part 8 of 10 \(section S\) ═══/);
   // Part 9: the personal code, then notifications (R), which ship before the
-  // wave's other sections (Yoad, 26 Nov 2026); those follow R there.
-  assert.match(parts[8], /^-- ═══ study-schema\.sql, part 9 of 9 \(sections I, R\) ═══/);
+  // wave's other sections (Yoad, 26 Nov 2026).
+  assert.match(parts[8], /^-- ═══ study-schema\.sql, part 9 of 10 \(sections I, R\) ═══/);
+  // Part 10: practice sets (L), which would take part 9 past 170 KB; the
+  // wave's later sections (Y, O) follow L there.
+  assert.match(parts[9], /^-- ═══ study-schema\.sql, part 10 of 10 \(section L\) ═══/);
+});
+
+// Section L (practice sets, OD14) redefines study_private.kind_on so the
+// question-writing kinds obey the switch questions_paid, and section F
+// carries the same text: running part 1 again after part 10 keeps it.
+test("kind_on: section F and section L define it with the same text", () => {
+  const text = readFileSync(join(process.cwd(), "supabase", "study-schema.sql"), "utf8");
+  const defs = [...text.matchAll(/create or replace function study_private\.kind_on\(p_kind text\)\n[\s\S]*?\n\$\$;/g)].map((m) => m[0]);
+  assert.equal(defs.length, 2, "one in F, one in L");
+  assert.equal(defs[0], defs[1]);
+  assert.match(defs[0], /'practice', 'solver', 'reword', 'style', 'points', 'bank'\) then study_private\.feature_on\('questions_paid'\)/);
+  const f = text.indexOf("-- ════ BEGIN SECTION F");
+  const l = text.indexOf("-- ════ BEGIN SECTION L ");
+  assert.ok(f >= 0 && l > f && text.indexOf(defs[0]) < l && text.lastIndexOf(defs[0]) > l);
 });

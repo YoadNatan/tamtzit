@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// supabase/study-schema.sql in 9 parts, for Supabase's SQL Editor, which
+// supabase/study-schema.sql in 10 parts, for Supabase's SQL Editor, which
 // does not take the whole file (about 0.9 MB) in one paste.
 //
-//   npm run sql:parts            writes supabase/parts/1.sql … 9.sql
+//   npm run sql:parts            writes supabase/parts/1.sql … 10.sql
 //   node tools/sql-parts.mjs --check   exits 1 if those files are not what
 //                                      the schema makes now (a unit test
 //                                      runs this check)
 //
 // The parts are the file itself, cut only between its sections (the
 // "-- ════ BEGIN SECTION X" lines, which are top-level comments), so running
-// parts 1 to 9 in order, each to the end, does exactly what running the
+// parts 1 to 10 in order, each to the end, does exactly what running the
 // whole file does. Every part is safe to run again, as the file is.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -22,8 +22,9 @@ const DIR = join(root, "supabase", "parts");
 /** Each part after the first starts at this section. Sections added later
  *  go into the part of the section before them. Supabase's SQL Editor
  *  refuses a run much larger than about 170 KB, so each part stays at or
- *  under PART_MAX_BYTES (server/study/sqlParts.test.ts checks it). */
-const STARTS = ["Q", "Z", "C", "P", "V", "H", "S", "I"];
+ *  under PART_MAX_BYTES (server/study/sqlParts.test.ts checks it). Part 10
+ *  starts at L (practice sets): with I and R, part 9 would pass 170 KB. */
+const STARTS = ["Q", "Z", "C", "P", "V", "H", "S", "I", "L"];
 
 /** 170,000 bytes, not 170 × 1024: whichever way the editor counts "170 KB",
  *  a part under this runs. */

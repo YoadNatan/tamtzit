@@ -2,7 +2,7 @@
 
 Planning documents for the next features of the study app (`/`), and where the build stands. The repository's [`README.md`](../../README.md#english) is how to set the app up, update it and run its tests.
 
-> **Since the move to its own repository** ([`../MOVE.md`](../MOVE.md)): these documents were written while the app lived at `/study/` on `delo-logo-review.vercel.app`, inside the `delo-logo-review` repository, next to other apps. The app is now served at `/` of its own address; addresses in the release notes are written for `https://tamtzit.vercel.app` (use the real one if Vercel assigned another). Branch names, commit hashes and GitHub links to `delo-logo-review` refer to that repository's history, and "the README's study section" means this repository's README. The SQL is run in 9 parts (`supabase/parts/`, README).
+> **Since the move to its own repository** ([`../MOVE.md`](../MOVE.md)): these documents were written while the app lived at `/study/` on `delo-logo-review.vercel.app`, inside the `delo-logo-review` repository, next to other apps. The app is now served at `/` of its own address; addresses in the release notes are written for `https://tamtzit.vercel.app` (use the real one if Vercel assigned another). Branch names, commit hashes and GitHub links to `delo-logo-review` refer to that repository's history, and "the README's study section" means this repository's README. The SQL is run in 10 parts (`supabase/parts/`, README).
 
 ## The build so far
 

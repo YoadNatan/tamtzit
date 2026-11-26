@@ -615,12 +615,16 @@ create or replace function study_private.feature_on(p_name text)
 returns boolean language sql stable security definer set search_path = public as $$
   select coalesce((select f.enabled from study_private.features f where f.name = p_name), true)
 $$;
--- Which switch a ledger kind obeys.
+-- Which switch a ledger kind obeys. Section L (practice sets, OD14) maps
+-- every question-writing kind to the switch questions_paid; this is L's
+-- text, so running this part again keeps it.
 create or replace function study_private.kind_on(p_kind text)
 returns boolean language sql stable security definer set search_path = public as $$
-  select case p_kind when 'notes' then study_private.feature_on('recordings')
-                     when 'exam'  then study_private.feature_on('exams')
-                     else true end
+  select case
+    when p_kind = 'notes' then study_private.feature_on('recordings')
+    when p_kind = 'exam'  then study_private.feature_on('exams')
+    when p_kind in ('practice', 'solver', 'reword', 'style', 'points', 'bank') then study_private.feature_on('questions_paid')
+    else true end
 $$;
 -- For members' policies and the app (true/false per switch; nothing secret).
 create or replace function public.study_feature_on(p_name text)
@@ -19788,3 +19792,1070 @@ end $$;
 insert into study_private.schema_sections (section, version) values ('R', 2)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION R ════
+
+-- ════ BEGIN SECTION L · practice sets (package L, "lists") ════
+--  docs/study/sets.md; design-practice revision 2, §7; the decisions are in
+--  docs/study/DECISIONS-2026-11-26.md ("Practice sets").
+--  A set ("סט") is a titled, fixed, ordered list of bank questions with an
+--  author and a date. The questions stay in the group's single bank
+--  (decision 2): a set is a view over them. Every set is on the group's
+--  shelf from the moment it is created (OD3): no private set, no unshare.
+--  Any member hides a set for themselves; the author or the group's creator
+--  deletes it (a soft delete; the questions stay in the bank).
+--
+--  L 1 (this version): the tables, their row security, the member RPCs
+--  (shelf, open, progress, rename, delete, hide, seen, attempts, the answer
+--  wrappers, the group's numbers, the names choice, the sets line's and the
+--  day's figures), the op's RPCs (begin, attach, abandon, style, autokeep),
+--  the trigger that fills a set from the bank, the hooks for the exams
+--  design's sheet sets and for R, the switches, kind_on and the nightly job.
+--
+--  Group numbers follow the floor of 3 (study_private.pulse_floor(), OD5):
+--  "פותרים: k" and the member's own score always; the average and the
+--  per-question bands only when at least 3 OTHER members finished, the
+--  bands computed without the viewer; no best score. Each member counts
+--  with their first finished attempt, scored on the first answer per
+--  question in it. Raw answers stay private (study_answers): a set's
+--  attempt is stamped on them by the wrappers, and only definer RPCs read
+--  other members' rows.
+--
+--  The switches (study_private.features):
+--    qsets            on: set features. Off: begin refuses ('off') and the
+--                     shelf is empty; the questions stay in the bank.
+--    qsets_auto_keep  off (OD15): study_qset_autokeep does nothing.
+--    questions_paid   on (OD14): off stops every question-writing kind
+--                     (kind_on: practice, solver, reword, style, points,
+--                     bank) without a redeploy.
+--      update study_private.features set enabled = false, changed_at = now() where name = 'questions_paid';
+--
+--  Order: after I and R in this file. Part 10 of supabase/parts starts with
+--  this section (with it, part 9 would pass 170 KB); the wave's later
+--  sections (Y, O) follow it there. L uses Q, X, S, T and R directly,
+--  because the file always runs in order; the calls into R (the set_shared
+--  hook, set_solved) and into O (later) are still guarded with
+--  to_regprocedure, so a database without them loads L and works.
+--  Re-runnable throughout.
+
+-- ── Sets ──
+create table if not exists public.study_qsets (
+  id          uuid        primary key default gen_random_uuid(),
+  group_id    uuid        not null references public.study_groups (id) on delete cascade,
+  kind        text        not null check (kind in ('lecture', 'course', 'sheet')),   -- 'course': WP20; 'sheet': the exams design
+  title       text        not null check (char_length(btrim(title)) between 1 and 80),
+  lecture_id  uuid        references public.study_lectures (id) on delete cascade,
+  plan_id     uuid,                       -- a course round (S), WP20
+  exam_id     uuid,                       -- a sheet set (section O; no foreign key: O comes later)
+  similar_run uuid,                       -- O's study_similar_runs.id (no foreign key)
+  want        int         not null check (want between 1 and 60),
+  options     jsonb       not null default '{}' check (jsonb_typeof(options) = 'object' and pg_column_size(options) <= 2000),
+                                          -- {level, difficulty, types[], parts[], style_sig?}; never points or a focus
+  state       text        not null default 'making' check (state in ('reading', 'making', 'ready')),
+  notified_at timestamptz,                -- set_shared went to the group (once)
+  created_by  uuid        default auth.uid() references auth.users (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  deleted_at  timestamptz,
+  deleted_by  uuid        references auth.users (id) on delete set null,
+  check (kind <> 'lecture' or lecture_id is not null)
+);
+create index if not exists study_qsets_shelf   on public.study_qsets (group_id, created_at desc) where deleted_at is null;
+create index if not exists study_qsets_lecture on public.study_qsets (lecture_id, created_at desc) where deleted_at is null;
+create index if not exists study_qsets_daily   on public.study_qsets (created_by, created_at);
+
+-- A lecture set's request (one; slice C's course sets may have several).
+create table if not exists public.study_qset_requests (
+  set_id     uuid not null references public.study_qsets (id) on delete cascade,
+  request_id uuid not null unique references public.study_question_requests (id) on delete cascade,
+  primary key (set_id, request_id)
+);
+
+-- The set's questions, in order. Filled by the trigger below (a keep, keep
+-- all, auto-keep) and by O's similar run (qset_add_items).
+create table if not exists public.study_qset_items (
+  set_id       uuid        not null references public.study_qsets (id) on delete cascade,
+  question_id  uuid        not null references public.study_questions (id) on delete cascade,
+  pos          int         not null check (pos between 1 and 200),
+  added_at     timestamptz not null default now(),
+  auto_kept_at timestamptz,                 -- kept by study_qset_autokeep, not by a member
+  primary key (set_id, question_id)
+);
+create index if not exists study_qset_items_question on public.study_qset_items (question_id);
+
+-- A summary per solve; the answers themselves stay private in study_answers.
+create table if not exists public.study_qset_attempts (
+  id          uuid        primary key default gen_random_uuid(),
+  set_id      uuid        not null references public.study_qsets (id) on delete cascade,
+  user_id     uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  started_at  timestamptz not null default now(),
+  finished_at timestamptz,
+  total       int         not null default 0,
+  answered    int         not null default 0,
+  right_n     int         not null default 0
+);
+create index if not exists study_qset_attempts_set on public.study_qset_attempts (set_id, user_id, finished_at);
+create index if not exists study_qset_attempts_user on public.study_qset_attempts (user_id, started_at desc);
+
+-- Seen ("חדש" clears) and hidden for oneself.
+create table if not exists public.study_qset_marks (
+  user_id   uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  set_id    uuid        not null references public.study_qsets (id) on delete cascade,
+  seen_at   timestamptz,
+  hidden_at timestamptz,
+  primary key (user_id, set_id)
+);
+create index if not exists study_qset_marks_set on public.study_qset_marks (set_id);
+
+-- OD7: a member's name in "מי פתרו" only when they chose it (L's own; T's
+-- study_member_prefs is untouched).
+create table if not exists public.study_qset_prefs (
+  user_id   uuid        primary key default auth.uid() references auth.users (id) on delete cascade,
+  show_name boolean     not null default false,
+  asked_at  timestamptz
+);
+
+-- The one change to Q's tables: an answer given inside a set's attempt.
+alter table public.study_answers add column if not exists set_attempt uuid
+  references public.study_qset_attempts (id) on delete set null;
+create index if not exists study_answers_set_attempt on public.study_answers (set_attempt) where set_attempt is not null;
+
+-- ── Row security: members read their group's live sets; their own
+-- attempts, marks and choice. Nobody writes directly. ──
+alter table public.study_qsets enable row level security;
+alter table public.study_qset_requests enable row level security;
+alter table public.study_qset_items enable row level security;
+alter table public.study_qset_attempts enable row level security;
+alter table public.study_qset_marks enable row level security;
+alter table public.study_qset_prefs enable row level security;
+drop policy if exists "study qsets read" on public.study_qsets;
+create policy "study qsets read" on public.study_qsets for select to authenticated
+  using (deleted_at is null and public.study_is_member(group_id));
+drop policy if exists "study qset requests read" on public.study_qset_requests;
+create policy "study qset requests read" on public.study_qset_requests for select to authenticated
+  using (exists (select 1 from public.study_qsets s where s.id = set_id));
+drop policy if exists "study qset items read" on public.study_qset_items;
+create policy "study qset items read" on public.study_qset_items for select to authenticated
+  using (exists (select 1 from public.study_qsets s where s.id = set_id));
+drop policy if exists "study qset attempts own" on public.study_qset_attempts;
+create policy "study qset attempts own" on public.study_qset_attempts for select to authenticated using (user_id = auth.uid());
+drop policy if exists "study qset marks own" on public.study_qset_marks;
+create policy "study qset marks own" on public.study_qset_marks for select to authenticated using (user_id = auth.uid());
+drop policy if exists "study qset prefs own" on public.study_qset_prefs;
+create policy "study qset prefs own" on public.study_qset_prefs for select to authenticated using (user_id = auth.uid());
+revoke all on public.study_qsets, public.study_qset_requests, public.study_qset_items, public.study_qset_attempts,
+  public.study_qset_marks, public.study_qset_prefs from anon, authenticated;
+grant select on public.study_qsets, public.study_qset_requests, public.study_qset_items, public.study_qset_attempts,
+  public.study_qset_marks, public.study_qset_prefs to authenticated;
+
+-- ── The switches (OD14, OD15) and which switch each ledger kind obeys ──
+insert into study_private.features (name, enabled) values
+  ('qsets', true),             -- set features; off: begin refuses and the shelf is empty
+  ('qsets_auto_keep', false),  -- OD15: off until measured (WP16)
+  ('questions_paid', true)     -- OD14: off stops every question-writing kind
+on conflict (name) do nothing;
+
+-- The same text is in section F (so a later run of part 1 keeps it).
+create or replace function study_private.kind_on(p_kind text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select case
+    when p_kind = 'notes' then study_private.feature_on('recordings')
+    when p_kind = 'exam'  then study_private.feature_on('exams')
+    when p_kind in ('practice', 'solver', 'reword', 'style', 'points', 'bank') then study_private.feature_on('questions_paid')
+    else true end
+$$;
+revoke all on function study_private.kind_on(text) from public;
+
+-- ── Helpers ──
+
+-- A set the caller may see (a member of its group, not deleted, its lecture
+-- not deleted), or 'set not found'.
+create or replace function study_private.qset_get(p_set uuid)
+returns public.study_qsets language plpgsql stable security definer set search_path = public as $$
+declare s public.study_qsets;
+begin
+  select * into s from public.study_qsets x where x.id = p_set;
+  if not found or s.deleted_at is not null or not coalesce(public.study_is_member(s.group_id), false)
+     or exists (select 1 from public.study_lectures l where l.id = s.lecture_id and l.deleted_at is not null) then
+    raise exception 'set not found';
+  end if;
+  return s;
+end;
+$$;
+
+-- What a set's requests have made so far: its questions (items); drafts
+-- ready (the solver passed them, or could not run) or kept; questions that
+-- did not come out (batches done with fewer than they wanted); pending
+-- drafts the solver could not check; batches still pending or writing, and
+-- when one of them last moved; when any batch last moved.
+create or replace function study_private.qset_facts(p_set uuid)
+returns table (items int, made int, failed int, unchecked int, busy int, busy_at timestamptz, last_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  with b as (select x.status, x.wanted, x.made, x.updated_at
+               from public.study_question_batches x
+               join public.study_qset_requests r on r.request_id = x.request_id
+              where r.set_id = p_set),
+       d as (select x.status, x.check_state
+               from public.study_question_drafts x
+               join public.study_qset_requests r on r.request_id = x.request_id
+              where r.set_id = p_set),
+       i as (select count(*)::int as n from public.study_qset_items y where y.set_id = p_set)
+  select (select n from i),
+         greatest((select n from i), (select count(*)::int from d where d.status in ('pending', 'kept') and d.check_state in ('ok', 'unchecked'))),
+         (select coalesce(sum(greatest(b.wanted - b.made, 0)), 0)::int from b where b.status in ('ready', 'failed')),
+         (select count(*)::int from d where d.status = 'pending' and d.check_state = 'unchecked'),
+         (select count(*)::int from b where b.status in ('pending', 'writing')),
+         (select max(b.updated_at) from b where b.status in ('pending', 'writing')),
+         (select max(b.updated_at) from b)
+$$;
+
+-- "Paused" is computed, never stored (design §7.4): a set being written
+-- whose newest batch has not moved for 6 minutes (rounds.ts's stuck rule),
+-- or a set still reading its lecture for 6 minutes (the points claim's lease).
+create or replace function study_private.qset_paused(p_state text, p_updated timestamptz, p_busy int, p_last timestamptz)
+returns boolean language sql stable set search_path = public as $$
+  select case p_state
+           when 'reading' then p_updated < now() - interval '6 minutes'
+           when 'making' then coalesce(p_busy, 0) > 0 and coalesce(p_last, p_updated) < now() - interval '6 minutes'
+           else false end
+$$;
+
+-- "Open" (D6, OD20): a set on the lecture someone is making now. Reading
+-- its lecture (moved in the last 10 minutes); or being written (a batch
+-- pending or writing that moved in the last 30); or just begun, its request
+-- not attached yet (2 minutes: begin and attach are two calls).
+create or replace function study_private.qset_is_open(p_set uuid)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare s public.study_qsets; f record;
+begin
+  select * into s from public.study_qsets x where x.id = p_set;
+  if not found or s.deleted_at is not null then return false; end if;
+  if s.state = 'reading' then return s.updated_at > now() - interval '10 minutes'; end if;
+  if s.state <> 'making' then return false; end if;
+  if not exists (select 1 from public.study_qset_requests r where r.set_id = p_set) then
+    return s.kind = 'lecture' and s.updated_at > now() - interval '2 minutes';
+  end if;
+  select * into f from study_private.qset_facts(p_set);
+  return f.busy > 0 and f.busy_at > now() - interval '30 minutes';
+end;
+$$;
+
+-- Tells the group about a set once, when it is ready with at least one
+-- question (R's set_shared hook, when there is one: R owns the dedupe, the
+-- coalescing and the words). notified_at is stamped either way, so a hook
+-- installed later never announces old sets.
+create or replace function study_private.qset_announce(p_set uuid)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare
+  s     public.study_qsets;
+  n     int;
+  lec   text;
+  who   text;
+begin
+  select * into s from public.study_qsets x where x.id = p_set for update;
+  if not found or s.deleted_at is not null or s.state <> 'ready' or s.notified_at is not null then return false; end if;
+  select count(*)::int into n from public.study_qset_items i where i.set_id = p_set;
+  if n < 1 then return false; end if;
+  update public.study_qsets x set notified_at = now() where x.id = p_set;
+  if to_regprocedure('study_private.notice_set_shared(uuid,uuid,uuid[],uuid,jsonb)') is not null then
+    select l.title into lec from public.study_lectures l where l.id = s.lecture_id;
+    select m.name into who from public.study_members m where m.group_id = s.group_id and m.user_id = s.created_by;
+    begin
+      execute 'select study_private.notice_set_shared($1, $2, $3, $4, $5)'
+        using s.group_id, s.id, null::uuid[], s.created_by, jsonb_build_object('lecture', lec, 'k', n, 'name', who);
+    exception when others then
+      raise warning 'qset_announce %', sqlstate;
+    end;
+  end if;
+  return true;
+end;
+$$;
+
+-- Brings a lecture set's state up to date: ready once its request has no
+-- batch pending or writing, making again when a batch is written again
+-- ("לנסות שוב" after it was ready). Then the once-only notice.
+create or replace function study_private.qset_refresh(p_set uuid)
+returns public.study_qsets language plpgsql volatile security definer set search_path = public as $$
+declare s public.study_qsets; f record;
+begin
+  select * into s from public.study_qsets x where x.id = p_set;
+  if not found then return null; end if;
+  if s.deleted_at is null and s.state in ('making', 'ready')
+     and exists (select 1 from public.study_qset_requests r where r.set_id = p_set) then
+    select * into f from study_private.qset_facts(p_set);
+    if s.state = 'making' and f.busy = 0 then
+      update public.study_qsets x set state = 'ready', updated_at = now() where x.id = p_set and x.state = 'making';
+    elsif s.state = 'ready' and f.busy > 0 then
+      update public.study_qsets x set state = 'making', updated_at = now() where x.id = p_set and x.state = 'ready';
+    end if;
+  end if;
+  perform study_private.qset_announce(p_set);
+  select * into s from public.study_qsets x where x.id = p_set;
+  return s;
+end;
+$$;
+
+-- The rows the shelf, the set page and the lecture page show (one set with
+-- p_set). author_name: the author's name in the group, or null once they left.
+create or replace function study_private.qset_rows(p_group uuid, p_lecture uuid, p_set uuid, p_limit int)
+returns table (id uuid, kind text, title text, lecture_id uuid, lecture_title text, course text, author_id uuid,
+               author_name text, created_at timestamptz, updated_at timestamptz, want int, size int, made int,
+               state text, paused boolean, solvers int, my_score int, my_total int, my_open_attempt uuid,
+               is_new boolean, is_mine boolean, is_hidden boolean)
+language sql stable security definer set search_path = public as $$
+  select s.id, s.kind, s.title, s.lecture_id, l.title, coalesce(l.course, ''), s.created_by,
+         (select m.name from public.study_members m where m.group_id = s.group_id and m.user_id = s.created_by),
+         s.created_at, s.updated_at, s.want, f.items, f.made, s.state,
+         study_private.qset_paused(s.state, s.updated_at, f.busy, f.last_at),
+         (select count(distinct a.user_id)::int from public.study_qset_attempts a where a.set_id = s.id and a.finished_at is not null),
+         mine.right_n, mine.total,
+         (select a.id from public.study_qset_attempts a
+           where a.set_id = s.id and a.user_id = auth.uid() and a.finished_at is null and a.started_at > now() - interval '12 hours'
+           order by a.started_at desc limit 1),
+         s.created_by is distinct from auth.uid() and mk.seen_at is null,
+         s.created_by is not distinct from auth.uid(),
+         mk.hidden_at is not null
+    from public.study_qsets s
+    left join public.study_lectures l on l.id = s.lecture_id
+    left join public.study_qset_marks mk on mk.set_id = s.id and mk.user_id = auth.uid()
+    cross join lateral study_private.qset_facts(s.id) f
+    left join lateral (select a.right_n, a.total from public.study_qset_attempts a
+                        where a.set_id = s.id and a.user_id = auth.uid() and a.finished_at is not null
+                        order by a.finished_at, a.id limit 1) mine on true
+   where s.group_id = p_group and s.deleted_at is null and (l.id is null or l.deleted_at is null)
+     and (p_lecture is null or s.lecture_id = p_lecture)
+     and (p_set is null or s.id = p_set)
+   order by s.created_at desc, s.id
+   limit greatest(1, least(coalesce(p_limit, 40), 200))
+$$;
+
+-- ── The op's RPCs (the server key and the member's token) ──
+
+-- "ליצור": checks the switches, the day's sets (p_daily, OD13), the sets
+-- line (p_line USD of practice, solver, reword and style this month, OD12),
+-- and, under the lecture's round lock, an open set on the lecture (D6:
+-- answered as {"open": {…}} unless p_force). Then the set: state 'reading'
+-- when the generating screen reads first (p_phase 'read' or 'style'), else
+-- 'making' (study_qset_attach follows at once). p_set: {title, want, options}.
+-- Answers {"set_id", "state"}.
+-- Errors: 'forbidden', 'not signed in', 'lecture not found', 'off',
+-- 'bad request', 'daily_limit', 'sets_line'.
+create or replace function public.study_qset_begin(p_lecture uuid, p_set jsonb, p_phase text default null,
+  p_force boolean default false, p_daily int default null, p_line numeric default null, p_key text default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  me     uuid := auth.uid();
+  lec    public.study_lectures;
+  v_want int;
+  v_ttl  text;
+  v_opt  jsonb;
+  v_raw  jsonb;
+  o      uuid;
+  f      record;
+  v_id   uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if me is null then raise exception 'not signed in'; end if;
+  select * into lec from public.study_lectures l where l.id = p_lecture;
+  if not found or lec.deleted_at is not null or not coalesce(public.study_is_member(lec.group_id), false) then
+    raise exception 'lecture not found';
+  end if;
+  if not study_private.feature_on('qsets') or not study_private.kind_on('practice') then raise exception 'off'; end if;
+  if jsonb_typeof(p_set) is distinct from 'object' or coalesce(p_set ->> 'want', '') !~ '^[0-9]{1,2}$'
+     or (p_phase is not null and p_phase not in ('read', 'style'))
+     or (p_set ? 'options' and jsonb_typeof(p_set -> 'options') is distinct from 'object')
+     or (p_set ? 'title' and jsonb_typeof(p_set -> 'title') not in ('string', 'null')) then
+    raise exception 'bad request';
+  end if;
+  v_want := (p_set ->> 'want')::int;
+  if v_want not between 1 and 40 then raise exception 'bad request'; end if;
+  v_ttl := left(btrim(regexp_replace(coalesce(p_set ->> 'title', ''), '\s+', ' ', 'g')), 80);
+  if v_ttl = '' then v_ttl := left(btrim(lec.title), 80); end if;
+  -- Only what the set page shows again: never the member's points or a focus.
+  v_raw := coalesce(p_set -> 'options', '{}');
+  v_opt := jsonb_strip_nulls(jsonb_build_object(
+    'level', case when jsonb_typeof(v_raw -> 'level') = 'string' then v_raw -> 'level' end,
+    'difficulty', case when jsonb_typeof(v_raw -> 'difficulty') = 'string' then v_raw -> 'difficulty' end,
+    'types', case when jsonb_typeof(v_raw -> 'types') = 'array' then v_raw -> 'types' end,
+    'parts', case when jsonb_typeof(v_raw -> 'parts') = 'array' then v_raw -> 'parts' end));
+  if pg_column_size(v_opt) > 2000 then raise exception 'bad request'; end if;
+  -- The day's sets: one count at a time per member (two lectures at once cannot both pass).
+  perform pg_advisory_xact_lock(hashtext('study_qset_daily:' || me::text));
+  if p_daily is not null
+     and (select count(*) from public.study_qsets s
+           where s.created_by = me and s.kind in ('lecture', 'course')
+             and s.created_at >= (date_trunc('day', now() at time zone 'Asia/Jerusalem') at time zone 'Asia/Jerusalem')) >= p_daily then
+    raise exception 'daily_limit';
+  end if;
+  if p_line is not null
+     and coalesce((select sum(u.cost_usd) from public.study_usage u
+                    where u.group_id = lec.group_id and u.kind in ('practice', 'solver', 'reword', 'style')
+                      and u.created_at >= (date_trunc('month', now() at time zone 'utc') at time zone 'utc')), 0) >= p_line then
+    raise exception 'sets_line';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_question_round:' || p_lecture::text));
+  if not coalesce(p_force, false) then
+    select s.id into o from public.study_qsets s
+     where s.lecture_id = p_lecture and s.deleted_at is null and s.state in ('reading', 'making')
+       and study_private.qset_is_open(s.id)
+     order by s.created_at desc limit 1;
+    if o is not null then
+      select * into f from study_private.qset_facts(o);
+      return jsonb_build_object('open', (
+        select jsonb_build_object('set_id', s.id, 'state', s.state, 'want', s.want, 'made', f.made,
+                                  'author_name', (select m.name from public.study_members m where m.group_id = s.group_id and m.user_id = s.created_by),
+                                  'mine', s.created_by = me)
+          from public.study_qsets s where s.id = o));
+    end if;
+  end if;
+  insert into public.study_qsets (group_id, kind, title, lecture_id, want, options, state, created_by)
+  values (lec.group_id, 'lecture', v_ttl, p_lecture, v_want, v_opt,
+          case when p_phase in ('read', 'style') then 'reading' else 'making' end, me)
+  returning id into v_id;
+  return jsonb_build_object('set_id', v_id, 'state', case when p_phase in ('read', 'style') then 'reading' else 'making' end);
+end;
+$$;
+
+-- The set's request and batches (Q's study_request_create, with its rules
+-- and refusals), under the same round lock; only the author, only once.
+-- The set is 'making' after it and wants what the request plans.
+create or replace function public.study_qset_attach(p_set uuid, p_request jsonb, p_batches jsonb, p_key text default null)
+returns table (set_id uuid, request_id uuid, round int, batch_id uuid, part_idx int, seq int, wanted int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me  uuid := auth.uid();
+  s   public.study_qsets;
+  q   record;
+  rid uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if me is null then raise exception 'not signed in'; end if;
+  select * into s from public.study_qsets x where x.id = p_set;
+  if not found or s.deleted_at is not null or s.created_by is distinct from me or s.kind <> 'lecture'
+     or not coalesce(public.study_is_member(s.group_id), false) then
+    raise exception 'set not found';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('study_question_round:' || s.lecture_id::text));   -- before the row, as keep
+  perform 1 from public.study_qsets x where x.id = p_set for update;
+  if exists (select 1 from public.study_qset_requests r where r.set_id = p_set) then raise exception 'set has a request'; end if;
+  for q in select * from public.study_request_create(s.lecture_id, p_request, p_batches, p_key) loop
+    if rid is null then
+      rid := q.request_id;
+      insert into public.study_qset_requests (set_id, request_id) values (p_set, rid);
+    end if;
+    set_id := p_set; request_id := q.request_id; round := q.round; batch_id := q.batch_id;
+    part_idx := q.part_idx; seq := q.seq; wanted := q.wanted;
+    return next;
+  end loop;
+  update public.study_qsets x
+     set state = 'making', updated_at = now(),
+         want = coalesce((select least(greatest(r.count, 1), 60) from public.study_question_requests r where r.id = rid), x.want)
+   where x.id = p_set;
+end;
+$$;
+
+-- A set that never got its request (Q refused, or the author left the
+-- reading phase) is removed; one with a request or questions stays.
+create or replace function public.study_qset_abandon(p_set uuid)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare s public.study_qsets;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into s from public.study_qsets x where x.id = p_set;
+  if not found or s.created_by is distinct from auth.uid() then return false; end if;
+  if s.lecture_id is not null then
+    perform pg_advisory_xact_lock(hashtext('study_question_round:' || s.lecture_id::text));
+  end if;
+  delete from public.study_qsets x
+   where x.id = p_set
+     and not exists (select 1 from public.study_qset_requests r where r.set_id = x.id)
+     and not exists (select 1 from public.study_qset_items i where i.set_id = x.id);
+  return found;
+end;
+$$;
+
+-- The example's signed style (the op's signStyle), kept on the set while it
+-- reads, so a retry does not pay again.
+create or replace function public.study_qset_style(p_set uuid, p_sig text, p_key text default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare s public.study_qsets;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if coalesce(p_sig, '') !~ '^[0-9a-f]{64}$' then raise exception 'bad request'; end if;
+  s := study_private.qset_get(p_set);
+  if s.state <> 'reading' then return false; end if;
+  update public.study_qsets x set options = x.options || jsonb_build_object('style_sig', p_sig), updated_at = now()
+   where x.id = p_set;
+  return true;
+end;
+$$;
+
+-- Auto-keep (OD15, slice C): the op "write" passes the drafts its solver
+-- just passed. Nothing while the switch qsets_auto_keep is off. For each
+-- draft of a set's request: first the lecture's round lock, then the draft
+-- row (keep's order, so it never deadlocks with "להוסיף הכול"); only a
+-- pending draft the solver passed (check_state 'ok', not 'unchecked'), a
+-- staged case only when every step passed; never past 150 active questions.
+create or replace function public.study_qset_autokeep(p_drafts uuid[], p_key text default null)
+returns table (draft_id uuid, question_id uuid)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  x   uuid;
+  lec uuid;
+  rq  uuid;
+  d   public.study_question_drafts;
+  t   public.study_question_drafts;
+  m   int;
+  qid uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if not study_private.feature_on('qsets_auto_keep') then return; end if;
+  for x in select distinct u from unnest(coalesce(p_drafts, '{}')) u where u is not null order by 1 loop
+    lec := null; rq := null;
+    select y.lecture_id, y.request_id into lec, rq from public.study_question_drafts y where y.id = x;
+    continue when lec is null or not exists (select 1 from public.study_qset_requests r where r.request_id = rq);
+    continue when exists (select 1 from public.study_lectures l where l.id = lec and l.deleted_at is not null);
+    perform pg_advisory_xact_lock(hashtext('study_question_round:' || lec::text));
+    select * into d from public.study_question_drafts y where y.id = x for update;
+    continue when d.id is null or d.status <> 'pending' or d.check_state <> 'ok' or d.lease_until > now();
+    if d.series is not null then
+      perform 1 from public.study_question_drafts y where y.series = d.series and y.status = 'pending' for update;
+      continue when exists (select 1 from public.study_question_drafts y where y.series = d.series and y.status = 'pending'
+                             and (y.check_state <> 'ok' or y.lease_until > now()));
+      select count(*)::int into m from public.study_question_drafts y where y.series = d.series and y.status = 'pending';
+      continue when (select count(*) from public.study_questions q where q.lecture_id = lec and q.retired_at is null) + m > 150;
+      for t in select * from public.study_question_drafts y where y.series = d.series and y.status = 'pending' order by y.step loop
+        qid := study_private.draft_to_bank(t);
+        update public.study_qset_items i set auto_kept_at = now() where i.question_id = qid;
+        draft_id := t.id; question_id := qid;
+        return next;
+      end loop;
+      continue;
+    end if;
+    continue when (select count(*) from public.study_questions q where q.lecture_id = lec and q.retired_at is null) >= 150;
+    qid := study_private.draft_to_bank(d);
+    update public.study_qset_items i set auto_kept_at = now() where i.question_id = qid;
+    draft_id := d.id; question_id := qid;
+    return next;
+  end loop;
+end;
+$$;
+
+-- ── The member's RPCs ──
+
+-- The generating screen (and the set page while it is made): the state,
+-- brought up to date, and the counts. paused: nobody is writing it (§7.4).
+create or replace function public.study_qset_progress(p_set uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare s public.study_qsets; f record;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  s := study_private.qset_get(p_set);
+  s := study_private.qset_refresh(p_set);
+  select * into f from study_private.qset_facts(p_set);
+  return jsonb_build_object('state', s.state, 'want', s.want, 'made', f.made, 'size', f.items, 'failed', f.failed,
+                            'unchecked', f.unchecked, 'paused', study_private.qset_paused(s.state, s.updated_at, f.busy, f.last_at));
+end;
+$$;
+
+-- The author renames a set.
+create or replace function public.study_qset_rename(p_set uuid, p_title text)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare s public.study_qsets; t text := left(btrim(regexp_replace(coalesce(p_title, ''), '\s+', ' ', 'g')), 80);
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  s := study_private.qset_get(p_set);
+  if s.created_by is distinct from auth.uid() then raise exception 'not yours'; end if;
+  if t = '' then raise exception 'bad title'; end if;
+  update public.study_qsets x set title = t, updated_at = now() where x.id = p_set;
+end;
+$$;
+
+-- The author or the group's creator deletes a set (OD3): it leaves every
+-- shelf; its questions stay in the bank.
+create or replace function public.study_qset_delete(p_set uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare s public.study_qsets;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  s := study_private.qset_get(p_set);
+  if s.created_by is distinct from auth.uid()
+     and not exists (select 1 from public.study_groups g where g.id = s.group_id and g.created_by = auth.uid()) then
+    raise exception 'not yours';
+  end if;
+  update public.study_qsets x set deleted_at = now(), deleted_by = auth.uid(), updated_at = now() where x.id = p_set;
+end;
+$$;
+
+-- Hides a set for the caller only ("להסתיר אצלי"), or brings it back.
+create or replace function public.study_qset_hide(p_set uuid, p_hidden boolean)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  perform study_private.qset_get(p_set);
+  insert into public.study_qset_marks as k (user_id, set_id, hidden_at)
+  values (auth.uid(), p_set, case when coalesce(p_hidden, false) then now() end)
+  on conflict (user_id, set_id) do update set hidden_at = case when coalesce(p_hidden, false) then coalesce(k.hidden_at, now()) end;
+end;
+$$;
+
+-- "חדש" clears: the sets the caller opened (those they may see).
+create or replace function public.study_qset_seen(p_sets uuid[])
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare n int;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  insert into public.study_qset_marks as k (user_id, set_id, seen_at)
+  select auth.uid(), s.id, now() from public.study_qsets s
+   where s.id = any (coalesce(p_sets, '{}')) and s.deleted_at is null and public.study_is_member(s.group_id)
+  on conflict (user_id, set_id) do update set seen_at = coalesce(k.seen_at, excluded.seen_at);
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- The shelf, "סטים של הקבוצה" (with p_lecture: the sets on a lecture).
+-- Newest first; hidden ones are in it with is_hidden (the screen folds
+-- them). No group average here (only on the set page). Empty while the
+-- switch qsets is off.
+create or replace function public.study_qsets_shelf(p_group uuid, p_lecture uuid default null, p_limit int default 40)
+returns table (id uuid, kind text, title text, lecture_id uuid, lecture_title text, course text, author_id uuid,
+               author_name text, created_at timestamptz, updated_at timestamptz, want int, size int, made int,
+               state text, paused boolean, solvers int, my_score int, my_total int, my_open_attempt uuid,
+               is_new boolean, is_mine boolean, is_hidden boolean)
+language plpgsql volatile security definer set search_path = public as $$
+declare x uuid;
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  if not study_private.feature_on('qsets') then return; end if;
+  for x in select s.id from public.study_qsets s
+            where s.group_id = p_group and s.deleted_at is null and (p_lecture is null or s.lecture_id = p_lecture)
+              and (s.state = 'making' or (s.state = 'ready' and s.notified_at is null))
+              and s.created_at > now() - interval '30 days' loop
+    perform study_private.qset_refresh(x);
+  end loop;
+  return query select * from study_private.qset_rows(p_group, p_lecture, null, p_limit);
+end;
+$$;
+
+-- The set page: its row as on the shelf, its questions in order, the
+-- caller's attempts, the drafts the solver could not check ("לאשר או
+-- להסיר"). 'set not found' for a deleted set or another group's.
+create or replace function public.study_qset_open(p_set uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare s public.study_qsets;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  s := study_private.qset_get(p_set);
+  s := study_private.qset_refresh(p_set);
+  return jsonb_build_object(
+    'set', (select to_jsonb(r) from study_private.qset_rows(s.group_id, null, p_set, 1) r),
+    'options', s.options - 'style_sig',
+    'items', coalesce((select jsonb_agg(jsonb_build_object('question_id', i.question_id, 'pos', i.pos) order by i.pos)
+                         from public.study_qset_items i where i.set_id = p_set), '[]'),
+    'my_attempts', coalesce((select jsonb_agg(jsonb_build_object('id', a.id, 'started_at', a.started_at, 'finished_at', a.finished_at,
+                                                                 'total', a.total, 'answered', a.answered, 'right_n', a.right_n)
+                                              order by a.started_at)
+                               from public.study_qset_attempts a where a.set_id = p_set and a.user_id = auth.uid()), '[]'),
+    'unchecked', coalesce((select jsonb_agg(d.id order by d.part_idx, d.created_at)
+                             from public.study_question_drafts d join public.study_qset_requests r on r.request_id = d.request_id
+                            where r.set_id = p_set and d.status = 'pending' and d.check_state = 'unchecked'), '[]'));
+end;
+$$;
+
+-- D6: the open sets on a lecture (someone is making one now).
+create or replace function public.study_lecture_making(p_lecture uuid)
+returns table (set_id uuid, author_name text, made int, want int, state text, updated_at timestamptz, is_mine boolean)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare g uuid := public.study_lecture_group(p_lecture);
+begin
+  if auth.uid() is null or g is null or not coalesce(public.study_is_member(g), false) then raise exception 'forbidden'; end if;
+  if not study_private.feature_on('qsets') then return; end if;
+  return query
+  select s.id, (select m.name from public.study_members m where m.group_id = s.group_id and m.user_id = s.created_by),
+         f.made, s.want, s.state, s.updated_at, s.created_by is not distinct from auth.uid()
+    from public.study_qsets s cross join lateral study_private.qset_facts(s.id) f
+   where s.lecture_id = p_lecture and s.deleted_at is null and s.state in ('reading', 'making')
+     and study_private.qset_is_open(s.id)
+   order by s.created_at desc;
+end;
+$$;
+
+-- The create screen's two figures a member cannot read from the ledger:
+-- the group's spend this month of the kinds the sets line counts, and the
+-- sets the caller began today (Israel time).
+create or replace function public.study_qset_room(p_group uuid)
+returns table (sets_usd numeric, today int)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  return query
+  select coalesce((select sum(u.cost_usd) from public.study_usage u
+                    where u.group_id = p_group and u.kind in ('practice', 'solver', 'reword', 'style')
+                      and u.created_at >= (date_trunc('month', now() at time zone 'utc') at time zone 'utc')), 0)::numeric,
+         (select count(*)::int from public.study_qsets s
+           where s.created_by = auth.uid() and s.kind in ('lecture', 'course')
+             and s.created_at >= (date_trunc('day', now() at time zone 'Asia/Jerusalem') at time zone 'Asia/Jerusalem'));
+end;
+$$;
+
+-- "לפתור": the caller's open attempt from the last 12 hours, or a new one
+-- sized to the set as it is now.
+create or replace function public.study_qset_attempt_start(p_set uuid)
+returns public.study_qset_attempts language plpgsql volatile security definer set search_path = public as $$
+declare a public.study_qset_attempts;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  perform study_private.qset_get(p_set);
+  select * into a from public.study_qset_attempts x
+   where x.set_id = p_set and x.user_id = auth.uid() and x.finished_at is null and x.started_at > now() - interval '12 hours'
+   order by x.started_at desc limit 1;
+  if found then return a; end if;
+  insert into public.study_qset_attempts (set_id, user_id, total)
+  values (p_set, auth.uid(), (select count(*)::int from public.study_qset_items i where i.set_id = p_set))
+  returning * into a;
+  return a;
+end;
+$$;
+
+-- The attempt the caller may answer in: their own, open, of a set they still see.
+create or replace function study_private.qset_attempt_open(p_attempt uuid, p_question uuid)
+returns public.study_qset_attempts language plpgsql stable security definer set search_path = public as $$
+declare a public.study_qset_attempts;
+begin
+  select * into a from public.study_qset_attempts x where x.id = p_attempt;
+  if not found or a.user_id is distinct from auth.uid() then raise exception 'attempt not found'; end if;
+  if a.finished_at is not null then raise exception 'attempt finished'; end if;
+  perform study_private.qset_get(a.set_id);
+  if not exists (select 1 from public.study_qset_items i where i.set_id = a.set_id and i.question_id = p_question) then
+    raise exception 'not in set';
+  end if;
+  return a;
+end;
+$$;
+
+-- Answers inside a set (practice.ts calls these instead of Q's and X's):
+-- the same answer, the same checks and the same reply, then the attempt
+-- stamped on the answer that call added.
+create or replace function public.study_qset_answer(p_attempt uuid, p_question uuid, p_choice int, p_mode text default 'lecture',
+  p_ms int default null, p_confidence int default null)
+returns table (answer int, explanations text[], takeaway text, correct boolean, whens text[])
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare v_before uuid[];
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  perform study_private.qset_attempt_open(p_attempt, p_question);
+  v_before := array(select y.id from public.study_answers y where y.user_id = auth.uid() and y.question_id = p_question);
+  return query select * from public.study_answer_question(p_question, p_choice, p_mode, p_ms, p_confidence);
+  -- The row that call just added (exactly that one, whatever its time).
+  update public.study_answers x set set_attempt = p_attempt
+   where x.user_id = auth.uid() and x.question_id = p_question and x.id <> all (v_before);
+end;
+$$;
+
+create or replace function public.study_qset_answer_seq(p_attempt uuid, p_question uuid, p_choices int[], p_mode text default 'lecture',
+  p_ms int default null, p_confidence int default null)
+returns table (seq int[], explanations text[], takeaway text, correct boolean, whens text[], right_n int, total int)
+language plpgsql volatile security definer set search_path = public as $$
+#variable_conflict use_column
+declare v_before uuid[];
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  perform study_private.qset_attempt_open(p_attempt, p_question);
+  v_before := array(select y.id from public.study_answers y where y.user_id = auth.uid() and y.question_id = p_question);
+  return query select * from public.study_answer_set(p_question, p_choices, p_mode, p_ms, p_confidence);
+  -- The row that call just added (exactly that one, whatever its time).
+  update public.study_answers x set set_attempt = p_attempt
+   where x.user_id = auth.uid() and x.question_id = p_question and x.id <> all (v_before);
+end;
+$$;
+
+-- The end of an attempt: scored on the FIRST answer per question in it (an
+-- answer again after the explanation changes nothing). An attempt with no
+-- answer is dropped (it never counts as solving). The first finished
+-- attempt of someone other than the author tells the author (set_solved,
+-- inbox only, once R registers the kind). Answers {answered, right_n,
+-- total, first}; again for a finished attempt, its score.
+create or replace function public.study_qset_attempt_finish(p_attempt uuid)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  me    uuid := auth.uid();
+  a     public.study_qset_attempts;
+  s     public.study_qsets;
+  v_ans int;
+  v_ok  int;
+  v_first boolean;
+  k     int;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  select * into a from public.study_qset_attempts x where x.id = p_attempt for update;
+  if not found or a.user_id is distinct from me then raise exception 'attempt not found'; end if;
+  if a.finished_at is not null then
+    return jsonb_build_object('answered', a.answered, 'right_n', a.right_n, 'total', a.total, 'first', false);
+  end if;
+  select count(*)::int, count(*) filter (where f.correct)::int into v_ans, v_ok
+    from (select distinct on (x.question_id) x.correct from public.study_answers x
+           where x.set_attempt = p_attempt and x.user_id = me
+           order by x.question_id, x.answered_at, x.id) f;
+  if v_ans = 0 then
+    delete from public.study_qset_attempts x where x.id = p_attempt;
+    return jsonb_build_object('answered', 0, 'right_n', 0, 'total', a.total, 'first', false);
+  end if;
+  v_first := not exists (select 1 from public.study_qset_attempts x
+                        where x.set_id = a.set_id and x.user_id = me and x.finished_at is not null);
+  update public.study_qset_attempts x
+     set finished_at = now(), answered = v_ans, right_n = v_ok, total = greatest(x.total, v_ans)
+   where x.id = p_attempt
+  returning * into a;
+  select * into s from public.study_qsets x where x.id = a.set_id;
+  if v_first and s.created_by is not null and s.created_by <> me and s.deleted_at is null
+     and to_regprocedure('study_private.notice_add(uuid,uuid,text,jsonb,jsonb,text,text,uuid,timestamptz)') is not null
+     and to_regclass('study_private.notice_kinds') is not null then
+    begin
+      execute 'select count(*)::int from study_private.notice_kinds where kind = $1' into k using 'set_solved';
+      if k > 0 then
+        execute 'select study_private.notice_add($1, $2, $3, $4, $5, $6, $7, $8, null)'
+          using s.created_by, s.group_id, 'set_solved',
+                jsonb_build_object('title', s.title, 'k', (select count(distinct y.user_id) from public.study_qset_attempts y
+                                                            where y.set_id = s.id and y.finished_at is not null and y.user_id <> s.created_by)),
+                jsonb_build_object('v', 'sets', 'k', s.id), 'qset:' || s.id::text, 'qset_solved:' || s.id::text, s.lecture_id;
+      end if;
+    exception when others then
+      raise warning 'qset set_solved %', sqlstate;
+    end;
+  end if;
+  return jsonb_build_object('answered', a.answered, 'right_n', a.right_n, 'total', a.total, 'first', v_first);
+end;
+$$;
+
+-- The group's numbers on a set (OD5). solvers: members with a finished
+-- attempt. mine: the caller's first finished attempt. avg (the share right,
+-- 0-1) and per_q (bands: 1 most were wrong, 2 some, 3 most were right) only
+-- when at least pulse_floor() OTHER members finished, per_q over the others
+-- only and a band only where that many others answered the question.
+-- names: of finishers who chose to show their name (OD7), never a score.
+create or replace function public.study_qset_stats(p_set uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  me     uuid := auth.uid();
+  s      public.study_qsets;
+  fl     int := study_private.pulse_floor();
+  firsts jsonb;
+  n_all  int;
+  n_oth  int;
+  v_mine jsonb;
+  v_avg  numeric;
+  v_perq jsonb;
+  v_name jsonb;
+begin
+  if me is null then raise exception 'not signed in'; end if;
+  s := study_private.qset_get(p_set);
+  -- Each member's first finished attempt.
+  select coalesce(jsonb_agg(to_jsonb(f)), '[]') into firsts
+    from (select distinct on (a.user_id) a.id, a.user_id, a.total, a.answered, a.right_n
+            from public.study_qset_attempts a
+           where a.set_id = p_set and a.finished_at is not null
+           order by a.user_id, a.finished_at, a.id) f;
+  select count(*)::int, count(*) filter (where f.user_id <> me)::int into n_all, n_oth
+    from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int);
+  select jsonb_build_object('answered', f.answered, 'right_n', f.right_n, 'total', f.total) into v_mine
+    from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int) where f.user_id = me;
+  if n_oth >= fl then
+    select round(avg(f.right_n::numeric / nullif(greatest(f.total, f.answered), 0)), 3) into v_avg
+      from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int);
+    select jsonb_agg(jsonb_build_object('question_id', i.question_id, 'pos', i.pos,
+                                        'band', case when c.n < fl then null
+                                                     when c.r::numeric / c.n < 0.34 then 1
+                                                     when c.r::numeric / c.n <= 0.66 then 2
+                                                     else 3 end) order by i.pos)
+      into v_perq
+      from public.study_qset_items i
+      cross join lateral (
+        select count(*)::int as n, count(*) filter (where fa.correct)::int as r
+          from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int)
+          cross join lateral (select x.correct from public.study_answers x
+                               where x.set_attempt = f.id and x.user_id = f.user_id and x.question_id = i.question_id
+                               order by x.answered_at, x.id limit 1) fa
+         where f.user_id <> me) c
+     where i.set_id = p_set;
+  end if;
+  select jsonb_agg(m.name order by m.name) into v_name
+    from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int)
+    join public.study_qset_prefs p on p.user_id = f.user_id and p.show_name
+    join public.study_members m on m.group_id = s.group_id and m.user_id = f.user_id;
+  return jsonb_build_object('solvers', n_all, 'others', n_oth, 'floor', fl, 'mine', v_mine, 'avg', v_avg,
+                            'per_q', v_perq, 'names', coalesce(v_name, '[]'));
+end;
+$$;
+
+-- OD7: "להציג את השם שלי ברשימת מי פתרו" (asked once, then in שלי).
+create or replace function public.study_qset_names_pref(p_on boolean)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  insert into public.study_qset_prefs as p (user_id, show_name, asked_at) values (auth.uid(), coalesce(p_on, false), now())
+  on conflict (user_id) do update set show_name = excluded.show_name, asked_at = now();
+  return coalesce(p_on, false);
+end;
+$$;
+
+-- ── The trigger: a question kept from a set's request joins the set ──
+-- One trigger for a member's keep, keep all and auto-keep alike. The keep
+-- paths hold the round lock and then the draft row when the insert fires;
+-- this locks only the set row (as progress does), so there is no cycle. Its
+-- body never fails the keep: an error is a warning and the set misses that
+-- question. Rollback (sets stop filling, nothing else changes):
+--   alter table public.study_questions disable trigger study_qset_items_from_bank;
+create or replace function study_private.qset_item_from_bank()
+returns trigger language plpgsql security definer set search_path = public set lock_timeout = '2s' as $$
+declare v_set uuid; v_pos int;
+begin
+  select r.set_id into v_set from public.study_qset_requests r where r.request_id = new.request_id;
+  if v_set is null then return null; end if;
+  perform 1 from public.study_qsets s where s.id = v_set for update;
+  select coalesce(max(i.pos), 0) + 1 into v_pos from public.study_qset_items i where i.set_id = v_set;
+  if v_pos <= 200 then
+    insert into public.study_qset_items (set_id, question_id, pos) values (v_set, new.id, v_pos) on conflict do nothing;
+    update public.study_qsets s set updated_at = now() where s.id = v_set;
+  end if;
+  return null;
+exception when others then
+  raise warning 'study_qset_items_from_bank %', sqlstate;
+  return null;
+end;
+$$;
+drop trigger if exists study_qset_items_from_bank on public.study_questions;
+create trigger study_qset_items_from_bank after insert on public.study_questions
+  for each row when (new.request_id is not null) execute function study_private.qset_item_from_bank();
+
+-- ── Hooks for the other sections (guarded on their side) ──
+
+-- The set of a request, or null (R's questions_ready skips a set's request,
+-- so an author never gets two notices for one set).
+create or replace function study_private.qset_of_request(p_request uuid)
+returns uuid language sql stable security definer set search_path = public as $$
+  select r.set_id from public.study_qset_requests r join public.study_qsets s on s.id = r.set_id
+   where r.request_id = p_request and s.deleted_at is null
+$$;
+
+-- The exams design (section O 2): a "similar" run is a set of kind 'sheet'.
+create or replace function study_private.qset_for_similar(p_group uuid, p_exam uuid, p_run uuid, p_by uuid, p_title text, p_want int)
+returns uuid language plpgsql volatile security definer set search_path = public as $$
+declare v_id uuid; t text := left(btrim(coalesce(p_title, '')), 80);
+begin
+  if p_group is null or t = '' then raise exception 'bad request'; end if;
+  insert into public.study_qsets (group_id, kind, title, exam_id, similar_run, want, state, created_by)
+  values (p_group, 'sheet', t, p_exam, p_run, least(greatest(coalesce(p_want, 1), 1), 60), 'making', p_by)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Appends questions at the next places (a question already in it is skipped).
+create or replace function study_private.qset_add_items(p_set uuid, p_questions uuid[])
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare q uuid; v_pos int; n int := 0;
+begin
+  perform 1 from public.study_qsets s where s.id = p_set and s.deleted_at is null for update;
+  if not found then return 0; end if;
+  select coalesce(max(i.pos), 0) into v_pos from public.study_qset_items i where i.set_id = p_set;
+  for q in select u from unnest(coalesce(p_questions, '{}')) with ordinality as t(u, o) where u is not null order by o loop
+    exit when v_pos >= 200;
+    continue when exists (select 1 from public.study_qset_items i where i.set_id = p_set and i.question_id = q);
+    v_pos := v_pos + 1;
+    insert into public.study_qset_items (set_id, question_id, pos) values (p_set, q, v_pos);
+    n := n + 1;
+  end loop;
+  update public.study_qsets s set updated_at = now() where s.id = p_set;
+  return n;
+end;
+$$;
+
+-- The run's last job: ready, then the same once-only notice.
+create or replace function study_private.qset_similar_done(p_set uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  update public.study_qsets s set state = 'ready', updated_at = now() where s.id = p_set and s.state <> 'ready';
+  perform study_private.qset_announce(p_set);
+end;
+$$;
+
+-- ── The nightly clean-up (its own job: section F's is one fixed command) ──
+create or replace function study_private.qsets_cleanup()
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  -- A set that never got past reading its lecture.
+  delete from public.study_qsets s
+   where s.state = 'reading' and s.created_at < now() - interval '1 day'
+     and not exists (select 1 from public.study_qset_requests r where r.set_id = s.id)
+     and not exists (select 1 from public.study_qset_items i where i.set_id = s.id);
+  delete from public.study_qset_attempts a where a.finished_at is null and a.started_at < now() - interval '365 days';
+  delete from public.study_qset_marks k using public.study_qsets s where s.id = k.set_id and s.deleted_at is not null;
+  delete from public.study_qsets s
+   where s.deleted_at < now() - interval '30 days'
+     and not exists (select 1 from public.study_qset_attempts a where a.set_id = s.id);
+  if to_regclass('cron.job_run_details') is not null and to_regclass('cron.job') is not null then
+    execute $c$delete from cron.job_run_details where jobid in (select jobid from cron.job where jobname = 'study-qsets-clean')
+                and end_time < now() - interval '2 days'$c$;
+  end if;
+end;
+$$;
+
+-- ── Who may call what ──
+revoke all on function study_private.qset_get(uuid), study_private.qset_facts(uuid),
+  study_private.qset_paused(text, timestamptz, int, timestamptz), study_private.qset_is_open(uuid),
+  study_private.qset_announce(uuid), study_private.qset_refresh(uuid), study_private.qset_rows(uuid, uuid, uuid, int),
+  study_private.qset_attempt_open(uuid, uuid), study_private.qset_item_from_bank(), study_private.qset_of_request(uuid),
+  study_private.qset_for_similar(uuid, uuid, uuid, uuid, text, int), study_private.qset_add_items(uuid, uuid[]),
+  study_private.qset_similar_done(uuid), study_private.qsets_cleanup() from public;
+revoke all on function public.study_qset_begin(uuid, jsonb, text, boolean, int, numeric, text),
+  public.study_qset_attach(uuid, jsonb, jsonb, text), public.study_qset_abandon(uuid), public.study_qset_style(uuid, text, text),
+  public.study_qset_autokeep(uuid[], text), public.study_qset_progress(uuid), public.study_qset_rename(uuid, text),
+  public.study_qset_delete(uuid), public.study_qset_hide(uuid, boolean), public.study_qset_seen(uuid[]),
+  public.study_qsets_shelf(uuid, uuid, int), public.study_qset_open(uuid), public.study_lecture_making(uuid),
+  public.study_qset_room(uuid), public.study_qset_attempt_start(uuid),
+  public.study_qset_answer(uuid, uuid, int, text, int, int), public.study_qset_answer_seq(uuid, uuid, int[], text, int, int),
+  public.study_qset_attempt_finish(uuid), public.study_qset_stats(uuid), public.study_qset_names_pref(boolean)
+  from public, anon;
+-- begin, attach, style and autokeep need the server key inside; the grant only lets the op's call reach them.
+grant execute on function public.study_qset_begin(uuid, jsonb, text, boolean, int, numeric, text),
+  public.study_qset_attach(uuid, jsonb, jsonb, text), public.study_qset_abandon(uuid), public.study_qset_style(uuid, text, text),
+  public.study_qset_autokeep(uuid[], text), public.study_qset_progress(uuid), public.study_qset_rename(uuid, text),
+  public.study_qset_delete(uuid), public.study_qset_hide(uuid, boolean), public.study_qset_seen(uuid[]),
+  public.study_qsets_shelf(uuid, uuid, int), public.study_qset_open(uuid), public.study_lecture_making(uuid),
+  public.study_qset_room(uuid), public.study_qset_attempt_start(uuid),
+  public.study_qset_answer(uuid, uuid, int, text, int, int), public.study_qset_answer_seq(uuid, uuid, int[], text, int, int),
+  public.study_qset_attempt_finish(uuid), public.study_qset_stats(uuid), public.study_qset_names_pref(boolean)
+  to authenticated;
+
+-- ── Realtime: a set's state and its questions as they join (the
+-- generating screen, the shelf). Never an attempt, a mark or an answer. ──
+do $$
+declare t text;
+begin
+  foreach t in array array['study_qsets', 'study_qset_items'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception
+      when duplicate_object then null;
+      when undefined_object then raise notice 'no supabase_realtime publication: sets update on each open only';
+    end;
+  end loop;
+end $$;
+
+-- ── Every night at 03:29 (only with pg_cron) ──
+do $$
+begin
+  if to_regnamespace('cron') is null then
+    raise notice 'pg_cron is off: practice sets work, but nothing cleans them up at night. Integrations → Cron → enable pg_cron, then run this part again.';
+  else
+    perform cron.schedule('study-qsets-clean', '29 3 * * *', 'select study_private.qsets_cleanup()');
+  end if;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('L', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION L ════

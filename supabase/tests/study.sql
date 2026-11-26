@@ -10431,3 +10431,507 @@ select pg_temp.rok('R25', not exists (select 1 from study_private.notify_outbox 
   and not exists (select 1 from public.study_push_subs where endpoint like '%/r-0%'),
   'nothing of these checks is left (notices, pushes and devices go with their user)');
 -- ════ END SECTION R ════
+
+-- ════ BEGIN SECTION L ════ (checks for supabase/tests/study.sql)
+-- Practice sets (L 1, docs/study/sets.md): the switches and kind_on, who
+-- reads and calls what, begin (open sets, force, the day's sets, the sets
+-- line), attach and abandon, the trigger that fills a set from the bank (and
+-- never fails a keep), progress, paused and the once-only notice, the
+-- shelf, marks, rename and delete, attempts and the answer wrappers, the
+-- group's numbers and their floor of 3 others, set_solved, auto-keep, the
+-- hooks for sheet sets and the nightly clean-up. All titles and questions
+-- are invented. (keep all against auto-keep at once, and two begins at
+-- once: supabase/tests/qsets-concurrency.sh.)
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+set request.jwt.claim.sub = '';
+\set la '1b000000-0000-4000-8000-000000000001'
+\set lb '1b000000-0000-4000-8000-000000000002'
+\set lc '1b000000-0000-4000-8000-000000000003'
+\set ld '1b000000-0000-4000-8000-000000000004'
+\set le '1b000000-0000-4000-8000-000000000005'
+\set lz '1b000000-0000-4000-8000-000000000009'
+\set lg '1b000000-0000-4000-8000-0000000000a1'
+\set ll1 '1b000000-0000-4000-8000-0000000000b1'
+\set ll2 '1b000000-0000-4000-8000-0000000000b2'
+select set_config('l.key', (select decrypted_secret from vault.decrypted_secrets where name = 'study_worker_key' limit 1), false) is not null as k \gset
+insert into auth.users (id, raw_user_meta_data) values
+ (:'la', '{"app":"study","full_name":"אביב"}'), (:'lb', '{"app":"study","full_name":"ברק"}'),
+ (:'lc', '{"app":"study","full_name":"גפן"}'), (:'ld', '{"app":"study","full_name":"דניאל"}'),
+ (:'le', '{"app":"study","full_name":"הלל"}'), (:'lz', '{"app":"study","full_name":"זר"}');
+-- The group was opened by גפן (lc), so גפן may delete any set.
+insert into public.study_groups (id, name, join_code, created_by) values (:'lg', 'קבוצת הסטים', 'LSETS1', :'lc');
+insert into public.study_members (group_id, user_id, name) values
+ (:'lg', :'la', 'אביב'), (:'lg', :'lb', 'ברק'), (:'lg', :'lc', 'גפן'), (:'lg', :'ld', 'דניאל'), (:'lg', :'le', 'הלל');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'ll1', :'lg', 'פרמקולוגיה', 'משתנים (בדוי)', 'pptx', '[]', 'ready', :'la'),
+ (:'ll2', :'lg', 'פרמקולוגיה', 'אנטיביוטיקה (בדוי)', 'pptx', '[]', 'ready', :'lb');
+insert into public.study_sections (lecture_id, idx, title, slide_from, slide_to, status, markdown) values
+ (:'ll1', 0, 'חלק א', 1, 8, 'ready', '## חלק א'), (:'ll2', 0, 'חלק א', 1, 8, 'ready', '## חלק א');
+create or replace function pg_temp.lbegin(p_user text, p_lecture text, p_phase text, p_force boolean, p_daily int default null,
+  p_line numeric default null) returns jsonb language plpgsql as $$
+declare r jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', p_user, true);
+  r := public.study_qset_begin(p_lecture::uuid, '{"want": 3, "options": {"level": "custom", "parts": [0], "focus": "סוד", "points": ["x"]}}',
+                               p_phase, p_force, p_daily, p_line, current_setting('l.key'));
+  return r;
+exception when others then
+  return jsonb_build_object('error', sqlerrm);
+end $$;
+create or replace function pg_temp.lattach(p_user text, p_set text, p_parts text default '[0]') returns text language plpgsql as $$
+begin
+  perform set_config('request.jwt.claim.sub', p_user, true);
+  return (select string_agg(distinct a.request_id::text, ',') from public.study_qset_attach(p_set::uuid,
+            ('{"level":"custom","count":3,"parts":' || p_parts || ',"styles":["case"],"difficulty":"exam"}')::jsonb,
+            '[{"part_idx":0,"seq":0,"wanted":3,"points":[],"styles":["case","case","case"]}]'::jsonb, current_setting('l.key')) a);
+exception when others then
+  return 'error: ' || sqlerrm;
+end $$;
+create or replace function pg_temp.las(p_user text, p_sql text) returns text language plpgsql as $$
+declare r text;
+begin
+  perform set_config('request.jwt.claim.sub', p_user, true);
+  execute p_sql into r;
+  return coalesce(r, 'null');
+exception when others then
+  return 'error: ' || sqlerrm;
+end $$;
+-- The error a statement raises ('none' when it raises nothing).
+create or replace function pg_temp.lerr(p_sql text) returns text language plpgsql as $$
+begin
+  execute p_sql;
+  return 'none';
+exception when others then
+  return sqlerrm;
+end $$;
+-- A pending draft of a request (as the writer and the blind solver leave it), with its key (answer 0).
+create or replace function pg_temp.ldraft(p_request uuid, p_check text, p_n int, p_series uuid default null, p_step int default null)
+returns uuid language plpgsql as $$
+declare d uuid; r public.study_question_requests;
+begin
+  select * into r from public.study_question_requests x where x.id = p_request;
+  insert into public.study_question_drafts (group_id, lecture_id, request_id, batch_id, part_idx, style, kind, question, options,
+                                            check_state, created_by, series, step, created_at)
+  values (r.group_id, r.lecture_id, r.id, (select b.id from public.study_question_batches b where b.request_id = r.id limit 1), 0,
+          'case', 'mcq', 'שאלה בדויה מספר ' || p_n, array['א', 'ב', 'ג'], p_check, r.created_by, p_series, p_step,
+          now() + make_interval(secs => p_n))
+  returning id into d;
+  insert into public.study_question_draft_keys (draft_id, answer, explanations) values (d, 0, array['x', 'y', 'z']);
+  return d;
+end $$;
+
+-- ── The section, its switches, kind_on and loading it twice ──
+select pg_temp.rok('LS1', public.study_schema() ->> 'L' = '1', 'the registry has L 1');
+select pg_temp.rok('LS1b', (select string_agg(name || ':' || enabled, ',' order by name) from study_private.features
+                            where name in ('qsets', 'qsets_auto_keep', 'questions_paid')) = 'qsets:true,qsets_auto_keep:false,questions_paid:true',
+  'the switches: qsets on, auto-keep off (OD15), questions_paid on (OD14)');
+select pg_temp.rok('LS1c',
+  (select count(*) from pg_policies where tablename like 'study\_qset%') = 6
+  and (select count(*) from pg_trigger where tgname = 'study_qset_items_from_bank' and not tgisinternal) = 1
+  and (select count(*) from cron.job where jobname = 'study-qsets-clean' and schedule = '29 3 * * *') = 1
+  and (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename in ('study_qsets', 'study_qset_items')) = 2
+  and (select count(*) from pg_publication_tables where pubname = 'supabase_realtime'
+        and tablename in ('study_qset_attempts', 'study_qset_marks', 'study_qset_prefs', 'study_qset_requests')) = 0,
+  'loaded twice: one policy each, one trigger, one nightly job; sets and items published, attempts and marks never');
+select pg_temp.rok('LS1d', (select string_agg(k || ':' || study_private.kind_on(k), ',' order by k)
+                            from unnest(array['bank', 'part', 'points', 'practice', 'reword', 'solver', 'style']) k)
+                          = 'bank:true,part:true,points:true,practice:true,reword:true,solver:true,style:true'
+  and study_private.kind_on('notes') = study_private.feature_on('recordings') and study_private.kind_on('exam') = study_private.feature_on('exams'),
+  'kind_on: the question kinds on with questions_paid; notes and exam still follow their own switches');
+update study_private.features set enabled = false where name = 'questions_paid';
+select pg_temp.rok('LS1e', (select string_agg(k || ':' || study_private.kind_on(k), ',' order by k)
+                            from unnest(array['bank', 'outline', 'part', 'points', 'practice', 'reword', 'solver', 'style']) k)
+                          = 'bank:false,outline:true,part:true,points:false,practice:false,reword:false,solver:false,style:false',
+  'questions_paid off: practice, solver, reword, style, points and bank stop; summaries do not');
+select pg_temp.rok('LS1f', pg_temp.lerr(format('select public.study_reserve(%L, %L, %L, null, 0.1, 33, 0.8, null, null, null, %L)',
+                                           :'lg', :'ll1', 'practice', current_setting('l.key'))) = 'off'
+  and pg_temp.lerr(format('select public.study_reserve(%L, %L, %L, null, 0.1, 33, 0.8, null, null, null, %L)',
+                       :'lg', :'ll1', 'solver', current_setting('l.key'))) = 'off'
+  and pg_temp.lerr(format('select public.study_reserve(%L, %L, %L, null, 0.1, 33, 1, null, null, null, %L)',
+                       :'lg', :'ll1', 'part', current_setting('l.key'))) = 'none',
+  'study_reserve refuses practice and solver with ''off'', and still reserves a part');
+select pg_temp.rok('LS1g', pg_temp.lbegin(:'la', :'ll1', null, false) ->> 'error' = 'off', 'begin is off while questions_paid is off');
+update study_private.features set enabled = true where name = 'questions_paid';
+delete from public.study_usage where group_id = :'lg';
+select pg_temp.rok('LS1h', (select prosrc from pg_proc where oid = 'study_private.kind_on(text)'::regprocedure)
+                          like '%(''practice'', ''solver'', ''reword'', ''style'', ''points'', ''bank'')%questions_paid%',
+  'the one kind_on is L''s text (section F carries the same)');
+
+-- ── Who may read and call what ──
+select pg_temp.rok('LS2', (select bool_and(c.relrowsecurity) from pg_class c
+                           where c.relname in ('study_qsets', 'study_qset_requests', 'study_qset_items', 'study_qset_attempts',
+                                               'study_qset_marks', 'study_qset_prefs') and c.relnamespace = 'public'::regnamespace)
+  and not has_table_privilege('authenticated', 'public.study_qsets', 'insert')
+  and not has_table_privilege('authenticated', 'public.study_qsets', 'update')
+  and not has_table_privilege('authenticated', 'public.study_qset_items', 'insert')
+  and not has_table_privilege('authenticated', 'public.study_qset_attempts', 'update')
+  and not has_table_privilege('authenticated', 'public.study_qset_marks', 'insert')
+  and not has_table_privilege('authenticated', 'public.study_qset_prefs', 'update')
+  and not has_table_privilege('anon', 'public.study_qsets', 'select')
+  and not has_column_privilege('authenticated', 'public.study_answers', 'set_attempt', 'update'),
+  'row security on; members only read, and write nothing directly; anon reads nothing');
+select pg_temp.rok('LS2b',
+  not has_function_privilege('anon', 'public.study_qsets_shelf(uuid, uuid, int)', 'execute')
+  and not has_function_privilege('anon', 'public.study_qset_begin(uuid, jsonb, text, boolean, int, numeric, text)', 'execute')
+  and has_function_privilege('authenticated', 'public.study_qset_answer(uuid, uuid, int, text, int, int)', 'execute')
+  and not has_function_privilege('authenticated', 'study_private.qset_add_items(uuid, uuid[])', 'execute')
+  and not has_function_privilege('authenticated', 'study_private.qset_for_similar(uuid, uuid, uuid, uuid, text, int)', 'execute')
+  and not has_function_privilege('authenticated', 'study_private.qsets_cleanup()', 'execute'),
+  'the member RPCs are signed-in only; the hooks and the clean-up are nobody''s to call');
+
+-- ── begin: the server key, the switch, an open set, force, abandon ──
+set role authenticated;
+select pg_temp.rok('LS3', pg_temp.las(:'la', format('select public.study_qset_begin(%L, ''{"want":3}'', null, false, null, null, null)::text', :'ll1'))
+                         = 'error: forbidden', 'begin needs the server key');
+select pg_temp.rok('LS3b', pg_temp.lbegin(:'lz', :'ll1', null, false) ->> 'error' = 'lecture not found', 'a stranger cannot begin on the group''s lecture');
+select pg_temp.rok('LS3c', pg_temp.las(:'la', format('select public.study_qset_begin(%L, ''{"want":41}'', null, false, null, null, %L)::text', :'ll1', current_setting('l.key')))
+                          = 'error: bad request'
+  and pg_temp.las(:'la', format('select public.study_qset_begin(%L, ''{"want":3}'', ''write'', false, null, null, %L)::text', :'ll1', current_setting('l.key')))
+      = 'error: bad request', 'a size over 40 or an unknown phase is refused');
+reset role;
+update study_private.features set enabled = false where name = 'qsets';
+set role authenticated;
+select pg_temp.rok('LS3d', pg_temp.lbegin(:'la', :'ll1', null, false) ->> 'error' = 'off', 'qsets off: begin refuses');
+reset role;
+update study_private.features set enabled = true where name = 'qsets';
+set role authenticated;
+select (pg_temp.lbegin(:'la', :'ll1', 'read', false)) ->> 'set_id' as s1 \gset
+select pg_temp.rok('LS3e', pg_temp.las(:'la', format('select state || '' · '' || title || '' · '' || want || '' · '' || options::text from public.study_qsets where id = %L', :'s1'))
+                          = 'reading · משתנים (בדוי) · 3 · {"level": "custom", "parts": [0]}',
+  'Aviv''s set reads first; the title defaults to the lecture''s; the options keep no points and no focus');
+select pg_temp.rok('LS3f', (pg_temp.lbegin(:'lb', :'ll1', null, false) -> 'open') - 'set_id'
+                          = '{"made": 0, "mine": false, "want": 3, "state": "reading", "author_name": "אביב"}'::jsonb
+  and pg_temp.lbegin(:'lb', :'ll1', null, false) -> 'open' ->> 'set_id' = :'s1',
+  'Barak''s begin on the same lecture answers the open set (D6): its author, made of want');
+select (pg_temp.lbegin(:'lb', :'ll1', null, true)) ->> 'set_id' as s2 \gset
+select pg_temp.rok('LS3g', pg_temp.las(:'lb', format('select state from public.study_qsets where id = %L', :'s2')) = 'making', 'with force, a second set (OD20: a soft block)');
+select pg_temp.rok('LS3h', pg_temp.las(:'la', format('select public.study_qset_abandon(%L)::text', :'s2')) = 'false'
+  and pg_temp.las(:'lb', format('select public.study_qset_abandon(%L)::text', :'s2')) = 'true'
+  and pg_temp.las(:'lb', format('select count(*)::text from public.study_qsets where id = %L', :'s2')) = '0',
+  'abandon: only the author, and a set without a request or questions is gone');
+reset role;
+update public.study_qsets set updated_at = now() - interval '11 minutes' where id = :'s1';
+set role authenticated;
+select (pg_temp.lbegin(:'lb', :'ll1', null, false)) ->> 'set_id' as s3 \gset
+select pg_temp.rok('LS3i', :'s3' <> '' and pg_temp.lbegin(:'lc', :'ll1', null, false) -> 'open' ->> 'set_id' = :'s3',
+  'a set reading for 10 minutes no longer blocks; one just begun (its request not attached yet) does, for 2 minutes');
+reset role;
+update public.study_qsets set updated_at = now() - interval '3 minutes' where id = :'s3';
+set role authenticated;
+select pg_temp.rok('LS3j', pg_temp.lbegin(:'lc', :'ll1', null, false) ? 'set_id' and pg_temp.las(:'lc', format(
+    'select string_agg(public.study_qset_abandon(s.id)::text, '','') from public.study_qsets s where s.created_by = %L', :'lc')) = 'true',
+  'after 2 minutes without a request it does not block');
+select pg_temp.rok('LS3k', pg_temp.las(:'lb', format('select public.study_qset_abandon(%L)::text', :'s3')) = 'true', 'Barak''s unattached set is abandoned');
+
+-- ── attach: Q's request under the round lock; once; Q's refusals ──
+select pg_temp.rok('LS4', pg_temp.lattach(:'lb', :'s1') = 'error: set not found', 'only the author attaches');
+select pg_temp.rok('LS4b', pg_temp.lattach(:'la', :'s1', '[7]') = 'error: bad parts'
+  and pg_temp.las(:'la', format('select count(*)::text from public.study_qset_requests where set_id = %L', :'s1')) = '0',
+  'Q refuses (a part the lecture does not have): no request is left');
+select pg_temp.lattach(:'la', :'s1') as rq1 \gset
+select pg_temp.rok('LS4c', :'rq1' ~ '^[0-9a-f-]{36}$'
+  and pg_temp.las(:'la', format('select s.state || '' · '' || s.want || '' · '' || (select count(*) from public.study_qset_requests r where r.set_id = s.id)
+                                   from public.study_qsets s where s.id = %L', :'s1')) = 'making · 3 · 1',
+  'the request is attached; the set is making');
+select pg_temp.rok('LS4d', pg_temp.lattach(:'la', :'s1') = 'error: set has a request', 'only once');
+select pg_temp.rok('LS4e', pg_temp.lbegin(:'lb', :'ll1', null, false) -> 'open' ->> 'set_id' = :'s1',
+  'a set whose batch is pending is open');
+select pg_temp.rok('LS4f', pg_temp.las(:'la', format('select study_private.qset_of_request(%L)::text', :'rq1')) like 'error: permission denied%',
+  'the hooks are not callable by a member');
+reset role;
+select pg_temp.rok('LS4g', study_private.qset_of_request(:'rq1') = :'s1'::uuid, 'qset_of_request: the set of a request (R''s questions_ready skips it)');
+update public.study_question_batches set updated_at = now() - interval '31 minutes' where request_id = :'rq1';
+select pg_temp.rok('LS4h', not study_private.qset_is_open(:'s1'), 'a batch that has not moved for 30 minutes is not open');
+update public.study_question_batches set updated_at = now() where request_id = :'rq1';
+
+-- ── The day's sets (OD13) and the sets line (OD12) ──
+set role authenticated;
+select pg_temp.rok('LS5', (select string_agg(coalesce(pg_temp.lbegin(:'ld', :'ll2', null, true, 5) ->> 'error', 'set'), ',')
+                            from generate_series(1, 6)) = 'set,set,set,set,set,daily_limit',
+  'the 6th new set of the day is refused (p_daily 5)');
+select pg_temp.las(:'ld', format('select public.study_qset_delete(s.id)::text from public.study_qsets s where s.created_by = %L limit 1', :'ld')) as dummy \gset
+select pg_temp.rok('LS5b', pg_temp.lbegin(:'ld', :'ll2', null, true, 5) ->> 'error' = 'daily_limit',
+  'a deleted set still counts (its questions were paid)');
+select pg_temp.rok('LS5c', pg_temp.las(:'ld', format('select sets_usd::text || '' · '' || today from public.study_qset_room(%L)', :'lg')) = '0 · 5'
+  and pg_temp.las(:'lz', format('select today::text from public.study_qset_room(%L)', :'lg')) = 'error: forbidden',
+  'the room: the sets line''s spend and the day''s sets; members only');
+reset role;
+insert into public.study_usage (group_id, lecture_id, user_id, kind, cost_usd) values
+ (:'lg', :'ll1', :'lb', 'practice', 2.5), (:'lg', :'ll1', :'lb', 'solver', 0.5), (:'lg', :'ll1', :'lb', 'part', 4);
+set role authenticated;
+select pg_temp.rok('LS5d', pg_temp.lbegin(:'le', :'ll2', null, true, 5, 3) ->> 'error' = 'sets_line'
+  and pg_temp.lbegin(:'le', :'ll2', null, true, 5, 3.5) ? 'set_id'
+  and pg_temp.las(:'le', format('select sets_usd::text from public.study_qset_room(%L)', :'lg')) = '3.00000',
+  'the sets line: practice and solver count, a summary''s part does not');
+select pg_temp.las(:'le', format('select string_agg(public.study_qset_abandon(s.id)::text, '','') from public.study_qsets s where s.created_by = %L', :'le')) as dummy \gset
+reset role;
+delete from public.study_usage where group_id = :'lg';
+
+-- ── The trigger: kept questions join the set in order, and it never fails a keep ──
+select pg_temp.ldraft(:'rq1', 'ok', 1) as d1, pg_temp.ldraft(:'rq1', 'ok', 2) as d2, pg_temp.ldraft(:'rq1', 'unchecked', 3) as d3,
+       pg_temp.ldraft(:'rq1', 'failed', 4) as d4, pg_temp.ldraft(:'rq1', 'checking', 5) as d5 \gset
+set role authenticated;
+select pg_temp.las(:'lb', format('select public.study_draft_keep(%L)::text', :'d2')) as q2 \gset
+select pg_temp.las(:'la', format('select string_agg(question_id::text, '','') from public.study_draft_keep_all(%L)', :'rq1')) as kept \gset
+select pg_temp.rok('LS6', pg_temp.las(:'la', format('select string_agg(i.pos || '':'' || (select d.id = any (array[%L, %L, %L]::uuid[]) from public.study_question_drafts d where d.question_id = i.question_id), '','' order by i.pos)
+                                                     from public.study_qset_items i where i.set_id = %L', :'d2', :'d1', :'d3', :'s1')) = '1:true,2:true,3:true'
+  and pg_temp.las(:'la', format('select (select question_id from public.study_qset_items where set_id = %L and pos = 1)::text', :'s1')) = :'q2',
+  'a member''s keep, then keep all: three questions in the order they were kept');
+reset role;
+alter table public.study_qset_items add constraint study_qset_items_l_test check (pos < 0) not valid;
+select pg_temp.ldraft(:'rq1', 'ok', 6) as d6 \gset
+set role authenticated;
+select pg_temp.rok('LS6b', pg_temp.las(:'lb', format('select (public.study_draft_keep(%L) is not null)::text', :'d6')) = 'true'
+  and pg_temp.las(:'lb', format('select count(*)::text from public.study_qset_items where set_id = %L', :'s1')) = '3',
+  'a failure inside the trigger does not fail the keep (the set misses that question)');
+reset role;
+alter table public.study_qset_items drop constraint study_qset_items_l_test;
+select study_private.qset_add_items(:'s1', array[(select question_id from public.study_question_drafts where id = :'d6')]) as dummy \gset
+
+-- ── Progress: making, paused after 6 minutes, ready, and the notice once ──
+set role authenticated;
+select pg_temp.rok('LS7', pg_temp.las(:'la', format('select (public.study_qset_progress(%L) - ''want'')::text', :'s1'))
+                         = '{"made": 4, "size": 4, "state": "making", "failed": 0, "paused": false, "unchecked": 0}',
+  'progress while its batch is pending');
+reset role;
+update public.study_question_batches set updated_at = now() - interval '7 minutes' where request_id = :'rq1';
+set role authenticated;
+select pg_temp.rok('LS7b', pg_temp.las(:'lb', format('select (public.study_qset_progress(%L) ->> ''paused'')', :'s1')) = 'true'
+  and pg_temp.las(:'lb', format('select paused::text from public.study_qsets_shelf(%L) where id = %L', :'lg', :'s1')) = 'true',
+  'nothing moved for 6 minutes: paused (§7.4), on the shelf too');
+reset role;
+-- R's set_shared hook, stood in for here (WP17 adds the real one): every call is counted.
+create table if not exists pg_temp.l_shared (set_id uuid, args jsonb);
+select to_regprocedure('study_private.notice_set_shared(uuid,uuid,uuid[],uuid,jsonb)') is null as l_stub \gset
+\if :l_stub
+create function study_private.notice_set_shared(p_group uuid, p_set uuid, p_to uuid[], p_actor uuid, p_args jsonb)
+returns int language sql security definer as $$ insert into pg_temp.l_shared values (p_set, p_args) returning 1 $$;
+\endif
+update public.study_question_batches set status = 'ready', made = 2, updated_at = now() where request_id = :'rq1';
+set role authenticated;
+select pg_temp.rok('LS7c', pg_temp.las(:'lb', format('select (public.study_qset_progress(%L) - ''want'' - ''paused'')::text', :'s1'))
+                          = '{"made": 4, "size": 4, "state": "ready", "failed": 1, "unchecked": 0}',
+  'no batch left: ready; one question did not come out (3 wanted, 2 made)');
+select pg_temp.las(:'lc', format('select public.study_qset_progress(%L)::text', :'s1')) as dummy \gset
+reset role;
+select pg_temp.rok('LS7d', (select count(*) from pg_temp.l_shared where set_id = :'s1') = 1
+  and (select args from pg_temp.l_shared where set_id = :'s1') = '{"k": 4, "name": "אביב", "lecture": "משתנים (בדוי)"}'::jsonb
+  and (select notified_at is not null from public.study_qsets where id = :'s1'),
+  'set_shared once (notified_at), with the lecture, the count and the author''s name for R to word');
+\if :l_stub
+drop function study_private.notice_set_shared(uuid, uuid, uuid[], uuid, jsonb);
+\endif
+
+-- ── The shelf, marks, rename and delete ──
+set role authenticated;
+select pg_temp.rok('LS8', pg_temp.las(:'la', format('select string_agg(title || '' · '' || author_name || '' · '' || size || '' · '' || is_mine || '' · '' || is_new, ''|'')
+                                                     from public.study_qsets_shelf(%L, %L)', :'lg', :'ll1')) = 'משתנים (בדוי) · אביב · 4 · true · false'
+  and pg_temp.las(:'lb', format('select is_new::text from public.study_qsets_shelf(%L) where id = %L', :'lg', :'s1')) = 'true',
+  'the shelf: the author sees it as theirs; for Barak it is new');
+select pg_temp.rok('LS8b', pg_temp.las(:'lb', format('select public.study_qset_seen(array[%L]::uuid[])::text', :'s1')) = '1'
+  and pg_temp.las(:'lb', format('select is_new::text from public.study_qsets_shelf(%L) where id = %L', :'lg', :'s1')) = 'false',
+  'opened: no longer new');
+select pg_temp.rok('LS8c', pg_temp.las(:'lb', format('select public.study_qset_hide(%L, true)::text', :'s1')) = ''
+  and pg_temp.las(:'lb', format('select is_hidden::text from public.study_qsets_shelf(%L) where id = %L', :'lg', :'s1')) = 'true'
+  and pg_temp.las(:'la', format('select is_hidden::text from public.study_qsets_shelf(%L) where id = %L', :'lg', :'s1')) = 'false'
+  and pg_temp.las(:'lb', format('select public.study_qset_hide(%L, false)::text || (select is_hidden from public.study_qsets_shelf(%L) where id = %L)', :'s1', :'lg', :'s1')) = 'false',
+  'hidden for Barak only, and back');
+select pg_temp.rok('LS8d', pg_temp.las(:'lz', format('select count(*)::text from public.study_qsets_shelf(%L)', :'lg')) = 'error: forbidden'
+  and pg_temp.las(:'lz', format('select count(*)::text from public.study_qsets where id = %L', :'s1')) = '0'
+  and pg_temp.las(:'lz', format('select public.study_qset_open(%L)::text', :'s1')) = 'error: set not found'
+  and pg_temp.las(:'lz', format('select count(*)::text from public.study_qset_items where set_id = %L', :'s1')) = '0',
+  'a stranger sees no set, item or shelf');
+select pg_temp.rok('LS8e', pg_temp.las(:'lb', format('select jsonb_array_length(o -> ''items'')::text || '' · '' || (o -> ''set'' ->> ''author_name'') || '' · '' || (o -> ''options'')::text
+                                                      from public.study_qset_open(%L) o', :'s1')) = '4 · אביב · {"level": "custom", "parts": [0]}',
+  'the set page: its questions in order, the author''s name, the options without a style signature');
+select pg_temp.rok('LS8f', pg_temp.las(:'lb', format('select public.study_qset_rename(%L, ''שלי'')::text', :'s1')) = 'error: not yours'
+  and pg_temp.las(:'la', format('select public.study_qset_rename(%L, ''  משתנים   חזרה  '')::text', :'s1')) = ''
+  and pg_temp.las(:'la', format('select title from public.study_qsets where id = %L', :'s1')) = 'משתנים חזרה',
+  'only the author renames (spaces tidied)');
+-- A second set, by Barak, to delete.
+select (pg_temp.lbegin(:'lb', :'ll2', 'read', true)) ->> 'set_id' as s4 \gset
+select pg_temp.rok('LS8g', pg_temp.las(:'la', format('select public.study_qset_delete(%L)::text', :'s4')) = 'error: not yours'
+  and pg_temp.las(:'lc', format('select public.study_qset_delete(%L)::text', :'s4')) = ''
+  and pg_temp.las(:'lb', format('select count(*)::text from public.study_qsets where id = %L', :'s4')) = '0'
+  and pg_temp.las(:'lb', format('select public.study_qset_open(%L)::text', :'s4')) = 'error: set not found',
+  'the group''s creator deletes another member''s set (OD3); it leaves every shelf');
+reset role;
+update study_private.features set enabled = false where name = 'qsets';
+set role authenticated;
+select pg_temp.rok('LS8h', pg_temp.las(:'la', format('select count(*)::text from public.study_qsets_shelf(%L)', :'lg')) = '0', 'qsets off: the shelf is empty');
+reset role;
+update study_private.features set enabled = true where name = 'qsets';
+
+-- ── Attempts and the answer wrappers ──
+select array_agg(i.question_id order by i.pos) as qs from public.study_qset_items i where i.set_id = :'s1' \gset
+select (:'qs'::uuid[])[1] as q1, (:'qs'::uuid[])[2] as q2x, (:'qs'::uuid[])[3] as q3, (:'qs'::uuid[])[4] as q4 \gset
+set role authenticated;
+-- Aviv answered q1 in a lecture round before: that row stays out of any set.
+select pg_temp.las(:'la', format('select correct::text from public.study_answer_question(%L, 1)', :'q1')) as dummy \gset
+select pg_temp.las(:'lb', format('select id::text from public.study_qset_attempt_start(%L)', :'s1')) as ab1 \gset
+select pg_temp.rok('LS9', pg_temp.las(:'lb', format('select id::text || '' · '' || total from public.study_qset_attempt_start(%L)', :'s1')) = :'ab1' || ' · 4',
+  'start: a new attempt sized to the set, and the same one again within 12 hours');
+-- One answer per statement, as the app sends them (one call, one transaction, its own time).
+select pg_temp.las(:'lb', format('select correct::text || '' · '' || answer from public.study_qset_answer(%L, %L, 0)', :'ab1', :'q1')) as lb_a1 \gset
+select pg_temp.las(:'lb', format('select correct::text from public.study_qset_answer(%L, %L, 2)', :'ab1', :'q1')) as lb_a2 \gset
+select pg_temp.rok('LS9b', :'lb_a1' = 'true · 0' and :'lb_a2' = 'false',
+  'the wrapper answers as Q does (the key and the explanations), also a second time');
+select pg_temp.rok('LS9c', pg_temp.las(:'lb', format('select public.study_qset_answer(%L, %L, 0)::text', :'ab1', :'xold')) = 'error: not in set'
+  and pg_temp.las(:'la', format('select public.study_qset_answer(%L, %L, 0)::text', :'ab1', :'q2x')) = 'error: attempt not found',
+  'a question of another set, or another member''s attempt, is refused');
+select pg_temp.las(:'lb', format('select correct::text from public.study_qset_answer(%L, %L, 1)', :'ab1', :'q2x')) as dummy \gset
+select pg_temp.las(:'lb', format('select correct::text from public.study_qset_answer(%L, %L, 0)', :'ab1', :'q3')) as dummy \gset
+reset role;
+select pg_temp.rok('LS9d', (select count(*) filter (where set_attempt = :'ab1') || ' · ' || count(*) filter (where set_attempt is null)
+                             from public.study_answers where question_id = any (:'qs'::uuid[]) and user_id in (:'la', :'lb')) = '4 · 1',
+  'each set answer is stamped; Aviv''s answer outside the set is not');
+set role authenticated;
+select pg_temp.rok('LS9e', pg_temp.las(:'lb', format('select (public.study_qset_attempt_finish(%L) - ''total'')::text', :'ab1'))
+                          = '{"first": true, "right_n": 2, "answered": 3}',
+  'finish: scored on the first answer per question (q1 right first, q2 wrong, q3 right)');
+select pg_temp.rok('LS9f', pg_temp.las(:'lb', format('select public.study_qset_answer(%L, %L, 0)::text', :'ab1', :'q4')) = 'error: attempt finished'
+  and pg_temp.las(:'lb', format('select (public.study_qset_attempt_finish(%L) ->> ''right_n'')', :'ab1')) = '2',
+  'a finished attempt takes no answer; finishing again gives its score');
+select pg_temp.las(:'lb', format('select id::text from public.study_qset_attempt_start(%L)', :'s1')) as ab2 \gset
+select pg_temp.rok('LS9g', :'ab2' <> :'ab1' and pg_temp.las(:'lb', format('select (public.study_qset_attempt_finish(%L) ->> ''answered'')', :'ab2')) = '0'
+  and pg_temp.las(:'lb', format('select count(*)::text from public.study_qset_attempts where id = %L', :'ab2')) = '0',
+  'an attempt with no answer is dropped at its end');
+
+-- ── The group's numbers (OD5): 3 others, bands without the viewer, names without scores ──
+reset role;
+create or replace function pg_temp.lsolve(p_user text, p_choices int[]) returns text language plpgsql as $$
+declare a uuid; q uuid; i int := 0;
+begin
+  perform set_config('request.jwt.claim.sub', p_user, true);
+  a := (public.study_qset_attempt_start(current_setting('l.set')::uuid)).id;
+  for q in select x.question_id from public.study_qset_items x where x.set_id = current_setting('l.set')::uuid order by x.pos loop
+    i := i + 1;
+    if p_choices[i] is not null then perform public.study_qset_answer(a, q, p_choices[i]); end if;
+  end loop;
+  return public.study_qset_attempt_finish(a) ->> 'right_n';
+end $$;
+select set_config('l.set', :'s1', false) is not null as s \gset
+set role authenticated;
+select pg_temp.lsolve(:'la', array[0, 0, 1, 0]) as dummy \gset
+select pg_temp.rok('LS10', pg_temp.las(:'lb', format('select (public.study_qset_stats(%L) - ''names'')::text', :'s1'))
+                          = '{"avg": null, "mine": {"total": 4, "right_n": 2, "answered": 3}, "floor": 3, "per_q": null, "others": 1, "solvers": 2}'
+  and pg_temp.las(:'la', format('select (public.study_qset_stats(%L) ->> ''avg'') || ''·'' || (public.study_qset_stats(%L) ->> ''per_q'')', :'s1', :'s1')) = 'null',
+  'two finishers: "פותרים: 2" and each one''s own score; no average and no bands for either');
+select pg_temp.las(:'lc', format('select public.study_qset_names_pref(true)::text')) as dummy \gset
+select pg_temp.lsolve(:'lc', array[0, 1, 1, 1]) as dummy \gset
+select pg_temp.lsolve(:'ld', array[1, 0, 1, 1]) as dummy \gset
+-- Aviv: others Barak, Gefen, Daniel (3). q1: B right, G right, D wrong = 2/3 → 3; q2: B wrong, G wrong, D right = 1/3 → 1
+-- (with Aviv, who was right, it would be 2/4 → 2); q3: B right, G wrong, D wrong → 1; q4: B none, G wrong, D wrong: 2 answered → no band.
+select pg_temp.rok('LS10b', pg_temp.las(:'la', format('select string_agg(coalesce((e ->> ''band''), ''-''), '','' order by (e ->> ''pos'')::int)
+                                                       from jsonb_array_elements(public.study_qset_stats(%L) -> ''per_q'') e', :'s1')) = '3,1,1,-'
+  and pg_temp.las(:'la', format('select (public.study_qset_stats(%L) ->> ''avg'')', :'s1')) = '0.438',
+  'three others: the average (all four first attempts) and bands computed without the viewer; a band only from 3 answers');
+select pg_temp.rok('LS10c', pg_temp.las(:'lb', format('select string_agg(coalesce((e ->> ''band''), ''-''), '','' order by (e ->> ''pos'')::int)
+                                                       from jsonb_array_elements(public.study_qset_stats(%L) -> ''per_q'') e', :'s1')) = '3,3,1,1'
+  and pg_temp.las(:'lb', format('select (public.study_qset_stats(%L) ->> ''others'')', :'s1')) = '3'
+  and pg_temp.las(:'ld', format('select (public.study_qset_stats(%L) ->> ''names'')', :'s1')) = '["גפן"]',
+  'for Barak the others are Aviv, Gefen and Daniel (and q4 now has 3 answers); names: only Gefen, who chose it, and no score with it');
+select pg_temp.lsolve(:'lb', array[0, 0, 0, 0]) as dummy \gset
+select pg_temp.rok('LS10d', pg_temp.las(:'lb', format('select (public.study_qset_stats(%L) -> ''mine'' ->> ''right_n'')', :'s1')) = '2',
+  'a second attempt changes nothing: each member counts with the first');
+select pg_temp.rok('LS10e', pg_temp.las(:'la', format('select solvers::text || '' · '' || my_score || ''/'' || my_total from public.study_qsets_shelf(%L) where id = %L', :'lg', :'s1')) = '4 · 3/4',
+  'the shelf: "פותרים: 4" and my own score, no average');
+reset role;
+
+-- ── set_solved: only once R registers the kind; the first finish of someone other than the author ──
+select pg_temp.rok('LS11', (select count(*) from public.study_notices where kind = 'set_solved') = 0,
+  'the kind set_solved is not registered yet (WP17): no notice');
+select (select count(*) from study_private.notice_kinds where kind = 'set_solved') = 0 as l_kind \gset
+\if :l_kind
+insert into study_private.notice_kinds (kind, cat, ttl, delay, push) values ('set_solved', 'inapp', '7 days', '0', false);
+\endif
+set role authenticated;
+select pg_temp.lsolve(:'le', array[0, 0, 0, 0]) as dummy \gset
+select pg_temp.lsolve(:'le', array[0, 0, 0, 0]) as dummy \gset
+select pg_temp.lsolve(:'la', array[0, 0, 0, 0]) as dummy \gset
+reset role;
+select pg_temp.rok('LS11b', (select string_agg(user_id::text || ' · ' || (route ->> 'v') || ' · ' || (args ->> 'k') || ' · ' || count, ',')
+                              from public.study_notices where kind = 'set_solved' and dedupe = 'qset_solved:' || :'s1')
+                           = :'la' || ' · sets · 4 · 1',
+  'registered: Hillel''s first finish tells Aviv once (4 others solved); a second finish and the author''s own add nothing');
+delete from public.study_notices where kind = 'set_solved';
+\if :l_kind
+delete from study_private.notice_kinds where kind = 'set_solved';
+\endif
+
+-- ── Auto-keep (OD15): off by default; on, only what the solver passed ──
+\set ss1 '1b300000-0000-4000-8000-000000000001'
+\set ss2 '1b300000-0000-4000-8000-000000000002'
+select pg_temp.ldraft(:'rq1', 'ok', 11) as d7, pg_temp.ldraft(:'rq1', 'unchecked', 12) as d8,
+       pg_temp.ldraft(:'rq1', 'ok', 13, :'ss1', 1) as e1, pg_temp.ldraft(:'rq1', 'failed', 14, :'ss1', 2) as e2,
+       pg_temp.ldraft(:'rq1', 'ok', 15, :'ss2', 1) as f1, pg_temp.ldraft(:'rq1', 'ok', 16, :'ss2', 2) as f2 \gset
+set role authenticated;
+select pg_temp.rok('LS12', pg_temp.las(:'la', format('select count(*)::text from public.study_qset_autokeep(array[%L, %L]::uuid[], %L)', :'d7', :'f1', current_setting('l.key'))) = '0'
+  and pg_temp.las(:'la', format('select public.study_qset_autokeep(array[%L]::uuid[])::text', :'d7')) = 'error: forbidden',
+  'off by default: nothing is kept; the server key only');
+reset role;
+update study_private.features set enabled = true where name = 'qsets_auto_keep';
+set role authenticated;
+select pg_temp.las(:'la', format('select string_agg(draft_id::text, '','' order by draft_id) from public.study_qset_autokeep(array[%L, %L, %L, %L, %L]::uuid[], %L)',
+                                 :'d7', :'d8', :'e1', :'f1', :'d4', current_setting('l.key'))) as auto \gset
+reset role;
+select pg_temp.rok('LS12b', :'auto' = (select string_agg(x::text, ',' order by x) from unnest(array[:'d7', :'f1', :'f2']::uuid[]) x)
+  and (select count(*) from public.study_qset_items i join public.study_question_drafts d on d.question_id = i.question_id
+        where i.set_id = :'s1' and i.auto_kept_at is not null and d.id in (:'d7', :'f1', :'f2')) = 3
+  and (select count(*) from public.study_question_drafts where id in (:'d8', :'e1', :'e2', :'d4') and status = 'pending') = 4,
+  'on: the passed draft and a staged case whose steps all passed are kept, marked auto_kept_at; unchecked, failed and a half-passed case wait');
+insert into public.study_questions (group_id, lecture_id, source, kind, question, options)
+select :'lg', :'ll1', 'ai', 'mcq', 'שאלה ממלאת ' || n, array['א', 'ב'] from generate_series(1, 150) n;
+select pg_temp.ldraft(:'rq1', 'ok', 17) as d9 \gset
+set role authenticated;
+select pg_temp.rok('LS12c', pg_temp.las(:'la', format('select count(*)::text from public.study_qset_autokeep(array[%L]::uuid[], %L)', :'d9', current_setting('l.key'))) = '0',
+  'at 150 active questions auto-keep skips');
+reset role;
+delete from public.study_questions where lecture_id = :'ll1' and question like 'שאלה ממלאת %';
+update study_private.features set enabled = false where name = 'qsets_auto_keep';
+
+-- ── D6 on the lecture page; the example's signature; the hooks for sheet sets ──
+update public.study_qsets set updated_at = now() - interval '3 minutes' where created_by = :'ld';
+set role authenticated;
+select (pg_temp.lbegin(:'lb', :'ll2', 'style', false)) ->> 'set_id' as s5 \gset
+select pg_temp.rok('LS13', pg_temp.las(:'la', format('select string_agg(author_name || '' · '' || state || '' · '' || is_mine, '','') from public.study_lecture_making(%L)', :'ll2'))
+                          = 'ברק · reading · false',
+  'the lecture page: Barak''s set being read is open');
+select pg_temp.rok('LS13b', pg_temp.las(:'lb', format('select public.study_qset_style(%L, %L, %L)::text', :'s5', repeat('ab', 32), current_setting('l.key'))) = 'true'
+  and pg_temp.las(:'lb', format('select options ->> ''style_sig'' from public.study_qsets where id = %L', :'s5')) = repeat('ab', 32)
+  and pg_temp.las(:'lb', format('select public.study_qset_style(%L, ''nope'', %L)::text', :'s5', current_setting('l.key'))) = 'error: bad request'
+  and pg_temp.las(:'lb', format('select public.study_qset_style(%L, %L)::text', :'s5', repeat('ab', 32))) = 'error: forbidden',
+  'the example''s signed style is kept on the set while it reads');
+reset role;
+select study_private.qset_for_similar(:'lg', null, null, :'le', 'דומות לדף בדוי', 4) as s6 \gset
+select study_private.qset_add_items(:'s6', array[:'q1', :'q3', :'q1']::uuid[]) as add1 \gset
+select study_private.qset_add_items(:'s6', array[:'q3', :'q4']::uuid[]) as add2 \gset
+select pg_temp.rok('LS13c', :'add1' = '2' and :'add2' = '1'
+  and (select string_agg(pos::text || ':' || (question_id = (array[:'q1', :'q3', :'q4']::uuid[])[pos]), ',' order by pos) from public.study_qset_items where set_id = :'s6') = '1:true,2:true,3:true',
+  'a sheet set: twins appended in order, one already in it skipped');
+select study_private.qset_similar_done(:'s6') as dummy \gset
+select pg_temp.rok('LS13d', (select kind || ' · ' || state || ' · ' || (notified_at is not null) from public.study_qsets where id = :'s6') = 'sheet · ready · true',
+  'the run''s end: ready and announced once');
+
+-- ── The nightly clean-up ──
+update public.study_qsets set created_at = now() - interval '2 days' where id = :'s5';
+update public.study_qsets set deleted_at = now() - interval '31 days' where id = :'s6';
+insert into public.study_qset_marks (user_id, set_id, seen_at) values (:'la', :'s6', now());
+select (select id from public.study_qsets where created_by = :'ld' and deleted_at is not null limit 1) as s7 \gset
+update public.study_qsets set deleted_at = now() - interval '31 days' where id = :'s7';
+insert into public.study_qset_attempts (set_id, user_id, finished_at, answered) values (:'s7', :'ld', now(), 1);
+select study_private.qsets_cleanup() as dummy \gset
+select pg_temp.rok('LS14', (select count(*) from public.study_qsets where id in (:'s5', :'s6')) = 0
+  and (select count(*) from public.study_qsets where id = :'s7') = 1
+  and (select count(*) from public.study_qset_marks where set_id = :'s6') = 0
+  and (select count(*) from public.study_qsets where id = :'s1') = 1,
+  'clean-up: a set left reading for a day and a set deleted 30 days ago go; a deleted set someone solved stays');
+
+-- ── Gone with their group ──
+delete from public.study_groups where id = :'lg';
+select pg_temp.rok('LS15', (select count(*) from public.study_qsets where group_id = :'lg') = 0
+  and (select count(*) from public.study_qset_attempts a where a.user_id in (:'la', :'lb', :'lc', :'ld', :'le')) = 0,
+  'the group''s sets, items and attempts go with it');
+-- ════ END SECTION L ════
