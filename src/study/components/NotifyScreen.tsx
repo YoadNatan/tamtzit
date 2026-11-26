@@ -35,6 +35,9 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
   const [hours, setHours] = useState(false);
   const [testUntil, setTestUntil] = useState(0);
   const status = useRef<HTMLParagraphElement>(null);
+  // The app's go(), read when needed: the checks below run once per group, not on every new ctx.
+  const go = useRef(ctx.go);
+  go.current = ctx.go;
   const env = detect(probe());
 
   const loadDevices = useCallback(async () => {
@@ -48,7 +51,7 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
       const a = await available(true);
       if (!alive) return;
       if (!a.ok || !a.key || !a.keyId) {
-        ctx.go({ v: "notify" }, { replace: true });
+        go.current({ v: "notify" }, { replace: true });
         return;
       }
       setKey({ key: a.key, keyId: a.keyId });
@@ -66,7 +69,7 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
     return () => {
       alive = false;
     };
-  }, [ctx, loadDevices]);
+  }, [ctx.group.id, loadDevices]);
 
   useEffect(() => {
     if (!testUntil) return;
