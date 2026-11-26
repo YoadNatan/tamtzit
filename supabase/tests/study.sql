@@ -10464,6 +10464,8 @@ insert into auth.users (id, raw_user_meta_data) values
 insert into public.study_groups (id, name, join_code, created_by) values (:'lg', 'קבוצת הסטים', 'LSETS1', :'lc');
 insert into public.study_members (group_id, user_id, name) values
  (:'lg', :'la', 'אביב'), (:'lg', :'lb', 'ברק'), (:'lg', :'lc', 'גפן'), (:'lg', :'ld', 'דניאל'), (:'lg', :'le', 'הלל');
+-- In the group for 10 days: Pulse counts them (the group's numbers on a set count only those).
+update public.study_members set joined_at = now() - interval '10 days' where group_id = :'lg';
 insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
  (:'ll1', :'lg', 'פרמקולוגיה', 'משתנים (בדוי)', 'pptx', '[]', 'ready', :'la'),
  (:'ll2', :'lg', 'פרמקולוגיה', 'אנטיביוטיקה (בדוי)', 'pptx', '[]', 'ready', :'lb');
@@ -10749,8 +10751,19 @@ select pg_temp.rok('LS7g', :'sh3' = '2'
   and (select count from public.study_notices where kind = 'set_shared' and user_id = :'ld') = 3
   and (select count from public.study_notices where kind = 'set_shared' and user_id = :'lc') = 1,
   'seen, then a third set: a new row for ברק, still no second push that day (OD10); p_to reaches only the members named');
+-- הלל's first push of the day is being sent (no pushed_at yet) when another set coalesces into it.
+delete from public.study_notices where kind = 'set_shared' and user_id = :'le';
+insert into public.study_push_subs (user_id, endpoint, p256dh, auth, key_id)
+values (:'le', 'https://fcm.googleapis.com/fcm/send/l-01e', 'B' || repeat('q', 86), repeat('b', 22), 'kid12346');
+select study_private.notice_set_shared(:'lg', :'s1', array[:'le']::uuid[], :'la', '{"k": 3}') as dummy \gset
+update study_private.notify_outbox set state = 'sending', lease_until = now() + interval '1 minute' where kind = 'set_shared' and user_id = :'le';
+select study_private.notice_set_shared(:'lg', :'s1', array[:'le']::uuid[], :'la', '{"k": 3}') as sh4 \gset
+select pg_temp.rok('LS7h', :'sh4' = '1'
+  and (select string_agg(o.state || ':' || o.again, ',') from study_private.notify_outbox o where o.kind = 'set_shared' and o.user_id = :'le') = 'sending:false'
+  and (select count from public.study_notices where kind = 'set_shared' and user_id = :'le') = 2,
+  'a push being sent counts as the day''s push: the set that coalesces into it is not sent again');
 delete from public.study_notices where kind = 'set_shared' and group_id = :'lg';
-delete from public.study_push_subs where user_id = :'lb';
+delete from public.study_push_subs where user_id in (:'lb', :'le');
 
 -- ── The shelf, marks, rename and delete ──
 set role authenticated;
@@ -10773,7 +10786,7 @@ select pg_temp.rok('LS8d', pg_temp.las(:'lz', format('select count(*)::text from
   'a stranger sees no set, item or shelf');
 select pg_temp.rok('LS8e', pg_temp.las(:'lb', format('select jsonb_array_length(o -> ''items'')::text || '' · '' || (o -> ''set'' ->> ''author_name'') || '' · '' || (o -> ''options'')::text
                                                       from public.study_qset_open(%L) o', :'s1')) = '4 · אביב · {"level": "custom", "parts": [0]}',
-  'the set page: its questions in order, the author''s name, the options without a style signature');
+  'the set page: its questions in order, the author''s name, the options (never the member''s points or focus)');
 select pg_temp.rok('LS8f', pg_temp.las(:'lb', format('select public.study_qset_rename(%L, ''שלי'')::text', :'s1')) = 'error: not yours'
   and pg_temp.las(:'la', format('select public.study_qset_rename(%L, ''  משתנים   חזרה  '')::text', :'s1')) = ''
   and pg_temp.las(:'la', format('select title from public.study_qsets where id = %L', :'s1')) = 'משתנים חזרה',
@@ -10816,6 +10829,12 @@ select pg_temp.rok('LS9d', (select count(*) filter (where set_attempt = :'ab1') 
                              from public.study_answers where question_id = any (:'qs'::uuid[]) and user_id in (:'la', :'lb')) = '4 · 1',
   'each set answer is stamped; Aviv''s answer outside the set is not');
 set role authenticated;
+-- Barak deletes his own wrong answer to q2 (study_answers' "delete own") and answers again, right this time.
+select pg_temp.las(:'lb', format('with d as (delete from public.study_answers where set_attempt = %L and question_id = %L returning 1) select count(*)::text from d', :'ab1', :'q2x')) as lb_del \gset
+select pg_temp.las(:'lb', format('select correct::text from public.study_qset_answer(%L, %L, 0)', :'ab1', :'q2x')) as lb_again \gset
+select pg_temp.rok('LS9h', :'lb_del' = '1' and :'lb_again' = 'true'
+  and pg_temp.las(:'lb', format('select firsts ->> %L from public.study_qset_attempts where id = %L', :'q2x', :'ab1')) = 'false',
+  'the attempt keeps the first answer per question as it was given, whatever happens to the answer rows');
 select pg_temp.rok('LS9e', pg_temp.las(:'lb', format('select (public.study_qset_attempt_finish(%L) - ''total'')::text', :'ab1'))
                           = '{"first": true, "right_n": 2, "answered": 3}',
   'finish: scored on the first answer per question (q1 right first, q2 wrong, q3 right)');
@@ -10826,6 +10845,18 @@ select pg_temp.las(:'lb', format('select id::text from public.study_qset_attempt
 select pg_temp.rok('LS9g', :'ab2' <> :'ab1' and pg_temp.las(:'lb', format('select (public.study_qset_attempt_finish(%L) ->> ''answered'')', :'ab2')) = '0'
   and pg_temp.las(:'lb', format('select count(*)::text from public.study_qset_attempts where id = %L', :'ab2')) = '0',
   'an attempt with no answer is dropped at its end');
+select pg_temp.las(:'lb', format('select id::text from public.study_qset_attempt_start(%L)', :'s1')) as ab3 \gset
+select pg_temp.rok('LS9i', pg_temp.las(:'lz', format('select public.study_qset_stats(%L)::text', :'s1')) = 'error: set not found'
+  and pg_temp.las(:'lz', format('select id::text from public.study_qset_attempt_start(%L)', :'s1')) = 'error: set not found'
+  and pg_temp.las(:'lz', format('select correct::text from public.study_qset_answer(%L, %L, 0)', :'ab3', :'q1')) = 'error: attempt not found'
+  and pg_temp.las(:'lz', format('select public.study_qset_attempt_finish(%L)::text', :'ab3')) = 'error: attempt not found'
+  and pg_temp.las(:'lz', format('select public.study_qset_hide(%L, true)::text', :'s1')) = 'error: set not found'
+  and pg_temp.las(:'lz', format('select public.study_qset_seen(array[%L]::uuid[])::text', :'s1')) = '0'
+  and pg_temp.las(:'lz', format('select public.study_qset_progress(%L)::text', :'s1')) = 'error: set not found'
+  and pg_temp.las(:'lz', format('select count(*)::text from public.study_lecture_making(%L)', :'ll1')) = 'error: forbidden'
+  and pg_temp.las(:'lz', format('select count(*)::text from public.study_qset_room(%L)', :'lg')) = 'error: forbidden',
+  'a stranger gets nothing from the numbers, an attempt, an answer, hide, seen, progress, the lecture''s open sets or the room');
+select pg_temp.las(:'lb', format('select (public.study_qset_attempt_finish(%L) ->> ''answered'')', :'ab3')) as dummy \gset
 
 -- ── The group's numbers (OD5): 3 others, bands without the viewer, names without scores ──
 reset role;
@@ -10844,7 +10875,7 @@ select set_config('l.set', :'s1', false) is not null as s \gset
 set role authenticated;
 select pg_temp.lsolve(:'la', array[0, 0, 1, 0]) as dummy \gset
 select pg_temp.rok('LS10', pg_temp.las(:'lb', format('select (public.study_qset_stats(%L) - ''names'')::text', :'s1'))
-                          = '{"avg": null, "mine": {"total": 4, "right_n": 2, "answered": 3}, "floor": 3, "per_q": null, "others": 1, "solvers": 2}'
+                          = '{"avg": null, "mine": {"total": 4, "right_n": 2, "answered": 3}, "floor": 3, "per_q": null, "others": 1, "counted": 0, "solvers": 2}'
   and pg_temp.las(:'la', format('select (public.study_qset_stats(%L) ->> ''avg'') || ''·'' || (public.study_qset_stats(%L) ->> ''per_q'')', :'s1', :'s1')) = 'null',
   'two finishers: "פותרים: 2" and each one''s own score; no average and no bands for either');
 select pg_temp.las(:'lc', format('select public.study_qset_names_pref(true)::text')) as dummy \gset
@@ -10854,11 +10885,13 @@ select pg_temp.lsolve(:'ld', array[1, 0, 1, 1]) as dummy \gset
 -- (with Aviv, who was right, it would be 2/4 → 2); q3: B right, G wrong, D wrong → 1; q4: B none, G wrong, D wrong: 2 answered → no band.
 select pg_temp.rok('LS10b', pg_temp.las(:'la', format('select string_agg(coalesce((e ->> ''band''), ''-''), '','' order by (e ->> ''pos'')::int)
                                                        from jsonb_array_elements(public.study_qset_stats(%L) -> ''per_q'') e', :'s1')) = '3,1,1,-'
-  and pg_temp.las(:'la', format('select (public.study_qset_stats(%L) ->> ''avg'')', :'s1')) = '0.438',
-  'three others: the average (all four first attempts) and bands computed without the viewer; a band only from 3 answers');
+  and pg_temp.las(:'la', format('select (public.study_qset_stats(%L) ->> ''avg'')', :'s1')) = '0.3',
+  'three others: the average (Barak 2/4, Gefen 1/4, Daniel 1/4, without the viewer, to 0.1) and bands computed without the viewer; a band only from 3 answers');
+select pg_temp.las(:'la', format('select public.study_qset_stats(%L)::text', :'s1')) as la_before \gset
 select pg_temp.rok('LS10c', pg_temp.las(:'lb', format('select string_agg(coalesce((e ->> ''band''), ''-''), '','' order by (e ->> ''pos'')::int)
                                                        from jsonb_array_elements(public.study_qset_stats(%L) -> ''per_q'') e', :'s1')) = '3,3,1,1'
   and pg_temp.las(:'lb', format('select (public.study_qset_stats(%L) ->> ''others'')', :'s1')) = '3'
+  and pg_temp.las(:'lb', format('select (public.study_qset_stats(%L) ->> ''avg'')', :'s1')) = '0.4'
   and pg_temp.las(:'ld', format('select (public.study_qset_stats(%L) ->> ''names'')', :'s1')) = '["גפן"]',
   'for Barak the others are Aviv, Gefen and Daniel (and q4 now has 3 answers); names: only Gefen, who chose it, and no score with it');
 select pg_temp.lsolve(:'lb', array[0, 0, 0, 0]) as dummy \gset
@@ -10883,6 +10916,21 @@ select pg_temp.rok('LS11b', (select string_agg(user_id::text || ' · ' || (route
                            = :'la' || ' · sets · 4 · 4 · qset:' || :'s1'
   and not exists (select 1 from study_private.notify_outbox where kind = 'set_solved'),
   'Hillel''s first finish adds one (4 others solved), never pushed; a second finish and the author''s own add nothing');
+set role authenticated;
+select pg_temp.rok('LS10f', pg_temp.las(:'la', format('select (public.study_qset_stats(%L) - ''others'' - ''solvers'')::text', :'s1')) = (:'la_before'::jsonb - 'others' - 'solvers')::text
+  and pg_temp.las(:'la', format('select (public.study_qset_stats(%L) ->> ''others'') || '' · '' || (public.study_qset_stats(%L) ->> ''counted'')', :'s1', :'s1')) = '4 · 3',
+  'a 4th other finisher (Hillel, 4/4) moves neither the average nor a band: the numbers stay on the first 3 until 6, so nobody''s score is read off before and after');
+reset role;
+begin;
+update public.study_members set joined_at = now() where group_id = :'lg' and user_id = :'ld';
+insert into public.study_pulse_optout (group_id, user_id) values (:'lg', :'lc');
+delete from public.study_members where group_id = :'lg' and user_id = :'lb';
+set role authenticated;
+select pg_temp.rok('LS10g', pg_temp.las(:'la', format('select (public.study_qset_stats(%L) - ''names'' - ''mine'' - ''per_q'')::text', :'s1'))
+                          = '{"avg": null, "floor": 3, "others": 1, "counted": 0, "solvers": 5}',
+  'only others Pulse counts: Daniel (joined today), Gefen (out of Pulse) and Barak (left) do not; Hillel alone is under the floor');
+reset role;
+rollback;
 delete from public.study_notices where kind = 'set_solved';
 
 -- ── Auto-keep (OD15): off by default; on, only what the solver passed ──
@@ -10926,8 +10974,10 @@ select pg_temp.rok('LS13', pg_temp.las(:'la', format('select string_agg(author_n
 select pg_temp.rok('LS13b', pg_temp.las(:'lb', format('select public.study_qset_style(%L, %L, %L)::text', :'s5', repeat('ab', 32), current_setting('l.key'))) = 'true'
   and pg_temp.las(:'lb', format('select options ->> ''style_sig'' from public.study_qsets where id = %L', :'s5')) = repeat('ab', 32)
   and pg_temp.las(:'lb', format('select public.study_qset_style(%L, ''nope'', %L)::text', :'s5', current_setting('l.key'))) = 'error: bad request'
-  and pg_temp.las(:'lb', format('select public.study_qset_style(%L, %L)::text', :'s5', repeat('ab', 32))) = 'error: forbidden',
-  'the example''s signed style is kept on the set while it reads');
+  and pg_temp.las(:'lb', format('select public.study_qset_style(%L, %L)::text', :'s5', repeat('ab', 32))) = 'error: forbidden'
+  and pg_temp.las(:'la', format('select public.study_qset_style(%L, %L, %L)::text', :'s5', repeat('cd', 32), current_setting('l.key'))) = 'error: set not found'
+  and pg_temp.las(:'lb', format('select options ->> ''style_sig'' from public.study_qsets where id = %L', :'s5')) = repeat('ab', 32),
+  'the example''s signed style is kept on the set while it reads; only the author''s own set takes it');
 reset role;
 select study_private.qset_for_similar(:'lg', null, null, :'le', 'דומות לדף בדוי', 4) as s6 \gset
 select study_private.qset_add_items(:'s6', array[:'q1', :'q3', :'q1']::uuid[]) as add1 \gset
@@ -10938,6 +10988,19 @@ select pg_temp.rok('LS13c', :'add1' = '2' and :'add2' = '1'
 select study_private.qset_similar_done(:'s6') as dummy \gset
 select pg_temp.rok('LS13d', (select kind || ' · ' || state || ' · ' || (notified_at is not null) from public.study_qsets where id = :'s6') = 'sheet · ready · true',
   'the run''s end: ready and announced once');
+
+-- A set begun and never attached (the call between begin and attach died): paused after 2 minutes, gone after an hour.
+set role authenticated;
+select (pg_temp.lbegin(:'le', :'ll1', null, true)) ->> 'set_id' as s8 \gset
+reset role;
+update public.study_qsets set updated_at = now() - interval '3 minutes' where id = :'s8';
+set role authenticated;
+select pg_temp.rok('LS13e', pg_temp.las(:'lb', format('select paused::text || '' · '' || state || '' · '' || size from public.study_qsets_shelf(%L) where id = %L', :'lg', :'s8')) = 'true · making · 0'
+  and pg_temp.las(:'le', format('select public.study_qset_progress(%L) ->> ''paused''', :'s8')) = 'true'
+  and pg_temp.las(:'lb', format('select paused::text from public.study_qsets_shelf(%L) where id = %L', :'lg', :'s1')) = 'false',
+  'a lecture set never attached shows as paused after 2 minutes (a set with its request does not)');
+reset role;
+update public.study_qsets set updated_at = now() - interval '2 hours' where id = :'s8';
 
 -- ── The nightly clean-up ──
 update public.study_qsets set created_at = now() - interval '2 days' where id = :'s5';
@@ -10950,8 +11013,9 @@ select study_private.qsets_cleanup() as dummy \gset
 select pg_temp.rok('LS14', (select count(*) from public.study_qsets where id in (:'s5', :'s6')) = 0
   and (select count(*) from public.study_qsets where id = :'s7') = 1
   and (select count(*) from public.study_qset_marks where set_id = :'s6') = 0
-  and (select count(*) from public.study_qsets where id = :'s1') = 1,
-  'clean-up: a set left reading for a day and a set deleted 30 days ago go; a deleted set someone solved stays');
+  and (select count(*) from public.study_qsets where id = :'s1') = 1
+  and (select count(*) from public.study_qsets where id = :'s8') = 0,
+  'clean-up: a set left reading for a day, one never attached for an hour and a set deleted 30 days ago go; a deleted set someone solved stays');
 
 -- ── Gone with their group ──
 delete from public.study_groups where id = :'lg';

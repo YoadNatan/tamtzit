@@ -19814,12 +19814,14 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 --
 --  Group numbers follow the floor of 3 (study_private.pulse_floor(), OD5):
 --  "פותרים: k" and the member's own score always; the average and the
---  per-question bands only when at least 3 OTHER members finished, the
---  bands computed without the viewer; no best score. Each member counts
---  with their first finished attempt, scored on the first answer per
---  question in it. Raw answers stay private (study_answers): a set's
---  attempt is stamped on them by the wrappers, and only definer RPCs read
---  other members' rows.
+--  per-question bands only when at least 3 OTHER members whom Pulse counts
+--  (7 days in the group, not opted out) finished, both computed without the
+--  viewer over a fixed bucket (the first 3, 6, … of them to finish), the
+--  average rounded to 0.1; no best score. Each member counts with their
+--  first finished attempt, scored on the first answer per question in it
+--  (recorded on the attempt when given). Raw answers stay private
+--  (study_answers): a set's attempt is stamped on them by the wrappers, and
+--  only definer RPCs read other members' rows.
 --
 --  The switches (study_private.features):
 --    qsets            on: set features. Off: begin refuses ('off') and the
@@ -19895,6 +19897,11 @@ create table if not exists public.study_qset_attempts (
   answered    int         not null default 0,
   right_n     int         not null default 0
 );
+-- The first answer per question in the attempt, {question_id: correct},
+-- recorded by the answer wrappers when it is given: the score and the
+-- group's bands read this, so deleting one's own answer row and answering
+-- again (study_answers' "delete own") never changes a set's score.
+alter table public.study_qset_attempts add column if not exists firsts jsonb not null default '{}';
 create index if not exists study_qset_attempts_set on public.study_qset_attempts (set_id, user_id, finished_at);
 create index if not exists study_qset_attempts_user on public.study_qset_attempts (user_id, started_at desc);
 
@@ -20012,12 +20019,17 @@ $$;
 
 -- "Paused" is computed, never stored (design §7.4): a set being written
 -- whose newest batch has not moved for 6 minutes (rounds.ts's stuck rule),
--- or a set still reading its lecture for 6 minutes (the points claim's lease).
-create or replace function study_private.qset_paused(p_state text, p_updated timestamptz, p_busy int, p_last timestamptz)
+-- a set still reading its lecture for 6 minutes (the points claim's lease),
+-- or a lecture set begun but never attached (no batch at all: the call
+-- between begin and attach died) for 2 minutes. The nightly clean-up
+-- removes that last kind after an hour.
+drop function if exists study_private.qset_paused(text, timestamptz, int, timestamptz);
+create or replace function study_private.qset_paused(p_kind text, p_state text, p_updated timestamptz, p_busy int, p_last timestamptz)
 returns boolean language sql stable set search_path = public as $$
   select case p_state
            when 'reading' then p_updated < now() - interval '6 minutes'
-           when 'making' then coalesce(p_busy, 0) > 0 and coalesce(p_last, p_updated) < now() - interval '6 minutes'
+           when 'making' then case when p_last is null and p_kind = 'lecture' then p_updated < now() - interval '2 minutes'
+                                   else coalesce(p_busy, 0) > 0 and coalesce(p_last, p_updated) < now() - interval '6 minutes' end
            else false end
 $$;
 
@@ -20108,7 +20120,7 @@ language sql stable security definer set search_path = public as $$
   select s.id, s.kind, s.title, s.lecture_id, l.title, coalesce(l.course, ''), s.created_by,
          (select m.name from public.study_members m where m.group_id = s.group_id and m.user_id = s.created_by),
          s.created_at, s.updated_at, s.want, f.items, f.made, s.state,
-         study_private.qset_paused(s.state, s.updated_at, f.busy, f.last_at),
+         study_private.qset_paused(s.kind, s.state, s.updated_at, f.busy, f.last_at),
          (select count(distinct a.user_id)::int from public.study_qset_attempts a where a.set_id = s.id and a.finished_at is not null),
          mine.right_n, mine.total,
          (select a.id from public.study_qset_attempts a
@@ -20287,6 +20299,8 @@ begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   if coalesce(p_sig, '') !~ '^[0-9a-f]{64}$' then raise exception 'bad request'; end if;
   s := study_private.qset_get(p_set);
+  -- Only the author's own lecture set (another member never writes on it).
+  if s.created_by is distinct from auth.uid() or s.kind <> 'lecture' then raise exception 'set not found'; end if;
   if s.state <> 'reading' then return false; end if;
   update public.study_qsets x set options = x.options || jsonb_build_object('style_sig', p_sig), updated_at = now()
    where x.id = p_set;
@@ -20359,7 +20373,7 @@ begin
   s := study_private.qset_refresh(p_set);
   select * into f from study_private.qset_facts(p_set);
   return jsonb_build_object('state', s.state, 'want', s.want, 'made', f.made, 'size', f.items, 'failed', f.failed,
-                            'unchecked', f.unchecked, 'paused', study_private.qset_paused(s.state, s.updated_at, f.busy, f.last_at));
+                            'unchecked', f.unchecked, 'paused', study_private.qset_paused(s.kind, s.state, s.updated_at, f.busy, f.last_at));
 end;
 $$;
 
@@ -20455,7 +20469,7 @@ begin
   s := study_private.qset_refresh(p_set);
   return jsonb_build_object(
     'set', (select to_jsonb(r) from study_private.qset_rows(s.group_id, null, p_set, 1) r),
-    'options', s.options - 'style_sig',
+    'options', s.options,
     'items', coalesce((select jsonb_agg(jsonb_build_object('question_id', i.question_id, 'pos', i.pos) order by i.pos)
                          from public.study_qset_items i where i.set_id = p_set), '[]'),
     'my_attempts', coalesce((select jsonb_agg(jsonb_build_object('id', a.id, 'started_at', a.started_at, 'finished_at', a.finished_at,
@@ -20540,9 +20554,27 @@ begin
 end;
 $$;
 
+-- The answer row a wrapper's call just added (exactly that one, whatever
+-- its time) gets the attempt; the attempt records it as the question's first
+-- answer unless one is recorded already.
+create or replace function study_private.qset_stamp(p_attempt uuid, p_question uuid, p_before uuid[])
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare v_ok boolean;
+begin
+  update public.study_answers x set set_attempt = p_attempt
+   where x.user_id = auth.uid() and x.question_id = p_question and x.id <> all (coalesce(p_before, '{}'));
+  if not found then return; end if;
+  select x.correct into v_ok from public.study_answers x
+   where x.set_attempt = p_attempt and x.user_id = auth.uid() and x.question_id = p_question and x.id <> all (coalesce(p_before, '{}'))
+   order by x.answered_at, x.id limit 1;
+  update public.study_qset_attempts a set firsts = a.firsts || jsonb_build_object(p_question::text, coalesce(v_ok, false))
+   where a.id = p_attempt and not (a.firsts ? p_question::text);
+end;
+$$;
+
 -- Answers inside a set (practice.ts calls these instead of Q's and X's):
 -- the same answer, the same checks and the same reply, then the attempt
--- stamped on the answer that call added.
+-- stamped on the answer that call added (qset_stamp).
 create or replace function public.study_qset_answer(p_attempt uuid, p_question uuid, p_choice int, p_mode text default 'lecture',
   p_ms int default null, p_confidence int default null)
 returns table (answer int, explanations text[], takeaway text, correct boolean, whens text[])
@@ -20554,9 +20586,7 @@ begin
   perform study_private.qset_attempt_open(p_attempt, p_question);
   v_before := array(select y.id from public.study_answers y where y.user_id = auth.uid() and y.question_id = p_question);
   return query select * from public.study_answer_question(p_question, p_choice, p_mode, p_ms, p_confidence);
-  -- The row that call just added (exactly that one, whatever its time).
-  update public.study_answers x set set_attempt = p_attempt
-   where x.user_id = auth.uid() and x.question_id = p_question and x.id <> all (v_before);
+  perform study_private.qset_stamp(p_attempt, p_question, v_before);
 end;
 $$;
 
@@ -20571,14 +20601,15 @@ begin
   perform study_private.qset_attempt_open(p_attempt, p_question);
   v_before := array(select y.id from public.study_answers y where y.user_id = auth.uid() and y.question_id = p_question);
   return query select * from public.study_answer_set(p_question, p_choices, p_mode, p_ms, p_confidence);
-  -- The row that call just added (exactly that one, whatever its time).
-  update public.study_answers x set set_attempt = p_attempt
-   where x.user_id = auth.uid() and x.question_id = p_question and x.id <> all (v_before);
+  perform study_private.qset_stamp(p_attempt, p_question, v_before);
 end;
 $$;
 
--- The end of an attempt: scored on the FIRST answer per question in it (an
--- answer again after the explanation changes nothing). An attempt with no
+-- The end of an attempt: scored on the FIRST answer per question in it, as
+-- the wrappers recorded it (an answer again after the explanation, or after
+-- deleting one's own answer row, changes nothing). Only a member who still
+-- sees the set finishes (qset_get: not a deleted set, not after leaving the
+-- group); a finished attempt answers its score again. An attempt with no
 -- answer is dropped (it never counts as solving). The first finished
 -- attempt of someone other than the author tells the author (set_solved,
 -- inbox only, once R registers the kind). Answers {answered, right_n,
@@ -20600,10 +20631,8 @@ begin
   if a.finished_at is not null then
     return jsonb_build_object('answered', a.answered, 'right_n', a.right_n, 'total', a.total, 'first', false);
   end if;
-  select count(*)::int, count(*) filter (where f.correct)::int into v_ans, v_ok
-    from (select distinct on (x.question_id) x.correct from public.study_answers x
-           where x.set_attempt = p_attempt and x.user_id = me
-           order by x.question_id, x.answered_at, x.id) f;
+  perform study_private.qset_get(a.set_id);
+  select count(*)::int, count(*) filter (where e.value = 'true'::jsonb)::int into v_ans, v_ok from jsonb_each(a.firsts) e;
   if v_ans = 0 then
     delete from public.study_qset_attempts x where x.id = p_attempt;
     return jsonb_build_object('answered', 0, 'right_n', 0, 'total', a.total, 'first', false);
@@ -20635,12 +20664,20 @@ begin
 end;
 $$;
 
--- The group's numbers on a set (OD5). solvers: members with a finished
--- attempt. mine: the caller's first finished attempt. avg (the share right,
--- 0-1) and per_q (bands: 1 most were wrong, 2 some, 3 most were right) only
--- when at least pulse_floor() OTHER members finished, per_q over the others
--- only and a band only where that many others answered the question.
--- names: of finishers who chose to show their name (OD7), never a score.
+-- The group's numbers on a set (OD5, as fixed after review: docs/study/
+-- DECISIONS-2026-11-26.md). solvers: members with a finished attempt.
+-- mine: the caller's first finished attempt. The group's numbers count only
+-- OTHER members whom Pulse counts (pulse_counted: in the group 7 days, not
+-- opted out of Pulse, still a member), each with their first finished
+-- attempt and its first answers. avg (the share right, 0-1, rounded to 0.1)
+-- and per_q (bands: 1 most were wrong, 2 some, 3 most were right) only from
+-- pulse_floor() such others, and only over a fixed bucket: the first 3 (6,
+-- 9, …) of them to finish. One more finisher changes nothing until the next
+-- step of 3, so nobody's score can be read off two calls made before and
+-- after their finish. A band only where the floor's number of the bucket
+-- answered the question. others: how many others count; counted: the
+-- bucket's size. names: of finishers who chose to show their name (OD7),
+-- never a score.
 create or replace function public.study_qset_stats(p_set uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
@@ -20648,8 +20685,10 @@ declare
   s      public.study_qsets;
   fl     int := study_private.pulse_floor();
   firsts jsonb;
+  bucket jsonb;
   n_all  int;
   n_oth  int;
+  n_b    int := 0;
   v_mine jsonb;
   v_avg  numeric;
   v_perq jsonb;
@@ -20659,17 +20698,24 @@ begin
   s := study_private.qset_get(p_set);
   -- Each member's first finished attempt.
   select coalesce(jsonb_agg(to_jsonb(f)), '[]') into firsts
-    from (select distinct on (a.user_id) a.id, a.user_id, a.total, a.answered, a.right_n
+    from (select distinct on (a.user_id) a.id, a.user_id, a.total, a.answered, a.right_n, a.finished_at, a.firsts
             from public.study_qset_attempts a
            where a.set_id = p_set and a.finished_at is not null
            order by a.user_id, a.finished_at, a.id) f;
-  select count(*)::int, count(*) filter (where f.user_id <> me)::int into n_all, n_oth
-    from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int);
+  n_all := jsonb_array_length(firsts);
   select jsonb_build_object('answered', f.answered, 'right_n', f.right_n, 'total', f.total) into v_mine
-    from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int) where f.user_id = me;
+    from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int, finished_at timestamptz, firsts jsonb)
+   where f.user_id = me;
+  -- The others who count, earliest finish first; the bucket is the first n_b of them.
+  select coalesce(jsonb_agg(to_jsonb(b) order by b.finished_at, b.id), '[]') into bucket
+    from (select f.* from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int, finished_at timestamptz, firsts jsonb)
+           where f.user_id <> me and f.user_id in (select c.user_id from study_private.pulse_counted(s.group_id) c)) b;
+  n_oth := jsonb_array_length(bucket);
   if n_oth >= fl then
-    select round(avg(f.right_n::numeric / nullif(greatest(f.total, f.answered), 0)), 3) into v_avg
-      from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int);
+    n_b := (n_oth / fl) * fl;
+    select round(avg(b.right_n::numeric / nullif(greatest(b.total, b.answered), 0)), 1) into v_avg
+      from (select * from jsonb_to_recordset(bucket) as f (id uuid, user_id uuid, total int, answered int, right_n int, finished_at timestamptz, firsts jsonb)
+             order by f.finished_at, f.id limit n_b) b;
     select jsonb_agg(jsonb_build_object('question_id', i.question_id, 'pos', i.pos,
                                         'band', case when c.n < fl then null
                                                      when c.r::numeric / c.n < 0.34 then 1
@@ -20678,19 +20724,17 @@ begin
       into v_perq
       from public.study_qset_items i
       cross join lateral (
-        select count(*)::int as n, count(*) filter (where fa.correct)::int as r
-          from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int)
-          cross join lateral (select x.correct from public.study_answers x
-                               where x.set_attempt = f.id and x.user_id = f.user_id and x.question_id = i.question_id
-                               order by x.answered_at, x.id limit 1) fa
-         where f.user_id <> me) c
+        select count(*)::int as n, count(*) filter (where b.firsts -> i.question_id::text = 'true'::jsonb)::int as r
+          from (select * from jsonb_to_recordset(bucket) as f (id uuid, user_id uuid, total int, answered int, right_n int, finished_at timestamptz, firsts jsonb)
+                 order by f.finished_at, f.id limit n_b) b
+         where b.firsts ? i.question_id::text) c
      where i.set_id = p_set;
   end if;
   select jsonb_agg(m.name order by m.name) into v_name
-    from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int)
+    from jsonb_to_recordset(firsts) as f (id uuid, user_id uuid, total int, answered int, right_n int, finished_at timestamptz, firsts jsonb)
     join public.study_qset_prefs p on p.user_id = f.user_id and p.show_name
     join public.study_members m on m.group_id = s.group_id and m.user_id = f.user_id;
-  return jsonb_build_object('solvers', n_all, 'others', n_oth, 'floor', fl, 'mine', v_mine, 'avg', v_avg,
+  return jsonb_build_object('solvers', n_all, 'others', n_oth, 'counted', n_b, 'floor', fl, 'mine', v_mine, 'avg', v_avg,
                             'per_q', v_perq, 'names', coalesce(v_name, '[]'));
 end;
 $$;
@@ -20814,8 +20858,11 @@ end $$;
 -- to its count while it is unseen ("3 סטים חדשים בקבוצה", the route then the
 -- shelf, the args emptied so no lecture lingers), and at most one push a
 -- member a day (OD10): once a set_shared push went out today, a new or
--- coalesced row stays in the inbox. obj 'qsets': opening the shelf sees it.
--- Never raises; answers how many members got the row.
+-- coalesced row stays in the inbox; a set_shared push being sent right now
+-- counts as pushed (R's "again" would otherwise send a second one). obj
+-- 'qsets': opening the shelf sees it. Each member's row is its own step: one
+-- that fails is a warning and the others stay. Never raises; answers how
+-- many members got the row.
 create or replace function study_private.notice_set_shared(p_group uuid, p_set uuid, p_to uuid[], p_actor uuid, p_args jsonb)
 returns int language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -20846,27 +20893,32 @@ begin
             where m.group_id = p_group and m.user_id is distinct from p_actor
               and (p_to is null or m.user_id = any (p_to))
             order by m.user_id loop
-    select exists (select 1 from public.study_notices x where x.user_id = u and x.dedupe = v_dedupe and x.seen_at is null),
-           exists (select 1 from study_private.notify_outbox o where o.user_id = u and o.kind = 'set_shared' and o.pushed_at >= v_since)
-      into v_open, v_pushed;
-    v_id := study_private.notice_add(u, p_group, 'set_shared',
-              case when v_open then '{}'::jsonb else v_args end,
-              case when v_open then jsonb_build_object('v', 'sets') else jsonb_build_object('v', 'sets', 'k', p_set) end,
-              'qsets', v_dedupe, v_lec, null);
-    continue when v_id is null;
-    n := n + 1;
-    if v_pushed then
-      -- Already pushed today: this one waits in the inbox (a row being sent keeps its lease, without a second send).
-      update study_private.notify_outbox o
-         set again = false,
-             state = case when o.state = 'due' then case when o.pushed_at is not null then 'sent' else 'capped' end else o.state end
-       where o.notice_id = v_id and (o.state = 'due' or o.again);
-    end if;
+    begin
+      select exists (select 1 from public.study_notices x where x.user_id = u and x.dedupe = v_dedupe and x.seen_at is null),
+             exists (select 1 from study_private.notify_outbox o
+                      where o.user_id = u and o.kind = 'set_shared' and (o.pushed_at >= v_since or o.state = 'sending'))
+        into v_open, v_pushed;
+      v_id := study_private.notice_add(u, p_group, 'set_shared',
+                case when v_open then '{}'::jsonb else v_args end,
+                case when v_open then jsonb_build_object('v', 'sets') else jsonb_build_object('v', 'sets', 'k', p_set) end,
+                'qsets', v_dedupe, v_lec, null);
+      continue when v_id is null;
+      if v_pushed then
+        -- Already pushed (or being pushed) today: this one waits in the inbox (a row being sent keeps its lease, without a second send).
+        update study_private.notify_outbox o
+           set again = false,
+               state = case when o.state = 'due' then case when o.pushed_at is not null then 'sent' else 'capped' end else o.state end
+         where o.notice_id = v_id and (o.state = 'due' or o.again);
+      end if;
+      n := n + 1;
+    exception when others then
+      raise warning 'notice_set_shared %', sqlstate;
+    end;
   end loop;
   return n;
 exception when others then
   raise warning 'notice_set_shared %', sqlstate;
-  return n;
+  return 0;
 end;
 $$;
 
@@ -20877,6 +20929,13 @@ begin
   -- A set that never got past reading its lecture.
   delete from public.study_qsets s
    where s.state = 'reading' and s.created_at < now() - interval '1 day'
+     and not exists (select 1 from public.study_qset_requests r where r.set_id = s.id)
+     and not exists (select 1 from public.study_qset_items i where i.set_id = s.id);
+  -- A lecture set begun but never attached (the call between begin and
+  -- attach died, and so did its abandon): shown as paused after 2 minutes,
+  -- gone after an hour (it then stops counting toward the day's sets).
+  delete from public.study_qsets s
+   where s.kind = 'lecture' and s.state = 'making' and s.updated_at < now() - interval '1 hour'
      and not exists (select 1 from public.study_qset_requests r where r.set_id = s.id)
      and not exists (select 1 from public.study_qset_items i where i.set_id = s.id);
   delete from public.study_qset_attempts a where a.finished_at is null and a.started_at < now() - interval '365 days';
@@ -20893,9 +20952,9 @@ $$;
 
 -- ── Who may call what ──
 revoke all on function study_private.qset_get(uuid), study_private.qset_facts(uuid),
-  study_private.qset_paused(text, timestamptz, int, timestamptz), study_private.qset_is_open(uuid),
+  study_private.qset_paused(text, text, timestamptz, int, timestamptz), study_private.qset_is_open(uuid),
   study_private.qset_announce(uuid), study_private.qset_refresh(uuid), study_private.qset_rows(uuid, uuid, uuid, int),
-  study_private.qset_attempt_open(uuid, uuid), study_private.qset_item_from_bank(), study_private.qset_of_request(uuid),
+  study_private.qset_attempt_open(uuid, uuid), study_private.qset_stamp(uuid, uuid, uuid[]), study_private.qset_item_from_bank(), study_private.qset_of_request(uuid),
   study_private.qset_for_similar(uuid, uuid, uuid, uuid, text, int), study_private.qset_add_items(uuid, uuid[]),
   study_private.qset_similar_done(uuid), study_private.qsets_cleanup(),
   study_private.notice_set_shared(uuid, uuid, uuid[], uuid, jsonb) from public;

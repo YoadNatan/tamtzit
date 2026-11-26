@@ -3986,7 +3986,8 @@
    "finished_at",
    "total",
    "answered",
-   "right_n"
+   "right_n",
+   "firsts"
   ],
   "study_qset_items": [
    "set_id",
