@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DEFAULT_MODEL } from "../../shared/study/models.js";
 import { costUsd, estimateUsd, fallbackUsd, floorUsage, imageTokens, POLICY, reserve, settle, unsettledCount, type UsageLike } from "./budget.js";
-import { HttpError, serverKey } from "./study.js";
+import { HttpError, MODEL, serverKey } from "./study.js";
 
 /* F-4 (spec §7.F): prices, usage.iterations, cache writes by TTL, an unknown
  * model, estimateUsd against the real cost of the summary's calls, how far a
@@ -76,12 +77,58 @@ test("every listed model at its rates; an unknown model at the dearest rate a fa
     ["claude-opus-4-5-20251101", 5 + 25 + 0.5 + 6.25],
     ["claude-sonnet-5-5", 2 + 10 + 0.1 + 2.5],
     ["claude-sonnet-4-6", 3 + 15 + 0.3 + 3.75],
+    ["claude-fable-5", 10 + 50 + 1 + 12.5],
+    ["claude-mythos-5", 10 + 50 + 1 + 12.5],
+    ["claude-sonnet-5", 2 + 10 + 0.2 + 2.5],
+    ["claude-sonnet-4-5-20250929", 3 + 15 + 0.3 + 3.75],
+    ["claude-haiku-4-5", 1 + 5 + 0.1 + 1.25],
+    ["claude-haiku-4-5-20251001", 1 + 5 + 0.1 + 1.25],
+    // A 3M-token prompt: Haiku 5.5's card above 100k tokens.
     ["claude-haiku-5-5", 0.5 + 2.5 + 0.05 + 0.625],
   ];
   for (const [model, want] of rates) near(costUsd(u, model), want, model);
   const dearest = 10 + 50 + 1 + 12.5;
-  for (const model of ["claude-fable-5", "claude-mythos-5", "claude-someday-9", "claude-opus-50", ""]) near(costUsd(u, model), dearest, model || "(empty)");
+  for (const model of ["claude-someday-9", "claude-opus-50", "claude-opus-5-5-fast", "claude-haiku-5-5x", ""]) near(costUsd(u, model), dearest, model || "(empty)");
   assert.equal(costUsd(null, "claude-opus-5-5"), 0);
+});
+
+test("Haiku 5.5: $0.10 / $0.50 for a prompt of 100k tokens or fewer, $0.50 / $2.50 above (input, writes and hits together)", () => {
+  near(costUsd({ input_tokens: 100_000, output_tokens: 1_000 }, "claude-haiku-5-5"), (100_000 * 0.1 + 1_000 * 0.5) / M, "100k exactly: the low card");
+  near(costUsd({ input_tokens: 100_001, output_tokens: 1_000 }, "claude-haiku-5-5"), (100_001 * 0.5 + 1_000 * 2.5) / M, "one more: the high card");
+  // The whole prompt decides: 40k uncached + 50k hits + 20k written is 110k.
+  near(
+    costUsd({ input_tokens: 40_000, cache_read_input_tokens: 50_000, cache_creation_input_tokens: 20_000, output_tokens: 500 }, "claude-haiku-5-5"),
+    (40_000 * 0.5 + 50_000 * 0.05 + 20_000 * 0.625 + 500 * 2.5) / M,
+    "writes and hits count toward the 100k",
+  );
+  near(
+    costUsd({ input_tokens: 4_000, cache_read_input_tokens: 5_000, output_tokens: 800, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1_000 } }, "claude-haiku-5-5"),
+    (4_000 * 0.1 + 5_000 * 0.01 + 1_000 * 0.2 + 800 * 0.5) / M,
+    "a small call at the low card, a 1-hour write at $0.20",
+  );
+  near(costUsd({ input_tokens: 2_000, output_tokens: 300 }, "claude-haiku-5-5-20261101"), (2_000 * 0.1 + 300 * 0.5) / M, "a dated id");
+  // Each attempt of a fallback picks its own card.
+  near(
+    costUsd({ iterations: [{ model: "claude-haiku-5-5", input_tokens: 1_000, output_tokens: 100 }, { model: "claude-haiku-5-5", input_tokens: 200_000, output_tokens: 100 }] }, "claude-haiku-5-5"),
+    (1_000 * 0.1 + 100 * 0.5) / M + (200_000 * 0.5 + 100 * 2.5) / M,
+    "per attempt",
+  );
+  // Its estimate: characters ÷ 1.9 (its tokenizer counts about 30% more tokens), the card for that prompt.
+  near(estimateUsd("claude-haiku-5-5", 19_000, 2_000), (10_000 * 0.125 + 2_000 * 0.5) / M, "a short call");
+  near(estimateUsd("claude-haiku-5-5", 190_000, 2_000, 5_000), (105_000 * 0.625 + 2_000 * 2.5) / M, "a prompt over 100k tokens");
+});
+
+test("Sonnet 5 and Haiku 4.5 are priced as themselves, no longer at the dearest rates", () => {
+  near(costUsd({ input_tokens: M, output_tokens: M }, "claude-sonnet-5"), 12, "Sonnet 5: $2 + $10");
+  near(costUsd({ cache_read_input_tokens: M }, "claude-sonnet-5"), 0.2, "Sonnet 5's hit: twice Sonnet 5.5's");
+  near(costUsd({ input_tokens: M, output_tokens: M }, "claude-haiku-4-5"), 6, "Haiku 4.5: $1 + $5 at any length");
+  near(costUsd({ input_tokens: 150_000 }, "claude-haiku-4-5"), 0.15, "no long-prompt card");
+  near(estimateUsd("claude-sonnet-5", 25_000, 1_000), (10_000 * 2.5 + 1_000 * 10) / M, "Sonnet 5's estimate at 2.5 characters a token");
+});
+
+test("the default model is Opus 5.5, the one study.ts calls", () => {
+  assert.equal(DEFAULT_MODEL, "claude-opus-5-5");
+  assert.equal(MODEL, DEFAULT_MODEL);
 });
 
 test("estimateUsd: characters ÷ 2.5 plus pictures' tokens as input, all of max_tokens as output", () => {

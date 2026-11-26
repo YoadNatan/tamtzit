@@ -1,4 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { priceOf } from "../../shared/study/models.js";
+import { CHARS_PER_TOKEN, UNKNOWN_PRICE } from "../../shared/study/prices.js";
 import { HttpError, keyed } from "./study.js";
 
 /* ── One ledger, one budget (decision 14; spec §2.4) ──
@@ -13,27 +15,13 @@ import { HttpError, keyed } from "./study.js";
  * key; members cannot read or write the rows.
  */
 
-/** USD per million tokens: base input, output, 5-minute and 1-hour cache
- *  writes, cache hits. From https://platform.claude.com/docs/en/about-claude/pricing. */
-type Price = { in: number; out: number; w5m: number; w1h: number; hit: number };
-
-const PRICES: Array<[RegExp, Price]> = [
-  [/^claude-(fable|mythos)-5-2/, { in: 8, out: 40, w5m: 10, w1h: 16, hit: 0.2 }],
-  [/^claude-(fable|mythos)-5-1/, { in: 10, out: 50, w5m: 12.5, w1h: 20, hit: 0.25 }],
-  [/^claude-opus-5-5/, { in: 4, out: 20, w5m: 5, w1h: 8, hit: 0.2 }],
-  [/^claude-opus-(5|4-[5-8])(\b|-)/, { in: 5, out: 25, w5m: 6.25, w1h: 10, hit: 0.5 }],
-  [/^claude-sonnet-5-5/, { in: 2, out: 10, w5m: 2.5, w1h: 4, hit: 0.1 }],
-  [/^claude-sonnet-4-[56]/, { in: 3, out: 15, w5m: 3.75, w1h: 6, hit: 0.3 }],
-  [/^claude-haiku-5-5/, { in: 0.5, out: 2.5, w5m: 0.625, w1h: 1, hit: 0.05 }], // the over-100k-token rate: never under-count
-];
-/** A model not listed above (a fallback we don't know): the dearest rates a
- *  fallback can have, so it is never under-counted (review FE-14). */
-const UNKNOWN: Price = { in: 10, out: 50, w5m: 12.5, w1h: 20, hit: 1 };
-
-function priceOf(model: string | null | undefined): Price {
-  const m = model ?? "";
-  return PRICES.find(([re]) => re.test(m))?.[1] ?? UNKNOWN;
-}
+/* Prices live in one registry (design-models D2, WP1): shared/study/prices.ts
+ * holds every Claude row, shared/study/models.ts the routable models; a
+ * model nobody lists is priced at UNKNOWN_PRICE, the dearest rates a
+ * fallback can have, so it is never under-counted (review FE-14).
+ * estimateUsd and imageTokens moved to shared/study/estimate.ts and are
+ * re-exported here, so every call site stays as it was. */
+export { charsPerToken, estimateUsd, imageTokens } from "../../shared/study/estimate.js";
 
 export type TokenCounts = {
   input_tokens?: number | null;
@@ -52,8 +40,16 @@ export type UsageLike = TokenCounts & {
   service_tier?: string | null;
 };
 
+/** The attempt's whole prompt in tokens (input, cache writes, cache hits):
+ *  what picks a rate card that depends on prompt length (Haiku 5.5's 100k). */
+function promptTokens(u: TokenCounts): number {
+  const c = u.cache_creation;
+  const writes = Math.max(u.cache_creation_input_tokens ?? 0, (c?.ephemeral_5m_input_tokens ?? 0) + (c?.ephemeral_1h_input_tokens ?? 0));
+  return (u.input_tokens ?? 0) + writes + (u.cache_read_input_tokens ?? 0);
+}
+
 function partCost(u: TokenCounts, model: string | null | undefined): number {
-  const p = priceOf(model);
+  const p = priceOf(model, promptTokens(u));
   const c = u.cache_creation;
   // usage.cache_creation breaks the cache writes down by TTL; without it every write is a 5-minute one.
   const writes =
@@ -85,38 +81,6 @@ export function floorUsage(usage: UsageLike | null, streamedChars: number): Usag
   return out;
 }
 
-/** Input characters per token assumed by every estimate (§2.4; calibrated
- *  against the stored usage by §8.5's query, not measured here). */
-const CHARS_PER_TOKEN = 2.5;
-/** The app stores pictures at most 1,400 px on the long side (images.ts) and
- *  PDF pages at 1,200 px (pdf.ts). */
-const MAX_PICTURE_SIDE = 1400;
-
-/** A picture's input tokens: about width × height / 750, Claude's documented
- *  image cost; a picture of unknown size counts as the largest the app stores. */
-export function imageTokens(w?: number | null, h?: number | null): number {
-  const width = w && w > 0 ? w : MAX_PICTURE_SIDE;
-  const height = h && h > 0 ? h : MAX_PICTURE_SIDE;
-  return Math.ceil((width * height) / 750);
-}
-
-/** One attempt's worst case, which is what a call reserves: its input
- *  (characters ÷ 2.5, plus any pictures' tokens) and all of max_tokens as
- *  output (thinking is output, and max_tokens bounds it), at the model's
- *  prices. Input is priced at the 5-minute cache write rate, 1.25 times the
- *  uncached rate, because a call that writes its prefix to the cache pays
- *  that; at the uncached rate a call that wrote its whole prefix and used all
- *  of max_tokens would cost more than its reservation. No call here writes
- *  the 1-hour cache. A call that the model declines and a server-side
- *  fallback finishes can cost more: see fallbackUsd. A request sent through
- *  Message Batches (`opts.batch`, the bank's worker) is priced at half
- *  (§12.2.4: the fifth argument, so F0's four keep their meaning). */
-export function estimateUsd(model: string, inputChars: number, maxTokens: number, extraInputTokens = 0, opts: { batch?: boolean } = {}): number {
-  const p = priceOf(model);
-  const input = Math.max(0, inputChars) / CHARS_PER_TOKEN + Math.max(0, extraInputTokens);
-  return ((input * Math.max(p.in, p.w5m) + Math.max(0, maxTokens) * p.out) / 1_000_000) * (opts.batch ? 0.5 : 1);
-}
-
 /** The most a server-side fallback (fallbacks: "default") can add to a call
  *  beyond estimateUsd. When the model declines part-way, the API runs the
  *  request again on another model, which reads the input and the text
@@ -132,7 +96,7 @@ export function estimateUsd(model: string, inputChars: number, maxTokens: number
 export function fallbackUsd(inputChars: number, maxTokens: number, extraInputTokens = 0): number {
   const out = Math.max(0, maxTokens);
   const input = Math.max(0, inputChars) / CHARS_PER_TOKEN + Math.max(0, extraInputTokens) + out;
-  return (input * Math.max(UNKNOWN.in, UNKNOWN.w5m) + out * UNKNOWN.out) / 1_000_000;
+  return (input * Math.max(UNKNOWN_PRICE.in, UNKNOWN_PRICE.w5m) + out * UNKNOWN_PRICE.out) / 1_000_000;
 }
 
 /** §2.4's table with §12.2.4's rows: where each kind stops. `share` × the
