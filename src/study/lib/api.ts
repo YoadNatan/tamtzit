@@ -1151,6 +1151,14 @@ export type Health = {
   features?: Record<string, boolean> | null;
   /** The personal code works end to end (section I, the server key, the switch, Auth's email sign-in). */
   codes?: boolean;
+  /** Pushes can go out (section R, the VAPID keys, the server key, the database wired). */
+  notify?: boolean;
+  /** The VAPID public key whenever the keys are set; null when they are not (the service worker goes). */
+  vapid?: string | null;
+  /** The switch "notify" (off: the pilot only). */
+  notifyOn?: boolean;
+  /** The sender's breaker stopped the kicks. */
+  notifyStuck?: boolean;
 };
 
 /** GET /api/study/health, or null when it does not answer in 6 s. */

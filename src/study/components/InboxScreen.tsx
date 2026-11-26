@@ -15,8 +15,8 @@ import "../styles/notify.css";
  * goes to 0); the dots stay for this visit. A tap goes where the notice
  * points. A live notice that is over says so: a group quiz's links to its
  * results, any other has no link. A notice that comes while the inbox is
- * open joins the top of the list, seen at once. The settings (x=set) come
- * with pushes; until then their address opens this list. */
+ * open joins the top of the list, seen at once. A gear opens the settings
+ * (x=set, NotifyScreen.tsx) when pushes are offered to this member. */
 
 const PAGE = 50;
 
@@ -93,7 +93,7 @@ function Row({ n, fresh, now, go }: { n: Notice; fresh: boolean; now: number; go
   return <li>{over && !quiz ? <div className={cls}>{body}</div> : <RouteLink to={targetOf(n)} go={go} className={cls}>{body}</RouteLink>}</li>;
 }
 
-export default function InboxScreen({ route, ctx }: ScreenProps<"notify">) {
+export default function InboxScreen({ ctx }: ScreenProps<"notify">) {
   const group = ctx.group.id;
   const [rows, setRows] = useState<Notice[] | null>(null);
   // What failed to load, so "לנסות שוב" asks for it again; the list shown stays.
@@ -107,10 +107,18 @@ export default function InboxScreen({ route, ctx }: ScreenProps<"notify">) {
   const { unseen } = useNotices();
   const now = Date.now();
 
-  // The settings come with pushes (slice 2): until then their address is this list.
+  // The settings' gear, when pushes are offered to this member (health at most daily).
+  const [gear, setGear] = useState(false);
   useEffect(() => {
-    if (route.x === "set") ctx.go({ v: "notify" }, { replace: true });
-  }, [route.x, ctx]);
+    let alive = true;
+    import("../lib/notify")
+      .then((m) => m.available(false))
+      .then((a) => alive && setGear(a.ok))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   /** The first page; rows already shown from later pages stay below it. Opening
    *  the inbox marks every notice seen; a later read marks the new rows it shows. */
@@ -178,7 +186,16 @@ export default function InboxScreen({ route, ctx }: ScreenProps<"notify">) {
 
   return (
     <main className="notify-inbox">
-      <Head back={<BackLink go={ctx.go} fallback={flags.today ? { v: "today" } : { v: "library" }} />} title={NT.inbox.title} />
+      <Head back={<BackLink go={ctx.go} fallback={flags.today ? { v: "today" } : { v: "library" }} />} title={NT.inbox.title}>
+        {gear ? (
+          <RouteLink to={{ v: "notify", x: "set" }} go={ctx.go} className="ntf-gear" label={NT.inbox.gearAria}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </RouteLink>
+        ) : null}
+      </Head>
       {failed ? (
         <div className="a-card inbox-fail" role="alert">
           <p>{NT.inbox.fail}</p>

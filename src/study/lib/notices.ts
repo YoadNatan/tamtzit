@@ -69,6 +69,21 @@ export function devices(endpoint: string | null = null): Promise<Device[]> {
 export function removeDevice(id: number): Promise<number> {
   return rpc<number>("study_push_remove", { p_id: id });
 }
+/** This device's subscription (section R moves the endpoint to the caller). */
+export function subscribeDevice(d: { endpoint: string; p256dh: string; auth: string; keyId: string; device: string; browser: string }): Promise<number> {
+  return rpc<number>("study_push_subscribe", { p_endpoint: d.endpoint, p_p256dh: d.p256dh, p_auth: d.auth, p_key_id: d.keyId, p_device: d.device, p_browser: d.browser });
+}
+export function unsubscribeDevice(endpoint: string): Promise<number> {
+  return rpc<number>("study_push_unsubscribe", { p_endpoint: endpoint });
+}
+/** Every device of the caller's but this one (null: every one). */
+export function keepOnlyDevice(endpoint: string | null): Promise<number> {
+  return rpc<number>("study_push_keep_only", { p_endpoint: endpoint });
+}
+/** The caller's settings (the defaults when nothing was saved): an empty patch saves nothing new. */
+export function readPrefs(): Promise<Prefs> {
+  return savePrefs({});
+}
 export function sendTest(): Promise<number> {
   return rpc<number>("study_notify_test");
 }

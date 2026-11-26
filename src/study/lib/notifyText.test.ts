@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { bellCount, bellLabel, israelDate, NT, quietRow, rowTime, since } from "./notifyText";
+import { bellCount, bellLabel, dayMonth, deniedChrome, deniedIos, deviceName, enabledToast, halfHours, inApp, iosOld, israelDate, NT, quietRow, rowTime, since } from "./notifyText";
 
 /* The notifications' screen words (section R, the design's §6.2), pinned:
  * a change to a line is a change to this test too. */
@@ -36,6 +36,7 @@ test("every line, as the design's table writes it", () => {
     "device.broken": "ההרשמה להתראות לא הצליחה.",
     "device.retry": "לנסות שוב",
     "device.offline": "אין חיבור. אפשר לנסות שוב כשהחיבור חוזר.",
+    "device.testMany": "אפשר לשלוח עד 3 התראות ניסיון בשעה. אפשר לנסות שוב מאוחר יותר.",
     "cats.h": "מה שולחים",
     "cats.live.title": "עכשיו בקבוצה",
     "cats.live.desc": "מבחן קבוצתי שנפתח, פגישה שמתחילה, מפגש למידה",
@@ -48,6 +49,9 @@ test("every line, as the design's table writes it", () => {
     "cats.disabled": "יחולו כשההתראות יופעלו באחד המכשירים.",
     "cats.all": "ההגדרות חלות על כל המכשירים שלך.",
     "quiet.h": "מתי לא לשלוח",
+    "quiet.night": "לא לשלוח בלילה",
+    "quiet.from": "מ-",
+    "quiet.to": "עד",
     "quiet.note": "מה שמגיע בשעות האלה מחכה ברשימת ההתראות.",
     "quiet.change": "לשנות שעות",
     "quiet.fromAria": "תחילת שעות השקט",
@@ -113,8 +117,33 @@ test("a row's time: now, minutes, today's clock, an earlier day (Israel time)", 
   assert.equal(israelDate(Date.parse("2026-11-25T22:30:00Z")), "2026-11-26");
 });
 
+test("the settings' built lines: an old iOS, another app's browser, blocked, the toast, the devices, the hours", () => {
+  assert.equal(iosOld(), "צריך iOS 16.4 ומעלה כדי לקבל התראות (הגדרות ← כללי ← עדכון תוכנה). עד אז הכל מופיע ברשימת ההתראות.");
+  assert.equal(inApp("instagram", true), "בדפדפן של אינסטגרם אין התראות. פותחים את תמצית בספארי.");
+  assert.equal(inApp("facebook", false), "בדפדפן של פייסבוק אין התראות. פותחים את תמצית בכרום.");
+  assert.equal(inApp("other", false), "בדפדפן של האפליקציה הזאת אין התראות. פותחים את תמצית בכרום.");
+  assert.equal(deniedIos(), "באייפון: הגדרות ← עדכונים ← תמצית ← אפשר עדכונים. אחר כך חוזרים לכאן.");
+  assert.equal(deniedChrome(), "בכרום: הסמל שליד הכתובת ← הגדרות אתר ← התראות ← לאפשר. אחר כך חוזרים לכאן.");
+  assert.equal(enabledToast({ live: true, mine: true, digest: false }), "ההתראות פועלות: מבחן קבוצתי, תשובות אליך, ומה שהעלית כשהוא מוכן.");
+  assert.equal(enabledToast({ live: true, mine: true, digest: true }), "ההתראות פועלות: מבחן קבוצתי, תשובות אליך, מה שהעלית כשהוא מוכן, ותזכורת יומית.");
+  assert.equal(enabledToast({ live: true, mine: false, digest: false }), "ההתראות פועלות: מבחן קבוצתי.");
+  assert.equal(enabledToast({ live: false, mine: false, digest: false }), "ההתראות פועלות במכשיר הזה. כל הסוגים כבויים כרגע.");
+  assert.equal(deviceName("iphone", "Safari"), "אייפון");
+  assert.equal(deviceName("android", "Chrome"), "אנדרואיד");
+  assert.equal(deviceName("mac", "Chrome"), "מחשב · כרום");
+  assert.equal(deviceName("windows", "Edge"), "מחשב · אדג׳");
+  assert.equal(deviceName("other", ""), "מחשב");
+  assert.equal(dayMonth(Date.parse("2026-11-25T22:30:00Z")), "26.11");
+  assert.equal(quietRow("23:00", "07:30"), "לא לשלוח בלילה (23:00–07:30)");
+  const day = halfHours("06:00", "22:00");
+  assert.equal(day.length, 33);
+  assert.deepEqual([day[0], day[1], day[day.length - 1]], ["06:00", "06:30", "22:00"]);
+  assert.equal(halfHours().length, 48);
+});
+
 test("no gendered forms; the words COPY.md gives the inbox", () => {
-  const text = flat(NT).map(([, v]) => v).join(" ");
+  const built = [iosOld(), inApp("instagram", true), deniedIos(), deniedChrome(), enabledToast({ live: true, mine: true, digest: true })];
+  const text = [...flat(NT).map(([, v]) => v), ...built].join(" ");
   for (const w of [/(^|\s)אתה(\s|$)/, /לחצי|לחץ(\s|$)/, /תוכלי|תוכל(\s|$)/, /היכנסי|היכנס(\s|$)/, /מוזמנ/, /(^|\s)בואי?(\s|$)/, /הפעילי|הפעל(\s|$)/]) {
     assert.ok(!w.test(text), `${w}`);
   }

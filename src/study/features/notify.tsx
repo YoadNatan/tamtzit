@@ -6,12 +6,13 @@ import type { Ctx, ScreenProps } from "./types";
 /* ── Notifications' slot (section R; VITE_STUDY_NOTIFY) ──
  * Only these wrappers are in the study entry chunk: each is nothing without
  * the flag, and everything else loads lazily (components/NotifyParts.tsx,
- * the inbox; tools/study-bundle.mjs holds R's share). */
+ * which picks the inbox or the settings; tools/study-bundle.mjs holds R's
+ * share). */
 
 const Parts = () => import("../components/NotifyParts");
 const Core = lazy(() => Parts().then((m) => ({ default: m.NotifyCore })));
 const BellPart = lazy(() => Parts().then((m) => ({ default: m.Bell })));
-const Inbox = lazy(() => import("../components/InboxScreen"));
+const Screen = lazy(() => Parts().then((m) => ({ default: m.NotifyScreens })));
 
 /** Beside the guide's slot in the shell: the bell's count, seen notices. */
 export function NotifySlot({ route, ctx }: { route: Route; ctx: Ctx }) {
@@ -31,7 +32,7 @@ export function Bell() {
   ) : null;
 }
 
-/** ?v=notify: the inbox (its settings, x=set, come with pushes). */
+/** ?v=notify: the inbox; x=set: its settings (the inbox when pushes are not offered). */
 export function NotifyRoute({ route, ctx }: ScreenProps<"notify">) {
-  return <Inbox route={route} ctx={ctx} />;
+  return <Screen route={route} ctx={ctx} />;
 }

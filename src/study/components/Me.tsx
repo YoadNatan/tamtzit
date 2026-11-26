@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   groupCreator,
   groupSpent,
@@ -27,6 +27,11 @@ import { PulseSettingRow } from "../features/pulse";
 import { NeedsMeSetting } from "../features/today";
 import type { ScreenProps } from "../features/types";
 import { Head, readSize, RouteLink, saveSize, shareInvite, SIZES } from "./Shell";
+
+// Notifications (VITE_STUDY_NOTIFY): "הגדרות התראות", loaded only with the flag.
+const NotifyRow = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyMeRow })));
+/** Signing out: this device stops getting pushes first (best effort, at most 3 s). */
+const dropPushes = () => (flags.notify ? import("../lib/notify").then((m) => m.dropThisDevice()).catch(() => undefined) : Promise.resolve());
 
 /* ── "שלי" (spec §5.1; §12.2.3) ──
  * 1 the account (A1); 2 "ההתקדמות שלי" with the danger list (A2), "הטעויות
@@ -200,6 +205,11 @@ export default function Me({ ctx }: ScreenProps<"me">) {
       <MyLaneRows ctx={ctx} />
       {/* Adding the app to the home screen (VITE_STUDY_INSTALL), high on the screen as the owner asked. */}
       <InstallMeRow ctx={ctx} />
+      {flags.notify ? (
+        <Suspense fallback={null}>
+          <NotifyRow ctx={ctx} />
+        </Suspense>
+      ) : null}
       {/* The guide's own section, high on the screen so it is found (the owner's request). */}
       <GuideMeRows ctx={ctx} />
 
@@ -378,7 +388,7 @@ export default function Me({ ctx }: ScreenProps<"me">) {
             setConfirm(null);
             openAccount("new");
           }}
-          onOut={() => void signOut().then(() => location.assign(APP_PATH))}
+          onOut={() => void dropPushes().then(() => signOut()).then(() => location.assign(APP_PATH))}
         />
       ) : null}
       {issued ? (

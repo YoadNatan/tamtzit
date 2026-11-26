@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { newPersonalCode, personalCodeSeen, personalCodeStatus, signOutOthers, type CodeStatus } from "../lib/api";
 import { failText } from "../lib/failText";
+import { flags } from "../lib/flags";
 import {
   cacheCode,
   cachedCode,
@@ -423,6 +424,8 @@ export function CodeCard({ ctx }: { ctx: Ctx }) {
     if (!(await make())) return;
     try {
       await signOutOthers();
+      // Notifications: only this device keeps getting pushes (best effort).
+      if (flags.notify) void import("../lib/notify").then((m) => m.keepOnlyThis()).catch(() => undefined);
       ctx.say("המכשירים האחרים נותקו. הקוד החדש מוצג כאן.");
     } catch {
       ctx.say("הקוד הוחלף, אבל הניתוק לא הושלם. אפשר לנסות שוב.");

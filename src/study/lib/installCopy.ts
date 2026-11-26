@@ -32,6 +32,16 @@ export const OS = {
   samsungHome: "מסך הבית",
   /** Android: a Chrome Custom Tab's menu row (a link opened from Gmail or Telegram: "Open in Chrome"). */
   androidOpenInChrome: "פתיחה ב-Chrome",
+  /** Notifications (section R): iOS's Settings app, its "Notifications" list, a web app's "Allow Notifications", */
+  iosSettings: "הגדרות",
+  iosNotifications: "עדכונים",
+  iosAllow: "אפשר עדכונים",
+  /** …and the way to a newer iOS ("General" → "Software Update"). */
+  iosGeneral: "כללי",
+  iosUpdate: "עדכון תוכנה",
+  /** Chrome: the page's site settings (from the icon beside the address) and their "Notifications" row. */
+  chromeSiteSettings: "הגדרות אתר",
+  chromeNotifications: "התראות",
 } as const;
 
 /** The app's own entry on the join screen (components/Join.tsx). */

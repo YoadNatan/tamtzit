@@ -4,7 +4,10 @@
  * here: shared/study/notifyCopy.ts writes them, for the lock screen and the
  * inbox alike. Impersonal or plural throughout (docs/study/COPY.md); only
  * lazy modules import this file, so none of it is in the study entry chunk.
- * notifyText.test.ts pins every line. */
+ * notifyText.test.ts pins every line. The phones' own menu words come from
+ * installCopy.ts OS (unchecked on a device until the owner's screenshots). */
+
+import { OS } from "./installCopy";
 
 export const NT = {
   me: {
@@ -30,6 +33,7 @@ export const NT = {
     broken: "ההרשמה להתראות לא הצליחה.",
     retry: "לנסות שוב",
     offline: "אין חיבור. אפשר לנסות שוב כשהחיבור חוזר.",
+    testMany: "אפשר לשלוח עד 3 התראות ניסיון בשעה. אפשר לנסות שוב מאוחר יותר.",
   },
   cats: {
     h: "מה שולחים",
@@ -43,6 +47,9 @@ export const NT = {
   },
   quiet: {
     h: "מתי לא לשלוח",
+    night: "לא לשלוח בלילה",
+    from: "מ-",
+    to: "עד",
     note: "מה שמגיע בשעות האלה מחכה ברשימת ההתראות.",
     change: "לשנות שעות",
     fromAria: "תחילת שעות השקט",
@@ -81,6 +88,57 @@ export const NT = {
   errSave: "לא הצלחנו לשמור. אפשר לנסות שוב.",
 } as const;
 
+/** iOS before 16.4 in the home-screen app: the way to a newer iOS. */
+export function iosOld(): string {
+  return `צריך iOS 16.4 ומעלה כדי לקבל התראות (${OS.iosSettings} ← ${OS.iosGeneral} ← ${OS.iosUpdate}). עד אז הכל מופיע ברשימת ההתראות.`;
+}
+
+/** Another app's built-in browser: the real browser to open תמצית in. */
+export function inApp(app: "facebook" | "instagram" | "other", ios: boolean): string {
+  const name = app === "facebook" ? "פייסבוק" : app === "instagram" ? "אינסטגרם" : "האפליקציה הזאת";
+  return `בדפדפן של ${name} אין התראות. פותחים את תמצית ב${ios ? OS.safari : OS.chrome}.`;
+}
+
+/** Blocked: where to allow them again, on an iPhone and in Chrome. */
+export function deniedIos(): string {
+  return `באייפון: ${OS.iosSettings} ← ${OS.iosNotifications} ← תמצית ← ${OS.iosAllow}. אחר כך חוזרים לכאן.`;
+}
+export function deniedChrome(): string {
+  return `ב${OS.chrome}: הסמל שליד הכתובת ← ${OS.chromeSiteSettings} ← ${OS.chromeNotifications} ← לאפשר. אחר כך חוזרים לכאן.`;
+}
+
+/** The toast after turning pushes on: what this device will get, from the switches. */
+export function enabledToast(p: { live: boolean; mine: boolean; digest: boolean }): string {
+  const parts = [p.live && "מבחן קבוצתי", p.mine && "תשובות אליך", p.mine && "מה שהעלית כשהוא מוכן", p.digest && "תזכורת יומית"].filter(Boolean) as string[];
+  if (!parts.length) return "ההתראות פועלות במכשיר הזה. כל הסוגים כבויים כרגע.";
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")}, ו${parts[parts.length - 1]}`;
+  return `${NT.device.enabledToast}${list}.`;
+}
+
+const KIND: Record<string, string> = { iphone: "אייפון", ipad: "אייפד", android: "אנדרואיד" };
+const BROWSER: Record<string, string> = { Chrome: OS.chrome, Safari: OS.safari, Firefox: "פיירפוקס", Edge: "אדג׳", Samsung: "סמסונג", Opera: "אופרה" };
+
+/** A device in the list: "אייפון", or "מחשב · כרום" (a computer says its browser). */
+export function deviceName(device: string, browser: string): string {
+  if (KIND[device]) return KIND[device];
+  const b = BROWSER[browser];
+  return b ? `מחשב · ${b}` : "מחשב";
+}
+
+/** "d.m" of an instant, in Israel. */
+export function dayMonth(ms: number): string {
+  const [, m, d] = israelDate(ms).split("-").map(Number);
+  return `${d}.${m}`;
+}
+
+/** The half hours from `from` to `to` ("HH:MM", both included). */
+export function halfHours(from = "00:00", to = "23:30"): string[] {
+  const out: string[] = [];
+  const min = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+  for (let m = min(from); m <= min(to); m += 30) out.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+  return out;
+}
+
 /** The bell's name for a screen reader, with the count of new notices. */
 export function bellLabel(n: number): string {
   if (n <= 0) return "התראות";
@@ -95,7 +153,7 @@ export function bellCount(n: number): string {
 
 /** "לא לשלוח בלילה (23:00–07:30)": the times are left to right in the screen (bdi). */
 export function quietRow(from: string, to: string): string {
-  return `לא לשלוח בלילה (${from}–${to})`;
+  return `${NT.quiet.night} (${from}–${to})`;
 }
 
 /** "מאז 26.11" (a device's first day). */
