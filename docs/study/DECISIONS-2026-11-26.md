@@ -509,3 +509,35 @@ Also decided for this build:
   changes.
 - **Privacy line** (help and privacy copy; informational, not a gate): a set
   and its questions are visible to the whole group with the author's name.
+
+### Practice sets, slice A's groundwork (WP0-WP3), built on 26 November 2026
+
+- **Docs** (WP0): [`sets.md`](sets.md) (what is built, the numbers, the
+  calibration query, the planning rules, the owner's snippets); COPY.md's
+  glossary rows for sets; `practice.md` no longer describes a "תרגול" tab
+  where production has none.
+- **Bundle** (WP1): `tools/study-bundle.mjs` knows the package `QS` (its
+  slot `features/qsets.tsx`, its screens, `make`, `setsCopy`, `sets` and
+  `styles/sets.css`) and the flags `MAKE` and `SETS`; `QS` keeps only its
+  slot module in the entry chunk and fails the check above 2,000 B. Measured
+  before any of its code: 400,398 B with every flag on (9,602 B left), so no
+  entry code was moved.
+- **Planning** (WP2, `shared/study/practice2.ts`): fresh first (after red
+  flags, the points no active bank question tests come first), parts
+  weighted by their uncovered points (at least 1), `covers` counting only
+  new points, `coverageAfter()` and `styleCounts()` for the preview, and
+  `expectedQuestionUsd(model?)`: **$0.04 a question** (was $0.025), scaled by
+  another model's price for a writing batch against `claude-opus-5-5`.
+  Every estimate moves to $0.04, the old screens' too (OD11: the
+  conservative price is shown until the calibration).
+- **Server `plan`** (WP3, `server/study/practice2.ts`): fresh first for
+  `plan` and `create` alike (a question hidden by two flags covers nothing),
+  `plan.styles`, and with `inputs: true` the planning inputs (the points,
+  `covered`, the active count, `free`, the headroom to the 80% line and the
+  40% share, the prices). Open and recent sets, the sets line's headroom and
+  the day's sets left stay `null` until section L 1 provides them (a member
+  cannot read the ledger, so L needs a member RPC for those two figures);
+  `setsMonthlyCap()` (default $12), `SETS_LINE_KINDS` and `SETS_DAILY` (5)
+  are in `server/study/budget.ts`, outside `POLICY`.
+- **Not done here:** the calibration itself (Yoad runs the read-only query
+  in `sets.md`; production was not queried).

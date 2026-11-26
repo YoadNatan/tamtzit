@@ -124,7 +124,7 @@ screens read the shared vocabulary and numbers from
 |---|---|---|---|
 | none or `"write"` | write one batch: `{ batchId }` | yes | a stream |
 | `"points"` | read the lecture's points to know | yes, only for stale parts | a stream |
-| `"plan"` | the setup screen's numbers: `{ options? }` | no | JSON |
+| `"plan"` | the setup screen's numbers: `{ options?, inputs? }` | no | JSON |
 | `"create"` | a request and its batches: `{ options }` | no | JSON |
 | `"style"` | an example read back: `{ text?, image? }` | yes, small | JSON |
 | `"reword"` | one draft written again: `{ draftId, note? }` | yes | a stream |
@@ -183,7 +183,8 @@ gives 12, 24 and 40, as the approved screen shows.
   "points": { "total": 46, "current": true, "stale": [], "busy": false },
   "levels": { "focused": 12, "full": 24, "deep": 40 },
   "plan": { "level": "full", "total": 24,
-            "parts": [{ "part_idx": 0, "points": 6, "red_flags": 1, "questions": 3, "covers": 6 }], "batches": 6 },
+            "parts": [{ "part_idx": 0, "points": 6, "red_flags": 1, "questions": 3, "covers": 6 }], "batches": 6,
+            "styles": { "case": 6, "mechanism": 6, "drug_choice": 6, "adverse_contra": 6 } },
   "estimate": { "readUsd": 0, "questionsUsd": 0.96, "solverUsd": 0.12, "totalUsd": 0.96, "perQuestionUsd": 0.04,
                 "levels": { "focused": 0.48, "full": 0.96, "deep": 1.6 }, "rewordUsd": 0.03, "styleUsd": 0.01 },
   "spent": { "groupUsd": 3.21, "mineUsd": 0.42, "capUsd": 33, "share": 0.8, "memberShare": 0.4 }
@@ -203,6 +204,56 @@ gives 12, 24 and 40, as the approved screen shows.
 - `spent`: the group's spend this month, the member's own optional spend,
   the cap, and where optional spending stops (80% of the cap; 40% for one
   member). `null` when a figure could not be read.
+- **Fresh first** (practice sets D5, `sets.md`): the plan knows the bank.
+  Points that the lecture's active questions test (not retired, not hidden
+  by two flags) come after the ones no question tests yet (red flags still
+  first); משלי shares its questions by each part's uncovered points (at
+  least 1), and so does a level over 40. `plan.parts[].covers` counts only
+  the **new** points. With an empty bank every number is as before. `create`
+  plans the same way, so its batches are what `plan` showed.
+- `plan.styles`: how many items of each type the plan writes (the preview's
+  tiles).
+
+**`inputs: true`** (practice sets, "סט חדש"; the create screen calls `plan`
+once per lecture and computes its preview on the phone from these, D13)
+adds `inputs` (`PlanInputs`):
+
+```json
+"inputs": {
+  "points": [{ "id": "…", "part_idx": 0, "n": 1, "kind": "drug", "red_flag": true, "weight": 3 }],
+  "covered": ["…"],
+  "active": 24,
+  "free": 9,
+  "making": null,
+  "recent": null,
+  "headroom": { "group80": 23.19, "member40": 12.78, "line": null },
+  "dailyLeft": null,
+  "perQuestionUsd": 0.04,
+  "readUsd": 0,
+  "styleUsd": 0.01
+}
+```
+
+- `points`: every current point of the lecture, only what planning needs (no
+  text). `covered`: those of them the bank's active, shown questions test.
+  `active`: the lecture's active (not retired) questions, the 150 cap's
+  count.
+- `free`: the lecture's keyed active questions the member has not answered
+  (`study_practice_overview`; "בבנק יש {n} שאלות שעוד לא נענו · לפתור
+  בחינם").
+- `headroom`: USD left, in whole cents and never below 0: the group's to the
+  80% line (`group80`), the member's to the 40% share (`member40`), and the
+  group's to the sets line (`line`, `STUDY_SETS_MONTHLY_USD`, default 12).
+  `dailyLeft`: new paid sets the member may still start today (5 a day).
+- `making` (open sets on the lecture, `study_lecture_making`), `recent` (its
+  sets of the last 7 days, `study_qsets_shelf`), `headroom.line` and
+  `dailyLeft` need section L 1, which is not installed yet: until then they
+  are `null`. L 1 provides them (with a member RPC for the month's spend of
+  the sets line's kinds and the member's sets made today, since a member
+  cannot read the ledger), and the server reads them behind `schemaHas({ L:
+  1 })`.
+- Any other figure that cannot be read is `null` (the screen decides without
+  it); `perQuestionUsd` is `expectedQuestionUsd(MODEL)`.
 
 ### `points` → a stream
 
@@ -268,9 +319,10 @@ plan` (not an id, or another group's round), 400 `too few questions`, 409
 `round full` (also when two phones add the 5th and 6th lecture at once).
 
 Each batch writes at most 5 questions; a part with more has several batches
-(`seq`). Each batch carries the points it must cover and the style of each of
-its questions (the request's styles in turn; a blank table only on a part
-whose slides have a table).
+(`seq`). Each batch carries the points it must cover (fresh first: the
+points no active bank question tests before the covered ones) and the style
+of each of its questions (the request's styles in turn; a blank table only on
+a part whose slides have a table).
 
 ### `write` → a stream: `{ op: "questions", lectureId, batchId }`
 

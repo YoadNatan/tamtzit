@@ -626,7 +626,13 @@ export type PlanAnswer = {
   parts: PointsPart[];
   points: { total: number; current: boolean; stale: number[]; busy: boolean };
   levels: Levels3;
-  plan: { level: Level; total: number; parts: Plan["parts"]; batches: number };
+  /** `styles`: how many items of each type the plan writes (styleCounts);
+   *  `parts[].covers`: the new points, fresh first (absent from an older server). */
+  plan: { level: Level; total: number; parts: Plan["parts"]; batches: number; styles?: Partial<Record<Style, number>> };
+  /** Practice sets' planning inputs (docs/study/sets.md), only when the
+   *  request asks for them (`inputs: true`); the create screen computes its
+   *  preview from them on the phone, once per lecture. */
+  inputs?: PlanInputs;
   /** Question types: what each part offers (by part_idx), and the types checked first for the chosen parts. Absent from an older server. */
   facts?: Record<string, PartFacts>;
   defaults?: Style[];
@@ -641,6 +647,35 @@ export type PlanAnswer = {
     styleUsd: number;
   };
   spent: { groupUsd: number | null; mineUsd: number | null; capUsd: number; share: number; memberShare: number | null };
+};
+
+/** An open set on the lecture (study_lecture_making, section L 1). */
+export type MakingSet = { set_id: string; author_name: string; made: number; want: number; state: string; updated_at: string };
+/** A set on the lecture from the last 7 days (study_qsets_shelf, section L 1). */
+export type RecentSet = { id: string; title: string; author_name: string; created_at: string; size: number; want: number; state: string };
+
+/** What the create screen plans with ("סט חדש", practice sets D13): the
+ *  points (with `covered`, the point ids the lecture's active, shown bank
+ *  questions test), the bank's size and what the member can still solve for
+ *  free, the open and recent sets, the headroom to each line and the prices.
+ *  A figure the server could not read is null; `making`, `recent`,
+ *  `headroom.line` and `dailyLeft` are null until section L 1 is installed. */
+export type PlanInputs = {
+  points: PlanPoint[];
+  covered: string[];
+  /** Active (not retired) questions of the lecture: the 150 cap's count. */
+  active: number;
+  /** Keyed active questions of the lecture the member has not answered (study_practice_overview). */
+  free: number | null;
+  making: MakingSet[] | null;
+  recent: RecentSet[] | null;
+  /** USD left: the group's to the 80% line, the member's to the 40% share, the group's to the sets line. */
+  headroom: { group80: number | null; member40: number | null; line: number | null };
+  /** New paid sets the member may still start today (Israel time). */
+  dailyLeft: number | null;
+  perQuestionUsd: number;
+  readUsd: number;
+  styleUsd: number;
 };
 
 /** Action "create": the request and the batches to write one by one. */

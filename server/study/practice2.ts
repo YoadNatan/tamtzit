@@ -10,6 +10,7 @@ import {
   type Options,
   planRequest,
   type PlanAnswer,
+  type PlanInputs,
   type PlanPoint,
   type PointsLine,
   pointsUsd,
@@ -20,6 +21,7 @@ import {
   ROUND_MAX_LECTURES,
   ROUND_MIN_PER_LECTURE,
   solverUsd,
+  styleCounts,
   type Style,
   type StyleAnswer,
   type WriteLine,
@@ -78,7 +80,8 @@ import {
  * (docs/study/proposal/practice-2/DECISIONS.md; the API in docs/study/practice-2-api.md)
  *
  *   { op: "questions", action: "points", lectureId }           reads the lecture's points to know (paid once for the group)
- *   { op: "questions", action: "plan", lectureId, options? }   what the setup screen shows: points, counts, estimates (free)
+ *   { op: "questions", action: "plan", lectureId, options?, inputs? }   what the setup screen shows: points, counts,
+ *                                                               estimates; with inputs, "סט חדש"'s planning inputs (free)
  *   { op: "questions", action: "create", lectureId, options }  a request and its batches (free; the batches are then
  *                                                               written one by one: { op: "questions", lectureId, batchId })
  *   { op: "questions", action: "style", lectureId, text?, image? }  an example read back as the style (paid, small)
@@ -168,6 +171,68 @@ async function planPoints(sb: SupabaseClient, lectureId: string): Promise<PlanPo
   return (data ?? []) as PlanPoint[];
 }
 
+/** The lecture's bank as planning sees it (fresh first, practice sets D5):
+ *  the point ids its active questions test (not retired, not hidden by two
+ *  flags), and how many questions are active (the 150 cap counts the
+ *  retired_at is null ones, hidden or not). A point read again has a new
+ *  id, so a re-read part counts as uncovered. */
+export async function bankCoverage(sb: SupabaseClient, lectureId: string): Promise<{ covered: Set<string>; active: number }> {
+  const { data, error } = await sb.from("study_questions").select("points, hidden_at").eq("lecture_id", lectureId).is("retired_at", null);
+  if (error) throw new HttpError(500, error.message);
+  const rows = (data ?? []) as Array<{ points: string[] | null; hidden_at: string | null }>;
+  const covered = new Set<string>();
+  for (const r of rows) if (!r.hidden_at) for (const id of r.points ?? []) covered.add(id);
+  return { covered, active: rows.length };
+}
+
+/** Whole cents left to a line, never below 0. */
+const room = (line: number, spent: number) => Math.max(0, Math.floor((line - spent) * 100 + 1e-9) / 100);
+
+/** "סט חדש"'s planning inputs (PlanInputs; docs/study/sets.md): the points
+ *  and their coverage, the bank's size, what the member can solve for free,
+ *  the headroom to the 80% line and the member's 40% share, and the prices.
+ *  A figure that cannot be read is null: the screen decides without it.
+ *  `making`, `recent`, `headroom.line` and `dailyLeft` come from section L 1
+ *  (study_lecture_making, study_qsets_shelf and the sets line's and the day's
+ *  figures); until it is installed they are null, and the package that adds
+ *  L reads them here, behind schemaHas({ L: 1 }). */
+async function planInputs(
+  sb: SupabaseClient,
+  o: {
+    lecture: Lecture;
+    points: PlanPoint[];
+    covered: ReadonlySet<string>;
+    active: number;
+    groupUsd: number | null;
+    mineUsd: number | null;
+    readUsd: number;
+  },
+): Promise<PlanInputs> {
+  const overview = await sb.rpc("study_practice_overview", { p_group: o.lecture.group_id });
+  const row = overview.error
+    ? null
+    : ((overview.data ?? []) as Array<{ lecture_id: string | null; questions: number; answered: number }>).find((r) => r.lecture_id === o.lecture.id);
+  const free = overview.error ? null : row ? Math.max(0, Number(row.questions) - Number(row.answered)) : 0;
+  const cap = monthlyCap();
+  return {
+    points: o.points.map((p) => ({ id: p.id, part_idx: Number(p.part_idx), n: Number(p.n), kind: p.kind, red_flag: !!p.red_flag, weight: p.weight })),
+    covered: o.points.filter((p) => o.covered.has(p.id)).map((p) => p.id),
+    active: o.active,
+    free,
+    making: null,
+    recent: null,
+    headroom: {
+      group80: o.groupUsd === null ? null : room(cap * POLICY.practice.share, o.groupUsd),
+      member40: o.mineUsd === null ? null : room(cap * (POLICY.practice.memberShare ?? 0), o.mineUsd),
+      line: null,
+    },
+    dailyLeft: null,
+    perQuestionUsd: expectedQuestionUsd(MODEL),
+    readUsd: o.readUsd,
+    styleUsd: EXPECTED_USD.style,
+  };
+}
+
 /** What each part offers the question types (forms.ts canStyle): a table on
  *  its slides, the pictures its summary captions (fig:N-K), those with label
  *  geometry, its points by kind. */
@@ -235,22 +300,25 @@ function chosenParts(state: readonly StateRow[], options: Options): number[] {
   return state.filter((s) => s.points > 0).map((s) => s.part_idx);
 }
 
-/** { lectureId, options? }: the parts with their points (study_points_state),
- *  which are stale, the three levels' counts and the plan of these options,
- *  the estimates (reading the points when any is stale, the questions, a
- *  reword, reading an example) and the month's spend. No model, no spend. */
+/** { lectureId, options?, inputs? }: the parts with their points
+ *  (study_points_state), which are stale, the three levels' counts and the
+ *  plan of these options (fresh first: the bank's coverage), the estimates
+ *  (reading the points when any is stale, the questions, a reword, reading
+ *  an example) and the month's spend; with `inputs: true`, "סט חדש"'s
+ *  planning inputs (planInputs). No model, no spend. */
 export const planAction: Op = async (req, body) => {
   const lectureId = lectureIdOf(body);
   const options = optionsOf(body.options);
   // No model call and about a second of reads: a token near its end still serves.
   const { sb } = await memberClient(req, { minSeconds: QUICK_TOKEN_SECONDS });
   const lecture = await loadLecture(sb, lectureId);
-  const [state, points, sections, spent, mine] = await Promise.all([
+  const [state, points, sections, spent, mine, bank] = await Promise.all([
     pointsState(sb, lectureId),
     planPoints(sb, lectureId),
     sb.from("study_sections").select("idx, markdown").eq("lecture_id", lectureId),
     sb.rpc("study_spent", { p_group: lecture.group_id }),
     sb.rpc("study_my_spent", { p_group: lecture.group_id }),
+    bankCoverage(sb, lectureId),
   ]);
   if (sections.error) throw new HttpError(500, sections.error.message);
   const stale = state.filter((s) => s.summary === "ready" && !s.current).map((s) => s.part_idx);
@@ -259,10 +327,12 @@ export const planAction: Op = async (req, body) => {
     .reduce((n, s) => n + (s.markdown ?? "").length, 0);
   const parts = chosenParts(state, options);
   const facts = partFacts(lecture, state, (sections.data ?? []) as Array<{ idx: number; markdown: string | null }>, points);
-  const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, partFacts: facts });
+  const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, partFacts: facts, covered: bank.covered });
   const levels = levelCounts(points, parts);
   const readUsd = stale.length ? pointsUsd(chars, stale.length) : 0;
   const planned = plannedStyles(plan);
+  const groupUsd = spent.error ? null : Number(spent.data);
+  const mineUsd = mine.error ? null : Number(mine.data);
   const answer: PlanAnswer = {
     lecture: { slides: slidesOf(lecture).length },
     parts: state,
@@ -273,7 +343,7 @@ export const planAction: Op = async (req, body) => {
       busy: state.some((s) => s.busy),
     },
     levels,
-    plan: { level: options.level, total: plan.total, parts: plan.parts, batches: plan.batches.length },
+    plan: { level: options.level, total: plan.total, parts: plan.parts, batches: plan.batches.length, styles: styleCounts(plan) },
     // Question types: what each part offers, and the types checked first for the chosen parts.
     facts: Object.fromEntries([...facts].map(([k, v]) => [String(k), v])),
     defaults: defaultStylesFor(factsOf(facts, parts)) as Style[],
@@ -290,13 +360,14 @@ export const planAction: Op = async (req, body) => {
       styleUsd: EXPECTED_USD.style,
     },
     spent: {
-      groupUsd: spent.error ? null : Number(spent.data),
-      mineUsd: mine.error ? null : Number(mine.data),
+      groupUsd,
+      mineUsd,
       capUsd: monthlyCap(),
       share: POLICY.practice.share,
       memberShare: POLICY.practice.memberShare,
     },
   };
+  if (body.inputs === true) answer.inputs = await planInputs(sb, { lecture, points, covered: bank.covered, active: bank.active, groupUsd, mineUsd, readUsd });
   return json(200, answer);
 };
 
@@ -350,8 +421,8 @@ function planIdOf(body: Record<string, unknown>): string | null {
 /** { lectureId, options }: checks the options (400), the style's signature
  *  (400 "bad style"), that every chosen part is written (409 "summary not
  *  ready") and its points current (409 "points stale": action "points"
- *  reads them first), plans the request
- *  from the points (planRequest) and saves it with its batches
+ *  reads them first), plans the request from the points, fresh first
+ *  (planRequest with the bank's coverage), and saves it with its batches
  *  (study_request_create). The batches are then written one by one. */
 export const createAction: Op = async (req, body) => {
   const lectureId = lectureIdOf(body);
@@ -365,10 +436,11 @@ export const createAction: Op = async (req, body) => {
   const lecture = await loadLecture(sb, lectureId);
   if (options.style && !(await verifyStyle(key, lectureId, options.style))) throw new HttpError(400, "bad style");
   await needTypes(sb, options.styles);
-  const [state, points, sections] = await Promise.all([
+  const [state, points, sections, bank] = await Promise.all([
     pointsState(sb, lectureId),
     planPoints(sb, lectureId),
     sb.from("study_sections").select("idx, markdown").eq("lecture_id", lectureId),
+    bankCoverage(sb, lectureId),
   ]);
   if (sections.error) throw new HttpError(500, sections.error.message);
   const parts = chosenParts(state, options);
@@ -377,7 +449,8 @@ export const createAction: Op = async (req, body) => {
   if (chosen.some((s) => s.summary !== "ready")) throw new HttpError(409, "summary not ready");
   if (chosen.some((s) => !s.current)) throw new HttpError(409, "points stale");
   const facts = partFacts(lecture, state, (sections.data ?? []) as Array<{ idx: number; markdown: string | null }>, points);
-  const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, partFacts: facts });
+  // Fresh first, as plan showed it (practice sets D5).
+  const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, partFacts: facts, covered: bank.covered });
   if (plan.total === 0) throw new HttpError(400, "no points");
   const used = plan.parts.filter((p) => p.questions > 0).map((p) => p.part_idx);
   if (planId) {

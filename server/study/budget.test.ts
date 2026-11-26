@@ -4,7 +4,22 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_MODEL } from "../../shared/study/models.js";
-import { costUsd, estimateUsd, fallbackUsd, floorUsage, imageTokens, monthlyCap, POLICY, reserve, settle, unsettledCount, type UsageLike } from "./budget.js";
+import {
+  costUsd,
+  estimateUsd,
+  fallbackUsd,
+  floorUsage,
+  imageTokens,
+  monthlyCap,
+  POLICY,
+  reserve,
+  SETS_DAILY,
+  SETS_LINE_KINDS,
+  setsMonthlyCap,
+  settle,
+  unsettledCount,
+  type UsageLike,
+} from "./budget.js";
 import { HttpError, MODEL, serverKey } from "./study.js";
 
 /* F-4 (spec §7.F): prices, usage.iterations, cache writes by TTL, an unknown
@@ -143,6 +158,27 @@ test("the monthly cap defaults to $33 when STUDY_MONTHLY_USD is not set", () => 
   } finally {
     process.env.STUDY_MONTHLY_USD = was;
   }
+});
+
+test("practice sets: the sets line defaults to $12 (STUDY_SETS_MONTHLY_USD, OD12), 5 sets a day (OD13), never a ledger kind", () => {
+  const was = process.env.STUDY_SETS_MONTHLY_USD;
+  try {
+    delete process.env.STUDY_SETS_MONTHLY_USD;
+    assert.equal(setsMonthlyCap(), 12, "not set");
+    process.env.STUDY_SETS_MONTHLY_USD = "";
+    assert.equal(setsMonthlyCap(), 12, "empty");
+    process.env.STUDY_SETS_MONTHLY_USD = "8";
+    assert.equal(setsMonthlyCap(), 8, "set");
+    process.env.STUDY_SETS_MONTHLY_USD = "lots";
+    assert.equal(setsMonthlyCap(), 12, "not a number");
+  } finally {
+    if (was === undefined) delete process.env.STUDY_SETS_MONTHLY_USD;
+    else process.env.STUDY_SETS_MONTHLY_USD = was;
+  }
+  assert.equal(SETS_DAILY, 5);
+  assert.deepEqual([...SETS_LINE_KINDS], ["practice", "solver", "reword", "style"]);
+  for (const k of SETS_LINE_KINDS) assert.ok(POLICY[k], `${k} is a ledger kind`);
+  assert.ok(!("qsets" in POLICY), "the daily limit of sets reserves nothing");
 });
 
 test("estimateUsd: characters ÷ 2.5 plus pictures' tokens as input, all of max_tokens as output", () => {

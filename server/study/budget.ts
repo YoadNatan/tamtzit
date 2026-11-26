@@ -142,6 +142,20 @@ export const POLICY: Record<string, Policy> = {
 /** STUDY_MONTHLY_USD: the group's monthly cap in USD; 33 when it is not set
  *  (the approved cap, ₪20 a person; design-models OD16). */
 export const monthlyCap = (): number => Number(process.env.STUDY_MONTHLY_USD || 33);
+/** STUDY_SETS_MONTHLY_USD: the monthly line for practice sets in USD, the
+ *  group's spend of kinds practice, solver, reword and style (SETS_LINE_KINDS);
+ *  12 when it is not set (Yoad's sub-cap, practice sets OD12). Checked when a
+ *  set starts, so a started set finishes (docs/study/sets.md). */
+export const setsMonthlyCap = (): number => {
+  const v = Number(process.env.STUDY_SETS_MONTHLY_USD || 12);
+  return Number.isFinite(v) && v >= 0 ? v : 12;
+};
+/** The kinds the sets line counts. */
+export const SETS_LINE_KINDS = ["practice", "solver", "reword", "style"] as const;
+/** New paid sets a member may start a day, Israel time (practice sets OD13;
+ *  the design's POLICY.qsets.daily). Not a ledger kind, so it is not in
+ *  POLICY: nothing can reserve a call as "qsets". */
+export const SETS_DAILY = 5;
 /** The cap passed for a kind that costs nothing (the PDF's $0 rows). */
 const NO_CAP = 1_000_000;
 

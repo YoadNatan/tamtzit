@@ -16,7 +16,7 @@ a view over bank questions.
 
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
-| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | WP0-WP2 built (docs, bundle owner, shared planning and price); WP3 and the screens follow |
+| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | WP0-WP3 built (docs, bundle owner, shared planning and price, the server's `plan`); the screens follow |
 | B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | not built yet |
 | C | The notices `set_shared` and `set_solved` (WP17), with section R | (R's) | L 1, R | not built yet |
 
@@ -38,7 +38,9 @@ Server switches (rows in `study_private.features`, from section L 1):
 
 Server settings (Vercel): `STUDY_SETS_MONTHLY_USD`, the monthly line for sets
 (default 12, OD12), the spend of kinds practice, solver, reword and style.
-The daily limit is 5 new sets a member (`POLICY.qsets.daily`, OD13).
+The daily limit is 5 new sets a member (`SETS_DAILY` in
+`server/study/budget.ts`, the design's `POLICY.qsets.daily`, kept out of
+`POLICY` so nothing can reserve a call as "qsets"; OD13).
 
 ## The bundle (WP1)
 
@@ -155,7 +157,30 @@ moves the solver to Haiku (its O9), the rate falls to about $0.032.
 
 ## The server's plan (WP3)
 
-To come with WP3: the planning inputs of action `plan`.
+Action `plan` of op `questions` (`server/study/practice2.ts`) now:
+
+- **plans fresh first, always** (D5): it reads the lecture's active bank
+  questions (`bankCoverage`: not retired; a question hidden by two flags
+  covers nothing) and plans with their points as `covered`, so
+  `plan.parts[].covers` counts only new points. `create` plans the same way,
+  so its batches are what `plan` showed;
+- answers **`plan.styles`** (how many items of each type);
+- with **`inputs: true`**, answers the planning inputs the create screen
+  computes its preview from (D13: `plan` is called on open and when the
+  lecture changes, never on a size or type change): the points (no text),
+  `covered`, `active` (the 150 cap's count), `free`, the headroom to the 80%
+  line and the member's 40% share, the per-question, read and style prices.
+  Without `inputs` the answer is what it was (plus `styles` and the fresh
+  `covers`), so the old screens pay for no extra reads.
+
+`making`, `recent`, `headroom.line` and `dailyLeft` are `null` until section
+L 1 is installed: they need its RPCs (`study_lecture_making`,
+`study_qsets_shelf`, and a member RPC for the sets line's month and the day's
+sets, since a member cannot read the ledger). The package that adds L reads
+them in `planInputs` behind `schemaHas({ L: 1 })`. The server's numbers for
+them are ready: `setsMonthlyCap()` (`STUDY_SETS_MONTHLY_USD`, default 12),
+`SETS_LINE_KINDS` and `SETS_DAILY` (5) in `server/study/budget.ts`. The
+fields are in `practice-2-api.md` (`plan` → `inputs`).
 
 ## The owner's snippets (from section L 1)
 

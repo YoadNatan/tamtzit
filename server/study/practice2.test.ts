@@ -178,6 +178,9 @@ let batchStyles: string[] = ["case", "mechanism"];
 // A round over several lectures (sources.md B6.7): the round's requests so far, and study_request_plan's answer.
 let planRows: Array<{ lecture_id: string }> = [];
 let planLink: number | string = 2;
+// Practice sets (docs/study/sets.md): the bank's questions as planning reads them, the member's overview, section L's answers.
+let bankRows: Array<{ points: string[]; hidden_at: string | null }> = [];
+let overviewRows: unknown[] | string = [];
 
 const pause = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const readAll = (req: IncomingMessage) =>
@@ -255,7 +258,13 @@ const rest = createServer(async (req, res) => {
     }
     return send(res, 200, []);
   }
+  if (p === "/rest/v1/study_questions" && q.get("select") === "points,hidden_at") {
+    assert.equal(q.get("retired_at"), "is.null", "only active questions cover points");
+    return send(res, 200, eqOf(q, "lecture_id") === LECTURE ? bankRows : []);
+  }
   if (p === "/rest/v1/study_questions" || p === "/rest/v1/study_exams") return send(res, 200, []);
+  const rpcOr = (rows: unknown) => (typeof rows === "string" ? send(res, 400, pgError(rows)) : send(res, 200, rows));
+  if (p === "/rest/v1/rpc/study_practice_overview") return rpcOr(overviewRows);
   if (p === "/rest/v1/study_edits") return send(res, 404, { code: "PGRST205", details: null, hint: null, message: "no study_edits" });
   if (p === "/rest/v1/rpc/study_draft_save" || p === "/rest/v1/rpc/study_draft_replace") {
     const id = newDraftId();
@@ -393,6 +402,8 @@ beforeEach(() => {
   rewordRefusal = null;
   rewordRewrites = 0;
   goneDrafts = new Set();
+  bankRows = [];
+  overviewRows = [];
   createRows = (body) =>
     (body.p_batches as Array<{ part_idx: number; seq: number; wanted: number }>).map((b, i) => ({
       request_id: REQ,
@@ -797,6 +808,81 @@ test("plan: a slide saved without tables, a null slide or slides that are not a 
   assert.deepEqual([...tableParts({ slides: [{ n: 3 }] as unknown as Lecture["slides"] }, parts)], []);
   assert.deepEqual([...tableParts({ slides: [{ n: 3, tables: [[["x"]]] }] as unknown as Lecture["slides"] }, parts)], [0]);
   assert.equal(partFacts({ slides: undefined } as unknown as Lecture, parts, [], []).get(0)?.tables, false);
+});
+
+// ═══ plan and create for practice sets (docs/study/sets.md; design-practice §8.1-§8.2) ═══
+
+/** The bank: one question on points 1 and 2 (part 0), one hidden by two flags on point 3 (it covers nothing). */
+const BANK = [
+  { points: [pid(1), pid(2)], hidden_at: null },
+  { points: [pid(3)], hidden_at: "2026-11-20T10:00:00Z" },
+];
+
+test("plan, fresh first: the bank's coverage plans uncovered points first, `covers` counts only new ones, and plan.styles counts the types", async () => {
+  // One משלי question on part 0 takes two points: the red flag (point 2), then an uncovered one before the weightier covered point 1.
+  const before = await call({ action: "plan", options: { level: "custom", count: 1, parts: [0], styles: ["case"] } });
+  assert.deepEqual(before.json.plan.parts, [{ part_idx: 0, points: 4, red_flags: 1, questions: 1, covers: 2 }], "an empty bank: both points are new");
+  assert.deepEqual(before.json.plan.styles, { case: 1 });
+  bankRows = BANK;
+  const r = await call({ action: "plan", options: { level: "custom", count: 1, parts: [0], styles: ["case"] } });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json.plan.parts, [{ part_idx: 0, points: 4, red_flags: 1, questions: 1, covers: 1 }], "point 2 is in the bank; point 3 is new (its question is hidden)");
+  assert.equal(r.json.inputs, undefined, "the planning inputs only when asked");
+  assert.equal(rpcs("study_practice_overview").length, 0);
+  const mixed = await call({ action: "plan", options: { level: "full", styles: ["case", "mechanism"] } });
+  assert.deepEqual(mixed.json.plan.styles, { case: 2, mechanism: 1 });
+  assert.deepEqual(
+    mixed.json.plan.parts.map((p: { covers: number }) => p.covers),
+    [2, 2],
+    "מלא covers part 0's two new points and part 1's two",
+  );
+  assert.equal(models().length + rpcs("study_reserve").length, 0, "nothing spent");
+});
+
+test("create, fresh first: the batches carry the uncovered points before the covered ones, as plan showed", async () => {
+  bankRows = BANK;
+  const r = await call({ action: "create", options: { level: "custom", count: 1, parts: [0], styles: ["case"] } });
+  assert.equal(r.status, 200);
+  const [c] = rpcs("study_request_create").map(args);
+  assert.deepEqual(c.p_batches[0].points, [pid(2), pid(3)], "the red flag, then point 3 (new) before point 1 (in the bank)");
+  bankRows = [];
+  log = [];
+  await call({ action: "create", options: { level: "custom", count: 1, parts: [0], styles: ["case"] } });
+  assert.deepEqual(rpcs("study_request_create").map(args)[0].p_batches[0].points, [pid(1), pid(2)], "an empty bank: the weightiest, as before");
+});
+
+test("plan with inputs: the points and their coverage, the bank, what is free, the headroom, the prices; the sets' figures wait for section L", async () => {
+  bankRows = BANK;
+  overviewRows = [
+    { lecture_id: LECTURE, exam_id: null, questions: 14, answered: 5, wrong_now: 1, last_at: null },
+    { lecture_id: "11111111-0000-4000-8000-000000000099", exam_id: null, questions: 40, answered: 0, wrong_now: 0, last_at: null },
+  ];
+  const r = await call({ action: "plan", inputs: true });
+  assert.equal(r.status, 200);
+  const i = r.json.inputs;
+  assert.deepEqual(
+    i.points,
+    POINTS.map((p) => ({ id: p.id, part_idx: p.part_idx, n: p.n, kind: p.kind, red_flag: p.red_flag, weight: p.weight })),
+    "only what planning needs: no text",
+  );
+  assert.deepEqual(i.covered, [pid(1), pid(2)]);
+  assert.equal(i.active, 2, "the 150 cap counts a hidden question too");
+  assert.equal(i.free, 9, "14 keyed questions, 5 answered");
+  assert.deepEqual([i.making, i.recent, i.dailyLeft], [null, null, null], "section L 1's figures");
+  assert.deepEqual(i.headroom, { group80: 23.19, member40: 12.78, line: null }, "$33 × 0.8 − $3.21; $33 × 0.4 − $0.42");
+  assert.deepEqual([i.perQuestionUsd, i.readUsd, i.styleUsd], [0.04, 0, 0.01]);
+  assert.equal(models().length + rpcs("study_reserve").length, 0, "nothing spent");
+  // A stale part: the read's price is in the inputs too; an overview that fails is null, not a 500.
+  pointsState = state([true, false]);
+  overviewRows = "forbidden";
+  const s = await call({ action: "plan", inputs: true });
+  assert.equal(s.status, 200);
+  assert.ok(s.json.inputs.readUsd > 0);
+  assert.equal(s.json.inputs.readUsd, s.json.estimate.readUsd);
+  assert.equal(s.json.inputs.free, null);
+  // No row for the lecture: nothing to solve for free.
+  overviewRows = [];
+  assert.equal((await call({ action: "plan", inputs: true })).json.inputs.free, 0);
 });
 
 // ═══ create ═══
