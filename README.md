@@ -43,7 +43,8 @@ npm run dev                  # http://localhost:5173/
 - סודות, בשרת בלבד: `ANTHROPIC_API_KEY`, `STUDY_WORKER_KEY` (אותו ערך כמו
   סוד ה-Vault `study_worker_key`). לחבילות שעוד לא נבנו: `SEND_EMAIL_HOOK_SECRET`,
   `STUDY_TRANSCRIBE_KEY`.
-- הגדרה: `STUDY_MONTHLY_USD` (התקציב החודשי בדולרים; המאושר 33).
+- הגדרה: `STUDY_MONTHLY_USD` (התקציב החודשי בדולרים; המאושר 33),
+  `STUDY_SETS_MONTHLY_USD` (התקרה החודשית של סטי התרגול; המאושרת 12).
 - דגלי שחרור `VITE_STUDY_*`: הרשימה ב-[`.env.example`](.env.example).
   רק ב-Production, ואחרי שינוי Redeploy.
 
@@ -163,6 +164,7 @@ the page's build stamp, an old `/study/` link, `/api/study/health` and
 | `ANTHROPIC_API_KEY` | server | **secret** |
 | `STUDY_WORKER_KEY` | server | **secret**, 32+ characters, the same value as the Vault secret `study_worker_key` |
 | `STUDY_MONTHLY_USD` | server | the monthly budget in dollars (approved 33; 33 when unset) |
+| `STUDY_SETS_MONTHLY_USD` | server | practice sets' monthly line in dollars (approved 12; 12 when unset; [`docs/study/sets.md`](docs/study/sets.md)) |
 | `SEND_EMAIL_HOOK_SECRET`, `STUDY_TRANSCRIBE_KEY` | server | **secret**; for packages not built yet |
 | `STUDY_VAPID_PUBLIC`, `STUDY_VAPID_SUBJECT` | server, **Production only** | notifications' push key (public) and its subject, `https://<the app's address>`; made with `node tools/vapid-keys.mjs` ([`docs/study/RELEASE-R1.md`](docs/study/RELEASE-R1.md)) |
 | `STUDY_VAPID_PRIVATE` | server, **Production only** | **secret**, marked Sensitive; never on Preview, never in a chat or git |

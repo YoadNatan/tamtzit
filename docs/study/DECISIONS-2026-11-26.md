@@ -597,3 +597,40 @@ Also decided for this build:
   phase instead of 409 `points stale` when the set reads first. Course sets
   (a set with `planId`) are refused (WP20).
 
+
+
+### Practice sets, slice B's entry points, e2e and docs, and slice C's notices (WP14, WP15, WP17), built on 26 November 2026
+
+- **The notices live in section L 1, not in R:** `set_shared` (R's reserved
+  row, `mine`, pushed) is written by `study_private.notice_set_shared` and
+  `set_solved` is registered by L (`inapp`, 30 days), both through R's
+  `notice_add`. R's SQL is unchanged, so R stays at 2 and the client's
+  `requiredSchema` for notifications too; L is still at 1 (bumped once).
+- **R's `questions_ready` skip is moot:** R sends nothing for questions
+  being written (notifications' OD21), so there is nothing to skip;
+  `qset_of_request` stays as the seam.
+- **One push a day (OD10)** is enforced in the hook: once a `set_shared`
+  push went out to a member that Israel day, a new or coalesced row stays
+  in the inbox (its outbox row `sent` again, or `capped`). A coalesced row
+  (2 sets or more that day) links to the shelf and keeps no lecture title.
+  `obj` `qsets` (the shelf) sees `set_shared`; a set's page (`qset:<id>`)
+  sees `set_solved`.
+- **Today's primary "לפתור סט חדש"** (design §5.1) starts the newest ready
+  set someone else made that the member has not solved; "תרגול מהבנק"
+  stays the primary when there is none (WP7's choice for "סבב חדש") and
+  becomes a link in the card when there is.
+- **The mistakes' end** (`s=m` with `VITE_STUDY_SETS`): the primary reads
+  "לחזור על הטעויות" (it was "סבב נוסף") and "רק הטעויות מהסבב" is not
+  offered there (the same round, and two buttons did not fit at 360 px).
+  The paid secondary's price is the default size at the planning rate
+  ($0.40), without a stale read. Not on the Progress screen (not in WP14's
+  list; its own primary is the free "לתרגל את מה שחוזר היום").
+- **The lecture page's D6 line** names any set being made on the lecture,
+  the member's own too (a way back to it).
+- **A set's link, signed out:** after the personal code's sign-in the app
+  lands on the set (`StudyApp.tsx`, +147 B of entry code), as the design's
+  §5.6 asks; before, it went to Today.
+- **Release** ([`RELEASE-L1.md`](RELEASE-L1.md)): part 10 only (part 9, R 2,
+  is a prerequisite and unchanged); `VITE_STUDY_MAKE=1`, then
+  `VITE_STUDY_SETS=1`, Production only. Part 1 carries `kind_on`'s new text
+  only so a later re-run keeps it; it need not be run now.

@@ -17,8 +17,8 @@ a view over bank questions.
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
 | A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | Built (WP0-WP8): docs, bundle owner, shared planning and price, the server's `plan`, the flag and routes, the create and generating screens, the entry points and the fixes of the practice screens, and slice A's e2e (§14 steps 1-4, 12-13) |
-| B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | SQL section L 1 (WP9, part 10), the server's `create` with a set (WP10), the flag, routes and `lib/sets.ts` (WP11), the shelf, the set page and its numbers (WP12) and set sessions (WP13) built; the entry points for sets (WP14) and the rest of the e2e and docs (WP15) not yet |
-| C | The notices `set_shared` and `set_solved` (WP17), with section R | (R's) | L 1, R | not built yet |
+| B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | Built (WP9-WP15): SQL section L 1 (part 10), the server's `create` with a set, the flag, routes and `lib/sets.ts`, the shelf, the set page and its numbers, set sessions, the entry points for sets, the e2e with two members and these docs. Yoad's steps: [`RELEASE-L1.md`](RELEASE-L1.md) |
+| C | The notices `set_shared` and `set_solved` (WP17), with section R | (R's `VITE_STUDY_NOTIFY`) | L 1 (R 2 unchanged) | Built (WP17): in section L 1, through R's `notice_add`; the words in R's `notifyCopy.ts` |
 
 Not in this build: auto-keep turned on (WP16: it ships off, OD15), sheet sets
 (WP18, with the exams design), server-driven writing and the `set_ready` push
@@ -42,6 +42,14 @@ The daily limit is 5 new sets a member (`SETS_DAILY` in
 `server/study/budget.ts`, the design's `POLICY.qsets.daily`, kept out of
 `POLICY` so nothing can reserve a call as "qsets"; OD13).
 
+## Release
+
+Yoad's exact steps, the checks and the rollback are in
+[`RELEASE-L1.md`](RELEASE-L1.md): run `supabase/parts/10.sql` (section L 1;
+part 9, section R 2, must already be in), then `VITE_STUDY_MAKE=1` on
+Production only and redeploy, then `VITE_STUDY_SETS=1` on Production only and
+redeploy.
+
 ## The bundle (WP1)
 
 The study entry chunk's limit is 410,000 B (notifications' OD2). This
@@ -53,6 +61,16 @@ design's static share of it is capped at **2,000 B**: bundle owner `QS` in
 `QS` keeps only its slot module in the entry chunk (`SLOT_ONLY`), and the
 check fails when its share passes 2,000 B. The tool also turns on
 `VITE_STUDY_MAKE` and `VITE_STUDY_SETS` with every other flag.
+
+Measured on 26 Nov 2026 with WP14 (the entry points) and WP17 (the
+notices, SQL and words only): the entry chunk is **403,679 B** with every
+flag on (6,321 B left; +147 B: the personal code's sign-in landing on a
+set's link, in `StudyApp.tsx`), QS's share still **1,631 B** of its 2,000
+(the entry points are in lazy chunks: Today's rows read the shelf through a
+dynamic import, the hub's list and "שלי"'s row are `SetsEntries.tsx`, the
+lecture page's row is `MakeEntry.tsx`), and 402,894 B with every flag off.
+The notices' words are R's `notifyCopy.ts`, which the bell's lazy inbox
+loads.
 
 Measured on 26 Nov 2026 with WP11-WP13 (the flag, the routes, the shelf,
 the set page and set sessions): the entry chunk is **403,532 B** with every
@@ -459,11 +477,11 @@ the snippets below).
 batch has not moved for 6 minutes, or a set reading its lecture for 6
 minutes. **Ready**: a set whose request has no batch pending or writing
 (refreshed by progress, the set page and the shelf); the first time it is
-ready with a question, `set_shared` goes out once through R's hook
-`study_private.notice_set_shared` when there is one (WP17 adds it), and
-`notified_at` is stamped either way, so a hook installed later never
-announces old sets. A non-author's first finished attempt adds
-`set_solved` for the author, once R registers that kind (WP17).
+ready with a question, `set_shared` goes out once through
+`study_private.notice_set_shared` (WP17, below), and `notified_at` is
+stamped either way, so R installed later never announces old sets. A
+non-author's first finished attempt adds `set_solved` for the author
+(WP17).
 
 **Switches and `kind_on`:** `qsets` (on), `qsets_auto_keep` (off),
 `questions_paid` (on): `kind_on` maps practice, solver, reword, style,
@@ -472,8 +490,8 @@ compares them). **Nightly** `study-qsets-clean` (03:29): sets left reading
 for a day, unfinished attempts after a year, marks of deleted sets, sets
 deleted 30 days ago that nobody solved.
 
-**Seams:** `study_private.qset_of_request` (R's `questions_ready` skips a
-set's request, WP17), `qset_for_similar`, `qset_add_items` and
+**Seams:** `study_private.qset_of_request` (for a later "questions ready"
+notice to skip a set's request; R has none today), `qset_for_similar`, `qset_add_items` and
 `qset_similar_done` (the exams design's sheet sets, O 2). Nothing of the
 exams or models designs is built.
 
@@ -622,10 +640,102 @@ end ("רק אצלי", "פותרים: 1", the floor's line, the opt-in, "לחזו
 הטעויות") → the second member's shelf ("חדשים", "מאת שוהם"), the set's
 page and menu (no delete), hide and "להחזיר" → with 3 more finishers the
 average and the bands → the link signed out → D6's callout, "לפתוח את
-הסט" with "מאת שוהם" → the author renames and deletes. Not yet (WP14-WP15):
-Today's row, the hub's and the lecture page's sets, the mistakes end's paid
-secondary on "הטעויות שלי", the `show_name` row in "שלי", and the e2e of
-those, of a paused set and of the sign-in that lands on the set.
+הסט" with "מאת שוהם" → the author renames and deletes. WP14-WP15 add Today's rows, the hub's and
+the lecture page's sets, the mistakes end's paid secondary on "הטעויות
+שלי", the `show_name` row in "שלי", and the e2e of those, of a paused set
+and of the sign-in that lands on the set (below).
+
+## The entry points for sets (WP14)
+
+Each only with `VITE_STUDY_SETS` (design §5.1); without it every screen is
+slice A's:
+
+| Place | What |
+|---|---|
+| Today (`TodayScreen`) | In the card "תרגול", **one row "סטים חדשים בקבוצה (n) ‹"** (to the shelf) while sets someone else made are unopened and not hidden. With an empty queue the bar's free primary is **"לפתור סט חדש"** (the newest ready set someone else made that the member has not solved; one tap starts it), and "תרגול מהבנק ‹" moves into the card as a link; with no such set the primary stays "תרגול מהבנק". For each of the member's own sets paused in the middle, a row **"הסט {lecture} נעצר באמצע · להמשיך ליצור ‹"** (to the set). One read of the shelf's 6 newest (`study_qsets_shelf`, `lib/sets.ts` `entriesOf`), loaded lazily with its words; offline, nothing |
+| The hub (`PracticeHome`) | After the "סט חדש" card, **"סטים של הקבוצה"**: the 3 newest sets the member did not hide, in a vertical list of set cards, and **"לכל הסטים ‹"**; nothing while the group has no set. Live (`SetsEntries.tsx` `HubSets`, its own boundary) |
+| The lecture page (`MakeEntry`) | The row after reading gains **"סטים על ההרצאה (n) ‹"** (`?v=sets&l=`) once the lecture has sets, and, while a set is being made on it, D6's line **"יש סט בהכנה על ההרצאה · מאת {name} · k/n"** with **"לפתוח את הסט ‹"** (`study_lecture_making`) |
+| The mistakes' end | At a set's end and at "הטעויות שלי"'s end (`s=m`, `s=m.<lecture>`), the free primary is **"לחזור על הטעויות"** and the paid secondary **"שאלות חדשות על הטעויות · כ-$0.40 ‹"** opens "סט חדש" on the lecture that holds most of the round's questions (`?v=practice&l=…&x=new&from=m`: the parts prefilled, never the points; "הסט ישותף עם הקבוצה כמו כל סט, בלי לציין שהוא על טעויות"). The price is the default size (10) at the planning rate ($0.04), without a stale read; the create screen shows the exact one. "רק הטעויות מהסבב" is not offered at "הטעויות שלי"'s end (going over the mistakes is the same round) |
+| "שלי" (`Me`) | **"להציג את השם שלי ברשימת מי פתרו"** ("בסטים של הקבוצה: רק השם, בלי ציון"), OD7's choice after it was asked once at the first finished set (`SetsEntries.tsx` `MeNamesRow`, `study_qset_names_pref`) |
+| A set's link, signed out | After the personal code's sign-in on `?v=sets&k=`, the app lands on that set (`StudyApp.tsx`), not on Today |
+
+Not built: the Progress screen's paid secondary (the design's "and
+Progress"): its danger list's primary is "לתרגל את מה שחוזר היום", and the
+mistakes' end covers the path.
+
+## The notices (WP17)
+
+Section L 1 wires its two notices into section R without changing R's SQL
+(R stays at 2, and the app's `requiredSchema` for notifications is
+unchanged):
+
+- **`set_shared`** (R's registry already reserved it: `mine`, 7 days,
+  pushed): `study_private.notice_set_shared`, called once when a set is
+  first ready with a question (`qset_announce`, `notified_at`). The group
+  but the author gets **one row a member a day** (dedupe
+  `qsets:<group>:<Israel date>`); a second set that day adds to the unseen
+  row's count, its route becomes the shelf and its args are emptied (no
+  lecture lingers in it). **At most one set_shared push a member a day
+  (OD10):** once one went out today, a new or coalesced row stays in the
+  inbox (its outbox row `sent` again, or `capped`). R's quiet hours, its
+  6-a-day cap for "בשבילך", the switch `notify` and the member's settings
+  apply as to any notice; "בשבילך" is on by default. `obj` is `qsets`:
+  opening the shelf (`?v=sets`) sees it.
+- **`set_solved`** (registered by L: `inapp`, 30 days, never pushed): the
+  first finished attempt of someone other than the author adds or counts
+  one row for the author (dedupe `qset_solved:<set>`, `obj` `qset:<set>`:
+  opening the set's page sees it).
+- **Words** (`shared/study/notifyCopy.ts`, R's one table): the lock screen
+  says "סט תרגול חדש בקבוצה" or "{n} סטים חדשים בקבוצה" with "אפשר לפתור
+  מ״סטים של הקבוצה״", **never the lecture or the author's name**; the inbox
+  says "{lecture} · {k} שאלות · מאת {name}" for one set and the shelf for
+  several; "הסט ״{title}״ נפתר פעם אחת" / "נפתר {k} פעמים" with "אפשר
+  לראות את המספרים של הקבוצה". A push's link is the set (`/?v=sets&k=`) or
+  the shelf (`notifyRoute.ts` knows `sets`).
+- **No `questions_ready` skip is needed:** R sends nothing for questions
+  being written (notifications' OD21), so a set's author never gets two
+  notices for one set. `study_private.qset_of_request` stays as the seam
+  for a later notice of that kind.
+- Not built: `set_ready` (with server-driven writing, OD19).
+
+Tests: `supabase/tests/study.sql` LS7d-LS7g (the rows, once, the
+coalescing, no second push that day, `p_to`) and LS11 (`set_solved`);
+`notifyCopy.test.ts` and `notifyRoute.test.ts`; the e2e below.
+
+## The e2e of slice B and C (WP15)
+
+Flag set **`ps`** (`notify` with `VITE_STUDY_MAKE` and `VITE_STUDY_SETS`;
+`mock.cjs`'s `flagSetOf` and `SQL_SETS` have `pm` and `ps`), two members,
+שוהם and נועה, synthetic Hebrew only, screenshots outside the repo:
+
+- `e2e/study/sets-b.cjs` (WP12-WP13): create → the set's page → solving
+  with an attempt → the round's end; the shelf, hide and "להחזיר", the
+  group's numbers from 3 other finishers, the link signed out, D6, rename
+  and delete.
+- `e2e/study/sets-entries.cjs` (WP14, WP15, WP17): the §4 tap counts below,
+  Today's row and primary (step 6), the inbox's set_shared and set_solved,
+  both mistakes' ends (step 10), the hub's list, the lecture page's row and
+  D6's line, a paused set on Today and for another member (step 9), "שלי"'s
+  names row, the caps (step 11: the 80% line, the 40% share, the sets line,
+  the day's sets) and a set's link in a fresh browser through the personal
+  code to the same set (step 7).
+- The mocks: `mocks/sets.cjs` adds set_shared and set_solved to the
+  notifications' mock (`mocks/notify.cjs`) as section L does.
+
+**§4's tap counts, measured** (`sets-entries.cjs`, 26 Nov 2026):
+
+| Path | Design | Measured |
+|---|---|---|
+| The lecture page with no questions → the first question on screen | 3 | **3** (סט חדש → ליצור → להתחיל לפתור) |
+| Today → a new set, the lecture prefilled | 2 | **2** (סט חדש → ליצור) |
+| Made → visible to the group | 0 | **0** (Today's row and the inbox, with no step) |
+| Another member: Today's row → solving the new set | 3 | **3** (the row → the set → לפתור); 1 with Today's primary "לפתור סט חדש" on an empty queue |
+
+Also run with these builds: `sets.cjs` (`pm`), `notify.cjs`,
+`notify-push.cjs`, `notify-asks.cjs`, `shell.cjs`, `wide.cjs` and
+`small-phones.cjs` on the `ps` build with the flag set `notify`,
+`notify.cjs` on a build without MAKE and SETS, `today.cjs`, `qtypes.cjs`,
+`progress.cjs` and `code.cjs` with `ps`, and `practice.cjs` (the old flow).
 
 ## The owner's snippets (from section L 1)
 
@@ -648,6 +758,11 @@ update public.study_questions q set retired_at = now()
        where i.auto_kept_at is not null and (i.set_id = '<set>' or i.auto_kept_at >= '<date>'));
 -- Full rollback of L's trigger (sets stop filling; nothing else changes):
 alter table public.study_questions disable trigger study_qset_items_from_bank;
+-- New sets stay in the inbox but are never pushed (set_shared; undo: push = true):
+update study_private.notice_kinds set push = false where kind = 'set_shared';
+-- What the group heard about sets in the last day (read-only):
+select kind, count(*) as rows, sum(count) as events from public.study_notices
+ where kind in ('set_shared', 'set_solved') and created_at >= now() - interval '1 day' group by 1;
 ```
 
 **Weekly check** (read-only): sets made and their writing cost per week. The
@@ -684,6 +799,9 @@ select date_trunc('week', s.created_at) as wk, count(distinct s.id) as sets,
 4. Disable the items trigger (the snippet above) only if it fails writes,
    which its wrapper should prevent. `study_answers.set_attempt` and L's
    tables can stay: they are unused without the flag.
+5. The notices alone: `set_shared`'s `push = false` (the snippet above) keeps
+   new sets in the inbox only; R's `notify_hooks` off stops every notice of
+   every package ([`notify.md`](notify.md)).
 
 ## Privacy
 

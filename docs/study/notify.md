@@ -84,7 +84,9 @@ on by default (Yoad, 26 Nov 2026); the reminder is off (19:30 when turned on).
 | `code_used` | security | someone signed in with the personal code (the minute scan) | that member | always, at most 3 a day, never to the device that signed in; opening the inbox does not stop it, and devices removed within 10 minutes of the sign-in still get it (kept aside 15 minutes) |
 | `test` | security | "שליחת התראת ניסיון" | that member | after 5 s; never in the inbox |
 | `update`, `edit_wait`, `lecture_new`, `meeting_set` | inapp | "עדכון", a correction waiting, a new summary, a meeting set or moved | its member, or the rest of the group | never |
-| `set_shared`, `similar_ready`, `lab_new` | (reserved) | for packages not built yet | | wired by their packages |
+| `set_shared` | mine | a practice set is ready, once ([`sets.md`](sets.md), section L) | the group but its author | one row a member a day, coalesced ("{n} סטים חדשים בקבוצה"); at most one push a member a day; the lock screen without the lecture or the author's name |
+| `set_solved` | inapp | someone other than the author finished a set for the first time | the set's author | never |
+| `similar_ready`, `lab_new` | (reserved) | for packages not built yet | | wired by their packages |
 
 **Never sent:** questions and cards being written (they are written from the
 phone, which is almost always watching), corrections waiting, the daily
