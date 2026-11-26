@@ -31,7 +31,7 @@ const FNS = [
   "study_notices_mine", "study_notices_unseen", "study_notices_seen", "study_notices_seen_obj", "study_notify_state", "study_notify_prefs_set",
   "study_push_subscribe", "study_push_unsubscribe", "study_push_devices", "study_push_remove", "study_push_keep_only", "study_notify_test", "study_quiz_quiet",
 ];
-const CATS = { quiz_open: "live", boss_open: "live", meeting_soon: "live", reading: "live", session_soon: "live", reply: "mine", answer: "mine", summary_ready: "mine", summary_failed: "mine", exam_ready: "mine", exam_failed: "mine", digest: "digest", code_used: "security", test: "security" };
+const CATS = { quiz_open: "live", boss_open: "live", meeting_soon: "live", reading: "live", session_soon: "live", reply: "mine", answer: "mine", summary_ready: "mine", summary_failed: "mine", exam_ready: "mine", exam_failed: "mine", digest: "digest", code_used: "security", test: "security", set_shared: "mine", set_solved: "inapp" };
 
 module.exports = {
   seed(db) {

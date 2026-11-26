@@ -20,6 +20,9 @@
 //   GET study_qset_requests, study_qset_prefs (own row).
 // db.qsetsMock.calls keeps every call (fn, who, body). db.qsetsMock.finisher(userId, setId,
 // right, total) adds another member's finished attempt (with answers) for the group numbers.
+// With the notifications' mock (mocks/notify.cjs), a set's first "ready" adds
+// set_shared for the group but the author (WP17), and a non-author's first
+// finish adds set_solved for the author, as section L's hooks do.
 const FLOOR = 3;
 const PAUSE_MS = 6 * 60_000;
 const FNS = [
@@ -65,8 +68,26 @@ module.exports = {
       const f = Q.facts(s);
       if (s.state === "making" && f.busy === 0) Object.assign(s, { state: "ready", updated_at: iso() });
       else if (s.state === "ready" && f.busy > 0) Object.assign(s, { state: "making", updated_at: iso() });
-      if (s.state === "ready" && !s.notified_at && f.items > 0) s.notified_at = iso();
+      if (s.state === "ready" && !s.notified_at && f.items > 0) {
+        s.notified_at = iso();
+        Q.announce(s, f.items);
+      }
       return s;
+    };
+    /** WP17, study_private.notice_set_shared through R's notice_add: the group
+     *  but the author, one row a member a day (coalesced while unseen: the
+     *  shelf as its route, no args), obj "qsets". Pushes are not played here. */
+    Q.announce = (s, k) => {
+      const N = db.notifyMock;
+      if (!N) return;
+      const day = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+      const dedupe = `qsets:${s.group_id}:${day}`;
+      const args = { lecture: lectureOf(s.lecture_id)?.title ?? null, k, name: nameOf(s.created_by) };
+      for (const m of db.members.filter((x) => x.group_id === s.group_id && x.user_id !== s.created_by)) {
+        const open = N.notices.some((n) => n.user_id === m.user_id && n.dedupe === dedupe && !n.seen_at);
+        const row = N.add({ user_id: m.user_id, kind: "set_shared", cat: "mine", args: open ? {} : args, route: open ? { v: "sets" } : { v: "sets", k: s.id }, obj: "qsets", dedupe, lecture_id: s.lecture_id });
+        send("study_notices", row.count > 1 ? "UPDATE" : "INSERT", row);
+      }
     };
     Q.isOpen = (s) => {
       if (s.deleted_at) return false;
@@ -284,6 +305,13 @@ module.exports = {
         if (a.answered === 0) {
           Q.attempts.splice(Q.attempts.indexOf(a), 1);
           return json({ answered: 0, right_n: 0, total: a.total, first: false });
+        }
+        // WP17: someone other than the author finished first: set_solved in the author's inbox (never pushed).
+        const s = Q.sets.find((x) => x.id === a.set_id);
+        if (first && s && s.created_by && s.created_by !== me && !s.deleted_at && db.notifyMock) {
+          const k = new Set(Q.attempts.filter((x) => x.set_id === s.id && x.finished_at && x.user_id !== s.created_by).map((x) => x.user_id)).size;
+          const row = db.notifyMock.add({ user_id: s.created_by, kind: "set_solved", cat: "inapp", args: { title: s.title, k }, route: { v: "sets", k: s.id }, obj: `qset:${s.id}`, dedupe: `qset_solved:${s.id}`, lecture_id: s.lecture_id });
+          notify("study_notices", row.count > 1 ? "UPDATE" : "INSERT", row);
         }
         return json({ answered: a.answered, right_n: a.right_n, total: a.total, first });
       }
