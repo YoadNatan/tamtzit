@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ScreenProps } from "../features/types";
 import { flags } from "../lib/flags";
+import { guideMark } from "../lib/guideMark";
 import { detect, isIos, probe } from "../lib/install";
 import { devices as listDevices, readPrefs, removeDevice, savePrefs, sendTest, type Device, type Prefs } from "../lib/notices";
 import { available, enable, isComputer, readState, registerWorker, removeThisDevice, thisEndpoint, type PushState } from "../lib/notify";
@@ -89,6 +90,7 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
       setState(s);
       setBusy(false);
       if (s === "on") {
+        guideMark("notify"); // the guide's step "לקבל התראות" (nothing without VITE_STUDY_GUIDE)
         ctx.say(enabledToast(prefs ?? DEFAULT_PREFS));
         await loadDevices();
       }

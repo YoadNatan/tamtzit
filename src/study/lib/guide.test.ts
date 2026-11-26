@@ -6,6 +6,7 @@ import { flagsFrom, requiredSchema, type Flags } from "./flags";
 import {
   appTour,
   cardState,
+  cardTakesSteps,
   COPY,
   DONE_BY,
   firstSteps,
@@ -66,7 +67,7 @@ const PROD = S2.filter((n) => n !== "COURSES" && n !== "EXAMS");
 /** Every flag the guide speaks of. */
 /** Production's set with adding the app to the home screen (docs/study/install.md). */
 const S2I = [...S2, "INSTALL"];
-const ALL = [...new Set([...W5X, ...S2I])];
+const ALL = [...new Set([...W5X, ...S2I, "NOTIFY"])];
 const SETS: Array<[string, string[]]> = [
   ["off", []],
   ["rel1", R1],
@@ -83,7 +84,7 @@ const SETS: Array<[string, string[]]> = [
 ];
 const flagSet = (names: string[]): Flags => flagsFrom(Object.fromEntries([...names, "GUIDE"].map((n) => [`VITE_STUDY_${n}`, "1"])));
 const FULL: Facts = { lectures: 3, ready: [ID], writing: 1, members: 2, practiceLecture: ID, queue: 4, serverWrites: true, courses: 1, install: "ios", standalone: false };
-const WALKS: WalkId[] = ["read", "upload", "practice", "invite", "today", "group", "cards", "correct", "readaloud", "quizopen", "meeting", "ask", "readmark", "course", "install"];
+const WALKS: WalkId[] = ["read", "upload", "practice", "invite", "today", "group", "cards", "correct", "readaloud", "quizopen", "meeting", "ask", "readmark", "course", "install", "notify"];
 const ROUTES: Route[] = [
   { v: "today" },
   { v: "library" },
@@ -759,4 +760,62 @@ test("the how-to opens ?v=install, which this build allows; help's search finds 
   for (const q of ["להתקין", "מסך הבית", "אייקון", "אפליקציה"]) assert.ok(searchHowTos(q, howTos(f)).some((x) => x.key === "install"), q);
   assert.ok(!howTos(flagSet(S2)).some((x) => x.key === "install"), "not without the flag");
   assert.deepEqual(howTos(f).slice(0, 6).map((x) => x.key), howTos(flagSet(S2)).slice(0, 6).map((x) => x.key), "the first six stay");
+});
+
+/* ── notifications (docs/study/notify.md) ── */
+
+/** Production's set with the home screen and notifications. */
+const S2N = [...S2I, "NOTIFY"];
+
+test("S10: notifications last, only where this device can turn them on now, first in the home-screen app", () => {
+  const ids = (names: string[], x: Partial<Facts> = {}, m: Partial<Memory> = {}) =>
+    firstSteps(flagSet(names), { ...FULL, courses: 0, queue: 0, ...x }, { list: [], mode: "join", ...m }).map((s) => s.id);
+  assert.ok(!ids(S2I, { notify: "ask" }).includes("S10"), "without VITE_STUDY_NOTIFY: none");
+  assert.deepEqual(ids(S2N, { notify: "ask", ready: [], practiceLecture: null, members: 5 }), ["S1", "S9", "S7", "S10"], "a joiner: last");
+  assert.ok(!ids(S2N, { notify: "ask", members: 2 }).includes("S10"), "five steps before it: it gives way (the first launch from the icon asks)");
+  for (const st of ["off", "on", "denied", "ios-install", "inapp", "unsupported", "ios-old", "broken", "offline"] as const)
+    assert.ok(!ids(S2N, { notify: st }).includes("S10"), `${st}: none`);
+  assert.deepEqual(ids(S2N, { notify: "ask", standalone: true, install: "none" }).slice(0, 2), ["S10", "S1"], "from the icon: first");
+  const line = firstSteps(flagSet(S2N), { ...FULL, notify: "ask", standalone: true }, { list: [], mode: "join" }).find((s) => s.id === "S10");
+  assert.equal(line?.title, "לקבל התראות");
+  assert.equal(line?.walk, "notify");
+  // A finished card takes no new step, S10 included; a kept S10 whose device is no longer "ask" reads as skipped.
+  const done = { list: ["S1", "S2"] as StepId[], mode: "join" as const, did: ["open", "para"] as DoneEvent[] };
+  assert.deepEqual(firstSteps(flagSet(S2N), { ...FULL, notify: "ask" }, done).map((s) => s.id), ["S1", "S2"]);
+  const kept = firstSteps(flagSet(S2N), { ...FULL, notify: "denied" }, { list: ["S1", "S10"], mode: "join" }).find((s) => s.id === "S10");
+  assert.ok(kept?.skipped && !kept.walk, "kept, skipped, no walk");
+});
+
+test("S10 is ticked by \"notify\"; cardTakesSteps says when the guide's card holds the home", () => {
+  assert.deepEqual(DONE_BY.S10, ["notify"]);
+  const m: Memory = { v: 1, born: Date.now(), views: 1, did: [], list: ["S1", "S10"], tips: true };
+  const r = recordEvent(m, "notify", Date.now());
+  assert.equal(r.tick, "✓ 1 מתוך 2: לקבל התראות");
+  assert.deepEqual(parseMemory(JSON.stringify({ list: ["S10"], did: ["notify"] })).did, ["notify"]);
+  assert.equal(cardTakesSteps(m, Date.now()), true, "live, under way");
+  assert.equal(cardTakesSteps({ ...m, did: ["open", "notify"] }, Date.now()), false, "every step done");
+  assert.equal(cardTakesSteps({ ...m, hidden: true }, Date.now()), false, "hidden");
+  assert.equal(cardTakesSteps({ ...m, born: Date.now() - RETIRE_MS - 1 }, Date.now()), false, "retired");
+  assert.equal(cardTakesSteps({ ...m, born: undefined }, Date.now()), false, "never started");
+});
+
+test("the notify walk: שלי's tab, then the settings row; the how-to opens the settings", () => {
+  assert.equal(walkOf("notify", flagSet(S2I), FULL), null, "off without its flag");
+  const w = walkOf("notify", flagSet(S2N), FULL)!;
+  assert.deepEqual(
+    w.steps.map((s) => [s.target.sel, s.until]),
+    [
+      [TARGETS.meTab, "route"],
+      [TARGETS.notifyRow, "click"],
+    ],
+  );
+  assert.ok(w.steps.every((s) => !s.stop), "turning them on is the member's own: no STOP");
+  const f = flagSet(S2N);
+  const h = howTos(f).find((x) => x.key === "notify")!;
+  assert.deepEqual(h.open?.route, { v: "notify", x: "set" });
+  assert.equal(h.walk, "notify");
+  assert.deepEqual(allowed({ v: "notify", x: "set" }, f), { route: { v: "notify", x: "set" } });
+  for (const q of ["התראות", "פעמון", "תזכורת"]) assert.ok(searchHowTos(q, howTos(f)).some((x) => x.key === "notify"), q);
+  assert.ok(!howTos(flagSet(S2I)).some((x) => x.key === "notify"), "not without the flag");
+  assert.deepEqual(howTos(f).slice(0, 6).map((x) => x.key), howTos(flagSet(S2I)).slice(0, 6).map((x) => x.key), "the first six stay");
 });

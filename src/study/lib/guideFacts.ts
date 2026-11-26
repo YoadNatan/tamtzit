@@ -12,8 +12,10 @@ import { sessionCounts } from "./practice2";
 /* ── What the guide knows of the group (docs/study/guide.md) ──
  * Only the app's existing reads: the lectures (and the courses their course
  * texts make), the members and, with
- * practice, the session counts (how many questions each lecture has). No
- * write, no new RPC, no AI. One read at a time per group, kept for 20 s. */
+ * practice, the session counts (how many questions each lecture has); with
+ * notifications, where this device stands (health at most daily, and
+ * section R's study_notify_state). No write, no AI. One read at a time per
+ * group, kept for 20 s. */
 
 let cache: { group: string; at: number; facts: Promise<Facts> } | null = null;
 
@@ -32,6 +34,12 @@ export function guideFacts(ctx: Ctx, fresh = false): Promise<Facts> {
     const courses = new Set(lectures.map((l) => courseKey(l.course ?? "")).filter(Boolean)).size;
     // How this device adds the app to the home screen (read now: the prompt can come late).
     const env = envNow();
+    // Notifications (lazy, only with their flag): can this device turn them on now?
+    const notify = flags.notify
+      ? await import("./notify")
+          .then(async (m) => ((await m.available(false)).ok ? m.readState(true) : ("off" as const)))
+          .catch(() => "off" as const)
+      : ("off" as const);
     return {
       lectures: lectures.length,
       ready,
@@ -43,6 +51,7 @@ export function guideFacts(ctx: Ctx, fresh = false): Promise<Facts> {
       courses,
       install: installFact(env, canPrompt()),
       standalone: env.kind === "standalone",
+      notify,
     };
   })();
   cache = { group: ctx.group.id, at: Date.now(), facts };

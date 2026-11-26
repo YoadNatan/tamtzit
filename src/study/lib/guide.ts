@@ -1,5 +1,6 @@
 import type { Flags } from "./flags";
 import type { InstallFact } from "./installLazy";
+import type { PushState } from "./notify";
 import { installHowTo } from "./installCopy";
 import { miniScreen, type MiniRoute } from "./guideScreens";
 import { APP_PATH, tabOf, type Route } from "./route";
@@ -45,15 +46,18 @@ export type Facts = {
   install: InstallFact;
   /** The page runs as the home-screen app. */
   standalone: boolean;
+  /** Where this device stands with notifications (lib/notify.ts): "ask" when
+   *  pushes are offered to the member and this device can turn them on. */
+  notify: PushState;
 };
 
-export const NO_FACTS: Facts = { lectures: 0, ready: [], writing: 0, members: 0, practiceLecture: null, queue: null, serverWrites: false, courses: 0, install: "none", standalone: false };
+export const NO_FACTS: Facts = { lectures: 0, ready: [], writing: 0, members: 0, practiceLecture: null, queue: null, serverWrites: false, courses: 0, install: "none", standalone: false, notify: "off" };
 
 /* ─────────────────────────── the device's memory ─────────────────────────── */
 
-export type StepId = "S1" | "S2" | "S4" | "S5" | "S6" | "S7" | "S8" | "S9";
+export type StepId = "S1" | "S2" | "S4" | "S5" | "S6" | "S7" | "S8" | "S9" | "S10";
 /** A real action the first steps count: the layer's marks and routes. */
-export type DoneEvent = "upload" | "open" | "para" | "bet" | "run" | "invite" | "group" | "course" | "install";
+export type DoneEvent = "upload" | "open" | "para" | "bet" | "run" | "invite" | "group" | "course" | "install" | "notify";
 
 export type Memory = {
   v: 1;
@@ -91,8 +95,8 @@ const held = new Map<string, Memory>();
  *  value stored there is older than this load's copy, which wins. */
 const unsaved = new Set<string>();
 
-const DONE: readonly DoneEvent[] = ["upload", "open", "para", "bet", "run", "invite", "group", "course", "install"];
-const STEPS: readonly StepId[] = ["S1", "S2", "S4", "S5", "S6", "S7", "S8", "S9"];
+const DONE: readonly DoneEvent[] = ["upload", "open", "para", "bet", "run", "invite", "group", "course", "install", "notify"];
+const STEPS: readonly StepId[] = ["S1", "S2", "S4", "S5", "S6", "S7", "S8", "S9", "S10"];
 
 /** A stored value, cleaned: anything that is not the guide's shape is dropped. */
 export function parseMemory(raw: string | null | undefined): Memory {
@@ -166,7 +170,8 @@ export type WalkId =
   | "ask"
   | "readmark"
   | "course"
-  | "install";
+  | "install"
+  | "notify";
 
 export type FirstStep = {
   id: StepId;
@@ -257,6 +262,11 @@ function step(id: StepId, f: Flags, x: Facts, creator: boolean): FirstStep | nul
             doneBy: DONE_BY.S9,
           }
         : null;
+    case "S10":
+      // Notifications (docs/study/notify.md): only where this device can turn them on now.
+      return f.notify && x.notify === "ask"
+        ? { id, title: "לקבל התראות", line: "התראה כשמבחן קבוצתי נפתח, כשעונים בשרשור שלך וכשהסיכום מוכן. רק מה שבוחרים.", walk: "notify", doneBy: DONE_BY.S10 }
+        : null;
   }
 }
 
@@ -274,7 +284,9 @@ export const MAX_STEPS = 5;
 export function firstSteps(f: Flags, x: Facts, m: Pick<Memory, "list" | "mode"> & Partial<Pick<Memory, "did">>): FirstStep[] {
   const creator = m.mode === "create";
   const kept = new Set(m.list);
-  const order: StepId[] = creator ? ["S1", "S6", "S9", "S2", "S4", "S8", "S5", "S7"] : ["S1", "S9", "S2", "S4", "S8", "S5", "S6", "S7"];
+  const base: StepId[] = creator ? ["S1", "S6", "S9", "S2", "S4", "S8", "S5", "S7", "S10"] : ["S1", "S9", "S2", "S4", "S8", "S5", "S6", "S7", "S10"];
+  // Notifications (S10) come last; opened from the home-screen icon, where they can be turned on, first.
+  const order: StepId[] = x.standalone && x.notify === "ask" ? ["S10", ...base.filter((id) => id !== "S10")] : base;
   // A card already finished stays finished ("סגירה"): no step is added on top, not even S9 on the deploy that
   // turns it on for everyone at once.
   const finished = m.list.length > 0 && m.list.every((id) => DONE_BY[id]?.some((e) => m.did?.includes(e)));
@@ -296,7 +308,7 @@ export function firstSteps(f: Flags, x: Facts, m: Pick<Memory, "list" | "mode"> 
 }
 
 /** Facts under which every step whose flags are on applies. */
-const SOME_FACTS: Facts = { ...NO_FACTS, ready: ["-"], practiceLecture: "-", queue: 1, courses: 1, install: "ios" };
+const SOME_FACTS: Facts = { ...NO_FACTS, ready: ["-"], practiceLecture: "-", queue: 1, courses: 1, install: "ios", notify: "ask" };
 
 /** Whether a step is done: one of its real actions was seen. */
 export const isDone = (s: FirstStep, m: Pick<Memory, "did">) => s.doneBy.some((e) => m.did.includes(e));
@@ -316,7 +328,17 @@ export function cardState(m: Memory, steps: FirstStep[], now: number): CardState
 }
 
 /** The real actions that tick each step off. */
-export const DONE_BY: Record<StepId, DoneEvent[]> = { S1: ["upload", "open"], S2: ["para"], S4: ["bet"], S5: ["run"], S6: ["invite"], S7: ["group"], S8: ["course"], S9: ["install"] };
+export const DONE_BY: Record<StepId, DoneEvent[]> = {
+  S1: ["upload", "open"],
+  S2: ["para"],
+  S4: ["bet"],
+  S5: ["run"],
+  S6: ["invite"],
+  S7: ["group"],
+  S8: ["course"],
+  S9: ["install"],
+  S10: ["notify"],
+};
 const EVENT_TITLE: Record<DoneEvent, string> = {
   upload: "להעלות הרצאה ראשונה",
   open: "לפתוח סיכום",
@@ -327,6 +349,7 @@ const EVENT_TITLE: Record<DoneEvent, string> = {
   group: "להציץ ב״יחד״",
   course: "להציץ בעמוד הקורס",
   install: "להוסיף למסך הבית",
+  notify: "לקבל התראות",
 };
 
 /** Whether the home offers the app tour: a member this device never started
@@ -336,6 +359,12 @@ export const offerWanted = (m: Pick<Memory, "born" | "offer">) => !m.born && !m.
 
 /** Whether the home's card is live: started, not closed, hidden or retired. */
 export const cardLive = (m: Memory, now: number) => Boolean(m.born && !m.closed && !m.hidden && now - m.born <= RETIRE_MS);
+
+/** Whether the home's card is live and still takes new steps (not every kept
+ *  step done): it then holds the home, and notifications' first-launch card
+ *  gives way to its "לקבל התראות". */
+export const cardTakesSteps = (m: Memory, now: number) =>
+  cardLive(m, now) && !(m.list.length > 0 && m.list.every((id) => DONE_BY[id]?.some((e) => m.did.includes(e))));
 
 /** A real action seen: the memory with it, and the toast that says which
  *  step it ticked ("✓ 2 מתוך 4: לגעת בפסקה"), when it ticked one of a live card. */
@@ -515,6 +544,8 @@ export const TARGETS = {
   caLeft: ".course-ask .k-left",
   // Adding the app to the home screen (docs/study/install.md): its row in "שלי".
   installRow: "a.install-row",
+  // Notifications (docs/study/notify.md): "הגדרות התראות" in "שלי".
+  notifyRow: "a.ntf-me-row",
 } as const;
 
 const T = TARGETS;
@@ -801,6 +832,26 @@ export function walkOf(id: WalkId, f: Flags, x: Facts): Walk | null {
                 say: "כאן. ההסבר מותאם לטלפון שלך.",
                 until: "click",
                 empty: "כאן אין מה להוסיף: תמצית כבר פתוחה מהאייקון, או שהדפדפן הזה לא מציע התקנה.",
+              },
+            ],
+          }
+        : null;
+    case "notify":
+      // Notifications (docs/study/notify.md): "הגדרות התראות" in "שלי". No STOP: turning them on is the member's own.
+      return f.notify
+        ? {
+            id,
+            title: "לקבל התראות",
+            steps: [
+              { at: tabbedBut(f, "me"), place: "שלי", go: { v: "me" }, target: sel(T.meTab), say: "ההתראות נמצאות ב״שלי״.", until: "route" },
+              {
+                at: (r) => r.v === "me",
+                place: "שלי",
+                go: { v: "me" },
+                target: sel(T.notifyRow),
+                say: "כאן בוחרים מה מקבלים, ומפעילים במכשיר הזה.",
+                until: "click",
+                empty: "כאן אין עדיין הגדרות התראות: הן יופיעו כשההתראות יגיעו לקבוצה.",
               },
             ],
           }
@@ -1094,6 +1145,16 @@ export function howTos(f: Flags, x: { codes?: boolean } = {}): HowTo[] {
       answer: installHowTo(),
       words: "התקנה להתקין אייקון מסך הבית להוריד אפליקציה אייפון אנדרואיד ספארי כרום קיצור",
       open: { label: "להוסיף למסך הבית", route: { v: "install" } },
+    },
+    {
+      // Notifications (docs/study/notify.md), after "install" so the first six stay.
+      on: f.notify,
+      key: "notify",
+      title: "להפעיל התראות",
+      answer: "שלי ← ״הגדרות התראות״ ← ״להפעיל התראות במכשיר הזה״. באייפון רק כשפותחים את תמצית מהאייקון במסך הבית.",
+      words: "התראה התראות פעמון הודעה נוטיפיקציה להודיע תזכורת שקט לילה שבת",
+      open: { label: "להגדרות ההתראות", route: { v: "notify", x: "set" } },
+      walk: "notify",
     },
     { on: f.wall, key: "wall", title: "לכתוב אסוציאציה", answer: "נוגעים בפסקה ← ״אסוציאציה״, או ביחד ← ״קיר האסוציאציות״.", words: "אסוציאציה זכירה מצחיק קיר" },
     {

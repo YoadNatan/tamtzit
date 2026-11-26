@@ -114,6 +114,7 @@ const HELP: Array<[string, (f: Flags) => boolean]> = [
   ["מפגשי למידה", (f) => f.marathons],
   ["תוכנית עד המבחן", (f) => f.groupPlan],
   ["תמצית במסך הבית", (f) => f.install],
+  ["התראות", (f) => f.notify], // notifications (docs/study/notify.md)
   ["שמירת החשבון", (f) => f.account],
   ["הקלטות", (f) => f.recordings],
   ["PDF ושיתוף", () => true],

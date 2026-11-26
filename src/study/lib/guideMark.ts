@@ -9,7 +9,7 @@ import { miniScreen, type MiniRoute } from "./guideScreens";
  *  - guideMark(ev): a real action happened ("para": a paragraph was opened,
  *    "bet": an answer was sent with a bet, "upload": a summary started,
  *    "invite": the invite was shared, "install": the app was added to the
- *    home screen). The guide's layer ticks the matching
+ *    home screen, "notify": notifications were turned on on this device). The guide's layer ticks the matching
  *    first step off. Marks made before the layer loads wait in `pending`.
  *  - markFresh(mode, group): Join's success. The device's member is new to
  *    this group: the home shows "הצעדים הראשונים" once (sessionStorage, and a
@@ -19,7 +19,7 @@ import { miniScreen, type MiniRoute } from "./guideScreens";
  *
  * Nothing here talks to the network. */
 
-export type GuideEvent = "para" | "bet" | "upload" | "invite" | "install";
+export type GuideEvent = "para" | "bet" | "upload" | "invite" | "install" | "notify";
 export type GuideCommand =
   | { type: "mark"; ev: GuideEvent }
   | { type: "screen"; opener?: HTMLElement | null }

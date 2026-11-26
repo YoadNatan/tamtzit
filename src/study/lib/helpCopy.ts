@@ -72,6 +72,12 @@ function todayHelp(f: Flags): string {
   );
 }
 
+/** Help's row on notifications (section R): the bell for everyone, pushes where they are offered. */
+export const NOTIFY_HELP = {
+  title: "התראות",
+  text: "הפעמון למעלה מראה מה חדש: תשובות בשרשור שלך, מבחן קבוצתי שנפתח, פגישה שמתחילה, וסיכום או מבחן קודם שהעלית כשהם מוכנים. אפשר לקבל את זה גם כהתראה בטלפון או במחשב: שלי ← הגדרות התראות ← ״להפעיל התראות במכשיר הזה״. נשלחות רק ״עכשיו בקבוצה״ ו״בשבילך״, ותזכורת יומית רק למי שמפעילים אותה. בלילה (23:00–07:30) לא שולחים, ומה שמגיע מחכה בפעמון. באייפון ההתראות מגיעות רק כשפותחים את תמצית מהאייקון במסך הבית. על המסך הנעול מופיע שם ההרצאה, בלי שמות ובלי תוכן של תגובות.",
+} as const;
+
 /** The help screen's rows that are shown under these flags, in order. */
 export function helpRows(f: Flags, w: WritingHelp, ends: Ends = ENDS): HelpRow[] {
   const rows: Array<HelpRow & { on: boolean }> = [
@@ -318,6 +324,12 @@ export function helpRows(f: Flags, w: WritingHelp, ends: Ends = ENDS): HelpRow[]
       title: INSTALL.title,
       on: f.install,
       text: installHelp(w.codes === true),
+    },
+    {
+      // Notifications (docs/study/notify.md): what is sent, how to turn it on, and why an iPhone needs the icon.
+      title: NOTIFY_HELP.title,
+      on: f.notify,
+      text: NOTIFY_HELP.text,
     },
     {
       title: "שמירת החשבון",
