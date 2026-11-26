@@ -5,7 +5,7 @@ import { after, before, beforeEach, test } from "node:test";
 import ai from "../../api/study/ai.js";
 import { MODEL } from "./claude.js";
 import { claimedParts, PIECE_MIN_MS, readPoints } from "./points.js";
-import { partFacts, signStyle, tableParts, verifyStyle } from "./practice2.js";
+import { partFacts, setTitle, signStyle, tableParts, verifyStyle } from "./practice2.js";
 import { POINTS_SYSTEM } from "./prompts/points.js";
 import { QUESTIONS_SYSTEM, STYLE_READ_SYSTEM } from "./prompts/questions.js";
 import { SOLVER_SYSTEM } from "./prompts/solver.js";
@@ -36,6 +36,8 @@ const DRAFT = "77777777-0000-4000-8000-000000000001";
 /** A staged case's step (question types): never reworded. */
 const DRAFT_STEP = "77777777-0000-4000-8000-000000000002";
 const pid = (n: number) => `88888888-0000-4000-8000-${String(n).padStart(12, "0")}`;
+/** A practice set (section L 1). */
+const QSET = "55555555-0000-4000-8000-000000000001";
 
 // ── The lecture: 24 slides in two written parts; slide 20 has a table ──
 const lecture: Lecture = {
@@ -181,6 +183,14 @@ let planLink: number | string = 2;
 // Practice sets (docs/study/sets.md): the bank's questions as planning reads them, the member's overview, section L's answers.
 let bankRows: Array<{ points: string[]; hidden_at: string | null }> = [];
 let overviewRows: unknown[] | string = [];
+// Section L 1's answers (a string: the RPC refuses with that message).
+let makingRows: unknown[] | string = [];
+let shelfRows: unknown[] | string = [];
+let roomRow: unknown = { sets_usd: 0, today: 0 };
+let beginAnswer: unknown = { set_id: QSET, state: "making" };
+let attachRefusal: string | null = null;
+let qsetRows: unknown[] = [];
+let groupSpent = 3.21;
 
 const pause = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const readAll = (req: IncomingMessage) =>
@@ -224,7 +234,7 @@ const rest = createServer(async (req, res) => {
   if (p === "/rest/v1/rpc/study_points_claim") return typeof claimRows === "string" ? send(res, 400, pgError(claimRows)) : send(res, 200, claimRows);
   if (p === "/rest/v1/rpc/study_points_save") return send(res, 200, (a.p_points as unknown[]).length);
   if (p === "/rest/v1/rpc/study_points_fail") return send(res, 200, null);
-  if (p === "/rest/v1/rpc/study_spent") return send(res, 200, 3.21);
+  if (p === "/rest/v1/rpc/study_spent") return send(res, 200, groupSpent);
   if (p === "/rest/v1/rpc/study_my_spent") return send(res, 200, 0.42);
   if (p === "/rest/v1/rpc/study_reserve") {
     if (reserveRefusal && (reservesGranted === null || nextReservation - 100 >= reservesGranted)) return send(res, 400, pgError(reserveRefusal));
@@ -265,6 +275,16 @@ const rest = createServer(async (req, res) => {
   if (p === "/rest/v1/study_questions" || p === "/rest/v1/study_exams") return send(res, 200, []);
   const rpcOr = (rows: unknown) => (typeof rows === "string" ? send(res, 400, pgError(rows)) : send(res, 200, rows));
   if (p === "/rest/v1/rpc/study_practice_overview") return rpcOr(overviewRows);
+  if (p === "/rest/v1/rpc/study_lecture_making") return rpcOr(makingRows);
+  if (p === "/rest/v1/rpc/study_qsets_shelf") return rpcOr(shelfRows);
+  if (p === "/rest/v1/rpc/study_qset_room") return rpcOr(roomRow);
+  if (p === "/rest/v1/rpc/study_qset_begin") return rpcOr(beginAnswer);
+  if (p === "/rest/v1/rpc/study_qset_attach") {
+    if (attachRefusal) return send(res, 400, pgError(attachRefusal));
+    return send(res, 200, (createRows(a) as Array<Record<string, unknown>>).map((r) => ({ set_id: a.p_set, ...r })));
+  }
+  if (p === "/rest/v1/rpc/study_qset_abandon" || p === "/rest/v1/rpc/study_qset_style") return send(res, 200, true);
+  if (p === "/rest/v1/study_qsets") return send(res, 200, qsetRows.filter((r) => (r as { id: string }).id === eqOf(q, "id")));
   if (p === "/rest/v1/study_edits") return send(res, 404, { code: "PGRST205", details: null, hint: null, message: "no study_edits" });
   if (p === "/rest/v1/rpc/study_draft_save" || p === "/rest/v1/rpc/study_draft_replace") {
     const id = newDraftId();
@@ -404,6 +424,13 @@ beforeEach(() => {
   goneDrafts = new Set();
   bankRows = [];
   overviewRows = [];
+  makingRows = [];
+  shelfRows = [];
+  roomRow = { sets_usd: 0, today: 0 };
+  beginAnswer = { set_id: QSET, state: "making" };
+  attachRefusal = null;
+  qsetRows = [];
+  groupSpent = 3.21;
   createRows = (body) =>
     (body.p_batches as Array<{ part_idx: number; seq: number; wanted: number }>).map((b, i) => ({
       request_id: REQ,
@@ -441,6 +468,12 @@ test("every action needs section Q at version 2 (Q's end and practice 2.0)", asy
     const r = await call({ action });
     assert.deepEqual([r.status, r.json], [503, { error: "schema" }], action);
   }
+});
+
+test("create with a set needs section L 1: 503 schema and nothing begun (plan's inputs leave L's figures null)", async () => {
+  const r = await call({ action: "create", options: { level: "custom", count: 3, parts: [0], styles: ["case"] }, set: { want: 3 } });
+  assert.deepEqual([r.status, r.json], [503, { error: "schema" }]);
+  assert.equal(rpcs("study_qset_begin").length + rpcs("study_request_create").length, 0);
 });
 
 // ═══ points ═══
@@ -851,7 +884,7 @@ test("create, fresh first: the batches carry the uncovered points before the cov
   assert.deepEqual(rpcs("study_request_create").map(args)[0].p_batches[0].points, [pid(1), pid(2)], "an empty bank: the weightiest, as before");
 });
 
-test("plan with inputs: the points and their coverage, the bank, what is free, the headroom, the prices; the sets' figures wait for section L", async () => {
+test("plan with inputs, before section L: the points and their coverage, the bank, what is free, the headroom, the prices; no sets yet", async () => {
   bankRows = BANK;
   overviewRows = [
     { lecture_id: LECTURE, exam_id: null, questions: 14, answered: 5, wrong_now: 1, last_at: null },
@@ -868,7 +901,8 @@ test("plan with inputs: the points and their coverage, the bank, what is free, t
   assert.deepEqual(i.covered, [pid(1), pid(2)]);
   assert.equal(i.active, 2, "the 150 cap counts a hidden question too");
   assert.equal(i.free, 9, "14 keyed questions, 5 answered");
-  assert.deepEqual([i.making, i.recent, i.dailyLeft], [null, null, null], "section L 1's figures");
+  assert.deepEqual([i.making, i.recent, i.dailyLeft], [null, null, null], "section L 1 is not installed");
+  for (const f of ["study_lecture_making", "study_qsets_shelf", "study_qset_room"]) assert.equal(rpcs(f).length, 0, `${f} is L's`);
   assert.deepEqual(i.headroom, { group80: 23.19, member40: 12.78, line: null }, "$33 × 0.8 − $3.21; $33 × 0.4 − $0.42");
   assert.deepEqual([i.perQuestionUsd, i.readUsd, i.styleUsd], [0.04, 0, 0.01]);
   assert.equal(models().length + rpcs("study_reserve").length, 0, "nothing spent");
@@ -883,6 +917,227 @@ test("plan with inputs: the points and their coverage, the bank, what is free, t
   // No row for the lecture: nothing to solve for free.
   overviewRows = [];
   assert.equal((await call({ action: "plan", inputs: true })).json.inputs.free, 0);
+});
+
+test("plan with inputs and section L 1: open and recent sets, the sets line and the day's sets left", async () => {
+  schemaAnswer = { ...REQUIRED_SCHEMA, Q: 2, L: 1 };
+  const now = Date.now();
+  const iso = (daysAgo: number) => new Date(now - daysAgo * 86_400_000).toISOString();
+  makingRows = [{ set_id: "s-1", author_name: "שוהם", made: "6", want: 10, state: "making", updated_at: iso(0), is_mine: false }];
+  shelfRows = [
+    { id: "s-2", title: "משתנים · 10 שאלות", author_name: "נועה", created_at: iso(2), size: 10, want: 10, state: "ready", is_hidden: false },
+    { id: "s-3", title: "ישן", author_name: "נועה", created_at: iso(8), size: 5, want: 5, state: "ready", is_hidden: false },
+    { id: "s-4", title: "הוסתר", author_name: "עומר", created_at: iso(1), size: 5, want: 5, state: "ready", is_hidden: true },
+  ];
+  roomRow = [{ sets_usd: 10.5, today: 3 }];
+  const r = await call({ action: "plan", inputs: true });
+  assert.equal(r.status, 200);
+  const i = r.json.inputs;
+  assert.deepEqual(i.making, [{ set_id: "s-1", author_name: "שוהם", made: 6, want: 10, state: "making", updated_at: iso(0) }]);
+  assert.deepEqual(
+    i.recent.map((x: { id: string }) => x.id),
+    ["s-2"],
+    "the last 7 days, not hidden",
+  );
+  assert.deepEqual([i.headroom.line, i.dailyLeft], [1.5, 2], "$12 − $10.50; 5 − 3");
+  assert.deepEqual(args(rpcs("study_qsets_shelf")[0]), { p_group: GROUP, p_lecture: LECTURE, p_limit: 40 });
+  assert.deepEqual(args(rpcs("study_lecture_making")[0]), { p_lecture: LECTURE });
+  assert.deepEqual(args(rpcs("study_qset_room")[0]), { p_group: GROUP });
+  // STUDY_SETS_MONTHLY_USD moves the line; past it, 0 (never negative); the day's limit never below 0.
+  process.env.STUDY_SETS_MONTHLY_USD = "8";
+  roomRow = { sets_usd: 10.5, today: 7 };
+  try {
+    const o = await call({ action: "plan", inputs: true });
+    assert.deepEqual([o.json.inputs.headroom.line, o.json.inputs.dailyLeft], [0, 0]);
+  } finally {
+    delete process.env.STUDY_SETS_MONTHLY_USD;
+  }
+  // L's reads failing: those figures are null and the plan still answers.
+  makingRows = "forbidden";
+  shelfRows = "forbidden";
+  roomRow = "forbidden";
+  const f = await call({ action: "plan", inputs: true });
+  assert.equal(f.status, 200);
+  assert.deepEqual([f.json.inputs.making, f.json.inputs.recent, f.json.inputs.headroom.line, f.json.inputs.dailyLeft], [null, null, null, null]);
+  assert.equal(f.json.inputs.headroom.group80, 23.19);
+});
+
+// ═══ create with a set (practice sets, section L 1; design-practice §8.3, §8.6) ═══
+
+const SET_OPTIONS = { level: "custom", count: 3, parts: [0], styles: ["case"], difficulty: "exam", focus: "מה בודקים לפני טיפול" };
+const L_SCHEMA = () => ({ ...REQUIRED_SCHEMA, Q: 2, L: 1 });
+const lCalls = () => log.filter((l) => /^\/rest\/v1\/(rpc\/study_(qset|qsets|lecture_making)|study_qset)/.test(l.path)).map((l) => l.path);
+
+test("create without a set takes exactly today's path: no RPC of section L, even with L installed (D12)", async () => {
+  schemaAnswer = L_SCHEMA();
+  const r = await call({ action: "create", options: SET_OPTIONS });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.set, undefined);
+  assert.equal(rpcs("study_request_create").length, 1);
+  assert.deepEqual(lCalls(), []);
+});
+
+test("create with a set: the lines checked, the set begun (5 a day, the $12 line, no focus), then its request through study_qset_attach", async () => {
+  schemaAnswer = L_SCHEMA();
+  roomRow = [{ sets_usd: 1.25, today: 2 }];
+  const r = await call({ action: "create", options: SET_OPTIONS, set: { want: 3 } });
+  assert.equal(r.status, 200);
+  const [b] = rpcs("study_qset_begin").map(args);
+  assert.deepEqual(b, {
+    p_lecture: LECTURE,
+    p_set: { title: "הרצאה לדוגמה · 3 שאלות", want: 3, options: { level: "custom", difficulty: "exam", types: ["case"], parts: [0] } },
+    p_phase: null,
+    p_force: false,
+    p_daily: 5,
+    p_line: 12,
+    p_key: KEY,
+  });
+  assert.ok(!JSON.stringify(b.p_set).includes("טיפול"), "the focus stays in the request (the group sees it there), never on the set");
+  const [a] = rpcs("study_qset_attach").map(args);
+  assert.equal(a.p_set, QSET);
+  assert.equal(a.p_key, KEY);
+  assert.deepEqual(a.p_request, { level: "custom", count: 3, parts: [0], styles: ["case"], difficulty: "exam", style_note: "", style_example: "", focus: "מה בודקים לפני טיפול" });
+  assert.equal(rpcs("study_request_create").length, 0, "the request is made inside attach, under the round lock");
+  assert.deepEqual(r.json.set, { id: QSET, state: "making" });
+  assert.equal(r.json.request.id, REQ);
+  assert.equal(r.json.batches.length, 1);
+  assert.equal(models().length + rpcs("study_reserve").length, 0, "free: no model, no reservation");
+  // The member's own title, its spaces tidied.
+  await call({ action: "create", options: SET_OPTIONS, set: { want: 3, title: "  חזרה   לפני  המבחן " } });
+  assert.equal(args(rpcs("study_qset_begin").at(-1)!).p_set.title, "חזרה לפני המבחן");
+});
+
+test("create with a set: a malformed set or a set in a round is 400 bad set", async () => {
+  schemaAnswer = L_SCHEMA();
+  for (const set of [{ want: 0 }, { want: 41 }, { want: 2.5 }, { want: 3, title: "x".repeat(81) }, { want: 3, phase: "write" }, { want: 3, id: "nope" }, "set"]) {
+    const b = await call({ action: "create", options: SET_OPTIONS, set });
+    assert.deepEqual([b.status, b.json], [400, { error: "bad set" }], JSON.stringify(set));
+  }
+  const round = await call({ action: "create", options: SET_OPTIONS, set: { want: 3 }, planId: "88888888-0000-4000-8000-000000000001" });
+  assert.deepEqual([round.status, round.json], [400, { error: "bad set" }], "course sets are WP20");
+  assert.equal(rpcs("study_qset_begin").length, 0);
+});
+
+test("create with a set and stale points: begun as reading, answered with the phase; the second call with set.id attaches, never begins again", async () => {
+  schemaAnswer = L_SCHEMA();
+  pointsState = state([false, true]);
+  const r = await call({ action: "create", options: SET_OPTIONS, set: { want: 3 } });
+  assert.deepEqual([r.status, r.json], [200, { set: { id: QSET, state: "reading" }, phase: "read" }]);
+  assert.equal(args(rpcs("study_qset_begin")[0]).p_phase, "read");
+  assert.equal(rpcs("study_qset_attach").length + rpcs("study_request_create").length, 0, "no request before the points are read");
+  // Still stale on the second call: 409, as without a set.
+  const early = await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } });
+  assert.deepEqual([early.status, early.json], [409, { error: "points stale" }]);
+  // Read: the second call plans with the fresh points and attaches.
+  pointsState = state([true, true]);
+  qsetRows = [{ id: QSET, lecture_id: LECTURE, state: "reading", options: {} }];
+  log = [];
+  const second = await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } });
+  assert.equal(second.status, 200);
+  assert.deepEqual(second.json.set, { id: QSET, state: "making" });
+  assert.equal(rpcs("study_qset_begin").length, 0);
+  assert.equal(args(rpcs("study_qset_attach")[0]).p_set, QSET);
+  // Another lecture's set, or one the member cannot see.
+  qsetRows = [{ id: QSET, lecture_id: "11111111-0000-4000-8000-000000000099", state: "reading", options: {} }];
+  assert.deepEqual((await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } })).json, { error: "bad set" });
+  qsetRows = [];
+  const gone = await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } });
+  assert.deepEqual([gone.status, gone.json], [404, { error: "set not found" }]);
+});
+
+test("create with a set and an example: phase style; the signature kept on the set; a second call with another style is 400 bad style", async () => {
+  schemaAnswer = L_SCHEMA();
+  const r = await call({ action: "create", options: SET_OPTIONS, set: { want: 3, phase: "style" } });
+  assert.deepEqual(r.json, { set: { id: QSET, state: "reading" }, phase: "style" });
+  assert.equal(args(rpcs("study_qset_begin")[0]).p_phase, "style");
+  // The example read on the generating screen: action style with the set's id keeps the signature.
+  styleReplies = [{ styles: [{ description: "מקרה קצר עם גיל ומין.", example: "אישה בת 28 עם חום.\nמה הצעד הבא?", options: 4, case: true, readable: true }] }];
+  const st = await call({ action: "style", text: "אישה בת 28 עם חום. מה הצעד הבא?", setId: QSET });
+  assert.equal(st.status, 200);
+  const [kept] = rpcs("study_qset_style").map(args);
+  assert.deepEqual(kept, { p_set: QSET, p_sig: st.json.sig, p_key: KEY });
+  assert.deepEqual((await call({ action: "style", text: "שאלה?", setId: "nope" })).json, { error: "bad set" });
+  // The second call: the same style passes, another one signed for this lecture does not.
+  qsetRows = [{ id: QSET, lecture_id: LECTURE, state: "reading", options: { style_sig: st.json.sig } }];
+  const style = { description: st.json.description, example: st.json.example, sig: st.json.sig };
+  const ok = await call({ action: "create", options: { ...SET_OPTIONS, style }, set: { want: 3, id: QSET } });
+  assert.equal(ok.status, 200);
+  assert.equal(args(rpcs("study_qset_attach").at(-1)!).p_request.style_note, "מקרה קצר עם גיל ומין.");
+  const other = { description: "אחר", example: "שאלה?", sig: await signStyle(KEY, LECTURE, "אחר", "שאלה?") };
+  const bad = await call({ action: "create", options: { ...SET_OPTIONS, style: other }, set: { want: 3, id: QSET } });
+  assert.deepEqual([bad.status, bad.json], [400, { error: "bad style" }]);
+});
+
+test("create with a set: Q's refusal abandons the set and keeps Q's code", async () => {
+  schemaAnswer = L_SCHEMA();
+  for (const [code, status] of [
+    ["enough questions", 409],
+    ["bad parts", 400],
+    ["set not found", 404],
+  ] as const) {
+    log = [];
+    attachRefusal = code;
+    const r = await call({ action: "create", options: SET_OPTIONS, set: { want: 3 } });
+    assert.deepEqual([r.status, r.json], [status, { error: code }], code);
+    assert.deepEqual(rpcs("study_qset_abandon").map(args), [{ p_set: QSET }], code);
+  }
+});
+
+test("create with a set: an open set on the lecture is 409 already making with who and how far; force passes it on", async () => {
+  schemaAnswer = L_SCHEMA();
+  beginAnswer = { open: { set_id: "55555555-0000-4000-8000-000000000009", state: "making", want: 10, made: 6, author_name: "שוהם", mine: false } };
+  const r = await call({ action: "create", options: SET_OPTIONS, set: { want: 3 } });
+  assert.deepEqual([r.status, r.json], [
+    409,
+    { error: "already making", set_id: "55555555-0000-4000-8000-000000000009", author_name: "שוהם", made: 6, want: 10, state: "making", mine: false },
+  ]);
+  assert.equal(rpcs("study_qset_attach").length, 0);
+  beginAnswer = { set_id: QSET, state: "making" };
+  const f = await call({ action: "create", options: SET_OPTIONS, set: { want: 3 }, force: true });
+  assert.equal(f.status, 200);
+  assert.equal(args(rpcs("study_qset_begin").at(-1)!).p_force, true);
+});
+
+test("create with a set: 402 for each line (the group's 80%, the member's 40%, the sets line, the day's 5, too big for what is left, off)", async () => {
+  schemaAnswer = L_SCHEMA();
+  const refused = async (code: string) => {
+    log = [];
+    const r = await call({ action: "create", options: SET_OPTIONS, set: { want: 3 } });
+    assert.deepEqual([r.status, r.json], [402, { error: code }], code);
+  };
+  groupSpent = 26.4;
+  await refused("reserve");
+  assert.equal(rpcs("study_qset_begin").length, 0, "checked before the set is begun");
+  groupSpent = 3.21;
+  roomRow = { sets_usd: 12, today: 0 };
+  await refused("sets_line");
+  roomRow = { sets_usd: 0, today: 5 };
+  await refused("daily_limit");
+  // $26.40 − $25.50 = $0.90 left to the 80% line: under 3 × $0.04 + $1.00.
+  roomRow = { sets_usd: 0, today: 0 };
+  groupSpent = 25.5;
+  await refused("too_big");
+  assert.equal(rpcs("study_qset_begin").length, 0);
+  // $26.40 − $25.20 = $1.20: enough for $0.12 + $1.00.
+  groupSpent = 25.2;
+  assert.equal((await call({ action: "create", options: SET_OPTIONS, set: { want: 3 } })).status, 200);
+  groupSpent = 3.21;
+  // The database's own refusals under its lock (a race past the reads above, or the switches).
+  for (const code of ["daily_limit", "sets_line", "off"]) {
+    beginAnswer = code;
+    await refused(code);
+  }
+  // A figure that cannot be read checks nothing; begin still decides.
+  beginAnswer = { set_id: QSET, state: "making" };
+  roomRow = "forbidden";
+  assert.equal((await call({ action: "create", options: SET_OPTIONS, set: { want: 3 } })).status, 200);
+});
+
+test("setTitle: the lecture's title and the size, cut to fit 80 characters", () => {
+  assert.equal(setTitle("משתנים", 10), "משתנים · 10 שאלות");
+  const long = setTitle("א".repeat(120), 20);
+  assert.equal(long.length, 80);
+  assert.ok(long.endsWith("… · 20 שאלות"));
 });
 
 // ═══ create ═══

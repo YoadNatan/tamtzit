@@ -687,7 +687,26 @@ export type CreateAnswer = {
   /** A round over several lectures (sources.md B6.7): the phone's plan id
    *  and how many lectures the round has with this one. */
   round?: { planId: string; lectures: number };
+  /** Practice sets (section L 1): the set this request fills. */
+  set?: { id: string; state: "making" };
 };
+
+/** "ליצור" for a set (action "create" with `set`; docs/study/sets.md):
+ *  `want` the size asked (1-40), `title` the member's or the default,
+ *  `phase` "style" when an example is to be read first (the server adds
+ *  "read" by itself when the points are stale), `id` the set begun by an
+ *  earlier call that answered a phase. */
+export type SetBody = { title?: string; want: number; phase?: "style"; id?: string };
+export const SET_TITLE_MAX = 80;
+export const SET_WANT_MAX = 40;
+
+/** Action "create" with `set` when the generating screen reads first: the
+ *  set exists (state "reading"); the phone reads the points and/or the
+ *  example, then calls "create" again with `set.id`. */
+export type CreatePhase = { set: { id: string; state: "reading" }; phase: "read" | "style" };
+
+/** 409 "already making" (D6): an open set on the lecture, unless `force`. */
+export type AlreadyMaking = { error: "already making"; set_id: string; author_name: string | null; made: number; want: number; state: string; mine: boolean };
 
 /** A round over several lectures (sources.md B6.7): one request per
  *  lecture sharing a plan id, at most this many lectures, at least this

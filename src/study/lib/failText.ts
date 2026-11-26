@@ -255,8 +255,10 @@ const TEXT: Record<string, string> = {
   "practice:schema": "סוגי השאלות החדשים עוד לא הופעלו במסד הנתונים. אפשר לבחור שאלות אמריקאיות בינתיים.",
   "practice:bad geometry": "לא הצלחנו לקרוא את הסימונים מהקובץ. אפשר לנסות קובץ אחר.",
   "practice:request not found": "הבקשה הזו לא נמצאה. כדאי לרענן.",
-  // Practice sets (section L 1, docs/study/sets.md): the sets line as setsCopy words it, a set gone, an attempt's end.
+  // Practice sets (section L 1, docs/study/sets.md): the create screen's lines, as setsCopy words them.
   "practice:sets_line": "הסטים של החודש הגיעו לתקרה שנקבעה. אפשר לפתור סטים קיימים, ומתחדש ב-1 בחודש.",
+  "practice:daily_limit": "המכסה היומית של סטים חדשים נוצלה. אפשר שוב מחר.",
+  "practice:too_big": "לסט בגודל הזה לא נשאר מספיק תקציב החודש. אפשר סט קטן יותר.",
   "practice:set not found": "הסט לא נמצא. אולי נמחק.",
   "practice:attempt finished": "הפתרון הזה של הסט כבר הסתיים. אפשר לפתור את הסט שוב.",
   "practice:not in set": "השאלה הזו לא בסט. כדאי לרענן.",
@@ -462,7 +464,9 @@ export const INTERNAL_CODES: readonly string[] = [
   "bad drafts",
   "practice:bad options",
   "practice:bad answer",
-  // practice sets: a second attach of one set (server key only)
+  // practice sets: a set the phone sends malformed, a second attach of one set, a begin with no id (server key only)
+  "practice:bad set",
+  "practice:no set",
   "set has a request",
   "practice:unknown slide",
   "practice:exam not found",

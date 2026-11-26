@@ -3,10 +3,13 @@ import { getDeadline, waitUntil } from "@vercel/functions"; // 3.10.5, pinned
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod/v4";
 import {
+  type AlreadyMaking,
   type CreateAnswer,
+  type CreatePhase,
   EXPECTED_USD,
   expectedQuestionUsd,
   levelCounts,
+  type MakingSet,
   type Options,
   planRequest,
   type PlanAnswer,
@@ -17,6 +20,10 @@ import {
   type PointsPart,
   plannedStyles,
   readOptions,
+  type RecentSet,
+  SET_TITLE_MAX,
+  SET_WANT_MAX,
+  type SetBody,
   requestUsd,
   ROUND_MAX_LECTURES,
   ROUND_MIN_PER_LECTURE,
@@ -27,7 +34,7 @@ import {
   type WriteLine,
 } from "../../shared/study/practice2.js";
 import { addFacts, defaultStylesFor, emptyFacts, isNewStyle, type PartFacts } from "../../shared/study/forms.js";
-import { estimateUsd, imageTokens, monthlyCap, POLICY, reserve } from "./budget.js";
+import { estimateUsd, imageTokens, monthlyCap, POLICY, reserve, SETS_DAILY, setsMonthlyCap } from "./budget.js";
 import { figureList } from "./cards.js";
 import { generateItems, settleFor } from "./claude.js";
 import type { Op } from "./ops/types.js";
@@ -71,6 +78,7 @@ import {
   memberClient,
   MODEL,
   QUICK_TOKEN_SECONDS,
+  schemaHas,
   serverKey,
   textStream,
   tidyMarkdown,
@@ -84,7 +92,10 @@ import {
  *                                                               estimates; with inputs, "סט חדש"'s planning inputs (free)
  *   { op: "questions", action: "create", lectureId, options }  a request and its batches (free; the batches are then
  *                                                               written one by one: { op: "questions", lectureId, batchId })
- *   { op: "questions", action: "style", lectureId, text?, image? }  an example read back as the style (paid, small)
+ *   { op: "questions", action: "create", lectureId, options, set, force? }   the same as a practice set (section L 1):
+ *                                                               begun, read first when needed, then its request
+ *   { op: "questions", action: "style", lectureId, text?, image?, setId? }  an example read back as the style (paid,
+ *                                                               small); with setId its signature is kept on the set
  *   { op: "questions", action: "reword", lectureId, draftId, note? } one pending draft written again (paid)
  *
  * Each checks the member (their token: RLS decides what they read) and the
@@ -190,12 +201,10 @@ const room = (line: number, spent: number) => Math.max(0, Math.floor((line - spe
 
 /** "סט חדש"'s planning inputs (PlanInputs; docs/study/sets.md): the points
  *  and their coverage, the bank's size, what the member can solve for free,
- *  the headroom to the 80% line and the member's 40% share, and the prices.
- *  A figure that cannot be read is null: the screen decides without it.
- *  `making`, `recent`, `headroom.line` and `dailyLeft` come from section L 1
- *  (study_lecture_making, study_qsets_shelf and the sets line's and the day's
- *  figures); until it is installed they are null, and the package that adds
- *  L reads them here, behind schemaHas({ L: 1 }). */
+ *  the headroom to the 80% line and the member's 40% share, and the prices;
+ *  with section L 1, the open and recent sets on the lecture, the headroom
+ *  to the sets line and the day's sets left. A figure that cannot be read
+ *  is null: the screen decides without it. */
 async function planInputs(
   sb: SupabaseClient,
   o: {
@@ -208,29 +217,80 @@ async function planInputs(
     readUsd: number;
   },
 ): Promise<PlanInputs> {
-  const overview = await sb.rpc("study_practice_overview", { p_group: o.lecture.group_id });
+  const lectureId = o.lecture.id;
+  const groupId = o.lecture.group_id;
+  const [overview, sets] = await Promise.all([
+    sb.rpc("study_practice_overview", { p_group: groupId }),
+    // Section L 1 (practice sets): without it, no open or recent sets and no sets line.
+    schemaHas(sb, { L: 1 }).then((has) =>
+      has
+        ? Promise.all([
+            sb.rpc("study_lecture_making", { p_lecture: lectureId }),
+            sb.rpc("study_qsets_shelf", { p_group: groupId, p_lecture: lectureId, p_limit: 40 }),
+            sb.rpc("study_qset_room", { p_group: groupId }),
+          ])
+        : null,
+    ),
+  ]);
   const row = overview.error
     ? null
-    : ((overview.data ?? []) as Array<{ lecture_id: string | null; questions: number; answered: number }>).find((r) => r.lecture_id === o.lecture.id);
+    : ((overview.data ?? []) as Array<{ lecture_id: string | null; questions: number; answered: number }>).find((r) => r.lecture_id === lectureId);
   const free = overview.error ? null : row ? Math.max(0, Number(row.questions) - Number(row.answered)) : 0;
+  let making: MakingSet[] | null = null;
+  let recent: RecentSet[] | null = null;
+  let line: number | null = null;
+  let dailyLeft: number | null = null;
+  if (sets) {
+    const [mk, shelf, roomRes] = sets;
+    if (!mk.error)
+      making = ((mk.data ?? []) as MakingSet[]).map((m) => ({
+        set_id: m.set_id,
+        author_name: m.author_name ?? "",
+        made: Number(m.made),
+        want: Number(m.want),
+        state: m.state,
+        updated_at: m.updated_at,
+      }));
+    if (!shelf.error) {
+      const since = Date.now() - 7 * 86_400_000;
+      recent = ((shelf.data ?? []) as Array<RecentSet & { is_hidden?: boolean }>)
+        .filter((x) => !x.is_hidden && Date.parse(x.created_at) >= since)
+        .map((x) => ({ id: x.id, title: x.title, author_name: x.author_name ?? "", created_at: x.created_at, size: Number(x.size), want: Number(x.want), state: x.state }));
+    }
+    const r = roomOf(roomRes);
+    if (r) {
+      line = room(setsMonthlyCap(), r.setsUsd);
+      dailyLeft = Math.max(0, SETS_DAILY - r.today);
+    }
+  }
   const cap = monthlyCap();
   return {
     points: o.points.map((p) => ({ id: p.id, part_idx: Number(p.part_idx), n: Number(p.n), kind: p.kind, red_flag: !!p.red_flag, weight: p.weight })),
     covered: o.points.filter((p) => o.covered.has(p.id)).map((p) => p.id),
     active: o.active,
     free,
-    making: null,
-    recent: null,
+    making,
+    recent,
     headroom: {
       group80: o.groupUsd === null ? null : room(cap * POLICY.practice.share, o.groupUsd),
       member40: o.mineUsd === null ? null : room(cap * (POLICY.practice.memberShare ?? 0), o.mineUsd),
-      line: null,
+      line,
     },
-    dailyLeft: null,
+    dailyLeft,
     perQuestionUsd: expectedQuestionUsd(MODEL),
     readUsd: o.readUsd,
     styleUsd: EXPECTED_USD.style,
   };
+}
+
+/** study_qset_room's row (the sets line's spend this month and the sets the
+ *  member began today), or null when it could not be read. */
+function roomOf(res: { data: unknown; error: unknown }): { setsUsd: number; today: number } | null {
+  if (res.error) return null;
+  const r = (Array.isArray(res.data) ? res.data[0] : res.data) as { sets_usd?: unknown; today?: unknown } | null | undefined;
+  const setsUsd = Number(r?.sets_usd);
+  const today = Number(r?.today);
+  return r && Number.isFinite(setsUsd) && Number.isFinite(today) ? { setsUsd, today } : null;
 }
 
 /** What each part offers the question types (forms.ts canStyle): a table on
@@ -418,21 +478,114 @@ function planIdOf(body: Record<string, unknown>): string | null {
   return id;
 }
 
-/** { lectureId, options }: checks the options (400), the style's signature
- *  (400 "bad style"), that every chosen part is written (409 "summary not
- *  ready") and its points current (409 "points stale": action "points"
- *  reads them first), plans the request from the points, fresh first
- *  (planRequest with the bank's coverage), and saves it with its batches
- *  (study_request_create). The batches are then written one by one. */
+/** study_qset_begin's and study_qset_attach's refusals, and the set's own
+ *  budget lines, as HTTP statuses: every budget line is 402 (the create
+ *  screen's words for each, docs/study/sets.md). */
+const SET_STATUS: Record<string, number> = {
+  daily_limit: 402,
+  sets_line: 402,
+  too_big: 402,
+  reserve: 402,
+  member_share: 402,
+  off: 402,
+  "set not found": 404,
+  "set has a request": 409,
+};
+
+/** The body's set: absent is a request as before (D12: no set, nothing of
+ *  section L); anything malformed is 400 "bad set". */
+function setBodyOf(raw: unknown): SetBody | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, "bad set");
+  const o = raw as Record<string, unknown>;
+  const want = o.want;
+  if (typeof want !== "number" || !Number.isInteger(want) || want < 1 || want > SET_WANT_MAX) throw new HttpError(400, "bad set");
+  if (o.title !== undefined && o.title !== null && typeof o.title !== "string") throw new HttpError(400, "bad set");
+  const title = typeof o.title === "string" ? o.title.replace(/\s+/g, " ").trim() : "";
+  if (title.length > SET_TITLE_MAX) throw new HttpError(400, "bad set");
+  if (o.phase !== undefined && o.phase !== null && o.phase !== "style" && o.phase !== "read") throw new HttpError(400, "bad set");
+  const id = o.id === undefined || o.id === null ? null : idOf(o.id);
+  if (o.id !== undefined && o.id !== null && !id) throw new HttpError(400, "bad set");
+  return { want, ...(title ? { title } : {}), ...(o.phase === "style" ? { phase: "style" as const } : {}), ...(id ? { id } : {}) };
+}
+
+/** A set's default title (design §8.3): "{lecture} · {n} שאלות", the
+ *  lecture's title cut to fit 80 characters. */
+export function setTitle(lectureTitle: string, n: number): string {
+  const tail = ` · ${n} שאלות`;
+  const head = lectureTitle.replace(/\s+/g, " ").trim();
+  return (head.length + tail.length <= SET_TITLE_MAX ? head : `${head.slice(0, SET_TITLE_MAX - tail.length - 1).trimEnd()}…`) + tail;
+}
+
+/** Before a set begins: each line it would cross, first reason first (the
+ *  create screen's order), then whether what is left holds the set's
+ *  expected cost plus $1.00 (402 too_big). The day's sets are read here too,
+ *  so a member at the limit hears that and not "too big"; study_qset_begin
+ *  checks the day and the sets line again under its lock. A figure that
+ *  cannot be read checks nothing. */
+async function setHeadroom(sb: SupabaseClient, groupId: string, expectedUsd: number): Promise<void> {
+  const [spent, mine, roomRes] = await Promise.all([
+    sb.rpc("study_spent", { p_group: groupId }),
+    sb.rpc("study_my_spent", { p_group: groupId }),
+    sb.rpc("study_qset_room", { p_group: groupId }),
+  ]);
+  const cap = monthlyCap();
+  const r = roomOf(roomRes);
+  const group80 = spent.error ? null : room(cap * POLICY.practice.share, Number(spent.data));
+  const member40 = mine.error ? null : room(cap * (POLICY.practice.memberShare ?? 0), Number(mine.data));
+  const line = r ? room(setsMonthlyCap(), r.setsUsd) : null;
+  if (group80 !== null && group80 <= 0) throw new HttpError(402, "reserve");
+  if (member40 !== null && member40 <= 0) throw new HttpError(402, "member_share");
+  if (line !== null && line <= 0) throw new HttpError(402, "sets_line");
+  if (r && r.today >= SETS_DAILY) throw new HttpError(402, "daily_limit");
+  const known = [group80, member40, line].filter((x): x is number => x !== null);
+  if (known.length && Math.min(...known) < expectedUsd + SET_MARGIN_USD) throw new HttpError(402, "too_big");
+}
+/** What must stay free beyond a set's expected cost when it begins (design §8.3). */
+export const SET_MARGIN_USD = 1;
+
+/** The set a second call continues (after its reading phase): the member's
+ *  group's, on this lecture; a style other than the one its phase signed
+ *  is 400 "bad style". study_qset_attach checks the author again. */
+async function setToContinue(sb: SupabaseClient, setId: string, lectureId: string, options: Options): Promise<void> {
+  const { data, error } = await sb.from("study_qsets").select("id, lecture_id, state, options").eq("id", setId);
+  if (error) throw new HttpError(500, error.message);
+  const row = ((data ?? []) as Array<{ id: string; lecture_id: string | null; state: string; options: { style_sig?: string } | null }>)[0];
+  if (!row) throw new HttpError(404, "set not found");
+  if (row.lecture_id !== lectureId) throw new HttpError(400, "bad set");
+  const kept = row.options?.style_sig;
+  if (kept && options.style && options.style.sig.toLowerCase() !== kept) throw new HttpError(400, "bad style");
+}
+
+/** { lectureId, options, set?, force? }: checks the options (400), the
+ *  style's signature (400 "bad style"), that every chosen part is written
+ *  (409 "summary not ready") and its points current (409 "points stale":
+ *  action "points" reads them first), plans the request from the points,
+ *  fresh first (planRequest with the bank's coverage), and saves it with its
+ *  batches (study_request_create). The batches are then written one by one.
+ *
+ *  With `set` (practice sets, section L 1; without it nothing of L is
+ *  called, D12): the lines a set may not cross (402 reserve, member_share,
+ *  sets_line, daily_limit, too_big), then study_qset_begin (409 "already
+ *  making" with the open set unless `force`; 402 off). When the points are
+ *  stale or an example is to be read, it answers { set, phase } and the
+ *  phone reads them on the generating screen, then calls again with
+ *  `set.id`. Otherwise (or on that second call) the request is made through
+ *  study_qset_attach; a refusal there abandons the set and keeps Q's code. */
 export const createAction: Op = async (req, body) => {
   const lectureId = lectureIdOf(body);
   const options = optionsOf(body.options);
   const planId = planIdOf(body);
+  const set = setBodyOf(body.set);
+  // Sets over several lectures are course sets (WP20, not in v1).
+  if (set && planId) throw new HttpError(400, "bad set");
   // No model call: reads and one RPC. Each batch's write checks its own token.
   const { sb } = await memberClient(req, { minSeconds: QUICK_TOKEN_SECONDS });
   const key = serverKey();
   // A round over several lectures writes plan_id (section S at 1).
   if (planId) await assertSchema(sb, "questions_plan");
+  // A set needs section L 1.
+  if (set && !(await schemaHas(sb, { L: 1 }))) throw new HttpError(503, "schema");
   const lecture = await loadLecture(sb, lectureId);
   if (options.style && !(await verifyStyle(key, lectureId, options.style))) throw new HttpError(400, "bad style");
   await needTypes(sb, options.styles);
@@ -447,11 +600,14 @@ export const createAction: Op = async (req, body) => {
   const chosen = state.filter((s) => parts.includes(s.part_idx));
   // A part still being written has no points yet; one whose text changed is read again first.
   if (chosen.some((s) => s.summary !== "ready")) throw new HttpError(409, "summary not ready");
-  if (chosen.some((s) => !s.current)) throw new HttpError(409, "points stale");
+  const stale = chosen.filter((s) => !s.current).map((s) => s.part_idx);
+  // A set begun now reads them as its first phase; anything else needs them current.
+  const phaseRead = stale.length > 0 && set !== null && !set.id;
+  if (stale.length && !phaseRead) throw new HttpError(409, "points stale");
   const facts = partFacts(lecture, state, (sections.data ?? []) as Array<{ idx: number; markdown: string | null }>, points);
   // Fresh first, as plan showed it (practice sets D5).
   const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, partFacts: facts, covered: bank.covered });
-  if (plan.total === 0) throw new HttpError(400, "no points");
+  if (plan.total === 0 && !phaseRead) throw new HttpError(400, "no points");
   const used = plan.parts.filter((p) => p.questions > 0).map((p) => p.part_idx);
   if (planId) {
     // Checked first, to answer at once; study_request_create_in_plan checks
@@ -462,30 +618,76 @@ export const createAction: Op = async (req, body) => {
     const lectures = new Set(((others.data ?? []) as Array<{ lecture_id: string }>).map((r) => r.lecture_id).filter((l) => l !== lectureId));
     if (lectures.size >= ROUND_MAX_LECTURES) throw new HttpError(409, "round full");
   }
+  const request = {
+    level: options.level,
+    count: plan.total,
+    parts: used,
+    styles: options.styles,
+    difficulty: options.difficulty,
+    style_note: options.style?.description ?? "",
+    style_example: options.style?.example ?? "",
+    focus: options.focus,
+  };
+  let setId: string | null = null;
+  if (set?.id) {
+    await setToContinue(sb, set.id, lectureId, options);
+    setId = set.id;
+  } else if (set) {
+    const phase: CreatePhase["phase"] | null = phaseRead ? "read" : set.phase === "style" ? "style" : null;
+    const chars = ((sections.data ?? []) as Array<{ idx: number; markdown: string }>)
+      .filter((x) => stale.includes(x.idx))
+      .reduce((n, x) => n + (x.markdown ?? "").length, 0);
+    const questionsUsd = plan.total > 0 ? requestUsd(plannedStyles(plan)) : set.want * expectedQuestionUsd(MODEL);
+    const expected = questionsUsd + (stale.length ? pointsUsd(chars, stale.length) : 0) + (phase === "style" ? EXPECTED_USD.style : 0);
+    await setHeadroom(sb, lecture.group_id, expected);
+    // Never the member's points or a focus (design §7.1): the set page shows these again.
+    const setRow = {
+      title: set.title || setTitle(lecture.title, set.want),
+      want: set.want,
+      options: { level: options.level, difficulty: options.difficulty, types: options.styles, parts },
+    };
+    const begun = await sb.rpc(
+      "study_qset_begin",
+      keyed({ p_lecture: lectureId, p_set: setRow, p_phase: phase, p_force: body.force === true, p_daily: SETS_DAILY, p_line: setsMonthlyCap() }),
+    );
+    if (begun.error) throw new HttpError(SET_STATUS[begun.error.message] ?? CREATE_STATUS[begun.error.message] ?? 500, begun.error.message);
+    const b = (begun.data ?? {}) as { set_id?: string; open?: Omit<AlreadyMaking, "error"> };
+    if (b.open) {
+      const open: AlreadyMaking = {
+        error: "already making",
+        set_id: b.open.set_id,
+        author_name: b.open.author_name ?? null,
+        made: Number(b.open.made),
+        want: Number(b.open.want),
+        state: b.open.state,
+        mine: b.open.mine === true,
+      };
+      return json(409, open);
+    }
+    if (!b.set_id) throw new HttpError(500, "no set");
+    if (phase) return json(200, { set: { id: b.set_id, state: "reading" }, phase } satisfies CreatePhase);
+    setId = b.set_id;
+  }
   // In a round, the request and its link to the round are one call (one
   // transaction): a link refused there ("round full" when two phones add the
-  // 5th and 6th lecture at once) leaves no request or batches behind.
-  const { data, error } = await sb.rpc(
-    planId ? "study_request_create_in_plan" : "study_request_create",
-    keyed({
-      p_lecture: lectureId,
-      ...(planId ? { p_plan: planId } : {}),
-      p_request: {
-        level: options.level,
-        count: plan.total,
-        parts: used,
-        styles: options.styles,
-        difficulty: options.difficulty,
-        style_note: options.style?.description ?? "",
-        style_example: options.style?.example ?? "",
-        focus: options.focus,
-      },
-      p_batches: plan.batches,
-    }),
-  );
-  if (error) throw new HttpError(CREATE_STATUS[error.message] ?? ROUND_STATUS[error.message] ?? 500, error.message);
+  // 5th and 6th lecture at once) leaves no request or batches behind. A set's
+  // request is linked the same way (study_qset_attach).
+  const { data, error } = setId
+    ? await sb.rpc("study_qset_attach", keyed({ p_set: setId, p_request: request, p_batches: plan.batches }))
+    : await sb.rpc(
+        planId ? "study_request_create_in_plan" : "study_request_create",
+        keyed({ p_lecture: lectureId, ...(planId ? { p_plan: planId } : {}), p_request: request, p_batches: plan.batches }),
+      );
+  if (error) {
+    // Q refused (or the set was not the member's): a set with no request goes.
+    if (setId) await sb.rpc("study_qset_abandon", { p_set: setId }).then(() => undefined, () => undefined);
+    throw new HttpError(CREATE_STATUS[error.message] ?? ROUND_STATUS[error.message] ?? SET_STATUS[error.message] ?? 500, error.message);
+  }
   const rows = (data ?? []) as Array<{ request_id: string; round: number; batch_id: string; part_idx: number; seq: number; wanted: number; lectures?: number }>;
-  if (!rows.length) throw new HttpError(500, "no request");
+  if (!rows.length) {
+    if (setId) await sb.rpc("study_qset_abandon", { p_set: setId }).then(() => undefined, () => undefined);
+    throw new HttpError(500, "no request");
+  }
   const answer: CreateAnswer = {
     request: {
       id: rows[0].request_id,
@@ -501,6 +703,7 @@ export const createAction: Op = async (req, body) => {
     estimate: { questionsUsd: requestUsd(plannedStyles(plan)) },
   };
   if (planId) answer.round = { planId, lectures: Number(rows[0].lectures) };
+  if (setId) answer.set = { id: setId, state: "making" };
   return json(200, answer);
 };
 
@@ -568,6 +771,9 @@ const tidyLines = (s: string) =>
 export const styleAction: Op = async (req, body, started) => {
   const lectureId = lectureIdOf(body);
   const example = readExample(body);
+  // A set's reading phase (section L 1): its signature is kept on the set.
+  const setId = body.setId === undefined || body.setId === null ? null : idOf(body.setId);
+  if (body.setId !== undefined && body.setId !== null && !setId) throw new HttpError(400, "bad set");
   const { sb } = await memberClient(req);
   const client = anthropic();
   const key = serverKey();
@@ -619,6 +825,9 @@ export const styleAction: Op = async (req, body, started) => {
     costUsd: round6(costUsd),
     unsettled,
   };
+  // Kept on the set while it reads (study_qset_style), so a second "create"
+  // with another style is refused. Never worth failing the paid read over.
+  if (setId) await sb.rpc("study_qset_style", keyed({ p_set: setId, p_sig: answer.sig })).then(() => undefined, () => undefined);
   return json(200, answer);
 };
 

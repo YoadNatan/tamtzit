@@ -246,12 +246,12 @@ adds `inputs` (`PlanInputs`):
   group's to the sets line (`line`, `STUDY_SETS_MONTHLY_USD`, default 12).
   `dailyLeft`: new paid sets the member may still start today (5 a day).
 - `making` (open sets on the lecture, `study_lecture_making`), `recent` (its
-  sets of the last 7 days, `study_qsets_shelf`), `headroom.line` and
-  `dailyLeft` need section L 1, which is not installed yet: until then they
-  are `null`. L 1 provides them (with a member RPC for the month's spend of
-  the sets line's kinds and the member's sets made today, since a member
-  cannot read the ledger), and the server reads them behind `schemaHas({ L:
-  1 })`.
+  sets of the last 7 days that the member has not hidden,
+  `study_qsets_shelf`), `headroom.line` and `dailyLeft` (from
+  `study_qset_room`: the month's spend of the sets line's kinds and the sets
+  the member began today, since a member cannot read the ledger) come from
+  section L 1, read behind `schemaHas({ L: 1 })`. Without L, or when one of
+  those reads fails, they are `null`.
 - Any other figure that cannot be read is `null` (the screen decides without
   it); `perQuestionUsd` is `expectedQuestionUsd(MODEL)`.
 
@@ -307,6 +307,42 @@ part is still being written); 409 `points stale` (call `points` first); 400
 has 150 active questions, or 400 drafts were ever written for it); 400 `bad
 parts`.
 
+**A practice set** (section L 1, [`sets.md`](sets.md); design-practice
+§8.3): `{ options, set: { want, title?, phase?: "style", id? }, force? }`.
+Without `set`, `create` is exactly as above and calls nothing of section L
+(D12). With it (503 `schema` before L 1; 400 `bad set` when malformed or with
+a `planId`, course sets being WP20):
+
+1. **First call** (no `set.id`): the lines a set may not cross, each 402 in
+   the create screen's order: `reserve` (the group's 80% line reached),
+   `member_share` (the member's 40%), `sets_line` (`STUDY_SETS_MONTHLY_USD`,
+   default 12, of kinds practice, solver, reword and style this month),
+   `daily_limit` (5 new sets a member a day, Israel time; a deleted set
+   counts), `too_big` (what is left on the smallest of those lines is under
+   the set's expected cost plus $1.00). Then `study_qset_begin` (under the
+   lecture's round lock, which checks the day and the line again, and 402
+   `off` when the switch `qsets` or `questions_paid` is off). An open set
+   on the lecture (being read in the last 10 minutes, written in the last 30,
+   or just begun) is **409 `already making`** with `{ set_id, author_name,
+   made, want, state, mine }`, unless `force: true` (OD20, a soft block).
+   The set's title is the member's, or "{lecture} · {n} שאלות"; it keeps
+   the level, difficulty, types and parts, never the focus or the points.
+2. **A phase**: when a chosen part's points are stale (the set reads them,
+   instead of 409 `points stale`) or `set.phase` is `"style"` (an example
+   to read), the answer is `{ "set": { "id": "…", "state": "reading" },
+   "phase": "read" | "style" }` and no request is made. The generating
+   screen reads the points (`points`) and/or the example (`style` with
+   `setId`, which keeps the signature on the set), then calls `create`
+   again with `set.id`.
+3. **The request** (no phase, or the call with `set.id`): planned as above
+   and made by `study_qset_attach` (the author only, once, under the same
+   round lock: Q's own `study_request_create` inside it). The answer is the
+   usual one plus `"set": { "id": "…", "state": "making" }`. A refusal there
+   (Q's codes, or 404 `set not found`) abandons a set that has no request,
+   and keeps its code. With `set.id`: 404 `set not found`, 400 `bad set`
+   (another lecture's), 400 `bad style` (a style other than the one the
+   phase signed), 409 `points stale` (still stale).
+
 **A round over several lectures** (courses, `docs/study/sources.md` B6.7):
 the phone makes one id for the round and sends `create` once per lecture
 with `{ options, planId }`. Each lecture's request and batches are made
@@ -358,7 +394,7 @@ or an error); such a draft can be kept, and the screen should say it was not
 checked. A blank table's vignette is the table, one row a line written
 `| … | … |`, with the blank cell as `___`.
 
-### `style` → JSON: `{ text?, image? }`
+### `style` → JSON: `{ text?, image?, setId? }`
 
 `text`: at most 3,000 characters. `image`: `{ mediaType: "image/jpeg" |
 "image/png" | "image/webp" | "image/gif", data: "<base64>" }`, at most
@@ -373,7 +409,9 @@ app's pictures are). One or both.
 
 400 `bad example`; 422 `no example` (nothing that reads as an exam
 question); 422 `refusal`; 504 `timeout`; 402/429 as every paid call (10 a
-member a day).
+member a day). With `setId` (a set's reading phase), the signature is also
+kept on the set (`study_qset_style`, only while it reads; never worth
+failing the paid read over); 400 `bad set` when `setId` is not an id.
 
 ### `reword` → a stream: `{ draftId, note? }`
 
@@ -584,13 +622,19 @@ Every code below has Hebrew in `failText(code, "practice")` or is internal
 | `round full` | create (a round) | בסבב אחד אפשר לבחור עד 5 הרצאות. |
 | `too few questions` | create (a round) | בסבב על כמה הרצאות בוחרים לפחות 4 שאלות מכל הרצאה. |
 | `bad plan` | create (a round) | הסבב הזה לא נמצא. כדאי להתחיל אותו שוב. |
+| `sets_line` | create (a set) | הסטים של החודש הגיעו לתקרה שנקבעה. אפשר לפתור סטים קיימים, ומתחדש ב-1 בחודש. |
+| `daily_limit` | create (a set) | המכסה היומית של סטים חדשים נוצלה. אפשר שוב מחר. |
+| `too_big` | create (a set) | לסט בגודל הזה לא נשאר מספיק תקציב החודש. אפשר סט קטן יותר. |
+| `set not found` | create (a set), the set's RPCs | הסט לא נמצא. אולי נמחק. |
+| `already making` | create (a set, 409) | the create screen's own callout ("יש סט בהכנה…"), from the answer's fields |
 
 `busy`, `gave up`, `refusal`, `timeout`, `budget`, `reserve`,
 `member_share`, `daily_limit`, `hidden`, `not flagged`, `bad source`, `in
 quiz`, `bad bet` keep their existing words. Internal: `part not writing`,
 `bad points`, `bad style`, `rewrite limit`, `not failed`, `bad batch`, `no
 request`, `bad action`, `bad level`, `bad difficulty`, `lectureId required`,
-`lectureId and draftId required`, `draft of another lecture`.
+`lectureId and draftId required`, `draft of another lecture`, `bad set`, `no
+set`, `set has a request`.
 
 ## 8. Decisions where the documents were silent
 
