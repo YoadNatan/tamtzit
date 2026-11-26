@@ -98,6 +98,11 @@ export function flagsFrom(e: Record<string, unknown>) {
     // תרגילים", the course page by kind, the wide review, keying by hand,
     // printed order. A sheet is a past exam's row of kind 'sheet': section O 1.
     sheets: practice && on(e.VITE_STUDY_COURSES) && on(e.VITE_STUDY_EXAMS) && on(e.VITE_STUDY_SHEETS),
+    // Uploaded sheets, release A1 (docs/study/sheets.md): the sheet reader
+    // (open, numeric and multi-part questions, tables, up to 10 options), the
+    // forms in practice, the edit sheet, add and retire, answers and worked
+    // solutions, open-add, the budget pause, the lecture page's row. Section O 2.
+    sheetForms: practice && on(e.VITE_STUDY_COURSES) && on(e.VITE_STUDY_EXAMS) && on(e.VITE_STUDY_SHEETS) && on(e.VITE_STUDY_SHEETS_FORMS),
   } as const;
 }
 
@@ -187,5 +192,7 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     ...(f.sets ? { L: 1 } : {}),
     // Uploaded sheets (release A0): the kind, "a new sheet", keying by hand.
     ...(f.sheets ? { O: 1 } : {}),
+    // Release A1: the sheet reader's forms, edits and solutions.
+    ...(f.sheetForms ? { O: 2 } : {}),
   };
 }

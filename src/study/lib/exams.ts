@@ -67,7 +67,8 @@ export type ReviewItem = {
   id: string;
   no: number;
   kind: "mcq" | "case";
-  form: "one" | "tf" | "match";
+  /** open and numeric: an uploaded sheet's, read by the sheet reader (section O 2, release A1). */
+  form: "one" | "tf" | "match" | "open" | "numeric";
   vignette: string;
   question: string;
   options: string[];
@@ -84,6 +85,27 @@ export type ReviewItem = {
   fixed: boolean;
   /** Someone answered it: a page read again keeps its text, as a fix does. */
   answered?: boolean;
+  /* Uploaded sheets, release A1 (study_sheet_review, section O 2): the printed label, the
+   * figure boxes, the copy's exactness, a multi-part question's series and step, a numeric
+   * item's number, unit and tolerance, an open item's model answer and rubric, the worked
+   * solution and where it came from, who took the item out, whether anyone saw an open
+   * item's solution. Absent from S's review. */
+  label?: string;
+  figures?: string[];
+  exact?: number | null;
+  series?: string | null;
+  step?: number | null;
+  retired_by?: string | null;
+  retired_at?: string | null;
+  num?: number | null;
+  num_unit?: string | null;
+  num_tol?: number | null;
+  model_answer?: string | null;
+  rubric?: string[];
+  solution?: string | null;
+  solution_origin?: KeyOrigin | null;
+  solution_conf?: number | null;
+  marked?: boolean;
 };
 export type ReviewPage = { n: number; path: string; w: number; h: number; key: boolean };
 export type KeyLog = { id: number; question_id: string; old: number | null; new: number | null; origin_old: string | null; origin_new: string | null; undo_of: number | null; by: string | null; at: string };
@@ -94,6 +116,14 @@ export type Review = {
   items: ReviewItem[];
   key_log: KeyLog[];
   item_log: ItemLog[];
+  /* Uploaded sheets, release A1 (study_sheet_review): the kind and lecture, who reads its units
+   * (the sheet reader or the exam reader), the units the budget held (design D23), open-add's progress. */
+  kind?: "exam" | "sheet";
+  lecture?: { id: string; title: string } | null;
+  reader?: "sheet" | "exam";
+  skipped_open?: number;
+  paused?: { read: number; key: number; solve: number } | null;
+  extra?: { units: number; done: number; copied: number } | null;
 };
 /** A course's exam as its page lists it (study_course_overview at S 2). */
 export type CourseExam = {
@@ -338,9 +368,11 @@ export function readingPercent(units: readonly UnitRow[]): number {
 
 /** Where an item stands in the review: badly read, a suggested key, no key at all, or keyed. */
 export type ItemState = "unclear" | "suggested" | "nokey" | "ok";
-export function itemState(q: Pick<ReviewItem, "parse_conf" | "origin" | "answer" | "seq">): ItemState {
+export function itemState(q: Pick<ReviewItem, "parse_conf" | "origin" | "answer" | "seq"> & Partial<Pick<ReviewItem, "form" | "num" | "model_answer">>): ItemState {
   if (q.parse_conf === 1) return "unclear";
-  const keyed = q.answer !== null || (q.seq !== null && q.seq.length > 0);
+  // A numeric item is keyed by its number, an open one by its model answer (study_private.exam_unkeyed, O 2).
+  const keyed =
+    q.form === "numeric" ? q.num !== null && q.num !== undefined : q.form === "open" ? Boolean(q.model_answer) : q.answer !== null || (q.seq !== null && q.seq.length > 0);
   if (!keyed) return "nokey";
   if (q.origin === "solved") return "suggested";
   return "ok";
@@ -349,7 +381,7 @@ export function itemState(q: Pick<ReviewItem, "parse_conf" | "origin" | "answer"
 export const needsLook = (q: Parameters<typeof itemState>[0]) => itemState(q) !== "ok";
 
 /** The review's numbers: found, with an answer (the exam's, the sheet's or a member's), to check, suggested. */
-export function reviewCounts(items: ReadonlyArray<Pick<ReviewItem, "parse_conf" | "origin" | "answer" | "seq" | "retired">>) {
+export function reviewCounts(items: ReadonlyArray<Parameters<typeof itemState>[0] & Pick<ReviewItem, "retired">>) {
   const live = items.filter((q) => !q.retired);
   const look = live.filter(needsLook).length;
   return {

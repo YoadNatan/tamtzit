@@ -69,6 +69,8 @@ export type Feedback = {
   right?: number;
   total?: number;
   choices?: number[] | null;
+  /** An open question's own mark (uploaded sheets, release A1): personal, in no score (OD8). */
+  personal?: boolean;
 };
 /** The bet before "לבדוק" (p_confidence): ניחוש 1 · נראה לי 2 · על בטוח 3. */
 export type Bet = 1 | 2 | 3;

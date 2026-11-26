@@ -889,3 +889,15 @@ test("VITE_STUDY_SHEETS: uploaded sheets (release A0) on past exams, with sectio
   // No tab of its own: the tab bar is the same with the flag.
   assert.deepEqual(tabLinks(on), tabLinks(off));
 });
+
+test("VITE_STUDY_SHEETS_FORMS: uploaded sheets' release A1 on release A0, with section O 2", () => {
+  const base = { VITE_STUDY_QUESTIONS: "1", VITE_STUDY_PRACTICE: "1", VITE_STUDY_COURSES: "1", VITE_STUDY_EXAMS: "1", VITE_STUDY_SHEETS: "1" };
+  const off = flagsFrom(base);
+  const on = flagsFrom({ ...base, VITE_STUDY_SHEETS_FORMS: "1" });
+  assert.equal(off.sheetForms, false);
+  assert.equal(on.sheetForms, true);
+  assert.deepEqual({ ...on, sheetForms: false }, off, "it changes nothing else");
+  assert.deepEqual(requiredSchema(on), { ...requiredSchema(off), O: 2 }, "section O 2");
+  assert.equal(flagsFrom({ ...base, VITE_STUDY_SHEETS: "", VITE_STUDY_SHEETS_FORMS: "1" }).sheetForms, false, "it needs release A0");
+  assert.deepEqual(tabLinks(on), tabLinks(off), "no tab of its own");
+});

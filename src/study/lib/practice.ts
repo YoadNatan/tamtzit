@@ -1,8 +1,8 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { Aspect, FlagReason } from "../../../shared/study/aspects";
-import type { Form, Layout } from "../../../shared/study/forms";
+import type { Layout, SheetForm } from "../../../shared/study/forms";
 import { postStudy, readLines, sb } from "./api";
-import { qColumns, visibleQuestions } from "./questionColumns";
+import { plainOnly, qColumns, visibleQuestions } from "./questionColumns";
 
 /* ── Practice questions: the data (package Q; spec §5.4, design-questions §4.1) ──
  *
@@ -60,7 +60,7 @@ export type PublicQuestion = {
   /** Q's end: a picture of the lecture the question is about ("fig:N-K", "" none). */
   figure?: string;
   /** Question types (selected only with the flag; absent means a plain one-answer question). */
-  form?: Form;
+  form?: SheetForm;
   layout?: Layout | null;
   series?: string | null;
   step?: number | null;
@@ -80,6 +80,8 @@ export type Feedback = {
   right?: number;
   total?: number;
   choices?: number[] | null;
+  /** An open question's own mark (uploaded sheets, release A1): personal, in no score (OD8). */
+  personal?: boolean;
 };
 /** The bet before "לבדוק": ניחוש 1 · נראה לי 2 · על בטוח 3. */
 export type Bet = 1 | 2 | 3;
@@ -129,7 +131,7 @@ export type Mistake = { question_id: string; wrong_at: string };
 export type StreamedQuestion = Pick<PublicQuestion, "id" | "part_idx" | "kind" | "difficulty" | "vignette" | "question" | "options" | "slides" | "topic" | "aspect">;
 
 const FLAG_COLUMNS = "id, question_id, user_id, reason, note, created_at";
-export { qColumns, visibleQuestions } from "./questionColumns";
+export { plainOnly, qColumns, visibleQuestions } from "./questionColumns";
 const BATCH_COLUMNS = "id, lecture_id, round, part_idx, heading, slide_from, slide_to, wanted, status, made, rejected, error, attempts, created_at, updated_at, created_by, request_id";
 /** Ids per request: a URL stays well under PostgREST's limits. */
 const CHUNK = 50;
@@ -195,7 +197,7 @@ export async function listGroupQuestions(groupId: string): Promise<PublicQuestio
   const columns = qColumns();
   const { data, error } = await client().from("study_questions").select(columns).eq("group_id", groupId).order("created_at", { ascending: true });
   if (error) fail(error);
-  return visibleQuestions((data ?? []) as unknown as PublicQuestion[]);
+  return plainOnly(visibleQuestions((data ?? []) as unknown as PublicQuestion[]));
 }
 
 /* ─────────────────────────── generation ─────────────────────────── */
