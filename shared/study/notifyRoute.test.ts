@@ -77,7 +77,9 @@ test("the routes section R's hooks write (Today included)", () => {
 
 test("the hooks' routes in study-schema.sql are all kinds routeQuery knows", () => {
   const sql = readFileSync(join(process.cwd(), "supabase", "study-schema.sql"), "utf8");
-  const r = sql.slice(sql.indexOf("-- ════ BEGIN SECTION R "));
+  // Section R's own hooks. Section L's set_solved (route {v:"sets",k}) writes
+  // nothing until R registers that kind (WP17), which adds "sets" here.
+  const r = sql.slice(sql.indexOf("-- ════ BEGIN SECTION R "), sql.indexOf("-- ════ END SECTION R ════"));
   const kinds = new Set([...r.matchAll(/jsonb_build_object\('v', '([a-z]+)'/g)].map((m) => m[1]));
   assert.ok(kinds.size >= 3, [...kinds].join(","));
   for (const v of kinds) assert.notEqual(parseRoute(new URL(routeQuery({ v, l: L, q: Q }), "https://x.test").search).v, undefined, v);

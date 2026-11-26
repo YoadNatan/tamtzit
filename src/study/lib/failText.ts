@@ -255,6 +255,11 @@ const TEXT: Record<string, string> = {
   "practice:schema": "סוגי השאלות החדשים עוד לא הופעלו במסד הנתונים. אפשר לבחור שאלות אמריקאיות בינתיים.",
   "practice:bad geometry": "לא הצלחנו לקרוא את הסימונים מהקובץ. אפשר לנסות קובץ אחר.",
   "practice:request not found": "הבקשה הזו לא נמצאה. כדאי לרענן.",
+  // Practice sets (section L 1, docs/study/sets.md): the sets line as setsCopy words it, a set gone, an attempt's end.
+  "practice:sets_line": "הסטים של החודש הגיעו לתקרה שנקבעה. אפשר לפתור סטים קיימים, ומתחדש ב-1 בחודש.",
+  "practice:set not found": "הסט לא נמצא. אולי נמחק.",
+  "practice:attempt finished": "הפתרון הזה של הסט כבר הסתיים. אפשר לפתור את הסט שוב.",
+  "practice:not in set": "השאלה הזו לא בסט. כדאי לרענן.",
   // Not in §6.3: worded as "question not found".
   "exam:exam not found": "המבחן לא נמצא. כדאי לרענן.",
 
@@ -457,6 +462,8 @@ export const INTERNAL_CODES: readonly string[] = [
   "bad drafts",
   "practice:bad options",
   "practice:bad answer",
+  // practice sets: a second attach of one set (server key only)
+  "set has a request",
   "practice:unknown slide",
   "practice:exam not found",
   "bank:batch not found",
