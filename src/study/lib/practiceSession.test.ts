@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { numericValue } from "../../../server/study/questions";
 import {
+  appendQueue,
   answerArgs,
   answered,
   autopsyOrder,
@@ -599,4 +600,43 @@ test("practice 2.0 on the phone (practice2.ts): the options a request sends, the
   assert.equal(P2.writingSomewhere([b({ status: "writing", updated_at: ago(7) }), b({})], t), false);
   assert.deepEqual([0.6, 0.45, 1, 12.4].map(P2.usd), ["$0.60", "$0.45", "$1", "$12.40"]);
   assert.equal(P2.requestKey("r1"), "request:r1");
+});
+
+// ── Practice sets (docs/study/sets.md, slice B): s=k.<set> ──
+const SET = "88888888-0000-4000-8000-000000000001";
+test("k.<set>: a practice set's scope, recorded as a lecture's, its questions in the set's order", () => {
+  assert.deepEqual(parseScope(`k.${SET}`), { kind: "set", set: SET });
+  assert.equal(parseScope("k.nope"), null, "a set's id is an id");
+  assert.deepEqual(parseScope(`r.${L1}`), { kind: "again", group: L1 }, "r. stays another wording");
+  assert.equal(parseScope(`d.${L1}`), null, "d. is the exams design's, untouched here");
+  assert.equal(modeOf({ kind: "set", set: SET }), "lecture");
+  assert.equal(modeOf({ kind: "set", set: SET }, true), "exam", "מצב מבחן");
+  // The order given (the set's), every one whatever the size, the hidden left out, a series kept as stored.
+  const qs = [q("c", { part_idx: 3 }), q("a", { part_idx: 0 }), q("b", { part_idx: 1, study_question_flags: flag }), q("d")];
+  const got = pickQueue({ key: `k.${SET}`, questions: qs, latest: latest([["a", true, "2026-11-02T10:00:00Z"]]), hidden: new Set(["d"]), size: 2, random: seeded(1) });
+  assert.deepEqual(got, ["c", "a", "b"], "the set's order: no tiers, no size, flagged ones stay in place");
+  assert.equal(unpracticed({ key: `k.${SET}`, questions: qs, latest: new Map(), answered: [] }), 0, "a set has no 'נשארו'");
+});
+
+test("a set's attempt rides with its session, and questions ready later join its end once", () => {
+  const s0 = startSession({ key: `k.${SET}`, timed: false, queue: [q("a"), q("b")], now: 1000, random: seeded(2), attempt: "att-1" });
+  assert.equal(s0.attempt, "att-1");
+  assert.equal(s0.mode, "lecture");
+  assert.equal(startSession({ key: `l.${L1}`, timed: false, queue: [q("a")], now: 1 }).attempt, undefined, "only a set's session has one");
+  const s1 = appendQueue(s0, [q("b"), q("c"), q("c")], { now: 2000, random: seeded(3) });
+  assert.deepEqual(s1.ids, ["a", "b", "c"], "b is already in it; c once");
+  assert.equal(s1.orders.length, 3);
+  assert.equal(s1.seconds.length, 3);
+  assert.equal(s1.shownAt, 1000, "the question on screen keeps its time");
+  assert.equal(appendQueue(s1, [q("a")], { now: 3000 }), s1, "nothing new: the same state");
+  // A round that was over goes on with the new questions, timed ones with their clocks.
+  let t = startSession({ key: `k.${SET}`, timed: true, queue: [q("a")], now: 0, random: seeded(4), attempt: "att-2" });
+  t = recordAnswer(t, 0, { answer: 0, explanations: [], takeaway: "", correct: true }, 10);
+  assert.ok(isOver(t));
+  const t2 = appendQueue(t, [q("z")], { now: 50 });
+  assert.equal(isOver(t2), false);
+  assert.equal(currentId(t2), "z");
+  assert.equal(t2.shownAt, 50);
+  assert.ok(t2.seconds[1] >= 60, "a clock in מצב מבחן");
+  assert.equal(t2.attempt, "att-2");
 });

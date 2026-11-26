@@ -37,6 +37,7 @@ export type Route =
   //      · review (the request's drafts one by one, r: the request; practice sets keep it while bank is "סט בהכנה").
   //      Practice sets (flags.make): new is "סט חדש", also without l (the screen picks the lecture);
   //      from=m (with new): the member's mistakes' parts prefilled
+  //   s=k.<set> (flags.sets): solving a practice set, its questions in the set's order
   | { v: "exams"; e?: string; c?: string; isNew?: true }
   | { v: "quiz"; q?: string; l?: string; c?: string; isNew?: true; mk?: string; m?: string; preset?: "end" | "coffee" | "stop"; pf?: number; pt?: number } // m, preset, pf, pt: Z/M, from a meeting or a part range
   | { v: "cards"; l?: string; s?: string } // s: today · l.<lecture> · c.<course>
@@ -60,7 +61,8 @@ export type Route =
   | { v: "trap"; l: string; at?: At; d?: string } // E (P11)
   | { v: "try"; s?: "b" } // the guide's sandbox (s=b: a question with a bet); nothing in it is saved
   | { v: "install" } // adding the app to the home screen (docs/study/install.md), its steps for this device
-  | { v: "notify"; x?: "set" }; // notifications (section R): the inbox; x=set its settings
+  | { v: "notify"; x?: "set" } // notifications (section R): the inbox; x=set its settings
+  | { v: "sets"; k?: string; l?: string }; // practice sets (flags.sets): the shelf (l: the sets on a lecture); k: a set (being made, then its page)
 
 export type Tab = "today" | "library" | "practice" | "group" | "me";
 
@@ -84,6 +86,7 @@ const KEYED = [
   { prefix: "r.", re: new RegExp(`^r\\.${UUID}$`) },
   { prefix: "x.", re: new RegExp(`^x\\.${UUID}$`) },
   { prefix: "w.", re: new RegExp(`^w\\.${UUID}$`) },
+  { prefix: "k.", re: new RegExp(`^k\\.${UUID}$`) },
 ];
 
 const id = (x: string | null): string | undefined => (x && ID.test(x) ? x : undefined);
@@ -253,6 +256,10 @@ export function parseRoute(search: string, _hash?: string): Route {
       return { v: "install" };
     case "notify":
       return clean({ v: "notify" as const, x: oneOf(g("x"), ["set"] as const) });
+    case "sets": {
+      const k = id(g("k"));
+      return clean({ v: "sets" as const, k, l: k ? undefined : id(g("l")) });
+    }
     case null: {
       const l = id(g("l"));
       return l ? lecture(l, q) : { ...HOME };
@@ -412,6 +419,11 @@ export function routeUrl(r: Route): string {
       put("v", r.v);
       put("x", r.x);
       break;
+    case "sets":
+      put("v", r.v);
+      put("k", r.k);
+      put("l", r.l);
+      break;
     default:
       put("v", r.v);
   }
@@ -438,6 +450,9 @@ export function tabOf(r: Route, f: Flags): Tab | null {
       return "library";
     case "practice":
       return r.s || r.x ? null : practice;
+    case "sets":
+      // The shelf is where the practice hub is; a set's page has a back arrow.
+      return r.k ? null : practice;
     case "exams":
       // Past exams live in their course (sources.md): the library's tab once the course pages are on.
       return r.isNew ? null : f.courses ? "library" : practice;
@@ -512,6 +527,7 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
       if (r.s.startsWith("q.")) return f.quiz ? ok : off(practiceOf(l));
       if (r.s.startsWith("p.")) return f.anchor ? ok : off(practiceOf(l));
       if (r.s.startsWith("b.")) return f.blankTable ? ok : off(practiceOf(l));
+      if (r.s.startsWith("k.")) return f.sets ? ok : off(practiceOf());
       return ok;
     }
     case "exams":
@@ -576,6 +592,9 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
     case "notify":
       // Without its flag a notice's link goes home, with no notice.
       return f.notify ? ok : { route: f.today ? { v: "today" } : { v: "library" } };
+    case "sets":
+      // Practice sets' shelf and set page (flags.sets): without them, the practice hub, else the lecture's or the library.
+      return f.sets ? ok : off(practiceOf(r.l));
     default:
       return ok;
   }
@@ -649,4 +668,5 @@ export const BACK_LABEL: Record<string, string> = {
   group: "→ יחד",
   me: "→ שלי",
   notify: "→ להתראות",
+  sets: "→ סטים של הקבוצה",
 };

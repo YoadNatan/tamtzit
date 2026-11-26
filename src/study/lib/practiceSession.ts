@@ -3,7 +3,7 @@
  *
  * Pure, with the device's storage in try/catch: which questions a session
  * asks and in what order (pickQueue, for every session key of the practice
- * route: l. c. m m. t. e. q. p.); the fresh order each showing gives the
+ * route: l. c. m m. t. e. q. p. r. w. k.); the fresh order each showing gives the
  * options, mapped back to the stored index for study_answer_question and
  * applied to the explanations it returns (review UX-2: the options never
  * stay in one place, except all-numeric ones, which stay ascending); "מצב
@@ -116,7 +116,8 @@ export type Scope =
   | { kind: "quiz"; quiz: string } // q.<quiz>: an ended live quiz's questions
   | { kind: "paragraph"; lecture: string; part: number; anchor: number } // p.<lecture>.<part>.<anchor>: one paragraph's (N)
   | { kind: "again"; group: string } // r.<group>: what is due again today, each in another wording (Q-2)
-  | { kind: "mockWrong"; attempt: string }; // w.<attempt>: a simulation's mistakes, asked again (sources.md, phase 2)
+  | { kind: "mockWrong"; attempt: string } // w.<attempt>: a simulation's mistakes, asked again (sources.md, phase 2)
+  | { kind: "set"; set: string }; // k.<set>: a practice set's questions, in the set's order (docs/study/sets.md)
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -149,6 +150,8 @@ export function parseScope(s: string | undefined): Scope | null {
       return UUID.test(arg) ? { kind: "again", group: arg } : null;
     case "w":
       return UUID.test(arg) ? { kind: "mockWrong", attempt: arg } : null;
+    case "k":
+      return UUID.test(arg) ? { kind: "set", set: arg } : null;
     case "p": {
       const m = /^([^.]+)\.(\d{1,5})\.(\d{1,5})$/.exec(arg);
       return m && UUID.test(m[1]) ? { kind: "paragraph", lecture: m[1], part: Number(m[2]), anchor: Number(m[3]) } : null;
@@ -162,7 +165,8 @@ export function parseScope(s: string | undefined): Scope | null {
  *  "מצב מבחן", is "exam"; otherwise the scope's. */
 export function modeOf(scope: Scope, timed = false): Mode {
   if (timed || scope.kind === "exam" || scope.kind === "mockWrong") return "exam";
-  if (scope.kind === "lecture" || scope.kind === "paragraph") return "lecture";
+  // A practice set is a lecture's (a sheet set, the exams design's, will be "course").
+  if (scope.kind === "lecture" || scope.kind === "paragraph" || scope.kind === "set") return "lecture";
   if (scope.kind === "mistakes" || scope.kind === "again") return "mistakes";
   return "course";
 }
@@ -280,6 +284,8 @@ export function pickQueue(o: {
   }
   // A simulation's mistakes: in the simulation's order (the caller loads them so).
   if (scope.kind === "mockWrong") return take(qs.map((q) => q.id));
+  // A practice set: every question of it, in the set's order (the caller loads them so), whatever the size.
+  if (scope.kind === "set") return qs.map((q) => q.id);
   if (scope.kind === "exam") {
     return take(
       [...qs]
@@ -451,6 +457,8 @@ export type SessionState = {
   feedback: Record<string, Feedback>;
   /** סבב חדש's choice, kept for "סבב נוסף" (none: the scope's questions). */
   pick?: SessionPick;
+  /** A practice set's attempt (study_qset_attempts): every answer is stamped with it. */
+  attempt?: string;
 };
 
 /** A new session over `queue` (pickQueue's ids, with their questions). */
@@ -462,11 +470,13 @@ export function startSession(o: {
   setting?: number;
   random?: () => number;
   pick?: SessionPick;
+  attempt?: string;
 }): SessionState {
   const scope = parseScope(o.key);
   if (!scope) throw new Error("bad session");
   return {
     ...(o.pick ? { pick: o.pick } : {}),
+    ...(o.attempt ? { attempt: o.attempt } : {}),
     v: 2,
     key: o.key,
     mode: modeOf(scope, o.timed),
@@ -478,6 +488,28 @@ export function startSession(o: {
     shownAt: o.now,
     results: [],
     feedback: {},
+  };
+}
+
+/** A set being made (slice B, "להוסיף לסט"): questions that became ready
+ *  while solving join the end of the round, each with its own showing's
+ *  order and clock; ones already in it are not asked twice. A round that was
+ *  over goes on with them. */
+export function appendQueue(
+  s: SessionState,
+  queue: Array<Pick<SessionQuestion, "id" | "vignette" | "question" | "options"> & Partial<Pick<SessionQuestion, "form" | "figure" | "layout" | "source">>>,
+  o: { now: number; setting?: number; random?: () => number },
+): SessionState {
+  const have = new Set(s.ids);
+  const add = queue.filter((q) => !have.has(q.id) && (have.add(q.id), true));
+  if (!add.length) return s;
+  const wasOver = isOver(s);
+  return {
+    ...s,
+    ids: [...s.ids, ...add.map((q) => q.id)],
+    orders: [...s.orders, ...add.map((q) => orderFor(q, o.random))],
+    seconds: [...s.seconds, ...add.map((q) => (s.timed ? examSeconds(q, o.setting ?? EXAM_SETTING_SECONDS) : 0))],
+    ...(wasOver ? { shownAt: o.now } : {}),
   };
 }
 
@@ -707,6 +739,6 @@ export function unpracticed(o: { key: string; questions: SessionQuestion[]; late
   // A paragraph's questions are the ones section N places on it (the caller loads exactly those).
   if (scope.kind === "paragraph") qs = qs.filter((q) => q.lecture_id === scope.lecture && q.part_idx === scope.part);
   if (scope.kind === "topic") qs = qs.filter((q) => topicKey(q.topic) === scope.topic);
-  if (scope.kind === "mistakes" || scope.kind === "again" || scope.kind === "exam" || scope.kind === "quiz" || scope.kind === "mockWrong") return 0;
+  if (scope.kind === "mistakes" || scope.kind === "again" || scope.kind === "exam" || scope.kind === "quiz" || scope.kind === "mockWrong" || scope.kind === "set") return 0;
   return qs.length;
 }

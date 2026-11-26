@@ -292,6 +292,13 @@ say "שלי".
 | Points to know | הנקודות שצריך לדעת (a step) | Never shown: coverage is a percentage ("אחרי הסט: 89% מההרצאה מכוסים בבנק") |
 | Author | נוצרו ע״י · יצר/ה | מאת {name} |
 
+The set screens' own lines (slice B):
+
+| Where | Now |
+|---|---|
+| Back to the group's sets | → סטים של הקבוצה |
+| A set's own score | שלי: 7/10 · רק אצלי |
+
 ### Kept, on purpose
 
 - **״על בטוח״, ״נראה לי״, ״ניחוש״** (how sure an answer is): plain Hebrew, and Yoad's own

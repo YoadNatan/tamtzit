@@ -62,7 +62,7 @@ const VALID: Record<string, (x: string, v: string) => boolean> = {
   c: (x, v) => (v === "course" || v === "upload" || v === "ask" || v === "mock" ? UUID(x) : x.length <= 200),
   many: (x) => x === "1",
   seg: (x) => ["exams", "lectures", "made"].includes(x),
-  s: (x) => x.length <= 200 && (!/^[pbrxw]\./.test(x) || /^p\.[0-9a-f-]{36}\.\d+\.\d+$|^b\.[0-9a-f-]{36}\.[1-9]\d{0,2}$|^[rxw]\.[0-9a-f-]{36}$/.test(x)),
+  s: (x) => x.length <= 200 && (!/^[pbrxwk]\./.test(x) || /^p\.[0-9a-f-]{36}\.\d+\.\d+$|^b\.[0-9a-f-]{36}\.[1-9]\d{0,2}$|^[rxwk]\.[0-9a-f-]{36}$/.test(x)),
   t: (x, v) => (v === "wall" ? ["top", "new", "needed", "mine"].includes(x) : x.length <= 200),
   first: (x) => x.length <= 500,
   new: (x) => x === "1",
@@ -75,6 +75,7 @@ const VALID: Record<string, (x: string, v: string) => boolean> = {
   pt: (x) => /^\d{1,3}$/.test(x) && Number(x) <= 199,
   x: (x, v) => (v === "wall" ? ["drafts", "post", "moment"].includes(x) : v === "practice" ? ["new", "example", "bank", "round", "review"].includes(x) : v === "notify" ? x === "set" : x === "danger"),
   r: UUID,
+  k: UUID,
   from: (x) => x === "m",
   lane: (x) => ["group", "mine"].includes(x),
   d: (x, v) => (v === "wall" ? x.length <= 60 : v === "plan" ? /^\d{4}-\d{2}-\d{2}$/.test(x) : UUID(x)),
@@ -105,6 +106,7 @@ const PARAMS: Record<string, string[]> = {
   eve: ["l"],
   trap: ["l", "at", "d"],
   notify: ["x"],
+  sets: ["k", "l"],
 };
 
 /** The plain copy pass (docs/study/COPY.md) rewords some of the spec's sentences:
@@ -217,6 +219,10 @@ const ALL_ROUTES: Route[] = [
   { v: "install" }, // adding the app to the home screen (docs/study/install.md)
   { v: "notify" }, // notifications (section R): the inbox
   { v: "notify", x: "set" }, // and its settings
+  { v: "sets" }, // practice sets (flags.sets): the shelf
+  { v: "sets", l: ID }, // the sets on a lecture
+  { v: "sets", k: ID2 }, // a set: being made, then its page
+  { v: "practice", s: `k.${ID2}` }, // solving a set
 ];
 
 test("routeUrl writes every route of §5.2 and §12.2.1 so parseRoute reads it back exactly", () => {
@@ -345,6 +351,10 @@ test("tabOf: the spec's four tabs, Today's set, and immersive screens with none"
     [{ v: "quiz", q: ID }, null, null],
     [{ v: "notify" }, null, null], // the inbox: a screen with a back arrow
     [{ v: "notify", x: "set" }, null, null],
+    [{ v: "sets" }, "practice", "today"], // the shelf: where the hub is (OD1, no tab of its own)
+    [{ v: "sets", l: ID }, "practice", "today"],
+    [{ v: "sets", k: ID2 }, null, null], // a set's page: a back arrow
+    [{ v: "practice", s: `k.${ID2}` }, null, null],
   ];
   for (const [r, without, withToday] of cases) {
     assert.equal(tabOf(r, off), without, `${routeUrl(r)} without Today`);
@@ -477,6 +487,10 @@ const SAMPLES: Array<[Route, (f: Flags) => boolean]> = [
   [{ v: "boss", isNew: true, l: ID }, (f) => f.pulse && f.quiz && f.boss],
   [{ v: "eve", l: ID }, (f) => f.progress && f.eve],
   [{ v: "trap", l: ID, at: { part: 1, anchor: 2 } }, (f) => f.questions && f.traps],
+  [{ v: "sets" }, (f) => f.sets],
+  [{ v: "sets", l: ID }, (f) => f.sets],
+  [{ v: "sets", k: ID2 }, (f) => f.sets],
+  [{ v: "practice", s: `k.${ID2}` }, (f) => f.sets],
 ];
 
 test("under every release's flags, allowed() replaces exactly the routes that are off, always with a notice", () => {
@@ -823,4 +837,33 @@ test("VITE_STUDY_MAKE: practice sets' generator, on practice, with no SQL sectio
   const today = flagsFrom({ ...base, VITE_STUDY_TODAY: "1" });
   assert.deepEqual(tabLinks(flagsFrom({ ...base, VITE_STUDY_TODAY: "1", VITE_STUDY_MAKE: "1" })), tabLinks(today));
   assert.equal(tabOf({ v: "practice", x: "new" }, on), null, "an immersive screen");
+});
+
+test("VITE_STUDY_SETS: practice sets' shelf, set page and set sessions, on make, with section L 1", () => {
+  const base = { VITE_STUDY_QUESTIONS: "1", VITE_STUDY_PRACTICE: "1", VITE_STUDY_NOTIFY: "1", VITE_STUDY_MAKE: "1" };
+  const off = flagsFrom(base);
+  const on = flagsFrom({ ...base, VITE_STUDY_SETS: "1" });
+  assert.equal(off.sets, false);
+  assert.equal(on.sets, true);
+  assert.deepEqual({ ...on, sets: false }, off, "it changes nothing else");
+  assert.deepEqual(requiredSchema(on), { ...requiredSchema(off), L: 1 }, "section L 1");
+  assert.equal(flagsFrom({ ...base, VITE_STUDY_MAKE: "", VITE_STUDY_SETS: "1" }).sets, false, "it needs make");
+  assert.equal(flagsFrom({ VITE_STUDY_QUESTIONS: "1", VITE_STUDY_MAKE: "1", VITE_STUDY_SETS: "1" }).sets, false, "and practice");
+  // The routes: the shelf (with a lecture), a set, and solving it.
+  assert.deepEqual(parseRoute(`?v=sets&k=${ID}`), { v: "sets", k: ID });
+  assert.deepEqual(parseRoute(`?v=sets&k=${ID}&l=${ID2}`), { v: "sets", k: ID }, "a set's own page needs no lecture");
+  assert.deepEqual(parseRoute(`?v=sets&l=${ID2}`), { v: "sets", l: ID2 });
+  assert.deepEqual(parseRoute("?v=sets&k=nope"), { v: "sets" }, "a set's id is an id");
+  assert.deepEqual(parseRoute(`?v=practice&s=k.${ID}`), { v: "practice", s: `k.${ID}` });
+  assert.deepEqual(parseRoute("?v=practice&s=k.nope"), { v: "practice" }, "k. is a keyed session");
+  assert.equal(routeUrl({ v: "sets", k: ID }), `/?v=sets&k=${ID}`);
+  // Without the flag: the practice hub (or a lecture's practice), with the usual line.
+  assert.deepEqual(allowed({ v: "sets", k: ID }, off), { route: { v: "practice" }, notice: NOTICE.off });
+  assert.deepEqual(allowed({ v: "sets", l: ID2 }, off), { route: { v: "practice", l: ID2 }, notice: NOTICE.off });
+  assert.deepEqual(allowed({ v: "practice", s: `k.${ID}` }, off), { route: { v: "practice" }, notice: NOTICE.off });
+  assert.deepEqual(allowed({ v: "sets", k: ID }, on), { route: { v: "sets", k: ID } });
+  // No tab of its own (OD1): the tab bar is the same with the flag.
+  const today = { ...base, VITE_STUDY_TODAY: "1" };
+  assert.deepEqual(tabLinks(flagsFrom({ ...today, VITE_STUDY_SETS: "1" })), tabLinks(flagsFrom(today)));
+  assert.equal(BACK_LABEL.sets, "→ סטים של הקבוצה");
 });

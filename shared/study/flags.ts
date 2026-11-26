@@ -90,6 +90,10 @@ export function flagsFrom(e: Record<string, unknown>) {
     // section (requiredSchema is unchanged); without it, practice 2.0's
     // three-screen generator (kept one release, OD22).
     make: practice && on(e.VITE_STUDY_MAKE),
+    // Practice sets, slice B (docs/study/sets.md): every set on the group's
+    // shelf ("סטים של הקבוצה"), the set page, solving a set (s=k.<set>) and
+    // the group's numbers on it. Section L at 1.
+    sets: practice && on(e.VITE_STUDY_MAKE) && on(e.VITE_STUDY_SETS),
   } as const;
 }
 
@@ -175,5 +179,7 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     // and f.make neither: its screens call practice 2.0's actions (Q 2).
     // Notifications: the inbox, the devices and the settings are section R's.
     ...(f.notify ? { R: 1 } : {}),
+    // Practice sets' shelf, set page and set sessions: section L 1.
+    ...(f.sets ? { L: 1 } : {}),
   };
 }

@@ -20,15 +20,17 @@ export async function answerAny(
   mode: Mode,
   ms: number,
   bet: Bet | null,
+  /** A practice set's attempt: the answer goes through its wrapper and is stamped with it. */
+  attempt?: string,
 ): Promise<{ feedback: Feedback; choice: number | number[] | null }> {
   if (isSetForm(q.form)) {
     const shown = Array.isArray(response) ? response : null;
     const choices = shown ? toStoredSet(q.form, order, shown) : null;
-    const feedback = await answerSet(q.id, choices, mode, ms, shown ? bet : null);
+    const feedback = await answerSet(q.id, choices, mode, ms, shown ? bet : null, attempt);
     return { feedback, choice: choices };
   }
   const shown = typeof response === "number" ? response : null;
   const choice = toStored(order, shown);
-  const feedback = await answerQuestion(q.id, choice, mode, ms, shown === null ? null : bet);
+  const feedback = await answerQuestion(q.id, choice, mode, ms, shown === null ? null : bet, attempt);
   return { feedback, choice };
 }

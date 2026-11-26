@@ -258,9 +258,13 @@ export async function runBatch(
 /** Records the caller's answer (null: "לא יודעים") with the bet made before
  *  "לבדוק" (null: none), and returns the key with every explanation and
  *  "מתי כן", in the stored order. The bet is stored with the answer and shown
- *  to nobody else. */
-export async function answerQuestion(id: string, choice: number | null, mode: Mode, ms: number, bet: Bet | null = null): Promise<Feedback> {
-  const { data, error } = await client().rpc("study_answer_question", {
+ *  to nobody else. Inside a practice set's attempt (docs/study/sets.md) the
+ *  same answer goes through study_qset_answer, which records it the same way
+ *  and stamps the attempt on it (the group's numbers count only the first
+ *  answer per question of a finished attempt). */
+export async function answerQuestion(id: string, choice: number | null, mode: Mode, ms: number, bet: Bet | null = null, attempt?: string): Promise<Feedback> {
+  const { data, error } = await client().rpc(attempt ? "study_qset_answer" : "study_answer_question", {
+    ...(attempt ? { p_attempt: attempt } : {}),
     p_question: id,
     p_choice: choice,
     p_mode: mode,
@@ -278,9 +282,11 @@ export async function answerQuestion(id: string, choice: number | null, mode: Mo
 /** Answers a set question (tf, match, order; study_answer_set): `choices` in
  *  the stored order (tf 1/0 per statement; match the option at each prompt;
  *  order the option at each position), null for "לא יודעים", with the bet.
- *  Correct only when every element is; the right count comes back to show. */
-export async function answerSet(id: string, choices: number[] | null, mode: Mode, ms: number, bet: Bet | null = null): Promise<Feedback> {
-  const { data, error } = await client().rpc("study_answer_set", {
+ *  Correct only when every element is; the right count comes back to show.
+ *  Inside a practice set's attempt: study_qset_answer_seq, the same answer stamped. */
+export async function answerSet(id: string, choices: number[] | null, mode: Mode, ms: number, bet: Bet | null = null, attempt?: string): Promise<Feedback> {
+  const { data, error } = await client().rpc(attempt ? "study_qset_answer_seq" : "study_answer_set", {
+    ...(attempt ? { p_attempt: attempt } : {}),
     p_question: id,
     p_choices: choices,
     p_mode: mode,
