@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { TrapChip } from "../features/extras";
 import { ASPECTS } from "../../../shared/study/aspects";
 import { studyDay } from "../../../shared/study/day";
@@ -27,7 +27,7 @@ import {
 } from "../lib/practice";
 import * as S from "../lib/practiceSession";
 import { answerAny } from "../lib/answering";
-import { isSetForm, toShownSet } from "../../../shared/study/forms";
+import { isChoiceForm, isSetForm, toShownSet } from "../../../shared/study/forms";
 import { getSignals, pulseReady } from "../lib/pulse";
 import { shortName } from "../lib/questionText";
 import { myDangerDue, myRewordings } from "../lib/progress";
@@ -44,6 +44,13 @@ import FlagSheet from "./FlagSheet";
 import PracticeQuestion from "./PracticeQuestion";
 import { backTarget, Head, Loading, StickyActions } from "./Shell";
 import SlideSheet from "./SlideSheet";
+
+/* Uploaded sheets' release A1 (VITE_STUDY_SHEETS_FORMS): an open or numeric
+ * question, and an uploaded item's exact text, load with the first that needs them. */
+const SheetAnswer = lazy(() => import("./SheetAnswer"));
+const SheetText = lazy(() => import("./SheetText"));
+/** An open or a numeric question (section O 2): answered in SheetAnswer, not by choosing. */
+const sheetForm = (q: Pick<PublicQuestion, "form"> | undefined): boolean => Boolean(flags.sheetForms && q && (q.form === "open" || q.form === "numeric"));
 
 /* ── A practice session, as approved (proposal/mockups/practice.html) ──
  *
@@ -80,6 +87,8 @@ type Data = {
   /** Past exams' items (sources.md, phase 2): where each key came from, and the exams' titles. */
   origins?: Map<string, { origin: KeyOrigin | null; conf: number | null }>;
   examTitles?: Record<string, string>;
+  /** Uploaded sheets' items (release A1): each one's printed label and a numeric item's unit. */
+  sheetExtras?: Record<string, { label: string; unit: string | null }>;
 };
 const NO_AGAIN = { again: [] as S.Again[], danger: new Set<string>() };
 
@@ -161,14 +170,24 @@ async function scopeQuestions(scope: S.Scope, groupId: string): Promise<PublicQu
   }
 }
 
-/** A build without the question types never asks an exam's true/false or match item (it would read as one-answer). */
-const examItems = (qs: PublicQuestion[]): PublicQuestion[] => (flags.qtypes ? qs : qs.filter((q) => (q.form ?? "one") === "one"));
+/** A build without the question types never asks an exam's true/false or match item (it would read as one-answer);
+ *  one without release A1 never an open or numeric one (it has no way to answer it). */
+const examItems = (qs: PublicQuestion[]): PublicQuestion[] => {
+  const drawable = flags.sheetForms ? qs : qs.filter((q) => isChoiceForm(q.form ?? "one"));
+  return flags.qtypes ? drawable : drawable.filter((q) => (q.form ?? "one") === "one");
+};
 
 /** Past exams' items of a session: their keys' origins and their exams' titles (the review's). */
-async function examInfo(byId: Record<string, PublicQuestion>): Promise<Pick<Data, "origins" | "examTitles">> {
+async function examInfo(byId: Record<string, PublicQuestion>): Promise<Pick<Data, "origins" | "examTitles" | "sheetExtras">> {
   if (!flags.exams) return {};
   const exams = [...new Set(Object.values(byId).filter((q) => q.source === "exam" && q.exam_id).map((q) => q.exam_id as string))];
   if (!exams.length) return {};
+  if (flags.sheetForms) {
+    // Release A1: the review with the sheet reader's fields (the labels, a numeric item's unit).
+    const { sheetInfo } = await import("../lib/sheetForms");
+    const r = await sheetInfo(exams).catch(() => ({ origins: new Map(), titles: {}, extras: {} }));
+    return { origins: r.origins, examTitles: r.titles, sheetExtras: r.extras };
+  }
   const { origins, titles } = await keyOrigins(exams).catch(() => ({ origins: new Map(), titles: {} }));
   return { origins, examTitles: titles };
 }
@@ -511,6 +530,20 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     },
     [sending, save, ctx, data, setId],
   );
+  // An open or numeric question's primary action ("לבדוק" / "להראות פתרון"), in the bottom bar as every question's.
+  const [sheetAct, setSheetAct] = useState<{ label: string; busy: boolean; run: () => void } | null>(null);
+  /** An open or numeric question answered in SheetAnswer (release A1): the round records it (no bet;
+   *  an open item's own mark is personal and counts in no score, OD8). */
+  const recordSheet = useCallback(
+    (qid: string, correct: boolean, personal: boolean) => {
+      const cur = sRef.current;
+      if (!cur || S.isOver(cur) || S.answered(cur) || S.currentId(cur) !== qid) return;
+      save(S.recordAnswer(cur, null, { answer: -1, explanations: [], takeaway: "", correct, ...(personal ? { personal: true } : {}) }, Date.now(), null));
+      if (!correct && !personal)
+        setData((d) => (d ? { ...d, mistakes: [...d.mistakes.filter((m) => m.question_id !== qid), { question_id: qid, wrong_at: new Date().toISOString() }] } : d));
+    },
+    [save],
+  );
   const check = useCallback(() => {
     if (!ready || bet === null) return;
     void choose(setForm ? pickedSet.map((v) => v ?? 0) : picked, bet);
@@ -534,8 +567,10 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
   useEffect(() => {
     if (!timed || over || !id || sending || remaining > 0 || timedOut.current === id) return;
     timedOut.current = id;
+    // An open or numeric question whose clock ran out: no answer row, a miss in the round.
+    if (sheetForm(data?.byId[id])) return recordSheet(id, false, data?.byId[id]?.form === "open");
     void choose(null, null);
-  }, [timed, over, id, sending, remaining, choose]);
+  }, [timed, over, id, sending, remaining, choose, data, recordSheet]);
 
   // With practice sets (§5.11): "כמה בטוחים?" scrolls clear of the bottom bar on a
   // 390 px phone. The bar's height (and the tab bar under it) is measured into
@@ -723,8 +758,58 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
       }
     }
     const l = lectureOfQ(qq);
+    const extra = data.sheetExtras?.[qq.id];
+    const sourceChip =
+      qq.source === "exam" && scope?.kind !== "exam" && qq.exam_id && data.examTitles?.[qq.exam_id] ? (
+        <span className="a-chip pq-source">
+          <bdi>{data.examTitles[qq.exam_id]}</bdi>
+          {extra ? ` · שאלה ${extra.label}` : qq.exam_no ? ` · שאלה ${qq.exam_no}` : ""}
+        </span>
+      ) : null;
+    // An uploaded item's printed label ("שאלה 3א") and a multi-part question's part ("סעיף א׳ מתוך 3").
+    const partNow = flags.sheetForms && qq.series && qq.step ? Object.values(data.byId).filter((x) => x.series === qq.series).length : 0;
+    const partText = partNow > 1 ? `סעיף ${"אבגדהוזחטיכל"[(qq.step ?? 1) - 1] ?? qq.step}׳ מתוך ${partNow}` : "";
+    const labelChip = flags.sheetForms && extra && scope?.kind === "exam" ? <span className="a-chip pq-label-chip">שאלה {extra.label}</span> : null;
+    const crop = qq.source === "exam" && qq.exam_id && (qq.figure ?? "").startsWith("pg:") ? <PageCrop groupId={ctx.group.id} examId={qq.exam_id} figure={qq.figure} /> : undefined;
+    if (sheetForm(qq)) {
+      return (
+        <Suspense key={qq.id} fallback={<Loading />}>
+          <SheetAnswer
+            item={{ id: qq.id, form: qq.form as "open" | "numeric", vignette: qq.vignette, question: qq.question, label: extra?.label ?? String(qq.exam_no ?? ""), unit: extra?.unit ?? null }}
+            userId={ctx.userId}
+            mode={s.mode}
+            position={`שאלה ${i + 1} מתוך ${total}`}
+            part={partText || undefined}
+            stemFolded={stepFolded}
+            chips={
+              <>
+                {labelChip}
+                {sourceChip}
+              </>
+            }
+            media={crop}
+            answered={result ? { correct: result.correct } : null}
+            onAnswered={(correct, personal) => recordSheet(qq.id, correct, personal)}
+            onAction={read ? undefined : setSheetAct}
+            onSkip={read ? undefined : goNext}
+            read={read}
+          />
+        </Suspense>
+      );
+    }
+    // An uploaded item's exact text (release A1): its lines and tables as printed.
+    const exactStem =
+      flags.sheetForms && qq.source === "exam" && /\n|\|/.test(`${qq.vignette}${qq.question}`) ? (
+        <Suspense fallback={null}>
+          {qq.vignette.trim() ? <SheetText text={qq.vignette} label={extra?.label ?? String(qq.exam_no ?? "")} className="pq-vignette" /> : null}
+          <div className="a-q pq-lead" id={`lead-${qq.id}`}>
+            <SheetText text={qq.question} label={extra?.label ?? String(qq.exam_no ?? "")} />
+          </div>
+        </Suspense>
+      ) : undefined;
     return (
       <PracticeQuestion
+        stem={exactStem}
         key={qq.id}
         q={{ ...qq, options: shown }}
         position={{ index: i + 1, total }}
@@ -752,19 +837,16 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
               </span>
             ) : null}
             {origin && origin !== qq.id ? <span className="a-chip busy pq-again">בניסוח אחר</span> : null}
-            {qq.source === "exam" && scope?.kind !== "exam" && qq.exam_id && data.examTitles?.[qq.exam_id] ? (
-              <span className="a-chip pq-source">
-                <bdi>{data.examTitles[qq.exam_id]}</bdi>
-                {qq.exam_no ? ` · שאלה ${qq.exam_no}` : ""}
-              </span>
-            ) : null}
+            {labelChip}
+            {partText ? <span className="a-chip pq-step">{partText}</span> : null}
+            {sourceChip}
             {data.origins?.get(qq.id)?.origin === "solved" ? <span className="a-chip warn pq-suggested">תשובה מוצעת · לא נבדקה</span> : null}
             {/* E: a member's trap ("שאלה של מישהו מהקבוצה"), named once a live quiz unmasked it. */}
             <TrapChip ctx={ctx} questionId={qq.id} source={qq.source} />
           </>
         }
         note={notCounted(data.origins?.get(qq.id)) && fb ? "לא נספרה: התשובה המוצעת לא בטוחה" : note}
-        media={qq.source === "exam" && qq.exam_id && (qq.figure ?? "").startsWith("pg:") ? <PageCrop groupId={ctx.group.id} examId={qq.exam_id} figure={qq.figure} /> : undefined}
+        media={crop}
         dangerList={flags.progress}
         autoFocus={!read}
         keys={!read}
@@ -832,7 +914,8 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
   /* ── The end of a round ── */
   if (over) {
     // A suggested answer the app is not sure of counts in no score (decision 2, B7).
-    const sc = S.score({ ...s, results: s.results.filter((r) => !notCounted(data.origins?.get(r.id))) });
+    // An open question's own mark is personal (OD8): in no score either.
+    const sc = S.score({ ...s, results: s.results.filter((r) => !notCounted(data.origins?.get(r.id)) && !s.feedback[r.id]?.personal) });
     const wrong = s.results.filter((r) => !r.correct && data.byId[r.id]);
     // "רק הטעויות מהסבב" asks them again, except the ones this person hid since
     // ("להסתיר ממני") and any that left practice (finding Q6).
@@ -1067,7 +1150,15 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         <i style={{ width: `${Math.round((100 * (s.i + (shownFb ? 1 : 0))) / Math.max(1, total))}%` }} />
       </div>
       {q ? showQuestion(q, s.i, false) : <Loading />}
-      {q ? (
+      {q && sheetForm(q) && !shownFb ? (
+        sheetAct ? (
+          <StickyActions>
+            <button type="button" className="a-btn primary wide" disabled={sheetAct.busy} onClick={sheetAct.run}>
+              {sheetAct.label}
+            </button>
+          </StickyActions>
+        ) : null
+      ) : q ? (
         <StickyActions>
           {shownFb ? (
             <>

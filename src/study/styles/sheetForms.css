@@ -1,0 +1,221 @@
+/* Uploaded sheets, release A1 (docs/study/sheets.md; design-exams §5.6-5.9):
+   the exact text with its tables, the open and numeric answers in practice,
+   the edit sheet, the answer editor and the lecture page's row. Tokens and
+   kit classes only (tokens.css, kit.css). */
+
+/* ── the exact text (SheetText) ── */
+.sheet-text {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.st-p {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.st-line {
+  unicode-bidi: plaintext;
+}
+.st-unclear {
+  margin-inline: var(--sp-1);
+  vertical-align: baseline;
+}
+.st-cut {
+  margin: 0;
+}
+.sheet-table {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.sheet-table:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.sheet-table table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: var(--text-small);
+}
+.sheet-table th,
+.sheet-table td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  text-align: start;
+  white-space: nowrap;
+}
+.sheet-table th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.sheet-table tr:last-child td {
+  border-bottom: 0;
+}
+
+/* ── practice: a numeric or an open answer (SheetAnswer) ── */
+.sa {
+  display: grid;
+  gap: var(--sp-4);
+}
+.sa-part {
+  font-size: var(--text-small);
+  color: var(--muted);
+}
+.sa-stem-fold summary {
+  min-height: var(--hit);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--muted);
+}
+.sa-num {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.sa-num .a-input {
+  max-width: 14rem;
+  direction: ltr;
+  text-align: right;
+}
+.sa-unit {
+  color: var(--muted);
+}
+.sa-verdict {
+  margin: 0;
+  font-weight: 600;
+}
+.sa-verdict.ok {
+  color: var(--ink);
+}
+.sa-rubric {
+  margin: 0;
+  padding-inline-start: var(--sp-6);
+  display: grid;
+  gap: var(--sp-1);
+}
+.sa-self .a-seg {
+  flex-wrap: wrap;
+}
+.sa-self .a-btn {
+  min-height: var(--hit);
+}
+.sa-sol summary,
+.ss-sol summary {
+  min-height: var(--hit);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* ── the review: an item's answer, and the edit sheet (SheetEdit) ── */
+.ss-answer {
+  display: grid;
+  gap: var(--sp-2);
+}
+.ss-tag {
+  margin-inline-start: var(--sp-2);
+}
+.ss-more {
+  position: relative;
+}
+.ss-menu {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.se {
+  display: grid;
+  gap: var(--sp-4);
+}
+.se-forms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.se-forms .a-chip {
+  min-height: var(--hit);
+}
+.se-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.se-opt .a-input {
+  flex: 1;
+  min-width: 0;
+}
+.se-opt .l {
+  min-width: 1.5em;
+  font-weight: 600;
+}
+.se-opt .a-btn {
+  min-width: var(--hit);
+  min-height: var(--hit);
+}
+.se-figs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.se-draw {
+  display: grid;
+  gap: var(--sp-3);
+}
+.pv-sheet.drawing {
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pv-new {
+  position: absolute;
+  border: 2px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
+}
+.pv-mine {
+  position: absolute;
+  border: 2px solid #1d4ed8;
+  background: rgb(29 78 216 / 10%);
+  pointer-events: none;
+}
+.ss-retired summary {
+  min-height: var(--hit);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+.ss-paused {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+/* ── the lecture page's row (SheetsLecture) ── */
+.sl {
+  display: grid;
+  gap: var(--sp-2);
+  margin-block: var(--sp-4);
+}
+.sl h2 {
+  margin: 0;
+  font-size: var(--text-body);
+}
+.sl ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.sl a {
+  min-height: var(--hit);
+  display: inline-flex;
+  align-items: center;
+}

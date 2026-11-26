@@ -67,6 +67,8 @@ export type PracticeQuestionProps = {
   chips?: ReactNode;
   /** Under the question: a past exam's crop of its page (sources.md B1 S 2, the pg: figure). */
   media?: ReactNode;
+  /** The case and the lead-in drawn otherwise: an uploaded sheet's exact text, its lines and tables (VITE_STUDY_SHEETS_FORMS). */
+  stem?: ReactNode;
   /** A line beside the verdict ("השאלה תחזור מחר…"). */
   note?: ReactNode;
   /** "טעויות ׳על בטוח׳" is promised only where progress shows it. */
@@ -237,7 +239,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
       <article className="pq" onClick={onClick} aria-label={p.position ? `שאלה ${p.position.index} מתוך ${p.position.total}` : undefined}>
         {meta}
         {showFlags ? flagList(flags) : null}
-        {stem}
+        {p.stem ?? stem}
         {figure(null)}
         {p.media}
         {set ? (
@@ -335,7 +337,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
           </span>
         </div>
         {meta}
-        {stem}
+        {p.stem ?? stem}
         {p.media}
         <Suspense fallback={<p className="a-small a-muted">רגע…</p>}>
           <SetAnswer qid={q.id} options={q.options} prompts={prompts} value={[]} feedback={{ ...fb, choices: Array.isArray(chosen) ? chosen : null }} />
@@ -368,7 +370,7 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
         </span>
       </div>
       {meta}
-      {stem}
+      {p.stem ?? stem}
       {figure({ right: fb.answer, chosen: one, names: q.layout?.kind === "label" ? pinNames(q, fb) : undefined })}
       {p.media}
       <ol className="a-opts pq-autopsy" aria-label="התשובות וההסברים">
