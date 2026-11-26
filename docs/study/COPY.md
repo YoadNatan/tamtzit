@@ -272,6 +272,26 @@ A notice's own titles and bodies (the lock screen and the inbox) are in
 after "ב-"). A kind this build does not know reads "משהו חדש בתמצית", with
 nothing under it on the lock screen.
 
+### New words: practice sets (`sets.md`)
+
+The practice-sets design (revision 2, §6.2) names one action and one thing.
+Every string will live in `src/study/lib/setsCopy.ts` (pinned by
+`setsCopy.test.ts`, which also rejects second-person and gendered forms and
+model names); the notices' words in `shared/study/notifyCopy.ts`. Group facts
+are impersonal or plural ("פותרים: 4", "מאת {name}"); the member's own things
+say "שלי".
+
+| Concept | Was | Now |
+|---|---|---|
+| Creating questions | יצירה · שאלות חדשות · מה ליצור · הבנק נבנה | סט חדש · סט בהכנה · (the set page) |
+| A generated list | (none: "the request") | סט (סט שאלות) |
+| The group's sets | — | סטים של הקבוצה |
+| Practising a set | לתרגל · להתחיל · לתרגל את הדומות | לפתור |
+| Practising from the bank | תרגול חופשי | תרגול מהבנק (the flexible round keeps "סבב חדש") |
+| The blind solver | פותר עיוור · Claude ענה | הבדיקה · "נבדקה" |
+| Points to know | הנקודות שצריך לדעת (a step) | Never shown: coverage is a percentage ("אחרי הסט: 89% מההרצאה מכוסים בבנק") |
+| Author | נוצרו ע״י · יצר/ה | מאת {name} |
+
 ### Kept, on purpose
 
 - **״על בטוח״, ״נראה לי״, ״ניחוש״** (how sure an answer is): plain Hebrew, and Yoad's own

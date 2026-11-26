@@ -11,11 +11,18 @@ Practice 2.0 (`proposal/practice-2/DECISIONS.md`, its four screens in
 `proposal/mockups/practice.html`), in the design system
 (`design-system.md`):
 
-- **The "תרגול" tab** (`?v=practice`, P1): per course, each lecture with its
+- **The practice hub** (`?v=practice`, P1): per course, each lecture with its
   questions and the member's own counts ("15 שאלות · תורגלו 6 · 2 טעויות"),
   "יצירה" (to מה ליצור) where there are none yet, "נכתבות שאלות…" while
   a request or a round is written, "לתרגל את כל הקורס", the cards of today
   (package C's slot) and "מבחן קבוצתי" (package Z) when their flags are on.
+  **There is no "תרגול" tab with `VITE_STUDY_TODAY` on**, as in production
+  (decision 6): the tabs are היום · ספרייה · יחד · שלי, practice routes
+  belong to "היום" (`tabOf`), and the hub is reached from Today's
+  "תרגול חופשי", the library card's chip, the lecture page's "אחרי
+  הקריאה" and the paragraph sheet's "תרגול" tab. Only a build without
+  `TODAY` shows a "תרגול" tab. Practice sets keep it that way (`sets.md`,
+  OD1).
 - **A lecture's practice** (`?v=practice&l=<id>`): the bank's size, the
   member's own line ("רק לך"), "סבב חדש" and "שאלות חדשות"; "הבנק נבנה"
   with its count while a request is written or has drafts waiting; the
@@ -134,7 +141,7 @@ Details that are easy to miss:
 
 ## Flags
 
-`VITE_STUDY_QUESTIONS` shows the tab, P1, P2 and the chip; `VITE_STUDY_PRACTICE`
+`VITE_STUDY_QUESTIONS` shows the hub (the tab without `TODAY`), P1, P2 and the chip; `VITE_STUDY_PRACTICE`
 adds sessions. Release 1 (`RELEASE-1.md`) turns both on with
 `VITE_STUDY_CARDS`, without the quiz: nothing on these screens links to it
 then. "הטעויות שלי" (P1's card, P8, `s=m`) and past exams (`?v=exams`) are

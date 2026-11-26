@@ -455,3 +455,57 @@ version 2 (it was never released); part 9 is regenerated (115 KB of 170).
   `study_notices` (ids only) without row security; the app subscribes to
   inserts and updates only (`notify.md`). `study_site_url` must be the exact
   address members open (`RELEASE-R1.md`).
+
+## Practice sets (design-practice, revision 2)
+
+Yoad's answers decide OD3, OD5, OD11, OD12 and OD13 (and confirm OD1, OD8,
+OD14, OD15, OD19 and OD22 for this build); every other open decision takes
+the design's recommended default. The build is on `dev` in the design's
+slices: A (the generator, flag `VITE_STUDY_MAKE`, no SQL), B (sets and
+sharing, SQL section L 1, flag `VITE_STUDY_SETS`) and, of slice C, the
+notices (WP17), because notifications are built. What is built, the
+numbers and the owner's snippets are in [`sets.md`](sets.md).
+
+| OD | Decision |
+|---|---|
+| OD1 | **No new tab.** Decision 6 stands (היום · ספרייה · יחד · שלי); sets are reached from Today, the lecture page, the library card's chip and the hub `?v=practice` |
+| OD2 | Covered by notifications' OD2 (the entry chunk's limit of 410,000 B). This design's static share of the entry chunk is capped at **2,000 B** (bundle owner `QS`, only its slot module in the entry; `tools/study-bundle.mjs` fails over it); everything else loads lazily. WP1's "move 6 kB to lazy chunks" is **not** done now: the numbers are measured and recorded in `sets.md` |
+| OD3 | **Every set is shared when it is created** (Yoad): no private set, no switch, no unshare. Any member can hide a set for themselves; the author or the group's creator can delete it (a soft delete: the questions stay in the bank) |
+| OD4 | The free redo ("לחזור על הטעויות", `s=m`) is primary. The paid secondary, "שאלות חדשות על הטעויות", makes an ordinary shared lecture set whose request stores only the lecture's parts that hold the mistakes, never the member's points or a focus text; its copy says the set is shared |
+| OD5 | **"פותרים: k" always, and the member's own score** (Yoad). The group average only when at least **3 other** members finished (`study_private.pulse_floor()`); per-question results only from 3 others, as 3 bands computed without the viewer; **no best score**. Each member counts with their first finished attempt, scored on the first answer per question |
+| OD6 | The author's name on set cards, the set page, the inbox and Today's row ("מאת {name}"); **never on the lock screen** (notifications' OD11) |
+| OD7 | Names of members who solved a set: opt-in, names without scores, asked once at the end of the member's first finished set, then only in שלי |
+| OD8 | **No sets from the bank and no course sets in v1** (Yoad); "סבב חדש" stays the free path from the bank, course sets are WP20 (not built) |
+| OD9 | One concept: an uploaded sheet's "similar" run will become a set of kind `sheet` (L's columns `exam_id`, `similar_run` and the `study_private.qset_*` hooks are the seam). Nothing of the exams design is built here |
+| OD10 | At most **one push a day per member** for new sets, coalesced ("3 סטים חדשים בקבוצה"), its body without the lecture's name |
+| OD11 | **The price is shown, at a conservative $0.04 a question, until the ledger calibration** (Yoad). The owner's read-only calibration query is in `sets.md`; production was not queried. After calibration the base rate is the observed mean, scaled by the practice route's model price (`expectedQuestionUsd(model)`) |
+| OD12 | **A monthly line of $12 for sets** (Yoad's sub-cap; `STUDY_SETS_MONTHLY_USD`, default 12): the spend of kinds practice, solver, reword and style, checked when a set starts, so a started set finishes. Summaries stay protected |
+| OD13 | **5 new paid sets a day per member** (Israel time); the create screen shows what is left when 2 or fewer remain |
+| OD14 | **A server switch `questions_paid`** (on by default): `kind_on` maps practice, solver, reword, style, points and bank to it, so question spending stops without a redeploy |
+| OD15 | **Auto-keep ships off** (`qsets_auto_keep` off); on only after 2 weeks of measurement (5% or fewer flagged or retired) and only with an approved solver model (`AUTO_KEEP_MODELS`) |
+| OD16 | Another member may tap "להמשיך ליצור" on a paused set; the cost counts against the person who continues, and the button says so |
+| OD17 | A confirmation when a set's cost is above $1 |
+| OD18 | Set generation uses the practice, solver, style and reword routes. Yoad's answer for models applies: approved providers may get every kind; members get one informational line in the help screen's privacy text |
+| OD19 | **Server-driven writing later** (Yoad): no `set_ready` push now; the generating screen keeps its "the creation runs from this device" callout |
+| OD20 | A soft block for a second set on a lecture while one is being made ("יש סט בהכנה…" with "ליצור סט נוסף בכל זאת") |
+| OD21 | The word is **סט** ("סט שאלות"); "סבב" stays for the flexible round from the bank |
+| OD22 | **The old three-screen generator stays one release** after `VITE_STUDY_MAKE` is on (Yoad), behind the flag |
+
+Also decided for this build:
+
+- **Notices (WP17, slice C) are built now**, because section R exists:
+  `set_shared` (coalesced per group and Israel day, at most one push a day
+  per member, the body without the lecture's name, the author's name never
+  on the lock screen) and `set_solved` (inbox only, to the author), wired
+  into R's kind registry, its hooks and `notifyCopy.ts`, plus R's
+  `questions_ready` skip for a request that belongs to a set. Their defaults
+  follow R: group activity ("בשבילך") is on.
+- **SQL placement:** section L 1 follows section R in
+  `supabase/study-schema.sql` (the order is I, R, L; Y and O come later). It
+  goes into `supabase/parts/9.sql` while part 9 stays at most 170 KB;
+  otherwise L starts part 10 (`tools/sql-parts.mjs`'s `STARTS` and its tests
+  change with it). `kind_on`'s new text is also written into section F
+  (design §7.5). L's version is bumped once; R's changes only if R's SQL
+  changes.
+- **Privacy line** (help and privacy copy; informational, not a gate): a set
+  and its questions are visible to the whole group with the author's name.
