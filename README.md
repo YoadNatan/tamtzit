@@ -163,6 +163,8 @@ the page's build stamp, an old `/study/` link, `/api/study/health` and
 | `STUDY_WORKER_KEY` | server | **secret**, 32+ characters, the same value as the Vault secret `study_worker_key` |
 | `STUDY_MONTHLY_USD` | server | the monthly budget in dollars (approved 33; 33 when unset) |
 | `SEND_EMAIL_HOOK_SECRET`, `STUDY_TRANSCRIBE_KEY` | server | **secret**; for packages not built yet |
+| `STUDY_VAPID_PUBLIC`, `STUDY_VAPID_SUBJECT` | server, **Production only** | notifications' push key (public) and its subject, `https://<the app's address>`; made with `node tools/vapid-keys.mjs` ([`docs/study/RELEASE-R1.md`](docs/study/RELEASE-R1.md)) |
+| `STUDY_VAPID_PRIVATE` | server, **Production only** | **secret**, marked Sensitive; never on Preview, never in a chat or git |
 | `VITE_STUDY_*` | build (and health on the server) | release flags, `1` or unset; the list is in [`.env.example`](.env.example) |
 
 The question types (`VITE_STUDY_QTYPES`, [`docs/study/question-types.md`](docs/study/question-types.md))
@@ -201,7 +203,9 @@ part is run again: part 8 (section S) narrows two permissions the earlier
 parts open (an upload into an `exams/` folder, and a member updating an
 exam's status directly), and they stay open until part 8 runs again; part 9
 (section I, the personal code) redefines `study_member_saved` (the "יש קוד"
-chip), which part 1 puts back to its older form. After editing the schema, run `npm run sql:parts`; a unit test
+chip), which part 1 puts back to its older form; it also holds section R
+(notifications: the inbox, pushes and their minute job, with the switch
+`notify` inserted off, [`docs/study/notify.md`](docs/study/notify.md)). After editing the schema, run `npm run sql:parts`; a unit test
 fails while the parts are stale, or while one is over 170 KB (the SQL Editor's
 limit). Run the SQL **before** the code that needs
 it deploys: until then `/api/study/health` says `"schemaOk":false`.

@@ -39,7 +39,30 @@ Each package of the wave records its own decisions here as it is built.
 | OD5 | A production pilot with the notify switch off |
 | OD6 | Three slices in code, all built now, each releasable on its own |
 | Kinds not built yet | `set_shared`, `similar_ready` and `lab` are reserved in the notice-kind table, not wired |
-| Every other OD | The design's recommended default |
+| Every other OD | The design's recommended default (listed below) |
+
+The design's other open decisions, each at its recommended default:
+
+| OD | Taken |
+|---|---|
+| OD7 | The switch `notify` is inserted off; `notify_hooks` on |
+| OD8 | Quiet hours 23:00-07:30 Israel time, on by default, one switch; only the security notice goes inside them (silently) |
+| OD9 | The daily reminder at 19:30, adjustable 06:00-22:00 in half hours; no unseen count in it |
+| OD10 | "לא לשלוח בשבת" is a setting, off by default: Friday 16:00 to Saturday 20:30 |
+| OD11 | Lock screens show lecture and course titles; never a quiz's title, never a name |
+| OD12 | The security notice is always on, at most 3 a day, made by the minute scan, never to the device that signed in |
+| OD13 | 6 "בשבילך" and reminder pushes a day, 12 in all, security apart (3); a quiz push a group per 10 minutes, a host per 30; 60 a minute in all |
+| OD14 | "להודיע לקבוצה" on the quiz setup, on by default; the quiz push waits 15 s |
+| OD15 | "הפגישה מתחילה בעוד 15 דקות" on, one push a meeting a member ("the reading started" is skipped after it). If meetings turn out to be daily, it moves under the daily reminder's switch (a later change) |
+| OD16 | Two category switches plus the reminder; the devices listed only with 2 or more |
+| OD17 | No app-icon badge in v1 |
+| OD18 | No digest card on Today |
+| OD19 | A member's phone and computer both get every push |
+| OD20 | Offline caching only as its own package after two quiet weeks of pushes (not built) |
+| OD21 | No "your questions or cards are ready" notice |
+| OD22 | Yoad makes the VAPID keys with `tools/vapid-keys.mjs`, keeps the private key in a password manager, Production only, Sensitive |
+| OD23 | The VAPID subject is `https://<the app's address>` |
+| OD24 | "תיקון מחכה לאישור" is inbox only |
 
 ## Models (design-models, revision 2)
 
@@ -258,3 +281,77 @@ sets the VAPID keys on Production and adds the pilot (below); the switch
    `insert into study_private.notify_pilot (user_id) select created_by from public.study_groups where join_code = '<code>' on conflict do nothing;`
 4. From the home-screen icon: שלי → הגדרות התראות → "להפעיל התראות במכשיר
    הזה" → "שליחת התראת ניסיון"; then the design's device checklist (§13.4).
+
+### Notifications, R 2 and the asks (slice 3), and the docs, built on 26 November 2026
+
+The rest of the design: SQL section R at version 2, the asks, the quiz
+setup's checkbox, the guide's step, help, and the release notes. Yoad's steps
+for all three release points are in [`RELEASE-R1.md`](RELEASE-R1.md); what a
+member sees, the events and the device checklist in [`notify.md`](notify.md).
+
+- **SQL R 2** (part 9 regenerated: sections I and R, 106 KB of 170): 15
+  kinds registered (25 with R 1's and the three reserved), eight new hooks and
+  four new steps in the minute job; section R reports version 2. The app still
+  asks for R 1, so the client works with either.
+- **The asks**: Today's card on the first launch from the icon, the upload
+  ask, the inbox's line; the quiz setup's "להודיע לקבוצה"; the guide's step
+  S10 "לקבל התראות" with its walk to שלי's row; help's row "התראות" and the
+  how-to "להפעיל התראות". R's share of the study entry chunk is now 552 B of
+  1,200 (the slot became one helper that makes each lazy part).
+- **Choices the design left open, taken here:**
+  - A group challenge (mode `boss`) is "אתגר קבוצתי נפתח עכשיו" from the quiz
+    hook itself (no trigger on the battles' table); its lock-screen line is
+    the lectures' one course, or the first lecture's title.
+  - "הפגישה מתחילה בעוד 15 דקות" goes to every member not already in the
+    meeting (its scheduler too), 12 to 15 minutes ahead, once a meeting.
+    "ההקראה התחילה" goes once a meeting to members not in it (never the
+    reader); a meeting cancelled, or a reading stopped, holds the waiting push
+    and ends the live rows.
+  - "מפגש הלמידה מתחיל בעוד 30 דקות" goes 27 to 30 minutes ahead to those who
+    answered in or maybe; it links to the study day.
+  - "שאלה פתוחה שאפשר לעזור בה" runs once a day between 17:00 and 21:00
+    (Israel time) for the members who turned "הקבוצה צריכה אותך" on, at most
+    one a day across groups: the minute job asks `study_needs_me` (section G)
+    as each such member, inside its own transaction, and puts the caller's
+    claims back after. It links to the question's paragraph.
+  - The daily reminder reads the member's latest group: cards due before the
+    end of today, today's meeting still to come, the nearest course exam
+    within 14 days; with none of these it sends nothing. It goes within half
+    an hour of the member's hour, once a day.
+  - "קריאת המבחן לא הצליחה" carries the exam's error code (`no questions`)
+    like a summary's stop; `args.kind` waits for uploaded sheets (section O).
+  - "תיקון מחכה לאישור" and "עדכון" coalesce per lecture; "נקבעה פגישה" comes
+    for a future meeting when it is set or its time moves (not to the member
+    who did it); "סיכום חדש בספרייה" only the first time a summary is ready.
+  - A credit asked by the member it names, a dispute opened by the
+    correction's own proposer, and a decision by the one decided for, notify
+    nobody.
+  - Today's card shows only when the page runs from the home-screen icon, the
+    device can be asked, and the guide's card does not hold the home (it holds
+    it while it is live and still takes steps). In the home-screen app S10 is
+    the guide's first step on every launch until done (the design said "for
+    that launch"); in a browser it is last and gives way when five steps come
+    before it.
+  - An ask counts as shown when it appears; "לא עכשיו" rests every ask for 14
+    days; the browser's question closed without an answer keeps the ask. The
+    upload ask sits on the uploader's lecture while its outline is planned
+    (single uploads go straight there) and on the batch upload's done card.
+    The inbox's line opens the settings (the browser's question comes from
+    the settings' own button).
+  - "להודיע לקבוצה" is on the quiz setup only (not on the challenge's setup
+    nor the meeting's quiz presets, which push as usual); unchecked, the app
+    calls `study_quiz_quiet` right after the quiz is made.
+- **Checks:** `supabase/tests/study.sql` R30-R42 (each hook, the reminders,
+  once-a-day rules, the claim's meeting rules), fresh, from parts, and as an
+  upgrade from the previous schema; `notify-concurrency.sh`; unit tests for
+  S10, `cardTakesSteps`, the asks' memory and the routes R 2 writes;
+  `e2e/study/notify-asks.cjs` (the design's cases 10 and 11, with help) on the
+  flag sets `notify` and `i`.
+- **Not built:** the design's "S10 first only for the launch from the icon"
+  (it stays first in the app until done); real pushes on devices (the owner's
+  checklist in `notify.md`); the Hebrew iOS and Chrome menu words stay
+  unchecked until the owner's screenshots.
+
+**Owner steps** for all of notifications: [`RELEASE-R1.md`](RELEASE-R1.md)
+(release point 1: part 9 and `VITE_STUDY_NOTIFY`; 2: the VAPID keys and the
+pilot; 3: the switch on and the WhatsApp line).

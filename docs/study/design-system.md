@@ -401,6 +401,43 @@ rows is the list's.
 <div className="a-callout warn confirm"><span>למחוק את ההרצאה…?</span><div className="a-row">…</div></div>
 ```
 
+### Notifications: the bell, the inbox, the asks (`notify.md`)
+
+The bell is the tab bar's icon style (a stroke SVG, 22 px, `aria-hidden`) as
+a link at the end of a tab screen's `Head`, before the guide's "?"; its count
+is a pill in the badge tokens (`--badge-bg`, `--badge-ink`), 1-9 then 9+, and
+the link's `aria-label` carries it ("התראות, 3 חדשות"). The inbox is an
+`a-list` of link rows; an unread row has a dot, its title in bold and a
+visually hidden "חדש"; times sit in `<bdi dir="ltr">`.
+
+```tsx
+<a className="bell" aria-label="התראות, אחת חדשה" href="/?v=notify"><svg aria-hidden="true">…</svg><span className="bell-n" dir="ltr" aria-hidden="true">1</span></a>
+
+<ul className="a-list inbox-list">
+  <li>
+    <RouteLink className="inbox-row unseen" to={…} go={go}>
+      <span className="inbox-dot" aria-hidden="true" /><svg className="inbox-ic" aria-hidden="true">…</svg>
+      <span className="inbox-main"><span className="inbox-t">מבחן קבוצתי נפתח עכשיו<span className="sr-only"> · חדש</span></span><span className="inbox-b">…</span></span>
+      <bdi dir="ltr" className="inbox-time">09:12</bdi>
+    </RouteLink>
+  </li>
+</ul>
+
+{/* An ask: a card with one primary button and "לא עכשיו" (never on load; once on a device) */}
+<section className="a-card ntf-ask" data-ask="home">
+  <h2 className="a-h2">תמצית פתוחה מהאייקון ✓</h2>
+  <p className="a-small">עכשיו אפשר גם לקבל התראות: …</p>
+  <div className="a-row"><button className="a-btn primary small">להפעיל התראות</button><button className="a-btn ghost small">לא עכשיו</button></div>
+</section>
+<p className="a-callout ntf-offbar" role="status"><span>ההתראות לא פועלות במכשיר הזה.</span><RouteLink className="a-btn small" …>להפעיל</RouteLink></p>
+
+{/* A switch: the settings' rows and the quiz setup's "להודיע לקבוצה" */}
+<div className="a-list"><label className="a-li setting-row setting-check"><span><b>להודיע לקבוצה</b><span className="m">התראה לחברי הקבוצה כשהמבחן נפתח</span></span><input type="checkbox" /></label></div>
+```
+
+`styles/notify.css` holds these (tokens only) and loads with the lazy parts,
+never in the entry CSS.
+
 ### Progress
 
 ```tsx

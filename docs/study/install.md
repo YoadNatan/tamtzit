@@ -121,6 +121,10 @@ card (Today's "התור שלי"); "קוד חדש" moves it to the confirm's "ב�
   `beforeinstallprompt`, that is a separate decision. Kill path: the app
   removes it when `/api/study/health` stops giving the VAPID key, and the
   two-line unregistering `sw.js` in its header can be deployed in its place.
+  On an iPhone pushes come only from the home-screen app, so the first launch
+  from the icon is where Today offers them once ("תמצית פתוחה מהאייקון ✓",
+  [`notify.md`](notify.md)); the owner's steps are in
+  [`RELEASE-R1.md`](RELEASE-R1.md).
 
 ## Before release: on real devices
 

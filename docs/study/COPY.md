@@ -237,6 +237,37 @@ are written by `shared/study/notifyCopy.ts`; the screens' words are
 | A live notice that is over | הסתיים; a group quiz: הסתיים · לתוצאות |
 | A row's time | עכשיו · לפני {m} ד׳ · {HH:MM} (today) · {d.m} (earlier) |
 
+### New words: notifications' settings, asks and guide (`notify.md`)
+
+The settings screen ("הגדרות התראות") and the asks; all in
+`src/study/lib/notifyText.ts` (pinned by `notifyText.test.ts`), the help row
+in `helpCopy.ts`, the guide's step and how-to in `guide.ts`. The phones' own
+menu words come from `installCopy.ts` `OS` (unchecked on a device).
+
+| Concept | Words |
+|---|---|
+| The settings, in שלי and as a title | הגדרות התראות; its state: פועלות ✓ · כבויות · חסומות · לא במכשיר הזה |
+| This device | במכשיר הזה; on: ההתראות פועלות במכשיר הזה ✓ |
+| Turning on | להפעיל התראות במכשיר הזה (while it works: מפעילים…); the toast: ההתראות פועלות: {מבחן קבוצתי, תשובות אליך, ומה שהעלית כשהוא מוכן} |
+| The test push | שליחת התראת ניסיון; ההתראה תגיע בעוד כמה שניות. אפשר לנעול את המסך או לצאת מהאפליקציה. |
+| The two categories | עכשיו בקבוצה (מבחן קבוצתי שנפתח, פגישה שמתחילה, מפגש למידה) · בשבילך (תשובות אליך, תרגול ששיתפו איתך, ומה שהעלית כשהוא מוכן) |
+| The reminder | תזכורת יומית: פעם ביום: מה מחכה לחזרה היום; בשעה {HH:MM} |
+| When not | מתי לא לשלוח: לא לשלוח בלילה ({from}–{to}), לשנות שעות; לא לשלוח בשבת (משישי 16:00 עד מוצאי שבת 20:30) |
+| Why not on this device | באייפון, התראות מגיעות רק כשפותחים את תמצית מהאייקון במסך הבית. · ההתראות חסומות במכשיר הזה. · הדפדפן הזה לא תומך בהתראות. · ההרשמה להתראות לא הצליחה. |
+| Today's card, the first launch from the icon | תמצית פתוחה מהאייקון ✓ · עכשיו אפשר גם לקבל התראות: כשמבחן קבוצתי נפתח, כשעונים בשרשור שלך וכשהסיכום מוכן. |
+| After an upload | להודיע כשהסיכום מוכן? · אפשר לבחור מה מקבלים בשלי ← הגדרות התראות. |
+| The asks' buttons | להפעיל התראות · לא עכשיו |
+| The inbox's line | ההתראות לא פועלות במכשיר הזה. · להפעיל |
+| The quiz setup | להודיע לקבוצה · התראה לחברי הקבוצה כשהמבחן נפתח |
+| The guide's step | לקבל התראות (התראה כשמבחן קבוצתי נפתח, כשעונים בשרשור שלך וכשהסיכום מוכן. רק מה שבוחרים.) |
+| Help and its how-to | the row התראות; the how-to להפעיל התראות |
+
+A notice's own titles and bodies (the lock screen and the inbox) are in
+`shared/study/notifyCopy.ts` `KINDS`, one per kind, pinned by
+`notifyCopy.test.ts` with invented titles: for example "מבחן קבוצתי נפתח עכשיו",
+"תשובה חדשה בשרשור שלך", "הסיכום מוכן", "הפגישה מתחילה בעוד 15 דקות",
+"נכנסו עם הקוד האישי היום ב-{HH:MM}".
+
 ### Kept, on purpose
 
 - **״על בטוח״, ״נראה לי״, ״ניחוש״** (how sure an answer is): plain Hebrew, and Yoad's own
