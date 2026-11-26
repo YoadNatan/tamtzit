@@ -634,3 +634,61 @@ Also decided for this build:
   is a prerequisite and unchanged); `VITE_STUDY_MAKE=1`, then
   `VITE_STUDY_SETS=1`, Production only. Part 1 carries `kind_on`'s new text
   only so a later re-run keeps it; it need not be run now.
+### Practice sets, the reviews' fixes, built on 26 November 2026
+
+Three reviews (correctness, security and privacy, UX) of `baed964..0de429e`;
+every "must" and "should" is fixed, the nits that were cheap too. The
+details are in [`sets.md`](sets.md) ("The reviews' fixes"). Decisions taken
+in the fix, for Yoad to confirm or change:
+
+- **OD5, its exact form.** A precise running average let a member work out
+  another member's score from two calls (before and after a finish), and
+  the floor of 3 counted members who joined minutes ago, members out of
+  Pulse and former members. Now the group's numbers count only the other
+  members whom Pulse counts (`study_private.pulse_counted`: 7 days in the
+  group, not opted out of Pulse, still a member) and are computed over a
+  **fixed bucket: the first 3 (6, 9, …) of them to finish**, without the
+  viewer, the average **rounded to 0.1**. A 4th or 5th finisher changes
+  nothing until the 6th. The set page says it in one line ("הממוצע
+  והתוצאות: 3 הפותרים הראשונים, בעיגול"). "פותרים: k" still counts every
+  finisher. The hub's "התשובות והציונים שלך גלויים רק לך" stays true. What
+  remains possible: with 3 others in the bucket, a member who knows two of
+  their scores (by asking them) can narrow the third to about 10% of the
+  set; recorded, not prevented.
+- **A set's score is its first answers as given:** the attempt records each
+  question's first answer when it is given (`firsts`), so deleting one's own
+  answer row (`study_answers`' "delete own") and answering again changes
+  neither the score nor the group's bands. Finishing needs a set the member
+  still sees.
+- **OD12 also covers "create" without a set** once section L 1 is installed
+  (the older generator, OD22, and rounds over several lectures): one read of
+  L's room, 402 `sets_line` past the line. This changes D12 ("without a set
+  nothing of L is called") by that one read. The line is compared with
+  recorded spend, so sets begun within seconds of each other can each pass
+  before a batch is charged; accepted for a group of six.
+- **OD15 stays as decided on the server** (`qsets_auto_keep` off), and the
+  author's own device now keeps the set's checked questions when its writing
+  ends, the same keep "להתחיל לפתור" does (only drafts the blind solver
+  passed; the unchecked ones still wait for "לאשר או להסיר"). Without it a
+  set whose author left the finished screen was shown as "0 שאלות" and was
+  never announced. If Yoad prefers a tap, the alternative is to drop that
+  effect: the shelf then shows such a set as "מוכן לפתרון" and the first
+  member's "להתחיל לפתור" keeps it, and the group hears about it only then.
+- **The read phase is the phone's choice:** points gone stale between "plan"
+  and "ליצור" are 409 "points stale" as without a set (the screen reads them
+  and creates); the server's begin-as-reading path stays as a seam
+  (`set.phase: "read"`, sent by no screen in v1), and its continuation needs
+  a set still reading from the last 10 minutes, at most its size.
+- **Sets that never got their request** are paused after 2 minutes (their
+  author or the group's creator can delete them from the set page) and
+  removed by the nightly clean-up after an hour.
+- **The bundle (OD2):** the design's whole growth of the entry chunk is
+  2,829 B (400,398 → 403,227); QS's own share, which the cap measures, is
+  1,631 B of 2,000. The set screens' error words moved to the lazy
+  `setsCopy.ts`. Whether the 2,000 B cap should also count the design's
+  lines in F's modules (`route.ts`, `flags.ts`, the conditions) is Yoad's
+  call; as built it measures QS's slot only.
+- **Not changed:** a replaced route keeps its notice (review UX-1) also for
+  `x=new` without a lecture and `x=review` with MAKE off; "רק לך" stays the
+  app's wording outside the set screens; the lecture sheet has no coverage
+  percentage (it would need a plan call per lecture).

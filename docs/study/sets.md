@@ -62,6 +62,21 @@ design's static share of it is capped at **2,000 B**: bundle owner `QS` in
 check fails when its share passes 2,000 B. The tool also turns on
 `VITE_STUDY_MAKE` and `VITE_STUDY_SETS` with every other flag.
 
+Measured on 26 Nov 2026 after the reviews' fixes: the entry chunk is
+**403,227 B** with every flag on (6,773 B left) and 402,442 B with every
+flag off. **The whole design's growth of the entry chunk is 2,829 B**
+(400,398 → 403,227, minified), of which **QS's own share is 1,631 B** of
+its 2,000 B cap. The rest is code of F's and Q's modules that every screen
+loads: `?v=sets`, `k.` and the new steps in `route.ts`, the two flags in
+`shared/study/flags.ts`, the lecture page's and the library chip's
+conditions, the sign-in landing on a set's link (`StudyApp.tsx`) and one
+line of `failText` (`sets_line`, which the older generator screens can now
+meet). The set screens' own error words moved from `failText` to the lazy
+`setsCopy.ts` (`setFail`), which took 452 B out of the entry chunk. The cap
+as built measures QS's slot only (as the design's §10 and OD2 count it);
+whether it should also count the design's lines in F's modules is the
+owner's call (owner steps).
+
 Measured on 26 Nov 2026 with WP14 (the entry points) and WP17 (the
 notices, SQL and words only): the entry chunk is **403,679 B** with every
 flag on (6,321 B left; +147 B: the personal code's sign-in landing on a
@@ -734,8 +749,22 @@ Flag set **`ps`** (`notify` with `VITE_STUDY_MAKE` and `VITE_STUDY_SETS`;
 Also run with these builds: `sets.cjs` (`pm`), `notify.cjs`,
 `notify-push.cjs`, `notify-asks.cjs`, `shell.cjs`, `wide.cjs` and
 `small-phones.cjs` on the `ps` build with the flag set `notify`,
-`notify.cjs` on a build without MAKE and SETS, `today.cjs`, `qtypes.cjs`,
-`progress.cjs` and `code.cjs` with `ps`, and `practice.cjs` (the old flow).
+`notify.cjs` on a build without MAKE and SETS, `today.cjs`, `progress.cjs`
+and `code.cjs` with `ps`, and `practice.cjs` (the old flow). Until the
+reviews' fixes `qtypes.cjs` failed on every build with MAKE on (its step 1
+waited for the old screen's chips); it now takes the flag sets `pm` and `ps`
+and walks "סט חדש" (the types under "עוד אפשרויות", "ליצור", the drafts one
+by one at `x=review` while the set is still written), and passes with `ps`
+and `pm` (the final run's logs and summary are listed in the build's
+report).
+
+After the reviews' fixes the author's own device keeps a set's checked
+questions when its writing ends (see "The reviews' fixes" below), so the
+first path's third tap is the set page's "לפתור" (or "להתחיל לפתור" when it
+is tapped before the end): still **3**. "Made → visible to the group" is
+**0** whether the author stays or not: when the author stays, the set is
+kept, filled and announced; when the author leaves first, the shelf shows it
+as "מוכן לפתרון" with "לפתור" (any member's "להתחיל לפתור" keeps it).
 
 ## The owner's snippets (from section L 1)
 
@@ -758,7 +787,9 @@ update public.study_questions q set retired_at = now()
        where i.auto_kept_at is not null and (i.set_id = '<set>' or i.auto_kept_at >= '<date>'));
 -- Full rollback of L's trigger (sets stop filling; nothing else changes):
 alter table public.study_questions disable trigger study_qset_items_from_bank;
--- New sets stay in the inbox but are never pushed (set_shared; undo: push = true):
+-- New sets stay in the inbox but are never pushed (set_shared; undo: push = true).
+-- Run it again after any later re-run of part 9: R's kind registry insert
+-- sets push back to true (on conflict ... push = excluded.push).
 update study_private.notice_kinds set push = false where kind = 'set_shared';
 -- What the group heard about sets in the last day (read-only):
 select kind, count(*) as rows, sum(count) as events from public.study_notices
@@ -800,12 +831,67 @@ select date_trunc('week', s.created_at) as wk, count(distinct s.id) as sets,
    which its wrapper should prevent. `study_answers.set_attempt` and L's
    tables can stay: they are unused without the flag.
 5. The notices alone: `set_shared`'s `push = false` (the snippet above) keeps
-   new sets in the inbox only; R's `notify_hooks` off stops every notice of
-   every package ([`notify.md`](notify.md)).
+   new sets in the inbox only (run it again after any re-run of part 9, whose
+   registry insert turns `push` back on); R's `notify_hooks` off stops every
+   notice of every package ([`notify.md`](notify.md)).
 
 ## Privacy
 
 A set and its questions are visible to the whole group with the author's
 name (one informational line in help's privacy text, not a gate). Answers and
 scores stay private: the group sees "פותרים: k", and an average and
-per-question bands only from 3 other members who finished (OD5).
+per-question bands only from 3 other members who finished (OD5). After the
+security review both are computed over a fixed bucket (the first 3, 6, … of
+the other members Pulse counts to finish: 7 days in the group, not opted out
+of Pulse, still members), without the viewer, the average rounded to 0.1, so
+one more finisher moves nothing until the next 3 and nobody's score can be
+read off two calls made before and after their finish (`study.sql` LS10f).
+The first answer per question is recorded on the attempt when it is given,
+so deleting one's own answer and answering again changes no score (LS9h).
+
+## The reviews' fixes (26 Nov 2026)
+
+Three reviews (correctness, security and privacy, UX) of `baed964..0de429e`.
+What changed, beyond the lines above:
+
+- **Stale points between "plan" and "ליצור"** are 409 "points stale" with a
+  set too (the screen reads them first, then creates); the server begins a
+  "reading" set only when the phone asks (`set.phase: "read"`, which no
+  screen sends in v1). The second call with `set.id` needs a set still
+  reading, moved in the last 10 minutes (409 "set not reading"), plans at
+  most the set's size and checks the lines again (not the day's count).
+- **A set begun and never attached** (the call between begin and attach
+  died) shows as paused after 2 minutes ("היצירה נעצרה באמצע", with "למחוק
+  את הסט" for its author or the group's creator) and the nightly clean-up
+  removes it after an hour, when it also stops counting toward the day's 5.
+- **The sets line** also holds for "create" without a set once L 1 is
+  installed (the older screens, OD22, and rounds over several lectures:
+  402 `sets_line`). It is compared with recorded spend: several sets begun
+  within seconds of each other can each pass before their first batch is
+  charged. Accepted for a group of six (each set is at most 40 questions,
+  about $1.60, and the 80% group and 40% member reserves still hold every
+  batch); the line moves back under the cap with the next set.
+- **The example's style** can be kept only on the author's own lecture set
+  (`study_qset_style`), and the server checks the set's lecture before the
+  paid read. `study_qset_open` no longer strips `options.style_sig` (a
+  member reads the row directly anyway; it is an HMAC of the style).
+- **set_shared:** a push being sent counts as the day's push (`again`
+  cleared), so a set that coalesces into it is not sent a second time; each
+  member's row is its own step in `notice_set_shared`.
+- **When a set is announced:** once it is ready with a question, on the
+  next call that refreshes it (the author's own keep when writing ends, any
+  member's shelf, set page or the generating screen's progress). A set whose
+  author left before the end waits for the next member's screen; that
+  member then sees it on the shelf as "מוכן לפתרון" (design §7.2's wording;
+  the latency is not bounded, and is accepted).
+- **A finished set round** never reopens: the set's 10-second poll stops at
+  the round's end and nothing is appended to a finished round.
+
+Rejected, with the reason: the silent fallback for `x=new` without a lecture
+and for `x=review` when MAKE is off (the review's nit) would break the app's
+rule that a replaced route always says why (review UX-1, pinned by
+`route.test.ts`), so both keep the notice; "רק אצלי" everywhere (the second
+person "רק לך" is the app's convention on many screens outside this design;
+the set screens use "רק אצלי"); the lecture sheet's coverage percentage
+(the sheet has no per-lecture coverage without one "plan" call per
+lecture; not added).

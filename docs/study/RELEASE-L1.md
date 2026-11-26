@@ -110,7 +110,8 @@ redeploy: `qsets` off (below) empties the shelf, and making a set is refused.
 update study_private.features set enabled = false, changed_at = now() where name = 'questions_paid';
 -- 2. Sets off (the shelf empties, making a set is refused; questions stay in the bank):
 update study_private.features set enabled = false, changed_at = now() where name = 'qsets';
--- 3. New sets in the inbox only, never pushed:
+-- 3. New sets in the inbox only, never pushed (run it again after any re-run
+--    of part 9: R's registry insert turns push back on):
 update study_private.notice_kinds set push = false where kind = 'set_shared';
 -- Each back on: the same with true.
 ```
