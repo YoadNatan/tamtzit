@@ -7,7 +7,11 @@
 //   screens: join (a visitor's), Today, the library, the reader, the reader's
 //       contents (opened after scrolling on a phone; the side column at
 //       1024 and up), a slide's sheet, a course, a practice session after a
-//       pick, יחד, שלי, the install steps and the personal code's card;
+//       pick, יחד, שלי, the install steps and the personal code's card; with
+//       VITE_STUDY_SHEETS (flag set "o"), uploaded sheets' upload with the
+//       synthetic sheet's PDF chosen (the pages and the details: two columns
+//       from 760) and a ready sheet's review with an item open (the text on
+//       the right, the page on the left from 760; the phone's list under it);
 //   schemes: light everywhere; dark on iPhone 15, Pixel 7, the iPad sideways
 //       and the 1280 computer (DARK=all for every device), which keeps the run
 //       under about four minutes.
@@ -39,6 +43,7 @@
 // One screenshot per screen, device and scheme: <out>/<screen>-<device>-<scheme>.png.
 //
 //   NODE_PATH=$(npm root -g) E2E_FLAGS=s2 node e2e/study/devices.cjs <dist> <out dir>
+//   E2E_FLAGS=o (uploaded sheets) adds the screens sheet-upload and sheet-review.
 //   DEVICES=iphone-se,desktop-1280 SCREENS=join,reader DARK=all  (to split a run)
 const fs = require("fs");
 const path = require("path");
@@ -66,7 +71,7 @@ const ALL_DEVICES = [
 ];
 const DARK_ON = new Set(["iphone-15", "pixel-7", "ipad-landscape", "desktop-1280"]);
 const TAB_WALK = new Set(["iphone-15", "ipad-portrait", "ipad-landscape", "desktop-1280", "desktop-1920"]);
-const ALL_SCREENS = ["join", "today", "library", "reader", "toc", "sheet", "course", "practice", "group", "me", "install", "code"];
+const ALL_SCREENS = ["join", "today", "library", "reader", "toc", "sheet", "course", "practice", "group", "me", "install", "code", ...(flags.sheets ? ["sheet-upload", "sheet-review"] : [])];
 const pick = (env, all) => (env ? env.split(",").map((s) => s.trim()).filter(Boolean) : all);
 const wantDevices = new Set(pick(process.env.DEVICES, ALL_DEVICES.map(([n]) => n)));
 const wantScreens = new Set(pick(process.env.SCREENS, ALL_SCREENS));
@@ -235,6 +240,15 @@ const COVERED = () => {
   });
 
   const browser = await chromium.launch();
+  // Uploaded sheets (flag set "o"): the synthetic sheet's files, and a ready sheet of the course (mocks/sheets.cjs).
+  let sheetFiles = null;
+  let sheetRow = null;
+  if (flags.sheets && (wantScreens.has("sheet-upload") || wantScreens.has("sheet-review"))) {
+    const { makeSheetFiles, pageShots } = require("./fixtures/make-sheet.cjs");
+    sheetFiles = await makeSheetFiles(browser, path.join(out, "files"));
+    const clean = await pageShots(browser, path.join(out, "files"));
+    sheetRow = db.sheetsMock.seed({ course: mock.fixture.outline.course, title: "תרגיל 3 · פרמקוקינטיקה", lecture: L, images: clean.slice(1) });
+  }
   const steps = {};
   const problems = [];
   let shots = 0;
@@ -248,6 +262,14 @@ const COVERED = () => {
     }
   };
   let cid = null;
+  /** The course's id, once the courses' mock has made its row (the library's first load). */
+  const courseId = async () => {
+    for (let i = 0; i < 50 && !cid; i++) {
+      cid = db.coursesMock?.rows?.find((r) => !r.deleted_at)?.id ?? null;
+      if (!cid) await pause(100);
+    }
+    return cid;
+  };
 
   /** Every check on what is on screen now, in each scheme the device takes. */
   const checkNow = async (page, devName, dev, screen, o = {}) => {
@@ -465,6 +487,48 @@ const COVERED = () => {
               found.push(...(await checkNow(page, devName, dev, "code")));
             }
             return found;
+          });
+        if (want("sheet-upload") && sheetFiles)
+          await step(`${devName}: sheet-upload`, async () => {
+            if (!(await courseId())) return ["no course row"];
+            await go(page, `/?v=exams&new=sheet&c=${cid}&l=${L}`, "main.sheet-new");
+            await page.locator('input[type=file][accept="application/pdf,.pdf"]').setInputFiles(sheetFiles.pdf);
+            await page.locator(".sx-pages").first().waitFor({ timeout: 60000 });
+            await pause(500);
+            const found = await checkNow(page, devName, dev, "sheet-upload", {
+              primary: ".ph-foot .a-btn.primary",
+              extra: async (p) => {
+                const c = await p.evaluate(() => {
+                  const f = document.querySelector(".sx-files").getBoundingClientRect();
+                  const d = document.querySelector(".sx-details").getBoundingClientRect();
+                  return { side: d.left >= f.right - 1, stacked: d.top >= f.bottom - 1 || f.top >= d.bottom - 1 };
+                });
+                if (dev.viewport.width >= 760) return c.side ? [] : ["the upload's details are not beside the pages (760 and up)"];
+                return c.stacked ? [] : ["the upload's pages and details are not one under the other on a phone"];
+              },
+            });
+            return found.concat(await tabWalk(page, devName, 16));
+          });
+        if (want("sheet-review") && sheetRow)
+          await step(`${devName}: sheet-review`, async () => {
+            if (!(await courseId())) return ["no course row"];
+            await go(page, `/?v=exams&e=${sheetRow.id}&c=${cid}`, ".r-sum");
+            await page.getByRole("radio", { name: /^הכל/ }).click();
+            await page.locator(".r-head", { hasText: "שאלה 6" }).click();
+            await page.locator(".r-item").waitFor({ timeout: 10000 });
+            await pause(700);
+            const found = await checkNow(page, devName, dev, "sheet-review", {
+              extra: async (p) => {
+                const r = await p.evaluate(() => {
+                  const t = document.querySelector(".rw-text")?.getBoundingClientRect();
+                  const g = document.querySelector(".rw-page")?.getBoundingClientRect();
+                  return { wide: Boolean(document.querySelector(".exam-review.is-wide")), side: Boolean(t && g && t.left >= g.right - 1) };
+                });
+                if (dev.viewport.width >= 760) return r.wide && r.side ? [] : [`the review is not two columns, the text right of the page (${JSON.stringify(r)})`];
+                return r.wide ? ["a phone's review is in two columns"] : [];
+              },
+            });
+            return found.concat(await tabWalk(page, devName, 20));
           });
         if (want("install"))
           await step(`${devName}: install`, async () => {

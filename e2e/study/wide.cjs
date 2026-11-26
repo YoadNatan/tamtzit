@@ -21,8 +21,15 @@
 //       the library's cards in two columns;
 //   everywhere: no sideways scroll, a11y.cjs's checks in light and dark on
 //       the wide screens, no page error and no call to a real host.
+//   uploaded sheets (VITE_STUDY_SHEETS, flag set "o"; docs/study/sheets.md):
+//       on a phone, a sheet's review is the list (one column) and the upload
+//       puts the details under the pages; from 760 (M and L) the review is
+//       two columns, the text on the right and the page on the left, and the
+//       upload's details are beside its pages; on L with a mouse, ArrowDown
+//       opens the next item and E "לתקן טקסט".
 //
 //   NODE_PATH=$(npm root -g) E2E_FLAGS=s2 node e2e/study/wide.cjs <dist> <out dir>
+//   E2E_FLAGS=o adds uploaded sheets' checks.
 const fs = require("fs");
 const path = require("path");
 const { chromium, devices } = require("playwright");
@@ -107,6 +114,15 @@ const FRAME = () => {
   if (flags.qtypes) practicePlugin.seedTypes(db, L, GEO);
 
   const browser = await chromium.launch();
+  // Uploaded sheets (flag set "o"): the synthetic sheet's PDF, and a ready sheet of the course (mocks/sheets.cjs).
+  let sheetFiles = null;
+  let sheetRow = null;
+  if (flags.sheets) {
+    const { makeSheetFiles, pageShots } = require("./fixtures/make-sheet.cjs");
+    sheetFiles = await makeSheetFiles(browser, path.join(out, "files"));
+    const clean = await pageShots(browser, path.join(out, "files"));
+    sheetRow = db.sheetsMock.seed({ course: mock.fixture.outline.course, title: "תרגיל 3 · פרמקוקינטיקה", lecture: L, images: clean.slice(1) });
+  }
   const steps = {};
   const problems = [];
   const check = (name, ok, detail) => {
@@ -143,6 +159,51 @@ const FRAME = () => {
     await ctx.close();
   }
   const cid = db.coursesMock?.rows?.find((r) => !r.deleted_at)?.id ?? null;
+  /** Uploaded sheets: the review (two columns from 760) and the upload with the sheet's PDF (its details beside the pages from 760). */
+  const sheetLayout = async (name, dev, o = {}) => {
+    const wideNow = dev.viewport.width >= 760;
+    const { page, ctx } = await open(dev, "שוהם", `/?v=exams&e=${sheetRow.id}&c=${cid}`);
+    await page.locator(".r-sum").waitFor({ timeout: 20000 });
+    await page.getByRole("radio", { name: /^הכל/ }).click();
+    await page.locator(".r-head", { hasText: "שאלה 6" }).click();
+    await page.locator(".r-item").waitFor({ timeout: 10000 });
+    await pause(700);
+    const r = await page.evaluate(() => {
+      const t = document.querySelector(".rw-text")?.getBoundingClientRect();
+      const g = document.querySelector(".rw-page")?.getBoundingClientRect();
+      const img = document.querySelector(".pv-sheet img");
+      return { wide: Boolean(document.querySelector(".exam-review.is-wide")), side: Boolean(t && g && t.left >= g.right - 1), img: Boolean(img && img.complete && img.naturalWidth > 1), scroll: document.documentElement.scrollWidth, vw: innerWidth };
+    });
+    check(
+      `${name}: a sheet's review ${wideNow ? "in two columns, the text on the right and the page on the left" : "as the phone's list"}`,
+      (wideNow ? r.wide && r.side && r.img : !r.wide) && r.scroll <= r.vw,
+      JSON.stringify(r),
+    );
+    if (wideNow) await access(page, `sheet-review-${name}`);
+    else await shot(page, `sheet-review-${name}`);
+    if (o.keys) {
+      await page.locator(".r-item b[id^=ri-]").focus();
+      await page.keyboard.press("ArrowDown");
+      await page.locator(".r-item b[id^=ri-]", { hasText: "שאלה 7" }).waitFor({ timeout: 10000 });
+      await page.keyboard.press("KeyE");
+      await page.locator(".r-item .r-edit").waitFor({ timeout: 10000 });
+      check(`${name}: ArrowDown opens the next item, E "לתקן טקסט"`, true);
+    }
+    await page.goto(`${mock.base}/?v=exams&new=sheet&c=${cid}&l=${L}`);
+    await page.locator("main.sheet-new").waitFor({ timeout: 20000 });
+    await page.locator('input[type=file][accept="application/pdf,.pdf"]').setInputFiles(sheetFiles.pdf);
+    await page.locator(".sx-pages").first().waitFor({ timeout: 60000 });
+    await pause(500);
+    const u = await page.evaluate(() => {
+      const f = document.querySelector(".sx-files").getBoundingClientRect();
+      const d = document.querySelector(".sx-details").getBoundingClientRect();
+      return { side: d.left >= f.right - 1, under: d.top >= f.bottom - 1, scroll: document.documentElement.scrollWidth, vw: innerWidth };
+    });
+    check(`${name}: the upload's details ${wideNow ? "beside its pages (on the right)" : "under its pages"}`, (wideNow ? u.side : u.under) && u.scroll <= u.vw, JSON.stringify(u));
+    if (wideNow) await access(page, `sheet-upload-${name}`);
+    else await shot(page, `sheet-upload-${name}`);
+    await ctx.close();
+  };
 
   try {
     /* ───────── phones: as before ───────── */
@@ -174,6 +235,7 @@ const FRAME = () => {
         check(`${name}: a sheet rises from the bottom, the whole width, with its grip`, sheet.bottom === sheet.vh && sheet.w === sheet.vw && sheet.grip !== "none", JSON.stringify(sheet));
         await ctx.close();
       });
+      if (sheetRow && cid && name === "iphone-15") await step(`${name}: a sheet's review and upload`, () => sheetLayout(name, dev));
       await step(`${name}: practice's bottom bar`, async () => {
         const { page, ctx } = await open(dev, "שוהם", `/?v=practice&s=l.${L2}&n=3`);
         await page.locator(".pq-lead").waitFor({ timeout: 20000 });
@@ -244,6 +306,7 @@ const FRAME = () => {
         check(`${name}: a sheet of words is a dialog 560 wide`, s.w <= 560 && Math.abs(s.mid - s.vh / 2) <= 8, JSON.stringify(s));
         await ctx.close();
       });
+      if (sheetRow && cid) await step(`${name}: a sheet's review and upload`, () => sheetLayout(name, dev));
       await step(`${name}: practice's bottom bar under the question`, async () => {
         const { page, ctx } = await open(dev, "שוהם", `/?v=practice&s=l.${L2}&n=3`);
         await page.locator(".pq-lead").waitFor({ timeout: 20000 });
@@ -342,6 +405,7 @@ const FRAME = () => {
         check(`${name}: Escape closes a slide's sheet`, (await page.locator(".a-sheet").count()) === 0);
         await ctx.close();
       });
+      if (sheetRow && cid) await step(`${name}: a sheet's review and upload`, () => sheetLayout(name, dev, { keys: fine }));
       await step(`${name}: practice's keys`, async () => {
         const { page, ctx } = await open(dev, "שוהם", `/?v=practice&s=l.${L2}&n=3`);
         await page.locator(".pq-lead").waitFor({ timeout: 20000 });

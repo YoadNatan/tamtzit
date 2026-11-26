@@ -9,6 +9,7 @@
 //   const { makeSheetFiles, SHEET } = require("./fixtures/make-sheet.cjs");
 //   const f = await makeSheetFiles(browser, outDir);
 //   // { pdf, answersPdf, photos: [6 paths], turned, blurred, boxes: { "6": "pg:5:x,y,w,h" }, ms: {...} }
+//   const clean = await pageShots(browser, outDir);   // each page as the upload draws it: white, straight, sharp
 // Page lines: "| a | b |" rows are drawn as a table (header first) and
 // "[[figure:curve]]" as a concentration-time graph with a point marked X.
 // boxes are the drawn figures' boxes in thousandths of the page, measured,
@@ -133,7 +134,25 @@ async function makeSheetFiles(browser, outDir) {
   return { pdf, answersPdf, photos, turned: turnedN, blurred: blurredN, boxes, ms };
 }
 
-module.exports = { makeSheetFiles, SHEET };
+/** Each page of the sheet as a clean JPEG (white, straight, sharp: what the upload
+ *  draws from the PDF), for the scripts that seed a ready sheet (mocks/sheets.cjs)
+ *  and show its pages beside the copy. Returns the paths, page 1 (the cover) first. */
+async function pageShots(browser, outDir) {
+  fs.mkdirSync(outDir, { recursive: true });
+  const ctx = await browser.newContext({ viewport: { width: 794, height: 1123 }, deviceScaleFactor: 1 });
+  const page = await ctx.newPage();
+  const out = [];
+  for (const p of SHEET.pages) {
+    await page.setContent(doc([p]));
+    const file = path.join(outDir, `sheet-page-${String(p.n).padStart(2, "0")}.jpg`);
+    await page.locator(".pg").screenshot({ path: file, type: "jpeg", quality: 75 });
+    out.push(file);
+  }
+  await ctx.close();
+  return out;
+}
+
+module.exports = { makeSheetFiles, pageShots, SHEET };
 
 // node e2e/study/fixtures/make-sheet.cjs <out dir>: writes the files and prints what it made (NODE_PATH=$(npm root -g)).
 if (require.main === module) {
