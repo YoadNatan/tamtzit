@@ -14,7 +14,13 @@
 // again: 5 labels for slide 3's picture). On a build without the flag (w5x):
 // no new chips, and no question of a new type is ever asked.
 //
-//   NODE_PATH=$(npm root -g) E2E_FLAGS=prod node e2e/study/qtypes.cjs <dist> <out dir>   (prod, s1, s2 or w5x)
+// With practice sets (pm, ps: VITE_STUDY_MAKE) step 1 is "סט חדש": the types
+// are one chip group under "עוד אפשרויות", "ליצור" opens "סט בהכנה" (ps: the
+// set's page), and the drafts are checked one by one at x=review, reached
+// inside the app while the set is still written (so the set does not keep
+// them first).
+//
+//   NODE_PATH=$(npm root -g) E2E_FLAGS=prod node e2e/study/qtypes.cjs <dist> <out dir>   (prod, s1, s2, w5x, pm or ps)
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
@@ -25,12 +31,13 @@ const { makePptx } = require("./fixtures/make-pptx.cjs");
 
 const [dist, out] = process.argv.slice(2);
 const flagSet = flagSetOf().set;
-if (!dist || !out || !["prod", "s1", "s2", "w5x"].includes(flagSet)) {
-  console.error("usage: E2E_FLAGS=prod|s1|s2|w5x node e2e/study/qtypes.cjs <dist> <out dir>");
+if (!dist || !out || !["prod", "s1", "s2", "w5x", "pm", "ps"].includes(flagSet)) {
+  console.error("usage: E2E_FLAGS=prod|s1|s2|w5x|pm|ps node e2e/study/qtypes.cjs <dist> <out dir>");
   process.exit(2);
 }
 fs.mkdirSync(out, { recursive: true });
 const on = flagSetOf().qtypes;
+const make = Boolean(flagSetOf().make);
 const PRIMARY = ".ph-foot .a-btn.primary";
 const L3 = "eeeeeeee-0000-4000-8000-000000000033";
 const GEO = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "nephron-geo.json"), "utf8"));
@@ -103,24 +110,56 @@ const norm = (s) => String(s).replace(/[‎‏⁦-⁩]/g, "").replace(/\s+/g, " 
       /* ── 1. שאלות חדשות: two groups, the defaults, a request of every type, read-only in the bank ── */
       points(L);
       const { page } = await mock.open(browser, "שוהם", { path: `/?v=practice&l=${L}&x=new` });
-      await page.locator(".pc-types").waitFor({ timeout: 15000 });
-      await until(async () => (await page.locator(".pc-types button[aria-pressed=true]").count()) > 0, 10000, "the defaults");
       const pressed = async (sel) => (await page.locator(`${sel} button[aria-pressed=true]`).allInnerTexts()).map((t) => norm(t.replace("✓", "")));
-      const mcq = await pressed(".pc-styles");
-      const types = await pressed(".pc-types");
-      const labelOn = !(await page.locator(".pc-types button", { hasText: "סימון על תמונה" }).isDisabled());
-      check(
-        "1a both chip groups; the defaults for the part (case, נכון / לא נכון, התאמה, סידור, סימון על תמונה, מקרה בשלבים); label enabled",
-        mcq.join(",") === "מקרה קליני" && types.join(",") === "סימון על תמונה,מקרה קליני בשלבים,נכון / לא נכון,התאמה,סידור" && labelOn,
-        JSON.stringify({ mcq, types, labelOn }),
-      );
-      const why = await page.locator(".pc-why").allInnerTexts();
-      check("1b every type this part can have is on offer, with no reason line (its picture has labels)", why.length === 0 && !(await page.locator(".pc-geo").count()), JSON.stringify(why));
-      await shot(page, "qtypes-01-create", { primary: PRIMARY });
-      await page.locator(PRIMARY).click(); // "המשך: דוגמה ומיקוד"
-      await page.waitForURL(/x=example/, { timeout: 15000 });
-      await page.locator(PRIMARY, { hasText: "ליצור" }).click();
-      await page.waitForURL(/x=bank/, { timeout: 15000 });
+      const DEFAULTS = ["מקרה קליני", "סימון על תמונה", "מקרה קליני בשלבים", "נכון / לא נכון", "התאמה", "סידור"];
+      if (make) {
+        /* "סט חדש": the types under "עוד אפשרויות" (one group), the price on "ליצור" */
+        await page.locator(".mk-more").waitFor({ timeout: 15000 });
+        if (!(await page.locator(".mk-more[open]").count())) await page.locator(".mk-more > summary").click();
+        await until(async () => (await page.locator(".mk-chips button[aria-pressed=true]").count()) > 0, 10000, "the defaults");
+        const chosen = await pressed(".mk-chips");
+        const offered = (await page.locator(".mk-chips button").allInnerTexts()).map((t) => norm(t.replace("✓", "")));
+        const labelOn = !(await page.locator(".mk-chips button", { hasText: "סימון על תמונה" }).isDisabled());
+        check(
+          "1a (סט חדש) the types under עוד אפשרויות; the defaults for the part (case, סימון על תמונה, מקרה בשלבים, נכון / לא נכון, התאמה, סידור); label enabled",
+          [...chosen].sort().join(",") === [...DEFAULTS].sort().join(",") && labelOn,
+          JSON.stringify({ chosen, labelOn }),
+        );
+        check("1b every type this part can have is on offer", DEFAULTS.every((t) => offered.includes(t)), JSON.stringify(offered));
+        await shot(page, "qtypes-01-create", { primary: PRIMARY });
+        // Written slowly, so the drafts are looked at before the set's author keeps them (ps).
+        P.p2pace = 1500;
+        const before = P.qrequests.length;
+        await page.locator(PRIMARY).click(); // "ליצור 10 שאלות · כ-$…"
+        await until(async () => P.qrequests.length > before, 15000, "the request");
+        const rq = P.qrequests[P.qrequests.length - 1].id;
+        await page.waitForURL(make && flagSetOf().sets ? /v=sets/ : /x=bank/, { timeout: 15000 });
+        // The drafts one by one (x=review), inside the app: the writing goes on (rounds.ts).
+        await page.evaluate((u) => {
+          history.pushState(null, "", u);
+          dispatchEvent(new PopStateEvent("popstate"));
+        }, `/?v=practice&l=${L}&x=review&r=${rq}`);
+        await page.locator(".pb-draft").first().waitFor({ timeout: 30000 });
+        P.p2pace = 250;
+      } else {
+        await page.locator(".pc-types").waitFor({ timeout: 15000 });
+        await until(async () => (await page.locator(".pc-types button[aria-pressed=true]").count()) > 0, 10000, "the defaults");
+        const mcq = await pressed(".pc-styles");
+        const types = await pressed(".pc-types");
+        const labelOn = !(await page.locator(".pc-types button", { hasText: "סימון על תמונה" }).isDisabled());
+        check(
+          "1a both chip groups; the defaults for the part (case, נכון / לא נכון, התאמה, סידור, סימון על תמונה, מקרה בשלבים); label enabled",
+          mcq.join(",") === "מקרה קליני" && types.join(",") === "סימון על תמונה,מקרה קליני בשלבים,נכון / לא נכון,התאמה,סידור" && labelOn,
+          JSON.stringify({ mcq, types, labelOn }),
+        );
+        const why = await page.locator(".pc-why").allInnerTexts();
+        check("1b every type this part can have is on offer, with no reason line (its picture has labels)", why.length === 0 && !(await page.locator(".pc-geo").count()), JSON.stringify(why));
+        await shot(page, "qtypes-01-create", { primary: PRIMARY });
+        await page.locator(PRIMARY).click(); // "המשך: דוגמה ומיקוד"
+        await page.waitForURL(/x=example/, { timeout: 15000 });
+        await page.locator(PRIMARY, { hasText: "ליצור" }).click();
+        await page.waitForURL(/x=bank/, { timeout: 15000 });
+      }
       await until(async () => (await page.locator(".pb-draft").count()) >= 5 && !(await page.locator(".pb-more").count()), 40000, "every draft");
       await until(async () => !(await page.locator(".pb-verdict", { hasText: /נבדקת|בבדיקה/ }).count()), 15000, "every check");
       const cards = await page.locator(".pb-draft").evaluateAll((els) =>
@@ -142,7 +181,13 @@ const norm = (s) => String(s).replace(/[‎‏⁦-⁩]/g, "").replace(/\s+/g, " 
       await page.locator(".pb-keep-all").click();
       await until(async () => P.drafts.filter((d) => d.status === "pending").length === 0, 15000, "keep all");
       const kept = P.questions.filter((q) => q.series);
-      check("1d keep all: the staged case is kept whole, its 2 steps in one series", kept.length === 2 && kept[0].series === kept[1].series && kept.map((q) => q.step).sort().join() === "1,2", JSON.stringify(kept.map((q) => [q.series, q.step])));
+      // Each staged case (one in the old screen's request, one or more in a set of 10) is kept whole: steps 1 and 2 in one series.
+      const series = [...new Set(kept.map((q) => q.series))];
+      check(
+        "1d keep all: each staged case is kept whole, its 2 steps in one series",
+        series.length >= 1 && series.every((x) => kept.filter((q) => q.series === x).map((q) => q.step).sort().join() === "1,2"),
+        JSON.stringify(kept.map((q) => [q.series, q.step])),
+      );
       // From here, a clean bank of one question of each type.
       P.questions.length = 0;
       P.keys.clear();

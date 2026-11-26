@@ -110,10 +110,14 @@ const CODE = "ABCD-EFGH-JKLM-NPQR";
     await tap(shoham.locator(FOOT_GO));
     await until(async () => /v=sets&k=/.test(search(shoham)), 30000, "the set's page");
     const setId = new URL(shoham.url()).searchParams.get("k");
-    await until(async () => (await shoham.locator(START).count()) > 0 && (await shoham.locator(".mk-qtiles > li[data-s=coming]").count()) === 0, 60000, "every question written");
-    await tap(shoham.locator(START));
+    // Once every question is written the author's device keeps them (review UX-1) and the set's page
+    // takes over: its "לפתור" is the third tap ("להתחיל לפתור" if it is tapped before the end).
+    const SOLVE = ".qs-page .ph-foot .qs-go";
+    await until(async () => (await shoham.locator(SOLVE).count()) > 0, 60000, "every question written and kept");
+    const third = SOLVE;
+    await tap(shoham.locator(third));
     await shoham.locator(".pq-lead").first().waitFor({ timeout: 15000 });
-    check("§4 the lecture page with no questions → the first question on screen: 3 taps (סט חדש → ליצור → להתחיל לפתור)", taps === 3 && search(shoham).includes(`s=k.${setId}`), String(taps));
+    check("§4 the lecture page with no questions → the first question on screen: 3 taps (סט חדש → ליצור → לפתור, the set kept by the author's device)", taps === 3 && search(shoham).includes(`s=k.${setId}`), `${taps} · ${third}`);
     await answerAll(shoham);
     const shohamEnd = { mistakesNew: norm(await shoham.locator(".pq-mistakes-new").first().innerText()) };
     check("set's end: 'שאלות חדשות על הטעויות · כ-$0.40', the price in the label", shohamEnd.mistakesNew === "שאלות חדשות על הטעויות · כ-$0.40 ‹", JSON.stringify(shohamEnd));
@@ -129,7 +133,7 @@ const CODE = "ABCD-EFGH-JKLM-NPQR";
       primary: (await noa.locator(".t-start .t-solve-set").count()) ? norm(await noa.locator(".t-start .t-solve-set").innerText()) : "",
       bankLink: await noa.locator(".t-practice .t-free").count(),
     };
-    check("Today (step 6): one row 'סטים חדשים בקבוצה (1) ‹' and, with an empty queue, the free primary 'לפתור סט חדש' (the bank a link)", today.rows === 1 && today.row === "סטים חדשים בקבוצה (1) ‹" && today.primary === "לפתור סט חדש" && today.bankLink === 1, JSON.stringify(today));
+    check("Today (step 6): one row 'סטים חדשים בקבוצה (1) ‹' and, with an empty queue, the free primary names the set: 'לפתור: {lecture} · 10 שאלות' (the bank a link)", today.rows === 1 && today.row === "סטים חדשים בקבוצה (1) ‹" && today.primary === `לפתור: ${lectureTitle} · 10 שאלות` && today.bankLink === 1, JSON.stringify(today));
     await shot(noa, "setsc-01-today");
 
     /* ── WP17: the inbox ── */
@@ -222,7 +226,7 @@ const CODE = "ABCD-EFGH-JKLM-NPQR";
     await shoham.goto(`${mock.base}/`);
     await shoham.locator(".t-resume").first().waitFor({ timeout: 15000 });
     const resume = { n: await shoham.locator(".t-resume").count(), t: norm(await shoham.locator(".t-resume").first().innerText()), href: await shoham.locator(".t-resume").first().getAttribute("href") };
-    check("step 9 Today: the author's own paused set, 'הסט {lecture} נעצר באמצע · להמשיך ליצור ‹', to the set", resume.n === 1 && resume.t === `הסט ${lectureTitle} נעצר באמצע · להמשיך ליצור ‹` && (resume.href ?? "").includes(`k=${open.id}`), JSON.stringify(resume));
+    check("step 9 Today: the author's own paused set, 'הסט על ״{lecture}״ נעצר באמצע · להמשיך ליצור ‹', to the set", resume.n === 1 && resume.t === `הסט על ״${lectureTitle}״ נעצר באמצע · להמשיך ליצור ‹` && (resume.href ?? "").includes(`k=${open.id}`), JSON.stringify(resume));
     await shot(shoham, "setsc-07-today-resume");
     await noa.goto(`${mock.base}/?v=sets&k=${open.id}`);
     await noa.locator(".mk-paused").waitFor({ timeout: 20000 });
@@ -252,7 +256,8 @@ const CODE = "ABCD-EFGH-JKLM-NPQR";
     await tap(noa.locator(FOOT_GO));
     await until(async () => /v=sets&k=/.test(search(noa)), 30000, "the new set");
     check("§4 Today → a new set (the lecture prefilled): 2 taps (סט חדש → ליצור)", taps === 2 && Q.sets.length === setsBefore + 1 && Q.sets[Q.sets.length - 1].created_by === noaId, String(taps));
-    await until(async () => (await noa.locator(START).count()) > 0 && (await noa.locator(".mk-qtiles > li[data-s=coming]").count()) === 0, 60000, "נועה's set written");
+    // Written and kept by its author's device (review UX-1): the set's page with "לפתור".
+    await until(async () => (await noa.locator(".qs-page .ph-foot .qs-go").count()) > 0, 60000, "נועה's set written");
 
     /* ── step 11: the caps ── */
     const capOf = async (headroom, dailyLeft) => {

@@ -15,7 +15,7 @@
 //   rpc/study_qset_seen, _hide, _delete (the author or the group's creator), _rename (the author);
 //   rpc/study_qset_attempt_start   the caller's open attempt of the last 12 hours, or a new one;
 //   rpc/study_qset_attempt_finish  scored on the first answer per question; an empty one dropped;
-//   rpc/study_qset_stats           OD5: solvers and mine always; avg and per_q only from 3 others;
+//   rpc/study_qset_stats           OD5: solvers and mine always; avg and per_q only from 3 others (the first 3, 6, … to finish);
 //   rpc/study_qset_names_pref      OD7;
 //   GET study_qset_requests, study_qset_prefs (own row).
 // db.qsetsMock.calls keeps every call (fn, who, body). db.qsetsMock.finisher(userId, setId,
@@ -325,21 +325,23 @@ module.exports = {
         const mine = firsts.get(me);
         let avg = null;
         let perQ = null;
-        if (others.length >= FLOOR) {
-          const all = [...firsts.values()];
-          avg = Math.round((all.reduce((n, a) => n + a.right_n / Math.max(1, Math.max(a.total, a.answered)), 0) / all.length) * 1000) / 1000;
+        // As section L: a fixed bucket, the first 3 (6, …) others to finish, without the viewer; the average to 0.1.
+        const counted = others.length >= FLOOR ? Math.floor(others.length / FLOOR) * FLOOR : 0;
+        const bucket = others.slice(0, counted);
+        if (counted) {
+          avg = Math.round((bucket.reduce((n, a) => n + a.right_n / Math.max(1, Math.max(a.total, a.answered)), 0) / bucket.length) * 10) / 10;
           perQ = Q.items
             .filter((i) => i.set_id === s.id)
             .sort((x, y) => x.pos - y.pos)
             .map((i) => {
-              const got = others.map((a) => firstOf(db, a.id, i.question_id)).filter(Boolean);
+              const got = bucket.map((a) => firstOf(db, a.id, i.question_id)).filter(Boolean);
               const r = got.filter((x) => x.correct).length;
               const band = got.length < FLOOR ? null : r / got.length < 0.34 ? 1 : r / got.length <= 0.66 ? 2 : 3;
               return { question_id: i.question_id, pos: i.pos, band };
             });
         }
         const names = [...firsts.keys()].filter((uid) => Q.prefs.get(uid)?.show_name).map((uid) => db.members.find((m) => m.user_id === uid)?.name).filter(Boolean).sort();
-        return json({ solvers: firsts.size, others: others.length, floor: FLOOR, mine: mine ? { answered: mine.answered, right_n: mine.right_n, total: mine.total } : null, avg, per_q: perQ, names });
+        return json({ solvers: firsts.size, others: others.length, counted, floor: FLOOR, mine: mine ? { answered: mine.answered, right_n: mine.right_n, total: mine.total } : null, avg, per_q: perQ, names });
       }
       case "study_qset_names_pref": {
         Q.prefs.set(me, { show_name: Boolean(body.p_on), asked_at: iso() });

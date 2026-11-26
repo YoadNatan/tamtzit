@@ -82,6 +82,8 @@ const START = ".ph-foot .mk-start-btn";
     await until(async () => /ליצור 10 שאלות · כ-\$/.test(norm(await shoham.locator(FOOT_GO).innerText())), 15000, "the price on the button");
     const shared = await shoham.locator(".mk-preview", { hasText: "הסט ישותף עם הקבוצה" }).count();
     check("create: the preview says the set is shared with the group (OD3)", shared === 1, String(shared));
+    // Written at a pace a person sees (the first ready question before the last).
+    P.p2pace = 1200;
     await shoham.locator(FOOT_GO).click();
     await until(async () => /v=sets&k=/.test(search(shoham)), 30000, "the set's page");
     const setId = new URL(shoham.url()).searchParams.get("k");
@@ -89,12 +91,29 @@ const START = ".ph-foot .mk-start-btn";
     check("create: with VITE_STUDY_SETS 'create' carries the set ({want}) and opens ?v=sets&k=", made?.body?.set?.want === 10 && Q.sets.length === 1 && Q.sets[0].id === setId, JSON.stringify(made?.body));
     await shoham.locator(".mk-ring").waitFor({ timeout: 15000 });
     const genHead = await text(shoham, ".ph-head h1");
-    await until(async () => (await shoham.locator(START).count()) > 0 && (await shoham.locator(".mk-qtiles > li[data-s=coming]").count()) === 0, 60000, "every question written");
-    await shot(shoham, "setsb-01-generating", { primary: START });
-    check("set page while made: 'סט בהכנה' with the ring and 'להתחיל לפתור' (the checked ones wait to be kept)", genHead.startsWith("סט בהכנה") && /להתחיל לפתור \(\d+\)/.test(norm(await shoham.locator(START).innerText())), genHead);
+    // The button as soon as one question is ready (read at once: the author's keep may follow quickly).
+    let startWords = "";
+    await until(async () => {
+      startWords = (await shoham.locator(START).count()) ? norm(await shoham.locator(START).first().innerText({ timeout: 1000 }).catch(() => "")) : "";
+      return Boolean(startWords);
+    }, 60000, "the first question ready");
+    if (await shoham.locator(START).count()) await shot(shoham, "setsb-01-generating", { primary: START });
+    check("set page while made: 'סט בהכנה' with the ring and 'להתחיל לפתור (k)' from the first ready question", genHead.startsWith("סט בהכנה") && /להתחיל לפתור \(\d+\)/.test(startWords), `${genHead} · ${startWords}`);
 
-    /* ── WP13: "להתחיל לפתור" keeps and solves the set (s=k.) with an attempt ── */
-    await shoham.locator(START).click();
+    P.p2pace = 250;
+    /* ── review UX-1: when writing ends, the author's device keeps the checked questions itself (auto-keep ships off, OD15) ── */
+    await until(async () => (await shoham.locator(".qs-page .qs-go").count()) > 0, 90000, "the set page after the author's own keep");
+    const keptAuto = Q.items.filter((i) => i.set_id === setId).length;
+    const pageHead = norm(await shoham.locator(".qs-head h1").innerText());
+    check(
+      "writing ended on the author's device: the checked questions joined the set with no tap, and the set page took over with 'לפתור' (one h1: the set's title)",
+      keptAuto >= 5 && (await shoham.locator("h1").count()) === 1 && /שאלות$/.test(pageHead) && norm(await shoham.locator(".qs-go").innerText()) === "לפתור",
+      JSON.stringify({ keptAuto, pageHead }),
+    );
+    await shot(shoham, "setsb-01b-ready-author", { primary: ".qs-go" });
+
+    /* ── WP13: "לפתור" solves the set (s=k.) with an attempt ── */
+    await shoham.locator(".qs-go").click();
     await until(async () => search(shoham).includes(`s=k.${setId}`), 15000, "the set's session");
     await shoham.locator(".pq-lead").first().waitFor({ timeout: 15000 });
     const items = Q.items.filter((i) => i.set_id === setId).length;
