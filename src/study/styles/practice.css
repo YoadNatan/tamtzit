@@ -505,3 +505,19 @@
 .pq-sofar[open] .pq-sofar-chev {
   transform: translateY(2px) rotate(-135deg);
 }
+
+/* Practice sets' fixes of the question at 390 px (docs/study/sets.md, design
+   §5.11; only with VITE_STUDY_MAKE, which sets --pq-foot-h): the bet card
+   scrolls clear of the bottom bar and the tab bar under it (without the
+   custom property the margin is invalid, so 0, as before), and what "לבדוק"
+   waits for is said right above it. */
+.practice-session .pq-bet {
+  scroll-margin-bottom: calc(var(--pq-foot-h) + 16px);
+}
+.practice-session > .ph-foot:has(> .pq-foot-note) {
+  flex-wrap: wrap;
+}
+.pq-foot-note {
+  flex-basis: 100%;
+  margin: 0;
+}

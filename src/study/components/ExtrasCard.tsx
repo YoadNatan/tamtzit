@@ -27,7 +27,8 @@ export default function ExtrasCard({ ctx, lectureId, slides }: { ctx: Ctx; lectu
   useEffect(() => {
     let alive = true;
     // The group's other tables are read only when this lecture has none (the empty state's meter).
-    if (flags.blankTable && !tables.length)
+    // With practice sets (§5.11) a lecture without a table shows no "טבלה ריקה" card, so nothing to read.
+    if (flags.blankTable && !tables.length && !flags.make)
       slideTables(ctx.group.id)
         .then((rows) => {
           const other = rows.filter((r) => r.lecture_id !== lectureId && shapeOk(r));
@@ -44,7 +45,7 @@ export default function ExtrasCard({ ctx, lectureId, slides }: { ctx: Ctx; lectu
     };
   }, [ctx.group.id, lectureId, tables.length]);
 
-  const blank = flags.blankTable ? blankMeter(tables.length, others ?? { tables: 0, lectures: 0 }) : null;
+  const blank = flags.blankTable && (tables.length || !flags.make) ? blankMeter(tables.length, others ?? { tables: 0, lectures: 0 }) : null;
   const traps = flags.traps && mine ? trapMeter(meterRows(mine), Date.now()) : null;
 
   return (
@@ -63,7 +64,7 @@ export default function ExtrasCard({ ctx, lectureId, slides }: { ctx: Ctx; lectu
                   <div>
                     <b dir="rtl">{isolateLatin(tableName(t), `bt${t.slide}`)}</b>
                     <span className="m">
-                      ש׳ <bdi dir="ltr">{t.slide}</bdi> · {t.rows.length} שורות
+                      {flags.make ? "שקף" : "ש׳"} <bdi dir="ltr">{t.slide}</bdi> · {t.rows.length} שורות
                     </span>
                   </div>
                   <span className="a-chip busy">למלא</span>
@@ -83,7 +84,8 @@ export default function ExtrasCard({ ctx, lectureId, slides }: { ctx: Ctx; lectu
         <section className="a-card extras-traps" aria-labelledby="traps-h">
           <div className="a-sec">
             <h2 id="traps-h">שאלה משלי</h2>
-            <span className="a-chip">רק לך</span>
+            {/* With practice sets (§5.11): the question is the group's, so not "רק לך". */}
+            {flags.make ? <span className="a-small a-muted traps-where">נכנסת לבנק של הקבוצה בלי שם</span> : <span className="a-chip">רק לך</span>}
           </div>
           {traps ? (
             <>

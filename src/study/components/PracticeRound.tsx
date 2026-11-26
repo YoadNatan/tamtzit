@@ -20,6 +20,10 @@ import { BackLink, Head, Loading, StickyActions } from "./Shell";
 
 const SOURCES: Source[] = ["new", "wrong", "flagged", "all"];
 type Size = "5" | "10" | "all";
+/** With practice sets (flags.make, design-practice §5.11): the member's own
+ *  sources in one person ("שלא עניתי · שטעיתי · שסימנתי לבדיקה"; a flag is
+ *  "סימנתי לבדיקה", never a bookmark). */
+const SOURCE_MINE: Record<Source, string> = { new: "שלא עניתי", wrong: "שטעיתי", flagged: "שסימנתי לבדיקה", all: "הכול" };
 
 export default function PracticeRound({ route, ctx }: ScreenProps<"practice">) {
   const lectureId = route.l ?? "";
@@ -66,7 +70,11 @@ export default function PracticeRound({ route, ctx }: ScreenProps<"practice">) {
   // The default: what was never answered and what was wrong, else everything.
   const from: Source[] = sources ?? (counts && counts.new + counts.wrong > 0 ? ["new", "wrong"] : ["all"]);
   const n = rows ? sessionCount(rows, { sources: from, parts: chosenParts, styles: pickStyles }) : 0;
-  const howMany: Size = size ?? (n > 10 ? "10" : "all");
+  // "הכול (n)" only where it differs from a size (§5.11: "10" and "10 · הכול" both read as 10).
+  const allShown = !flags.make || (n !== 5 && n !== 10);
+  const sizes: Size[] = allShown ? ["5", "10", "all"] : ["5", "10"];
+  const chosen: Size = size ?? (n > 10 ? "10" : "all");
+  const howMany: Size = chosen === "all" && !allShown ? (String(n) as Size) : chosen;
   const asked = howMany === "all" ? n : Math.min(n, Number(howMany));
 
   if (error) {
@@ -127,7 +135,7 @@ export default function PracticeRound({ route, ctx }: ScreenProps<"practice">) {
               return (
                 <button key={s} type="button" className={`a-chip${on ? " busy" : ""}`} aria-pressed={on} onClick={() => toggleSource(s)}>
                   {on ? "✓ " : ""}
-                  {SOURCE_HE[s]} · {counts[s]}
+                  {(flags.make ? SOURCE_MINE : SOURCE_HE)[s]} · {counts[s]}
                 </button>
               );
             })}
@@ -194,9 +202,9 @@ export default function PracticeRound({ route, ctx }: ScreenProps<"practice">) {
             <h2 id="size-h">כמה</h2>
           </div>
           <div className="a-seg pr-size" role="radiogroup" aria-labelledby="size-h">
-            {(["5", "10", "all"] as Size[]).map((x) => (
+            {sizes.map((x) => (
               <button key={x} type="button" className="a-btn" role="radio" aria-checked={howMany === x} onClick={() => setSize(x)}>
-                {x === "all" ? `${n} · הכול` : x}
+                {x === "all" ? (flags.make ? `הכול (${n})` : `${n} · הכול`) : x}
               </button>
             ))}
           </div>

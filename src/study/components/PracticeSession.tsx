@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { TrapChip } from "../features/extras";
 import { ASPECTS } from "../../../shared/study/aspects";
 import { studyDay } from "../../../shared/study/day";
@@ -403,6 +403,28 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     timedOut.current = id;
     void choose(null, null);
   }, [timed, over, id, sending, remaining, choose]);
+
+  // With practice sets (§5.11): "כמה בטוחים?" scrolls clear of the bottom bar on a
+  // 390 px phone. The bar's height (and the tab bar under it) is measured into
+  // --pq-foot-h, which the bet card's scroll-margin-bottom reads.
+  // Measured in the commit (before reveal()'s frame), so the note's own line counts.
+  const qid = q?.id;
+  const noteNow = ready && bet === null && !sending;
+  useLayoutEffect(() => {
+    if (!flags.make || over || phase !== "ready") return;
+    const foot = document.querySelector<HTMLElement>(".practice-session > .ph-foot");
+    const main = foot?.parentElement;
+    if (!foot || !main) return;
+    const set = () => main.style.setProperty("--pq-foot-h", `${Math.ceil(foot.offsetHeight + (parseFloat(getComputedStyle(foot).bottom) || 0))}px`);
+    set();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(set);
+    ro?.observe(foot);
+    window.addEventListener("resize", set);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", set);
+    };
+  }, [over, phase, qid, noteNow]);
 
   // Desktop keys: 1-6 pick an option, Enter checks (with a bet) or goes on. Enter counts on an option or a
   // bet too: a mouse click leaves the focus there, and that is where the next Enter comes from.
@@ -840,9 +862,23 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
               </button>
             </>
           ) : (
-            <button type="button" className="a-btn primary wide" disabled={!ready || bet === null || sending} onClick={check}>
-              {sending ? "בודקים…" : "לבדוק"}
-            </button>
+            <>
+              {/* What "לבדוק" waits for, right above it (§5.11; with practice sets). */}
+              {flags.make && noteNow ? (
+                <p id="pq-check-why" className="a-small a-muted pq-foot-note">
+                  קודם לבחור כמה בטוחים
+                </p>
+              ) : null}
+              <button
+                type="button"
+                className="a-btn primary wide"
+                disabled={!ready || bet === null || sending}
+                aria-describedby={flags.make && noteNow ? "pq-check-why" : undefined}
+                onClick={check}
+              >
+                {sending ? "בודקים…" : "לבדוק"}
+              </button>
+            </>
           )}
         </StickyActions>
       ) : null}

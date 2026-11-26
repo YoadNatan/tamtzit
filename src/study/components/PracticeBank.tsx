@@ -260,7 +260,7 @@ export default function PracticeBank({ route, ctx }: ScreenProps<"practice">) {
             <span className={`a-chip ${v.tone} pb-verdict`.replace("  ", " ")}>{v.text}</span>
             {d.slides.length ? (
               <span className="a-tag src-tag">
-                ש׳ <bdi dir="ltr">{slidesText(d.slides)}</bdi>
+                {flags.make ? "שקף" : "ש׳"} <bdi dir="ltr">{slidesText(d.slides)}</bdi>
               </span>
             ) : null}
           </span>
@@ -283,7 +283,16 @@ export default function PracticeBank({ route, ctx }: ScreenProps<"practice">) {
           );
         })}
         {d.check_state === "failed" ? (
-          <p className="a-small a-muted">{rewriting ? "נכתבת מחדש אוטומטית." : <>בבדיקה, <bdi dir="ltr">Claude</bdi> ענה אחרת מהמפתח. אפשר לנסח אותה מחדש או להוריד.</>}</p>
+          <p className="a-small a-muted">{rewriting ? (
+            "נכתבת מחדש אוטומטית."
+          ) : flags.make ? (
+            // With practice sets: no model's name in member copy (§5.11).
+            "הבדיקה ענתה אחרת מהמפתח. אפשר לנסח אותה מחדש או להוריד."
+          ) : (
+            <>
+              בבדיקה, <bdi dir="ltr">Claude</bdi> ענה אחרת מהמפתח. אפשר לנסח אותה מחדש או להוריד.
+            </>
+          )}</p>
         ) : d.check_state === "unchecked" ? (
           <p className="a-small a-muted">הבדיקה לא הספיקה לבדוק אותה. אפשר להשאיר אותה בכל זאת.</p>
         ) : null}

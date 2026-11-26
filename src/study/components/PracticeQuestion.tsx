@@ -169,7 +169,8 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
       </span>
       {based ? (
         <span className="a-small a-muted pq-based">
-          מבוסס על ש׳ <bdi dir="ltr">{based}</bdi>
+          {/* With practice sets the slide is said in full (§5.11: "ש׳" was never defined). */}
+          {buildFlags.make ? "מבוסס על שקף" : "מבוסס על ש׳"} <bdi dir="ltr">{based}</bdi>
         </span>
       ) : null}
     </div>
