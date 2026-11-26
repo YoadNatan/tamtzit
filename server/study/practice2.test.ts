@@ -968,13 +968,24 @@ const SET_OPTIONS = { level: "custom", count: 3, parts: [0], styles: ["case"], d
 const L_SCHEMA = () => ({ ...REQUIRED_SCHEMA, Q: 2, L: 1 });
 const lCalls = () => log.filter((l) => /^\/rest\/v1\/(rpc\/study_(qset|qsets|lecture_making)|study_qset)/.test(l.path)).map((l) => l.path);
 
-test("create without a set takes exactly today's path: no RPC of section L, even with L installed (D12)", async () => {
+test("create without a set takes today's path; with L installed it reads only the sets line, and past it is 402 sets_line (OD12)", async () => {
   schemaAnswer = L_SCHEMA();
   const r = await call({ action: "create", options: SET_OPTIONS });
   assert.equal(r.status, 200);
   assert.equal(r.json.set, undefined);
   assert.equal(rpcs("study_request_create").length, 1);
-  assert.deepEqual(lCalls(), []);
+  assert.deepEqual(lCalls(), ["/rest/v1/rpc/study_qset_room"], "one read of L: the line, never a set");
+  // The old screens (OD22) and rounds cannot write past the sets line either.
+  log = [];
+  roomRow = { sets_usd: 12, today: 0 };
+  const past = await call({ action: "create", options: SET_OPTIONS });
+  assert.deepEqual([past.status, past.json], [402, { error: "sets_line" }]);
+  assert.equal(rpcs("study_request_create").length, 0);
+  // The day's sets are not counted for a request without a set; a figure that cannot be read checks nothing.
+  roomRow = { sets_usd: 1, today: 9 };
+  assert.equal((await call({ action: "create", options: SET_OPTIONS })).status, 200);
+  roomRow = "forbidden";
+  assert.equal((await call({ action: "create", options: SET_OPTIONS })).status, 200);
 });
 
 test("create with a set: the lines checked, the set begun (5 a day, the $12 line, no focus), then its request through study_qset_attach", async () => {
@@ -1018,27 +1029,54 @@ test("create with a set: a malformed set or a set in a round is 400 bad set", as
   assert.equal(rpcs("study_qset_begin").length, 0);
 });
 
-test("create with a set and stale points: begun as reading, answered with the phase; the second call with set.id attaches, never begins again", async () => {
+test("create with a set and stale points: 409 points stale (nothing begun) unless the phone asks for the read phase; the second call with set.id attaches, never begins again", async () => {
   schemaAnswer = L_SCHEMA();
   pointsState = state([false, true]);
-  const r = await call({ action: "create", options: SET_OPTIONS, set: { want: 3 } });
+  // Points gone stale between plan and "ליצור": as without a set, the screen reads them first (MakeJob).
+  const stale = await call({ action: "create", options: SET_OPTIONS, set: { want: 3 } });
+  assert.deepEqual([stale.status, stale.json], [409, { error: "points stale" }]);
+  assert.equal(rpcs("study_qset_begin").length, 0, "no set is begun that nobody would read for");
+  const r = await call({ action: "create", options: SET_OPTIONS, set: { want: 3, phase: "read" } });
   assert.deepEqual([r.status, r.json], [200, { set: { id: QSET, state: "reading" }, phase: "read" }]);
   assert.equal(args(rpcs("study_qset_begin")[0]).p_phase, "read");
   assert.equal(rpcs("study_qset_attach").length + rpcs("study_request_create").length, 0, "no request before the points are read");
   // Still stale on the second call: 409, as without a set.
+  const fresh = () => new Date().toISOString();
+  qsetRows = [{ id: QSET, lecture_id: LECTURE, state: "reading", want: 3, updated_at: fresh(), options: {} }];
   const early = await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } });
   assert.deepEqual([early.status, early.json], [409, { error: "points stale" }]);
   // Read: the second call plans with the fresh points and attaches.
   pointsState = state([true, true]);
-  qsetRows = [{ id: QSET, lecture_id: LECTURE, state: "reading", options: {} }];
   log = [];
   const second = await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } });
   assert.equal(second.status, 200);
   assert.deepEqual(second.json.set, { id: QSET, state: "making" });
   assert.equal(rpcs("study_qset_begin").length, 0);
   assert.equal(args(rpcs("study_qset_attach")[0]).p_set, QSET);
+  assert.deepEqual(args(rpcs("study_qset_room")[0]), { p_group: GROUP }, "the lines are checked again with the real plan");
+  // Never more than the set began with: a set of 2 plans 2, whatever the options ask.
+  log = [];
+  qsetRows = [{ id: QSET, lecture_id: LECTURE, state: "reading", want: 2, updated_at: fresh(), options: {} }];
+  assert.equal((await call({ action: "create", options: { ...SET_OPTIONS, count: 40 }, set: { want: 3, id: QSET } })).status, 200);
+  assert.equal(args(rpcs("study_qset_attach")[0]).p_request.count, 2);
+  // Past the line or the day: the line refuses the continuation, the day's count does not (this set is in it).
+  roomRow = { sets_usd: 0, today: 5 };
+  assert.equal((await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } })).status, 200);
+  roomRow = { sets_usd: 12, today: 0 };
+  assert.deepEqual((await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } })).json, { error: "sets_line" });
+  roomRow = { sets_usd: 0, today: 0 };
+  // Not reading any more, or read more than 10 minutes ago: 409 set not reading.
+  for (const row of [
+    { state: "making", updated_at: fresh() },
+    { state: "reading", updated_at: new Date(Date.now() - 11 * 60_000).toISOString() },
+    { state: "reading", updated_at: null },
+  ]) {
+    qsetRows = [{ id: QSET, lecture_id: LECTURE, want: 3, options: {}, ...row }];
+    const late = await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } });
+    assert.deepEqual([late.status, late.json], [409, { error: "set not reading" }], JSON.stringify(row));
+  }
   // Another lecture's set, or one the member cannot see.
-  qsetRows = [{ id: QSET, lecture_id: "11111111-0000-4000-8000-000000000099", state: "reading", options: {} }];
+  qsetRows = [{ id: QSET, lecture_id: "11111111-0000-4000-8000-000000000099", state: "reading", updated_at: fresh(), options: {} }];
   assert.deepEqual((await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } })).json, { error: "bad set" });
   qsetRows = [];
   const gone = await call({ action: "create", options: SET_OPTIONS, set: { want: 3, id: QSET } });
@@ -1051,14 +1089,22 @@ test("create with a set and an example: phase style; the signature kept on the s
   assert.deepEqual(r.json, { set: { id: QSET, state: "reading" }, phase: "style" });
   assert.equal(args(rpcs("study_qset_begin")[0]).p_phase, "style");
   // The example read on the generating screen: action style with the set's id keeps the signature.
+  qsetRows = [{ id: QSET, lecture_id: LECTURE, state: "reading", want: 3, updated_at: new Date().toISOString(), options: {} }];
   styleReplies = [{ styles: [{ description: "מקרה קצר עם גיל ומין.", example: "אישה בת 28 עם חום.\nמה הצעד הבא?", options: 4, case: true, readable: true }] }];
   const st = await call({ action: "style", text: "אישה בת 28 עם חום. מה הצעד הבא?", setId: QSET });
   assert.equal(st.status, 200);
   const [kept] = rpcs("study_qset_style").map(args);
   assert.deepEqual(kept, { p_set: QSET, p_sig: st.json.sig, p_key: KEY });
   assert.deepEqual((await call({ action: "style", text: "שאלה?", setId: "nope" })).json, { error: "bad set" });
+  // A set on another lecture (or none the member sees) is refused before the paid read.
+  const paid = models().length;
+  qsetRows = [{ id: QSET, lecture_id: "11111111-0000-4000-8000-000000000099", state: "reading", options: {} }];
+  assert.deepEqual((await call({ action: "style", text: "שאלה?", setId: QSET })).json, { error: "bad set" });
+  qsetRows = [];
+  assert.deepEqual((await call({ action: "style", text: "שאלה?", setId: QSET })).json, { error: "bad set" });
+  assert.equal(models().length, paid, "no model call for a set that is not this lecture's");
   // The second call: the same style passes, another one signed for this lecture does not.
-  qsetRows = [{ id: QSET, lecture_id: LECTURE, state: "reading", options: { style_sig: st.json.sig } }];
+  qsetRows = [{ id: QSET, lecture_id: LECTURE, state: "reading", want: 3, updated_at: new Date().toISOString(), options: { style_sig: st.json.sig } }];
   const style = { description: st.json.description, example: st.json.example, sig: st.json.sig };
   const ok = await call({ action: "create", options: { ...SET_OPTIONS, style }, set: { want: 3, id: QSET } });
   assert.equal(ok.status, 200);

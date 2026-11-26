@@ -696,7 +696,11 @@ export type CreateAnswer = {
  *  `phase` "style" when an example is to be read first (the server adds
  *  "read" by itself when the points are stale), `id` the set begun by an
  *  earlier call that answered a phase. */
-export type SetBody = { title?: string; want: number; phase?: "style"; id?: string };
+/** phase: "style" when an example is to be read first; "read" when the
+ *  phone asks the server to begin the set while the lecture's points are
+ *  still to be read (no screen sends it in v1: MakeJob reads them first and
+ *  then creates; without it, stale points are 409 "points stale" as before). */
+export type SetBody = { title?: string; want: number; phase?: "style" | "read"; id?: string };
 export const SET_TITLE_MAX = 80;
 export const SET_WANT_MAX = 40;
 

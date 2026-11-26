@@ -490,6 +490,7 @@ const SET_STATUS: Record<string, number> = {
   off: 402,
   "set not found": 404,
   "set has a request": 409,
+  "set not reading": 409,
 };
 
 /** The body's set: absent is a request as before (D12: no set, nothing of
@@ -506,7 +507,8 @@ function setBodyOf(raw: unknown): SetBody | null {
   if (o.phase !== undefined && o.phase !== null && o.phase !== "style" && o.phase !== "read") throw new HttpError(400, "bad set");
   const id = o.id === undefined || o.id === null ? null : idOf(o.id);
   if (o.id !== undefined && o.id !== null && !id) throw new HttpError(400, "bad set");
-  return { want, ...(title ? { title } : {}), ...(o.phase === "style" ? { phase: "style" as const } : {}), ...(id ? { id } : {}) };
+  const phase = o.phase === "style" || o.phase === "read" ? o.phase : null;
+  return { want, ...(title ? { title } : {}), ...(phase ? { phase } : {}), ...(id ? { id } : {}) };
 }
 
 /** A set's default title (design §8.3): "{lecture} · {n} שאלות", the
@@ -523,7 +525,7 @@ export function setTitle(lectureTitle: string, n: number): string {
  *  so a member at the limit hears that and not "too big"; study_qset_begin
  *  checks the day and the sets line again under its lock. A figure that
  *  cannot be read checks nothing. */
-async function setHeadroom(sb: SupabaseClient, groupId: string, expectedUsd: number): Promise<void> {
+async function setHeadroom(sb: SupabaseClient, groupId: string, expectedUsd: number, daily = true): Promise<void> {
   const [spent, mine, roomRes] = await Promise.all([
     sb.rpc("study_spent", { p_group: groupId }),
     sb.rpc("study_my_spent", { p_group: groupId }),
@@ -537,24 +539,47 @@ async function setHeadroom(sb: SupabaseClient, groupId: string, expectedUsd: num
   if (group80 !== null && group80 <= 0) throw new HttpError(402, "reserve");
   if (member40 !== null && member40 <= 0) throw new HttpError(402, "member_share");
   if (line !== null && line <= 0) throw new HttpError(402, "sets_line");
-  if (r && r.today >= SETS_DAILY) throw new HttpError(402, "daily_limit");
+  if (daily && r && r.today >= SETS_DAILY) throw new HttpError(402, "daily_limit");
   const known = [group80, member40, line].filter((x): x is number => x !== null);
   if (known.length && Math.min(...known) < expectedUsd + SET_MARGIN_USD) throw new HttpError(402, "too_big");
 }
 /** What must stay free beyond a set's expected cost when it begins (design §8.3). */
 export const SET_MARGIN_USD = 1;
 
+/** A set's reading phase lasts at most this long (the points' lease and a
+ *  style read fit in it); a later second call is 409 "set not reading". */
+export const SET_READING_MS = 10 * 60_000;
+
 /** The set a second call continues (after its reading phase): the member's
- *  group's, on this lecture; a style other than the one its phase signed
- *  is 400 "bad style". study_qset_attach checks the author again. */
-async function setToContinue(sb: SupabaseClient, setId: string, lectureId: string, options: Options): Promise<void> {
-  const { data, error } = await sb.from("study_qsets").select("id, lecture_id, state, options").eq("id", setId);
+ *  group's, on this lecture, still reading and begun (or last moved) in the
+ *  last 10 minutes (else 409 "set not reading"); a style other than the one
+ *  its phase signed is 400 "bad style". Answers what the set wants: the
+ *  request may not plan more (the size checked when it began).
+ *  study_qset_attach checks the author again. */
+async function setToContinue(sb: SupabaseClient, setId: string, lectureId: string, options: Options, now = Date.now()): Promise<number> {
+  const { data, error } = await sb.from("study_qsets").select("id, lecture_id, state, want, updated_at, options").eq("id", setId);
   if (error) throw new HttpError(500, error.message);
-  const row = ((data ?? []) as Array<{ id: string; lecture_id: string | null; state: string; options: { style_sig?: string } | null }>)[0];
+  const row = (
+    (data ?? []) as Array<{ id: string; lecture_id: string | null; state: string; want?: number; updated_at?: string; options: { style_sig?: string } | null }>
+  )[0];
   if (!row) throw new HttpError(404, "set not found");
   if (row.lecture_id !== lectureId) throw new HttpError(400, "bad set");
+  const moved = row.updated_at ? Date.parse(row.updated_at) : NaN;
+  if (row.state !== "reading" || !(now - moved <= SET_READING_MS)) throw new HttpError(409, "set not reading");
   const kept = row.options?.style_sig;
   if (kept && options.style && options.style.sig.toLowerCase() !== kept) throw new HttpError(400, "bad style");
+  return Math.max(1, Math.min(SET_WANT_MAX, Number(row.want) || SET_WANT_MAX));
+}
+
+/** Any "create" without a set once section L 1 is installed (the old
+ *  generator screens, kept one release, OD22, and rounds over several
+ *  lectures): the sets line (OD12) holds there too, since it counts the same
+ *  kinds (practice, solver, reword, style). One read; a figure that cannot
+ *  be read checks nothing. */
+async function lineHolds(sb: SupabaseClient, groupId: string): Promise<void> {
+  if (!(await schemaHas(sb, { L: 1 }))) return;
+  const r = roomOf(await sb.rpc("study_qset_room", { p_group: groupId }));
+  if (r && room(setsMonthlyCap(), r.setsUsd) <= 0) throw new HttpError(402, "sets_line");
 }
 
 /** { lectureId, options, set?, force? }: checks the options (400), the
@@ -574,7 +599,7 @@ async function setToContinue(sb: SupabaseClient, setId: string, lectureId: strin
  *  study_qset_attach; a refusal there abandons the set and keeps Q's code. */
 export const createAction: Op = async (req, body) => {
   const lectureId = lectureIdOf(body);
-  const options = optionsOf(body.options);
+  let options = optionsOf(body.options);
   const planId = planIdOf(body);
   const set = setBodyOf(body.set);
   // Sets over several lectures are course sets (WP20, not in v1).
@@ -589,6 +614,11 @@ export const createAction: Op = async (req, body) => {
   const lecture = await loadLecture(sb, lectureId);
   if (options.style && !(await verifyStyle(key, lectureId, options.style))) throw new HttpError(400, "bad style");
   await needTypes(sb, options.styles);
+  // A second call continues its set (still reading, at most its size).
+  const continued = set?.id ? await setToContinue(sb, set.id, lectureId, options) : null;
+  if (continued !== null && options.count !== undefined) options = { ...options, count: Math.min(options.count, continued) };
+  // Without a set, the sets line still holds (once L 1 is installed).
+  if (!set) await lineHolds(sb, lecture.group_id);
   const [state, points, sections, bank] = await Promise.all([
     pointsState(sb, lectureId),
     planPoints(sb, lectureId),
@@ -601,13 +631,16 @@ export const createAction: Op = async (req, body) => {
   // A part still being written has no points yet; one whose text changed is read again first.
   if (chosen.some((s) => s.summary !== "ready")) throw new HttpError(409, "summary not ready");
   const stale = chosen.filter((s) => !s.current).map((s) => s.part_idx);
-  // A set begun now reads them as its first phase; anything else needs them current.
-  const phaseRead = stale.length > 0 && set !== null && !set.id;
+  // A set begun now reads them as its first phase only when the phone asks
+  // for that (set.phase "read"); anything else needs them current, so a part
+  // gone stale after "plan" is 409 and the screen reads it first (MakeJob).
+  const phaseRead = stale.length > 0 && set !== null && !set.id && set.phase === "read";
   if (stale.length && !phaseRead) throw new HttpError(409, "points stale");
   const facts = partFacts(lecture, state, (sections.data ?? []) as Array<{ idx: number; markdown: string | null }>, points);
   // Fresh first, as plan showed it (practice sets D5).
   const plan = planRequest({ points, level: options.level, count: options.count, parts, styles: options.styles, partFacts: facts, covered: bank.covered });
   if (plan.total === 0 && !phaseRead) throw new HttpError(400, "no points");
+  if (continued !== null && plan.total > continued) throw new HttpError(400, "bad set");
   const used = plan.parts.filter((p) => p.questions > 0).map((p) => p.part_idx);
   if (planId) {
     // Checked first, to answer at once; study_request_create_in_plan checks
@@ -630,7 +663,8 @@ export const createAction: Op = async (req, body) => {
   };
   let setId: string | null = null;
   if (set?.id) {
-    await setToContinue(sb, set.id, lectureId, options);
+    // The lines again with the real plan (the day's count already has this set).
+    await setHeadroom(sb, lecture.group_id, requestUsd(plannedStyles(plan)), false);
     setId = set.id;
   } else if (set) {
     const phase: CreatePhase["phase"] | null = phaseRead ? "read" : set.phase === "style" ? "style" : null;
@@ -778,6 +812,12 @@ export const styleAction: Op = async (req, body, started) => {
   const client = anthropic();
   const key = serverKey();
   const lecture = await loadLecture(sb, lectureId);
+  // Only a set on this lecture (study_qset_style takes only the author's own), before the paid read.
+  if (setId) {
+    const own = await sb.from("study_qsets").select("id, lecture_id").eq("id", setId);
+    const row = ((own.data ?? []) as Array<{ lecture_id: string | null }>)[0];
+    if (own.error || !row || row.lecture_id !== lectureId) throw new HttpError(400, "bad set");
+  }
   const user: Anthropic.Beta.BetaContentBlockParam[] = [
     ...(example.image ? [{ type: "image" as const, source: { type: "base64" as const, media_type: example.image.media_type, data: example.image.data } }] : []),
     { type: "text", text: styleReadRequest({ text: example.text, image: example.image !== null }) },
