@@ -36,6 +36,7 @@ import { useMedia, WIDE_L } from "../lib/useMedia";
 import { useLectureN } from "../features/anchor";
 import { ReaderGuideChip } from "../features/guide";
 import { NotifyOffer } from "../features/notify";
+import { MakeLectureRow } from "../features/qsets";
 import { ParagraphSheet, useLectureK } from "../features/collab";
 import { useLectureM } from "../features/meeting";
 import { useLectureA } from "../features/progress";
@@ -1015,7 +1016,9 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
                 <span className="a-small a-muted">{readers.length ? `קראו: ${readers.join(", ")}` : "עוד אין סימוני קריאה"}</span>
               </div>
             ) : null}
-            {after && readyCount > 0 ? (
+            {after && readyCount > 0 && flags.make ? (
+              <MakeLectureRow ctx={ctx} lectureId={lectureId} />
+            ) : after && readyCount > 0 ? (
               <RouteLink to={after} go={ctx.go} className="a-btn after-reading">
                 אחרי הקריאה: תרגול על ההרצאה
               </RouteLink>

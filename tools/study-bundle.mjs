@@ -86,7 +86,7 @@ const COMPONENT = {
   S: ["CourseScreen", "UploadMany", "CourseAsk"],
   L: ["InstallScreen", "InstallParts"],
   R: ["NotifyScreen", "InboxScreen", "NotifyParts"],
-  QS: ["MakeScreen", "MakeParts", "MakeProgress", "SetPage", "SetsShelf", "SetStats", "SetCard"],
+  QS: ["MakeScreen", "MakeParts", "MakeProgress", "MakeEntry", "SetPage", "SetsShelf", "SetStats", "SetCard"],
 };
 const LIB = {
   W: ["generate", "writing", "transcript", "transcribe", "transcribe.worker", "pdf-export"],

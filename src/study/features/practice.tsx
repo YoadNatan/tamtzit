@@ -127,8 +127,10 @@ function ExamsHome({ ctx }: { ctx: Ctx }) {
   );
 }
 
-/** The library card's practice chip for a lecture ("15 שאלות"), or null. */
-export function usePracticeChip(ctx: Ctx): (lectureId: string) => ReactNode {
+/** The library card's practice chip for a lecture ("15 שאלות"), or null; with
+ *  practice sets (flags.make) also "+ סט" for a lecture whose summary is ready,
+ *  even with no questions yet (design-practice §5.1). */
+export function usePracticeChip(ctx: Ctx): (lectureId: string, ready?: boolean) => ReactNode {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const groupId = ctx.group.id;
   useEffect(() => {
@@ -159,14 +161,21 @@ export function usePracticeChip(ctx: Ctx): (lectureId: string) => ReactNode {
   }, [groupId]);
   const go = ctx.go;
   return useCallback(
-    (lectureId: string) => {
+    (lectureId: string, ready?: boolean) => {
       const n = counts[lectureId] ?? 0;
-      if (!flags.questions || n < 1) return null;
-      return (
-        <RouteLink key="practice" to={{ v: "practice", l: lectureId }} go={go} className="a-chip busy">
-          {n === 1 ? "שאלה אחת" : `${n} שאלות`}
-        </RouteLink>
-      );
+      const count =
+        flags.questions && n > 0 ? (
+          <RouteLink key="practice" to={{ v: "practice", l: lectureId }} go={go} className="a-chip busy">
+            {n === 1 ? "שאלה אחת" : `${n} שאלות`}
+          </RouteLink>
+        ) : null;
+      if (!flags.make || !ready) return count;
+      return [
+        count,
+        <RouteLink key="set" to={{ v: "practice", l: lectureId, x: "new" }} go={go} className="a-chip lc-set" label="סט חדש">
+          + סט
+        </RouteLink>,
+      ];
     },
     [counts, go],
   );

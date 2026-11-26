@@ -283,7 +283,7 @@ export default function Library({ ctx }: { ctx: Ctx }) {
                 const status = l.status === "new" && l.queued_at ? { label: "ממתינה לשרת", cls: "a-chip" } : STATUS[l.status];
                 const who = reads.filter((r) => r.lecture_id === l.id).map((r) => nameOf(r.user_id)).filter(Boolean);
                 const open = questions[l.id] ?? 0;
-                const p = practiceChip(l.id);
+                const p = practiceChip(l.id, l.status === "ready");
                 const c = cardsChip(l.id);
                 const k = editsChip(l.id);
                 return (

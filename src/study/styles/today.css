@@ -335,3 +335,13 @@ html:has(main.today:not(.t-session) > .t-start) {
     animation: a-burst-in 0.7s ease-out 0.05s 1 backwards;
   }
 }
+
+/* Practice sets' card "תרגול" (flags.make, docs/study/sets.md): "סט חדש"
+   beside the bank; two quiet links while the queue has the primary. */
+.today .t-practice > .a-btn {
+  justify-self: start;
+}
+.today .t-practice-go {
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-6);
+}

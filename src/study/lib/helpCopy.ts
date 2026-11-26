@@ -189,6 +189,12 @@ export function helpRows(f: Flags, w: WritingHelp, ends: Ends = ENDS): HelpRow[]
           ),
     },
     {
+      // practice sets, slice A (docs/study/sets.md; design-practice §6.1 help.row)
+      title: "סט חדש",
+      on: f.make,
+      text: "״סט חדש״ נמצא בהיום, בעמוד ההרצאה, בצ׳יפ ״+ סט״ בספרייה ובתרגול. בוחרים הרצאה וכמה שאלות, ולפני שיוצרים רואים אילו סוגי שאלות ייכתבו, כמה מההרצאה יהיה מכוסה בבנק אחרי הסט, ואת המחיר על הכפתור, מהתקציב של הקבוצה. כל השאר תחת ״עוד אפשרויות״. כל שאלה נבדקת לפני שהיא נכנסת לבנק של הקבוצה, ואפשר להתחיל לפתור כשהשאלות הראשונות מוכנות. חלק של הרצאה שנקרא מחדש מתחיל את הכיסוי שלו מאפס.",
+    },
+    {
       // question types (docs/study/question-types.md)
       title: "סוגי שאלות",
       on: f.qtypes,

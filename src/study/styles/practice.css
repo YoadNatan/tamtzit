@@ -521,3 +521,22 @@
   flex-basis: 100%;
   margin: 0;
 }
+
+/* Practice sets' hub (flags.make, design §5.2): the "סט חדש" card first,
+   outlined in the accent; then "תרגול מהבנק"; the group quiz last. */
+.practice-make-card {
+  border-color: var(--accent);
+}
+.practice-make-card .a-h2 {
+  gap: var(--sp-3);
+}
+.practice-make-go {
+  justify-self: start;
+}
+.practice-bank-h {
+  margin-block-start: var(--sp-3);
+}
+.practice-quiz-end {
+  justify-self: start;
+  align-self: flex-start;
+}

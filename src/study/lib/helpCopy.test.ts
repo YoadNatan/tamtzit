@@ -76,6 +76,7 @@ const RELEASES: Array<[string, string[]]> = [
   ["the courses alone", ["COURSES"]],
   // Production now (mock.cjs's "s2"): R12's EXAMS alone leaves f.exams off (flags.ts: practice && COURSES && EXAMS).
   ["production (27 flags, s2)", [...S2]],
+  ["production with practice sets' generator (pm)", [...S2, "INSTALL", "NOTIFY", "MAKE"]],
 ];
 const flagSet = (names: string[]): Flags => flagsFrom(Object.fromEntries(names.map((n) => [`VITE_STUDY_${n}`, "1"])));
 const W = { serverWrites: false, devicePrint: false };
@@ -99,6 +100,7 @@ const HELP: Array<[string, (f: Flags) => boolean]> = [
   ["מחלוקות", (f) => f.var],
   ["סימון קריאה", () => true],
   ["תרגול", (f) => f.practice],
+  ["סט חדש", (f) => f.make], // practice sets (docs/study/sets.md)
   ["סוגי שאלות", (f) => f.qtypes], // question types (docs/study/question-types.md)
   ["מבחנים קודמים", (f) => f.exams],
   ["שאלה משלי", (f) => f.traps],

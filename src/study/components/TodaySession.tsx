@@ -321,7 +321,7 @@ export default function TodaySession({ ctx }: { ctx: Ctx }) {
         </section>
         {flags.questions ? (
           <RouteLink to={{ v: "practice" }} go={ctx.go} className="a-btn ghost t-free">
-            תרגול חופשי
+            {flags.make ? "תרגול מהבנק" : "תרגול חופשי"}
           </RouteLink>
         ) : null}
         <StickyActions>

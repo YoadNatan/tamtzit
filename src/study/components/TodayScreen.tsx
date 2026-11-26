@@ -45,7 +45,8 @@ import ErrorBoundary from "./ErrorBoundary";
  * its line on a tap); "בקבוצה": the newest open question that is not hers;
  * T-2's "הקבוצה צריכה אותך" (opt-in; its meter when nothing waits) and,
  * from two days before the plan's exam, the exam-eve view's card (package
- * G's EveCard); and "תרגול חופשי". The queue is one table
+ * G's EveCard); and "תרגול חופשי" (with practice sets, the card "תרגול":
+ * "תרגול מהבנק" and "סט חדש"). The queue is one table
  * (shared/study/today.ts): each row waits for its own flag, so the screen
  * opens with whatever this build has (decision 1 of 17 Nov 2026: no
  * account). Everything on it is hers alone, except the meeting and the
@@ -66,6 +67,38 @@ function Example({ kind, text, slides, k }: { kind: string; text?: string; slide
         </>
       ) : null}
     </span>
+  );
+}
+
+/** Practice sets (flags.make, design §5.1): the card "תרגול" in place of the
+ *  ghost "תרגול חופשי". With an empty queue the free primary is the bar's
+ *  "תרגול מהבנק" (the hub's lectures) and the card holds "סט חדש"; with a
+ *  queue the card is two quiet links, so the queue keeps the screen's one
+ *  primary. "סט חדש" opens on the last lecture read (x=new without a lecture). */
+function PracticeCard({ ctx, queue }: { ctx: Ctx; queue: boolean }) {
+  return (
+    <section className="a-card flat t-practice" aria-labelledby="t-practice-h">
+      <h2 id="t-practice-h" className="a-h2">
+        תרגול
+      </h2>
+      {queue ? (
+        <div className="a-row t-practice-go">
+          <RouteLink to={{ v: "practice", x: "new" }} go={ctx.go} className="a-link t-make">
+            סט חדש ‹
+          </RouteLink>
+          <RouteLink to={{ v: "practice" }} go={ctx.go} className="a-link t-free">
+            תרגול מהבנק ‹
+          </RouteLink>
+        </div>
+      ) : (
+        <>
+          <p className="a-small a-muted">שאלות חדשות על הרצאה, נבדקות לפני הבנק</p>
+          <RouteLink to={{ v: "practice", x: "new" }} go={ctx.go} className="a-btn t-make">
+            סט חדש
+          </RouteLink>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -188,7 +221,7 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
           </button>
         ) : ready && flags.questions ? (
           <RouteLink to={{ v: "practice" }} go={ctx.go} className="a-btn primary wide t-free">
-            תרגול חופשי
+            {flags.make ? "תרגול מהבנק" : "תרגול חופשי"}
           </RouteLink>
         ) : null}
         {flame ? (
@@ -209,6 +242,7 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
           {flameLine(flame.days)}
         </p>
       ) : null}
+      {ready && !cut.items.length && flags.make ? <PracticeCard ctx={ctx} queue={false} /> : null}
       {flags.guide && offerBelow ? <GuideHome ctx={ctx} home="today" queue={ready ? cut.items.length : null} /> : null}
 
       {q ? (
@@ -233,7 +267,9 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
       <NeedsMeCard ctx={ctx} rows={data?.needs_me ?? []} />
       <EveCard ctx={ctx} />
 
-      {cut.items.length && flags.questions ? (
+      {cut.items.length && flags.make ? (
+        <PracticeCard ctx={ctx} queue />
+      ) : cut.items.length && flags.questions ? (
         <RouteLink to={{ v: "practice" }} go={ctx.go} className="a-btn ghost t-free">
           תרגול חופשי
         </RouteLink>

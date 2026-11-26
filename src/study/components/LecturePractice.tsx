@@ -142,7 +142,7 @@ export default function LecturePractice({ route, ctx }: ScreenProps<"practice">)
         <section className="a-card practice-building" aria-labelledby="building-h">
           <div className="a-row between">
             <h2 id="building-h" className="a-h2">
-              הבנק נבנה
+              {flags.make ? (building.open ? "סט בהכנה" : "הסט מוכן") : "הבנק נבנה"}
             </h2>
             <span className="a-chip busy">
               <bdi dir="ltr">
@@ -157,7 +157,7 @@ export default function LecturePractice({ route, ctx }: ScreenProps<"practice">)
             {[building.open ? "שאלות עוד נכתבות" : "", building.pending ? plural(building.pending, "שאלה אחת מחכה להחלטה", "שאלות מחכות להחלטה") : ""].filter(Boolean).join(" · ")}
           </p>
           <RouteLink to={{ v: "practice", l: lectureId, x: "bank", r: building.r.id }} go={ctx.go} className="a-btn">
-            לבנק שנבנה
+            {flags.make ? "לפתוח את הסט" : "לבנק שנבנה"}
           </RouteLink>
         </section>
       ) : null}
@@ -184,7 +184,7 @@ export default function LecturePractice({ route, ctx }: ScreenProps<"practice">)
             <p className="a-small a-muted">{failText("enough questions", "practice")}</p>
           ) : (
             <RouteLink to={create} go={ctx.go} className="a-btn wide practice-more">
-              שאלות חדשות
+              {flags.make ? "סט חדש" : "שאלות חדשות"}
             </RouteLink>
           )}
         </section>
@@ -193,9 +193,11 @@ export default function LecturePractice({ route, ctx }: ScreenProps<"practice">)
           <h2 id="empty-h" className="a-h2">
             עוד אין שאלות תרגול להרצאה הזו.
           </h2>
-          <p className="a-small a-muted">בוחרים כמה, על אילו חלקים ובאיזה סגנון. כל שאלה נבדקת לפני שהיא נכנסת לבנק, והבנק משותף לכל הקבוצה.</p>
+          <p className="a-small a-muted">
+            {flags.make ? "כל שאלה נבדקת לפני שהיא נכנסת לבנק, והבנק משותף לכל הקבוצה." : "בוחרים כמה, על אילו חלקים ובאיזה סגנון. כל שאלה נבדקת לפני שהיא נכנסת לבנק, והבנק משותף לכל הקבוצה."}
+          </p>
           <RouteLink to={create} go={ctx.go} className="a-btn primary">
-            שאלות חדשות
+            {flags.make ? "סט חדש" : "שאלות חדשות"}
           </RouteLink>
         </section>
       )}

@@ -5,6 +5,7 @@ import { listLectures, type LectureRow } from "../lib/api";
 import { flags } from "../lib/flags";
 import { courseKey } from "../../../shared/study/courseKey";
 import { openBatches, practiceOverview, watchPractice, type Overview } from "../lib/practice";
+import { Icon } from "./Icon";
 import { Head, Loading, RouteLink } from "./Shell";
 
 /* ── The practice hub (P1; package Q, design-questions §1.3) ──
@@ -14,7 +15,9 @@ import { Head, Loading, RouteLink } from "./Shell";
  * and this person's own counts ("15 שאלות · תורגלו 6 · 2 טעויות"), "יצירה"
  * where there are none yet, "נכתבות שאלות…" while a round is written, and
  * "לתרגל את כל הקורס". "הטעויות שלי" and past exams come with Q-2 (release 8
- * and 12). */
+ * and 12). With practice sets (flags.make, docs/study/sets.md §5.2): the
+ * "סט חדש" card first, the lectures under "תרגול מהבנק" with "סט חדש" where
+ * a lecture has none, and the group quiz last. */
 
 const SIX_MINUTES = 6 * 60_000;
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`);
@@ -74,9 +77,22 @@ export default function PracticeHome({ ctx }: ScreenProps<"practice">) {
       <Head title="תרגול" />
       <p className="ph-sub">התשובות והציונים שלך גלויים רק לך.</p>
 
+      {flags.make ? (
+        <section className="a-card practice-make-card" aria-labelledby="make-h">
+          <h2 id="make-h" className="a-h2 a-row">
+            <Icon name="star" size={16} />
+            סט חדש
+          </h2>
+          <p className="a-small a-muted">שאלות חדשות על הרצאה, נבדקות לפני הבנק</p>
+          <RouteLink to={{ v: "practice", x: "new" }} go={ctx.go} className="a-btn primary practice-make-go">
+            סט חדש
+          </RouteLink>
+        </section>
+      ) : null}
+
       <CardsHubCard ctx={ctx} />
 
-      {flags.quiz ? (
+      {flags.quiz && !flags.make ? (
         <section className="a-card practice-quiz-card" aria-labelledby="quiz-h">
           <h2 id="quiz-h" className="a-h2">
             מבחן קבוצתי
@@ -89,6 +105,8 @@ export default function PracticeHome({ ctx }: ScreenProps<"practice">) {
 
       {error ? <p className="a-error">התרגול לא נטען. כדאי לבדוק את החיבור ולנסות שוב.</p> : null}
       {lectures === null && !error ? <Loading /> : null}
+
+      {flags.make && courses.length ? <h2 className="a-h2 practice-bank-h">תרגול מהבנק</h2> : null}
 
       {courses.map(([course, list]) => {
         const withQ = list.filter((l) => (byLecture.get(l.id)?.questions ?? 0) > 0);
@@ -135,7 +153,7 @@ export default function PracticeHome({ ctx }: ScreenProps<"practice">) {
                     </RouteLink>
                     {!n && !writing.has(l.id) ? (
                       <RouteLink to={{ v: "practice", l: l.id, x: "new" }} go={ctx.go} className="a-btn small practice-create">
-                        יצירה
+                        {flags.make ? "סט חדש" : "יצירה"}
                       </RouteLink>
                     ) : null}
                   </li>
@@ -145,6 +163,12 @@ export default function PracticeHome({ ctx }: ScreenProps<"practice">) {
           </section>
         );
       })}
+
+      {flags.quiz && flags.make ? (
+        <RouteLink to={{ v: "quiz", isNew: true }} go={ctx.go} className="a-btn practice-quiz-end">
+          מבחן קבוצתי
+        </RouteLink>
+      ) : null}
     </main>
   );
 }
