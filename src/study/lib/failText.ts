@@ -525,6 +525,13 @@ export const INTERNAL_CODES: readonly string[] = [
   // op "var": the app always sends the yellow card's own id
   "dispute:disputeId required",
   "traps:draftId required",
+  // notifications (section R): the worker's report (server key only); the
+  // settings screen words its own failures (notifyText: a device that did
+  // not sign up, a setting not saved, a test push too soon)
+  "bad results",
+  "bad endpoint",
+  "bad prefs",
+  "too many",
 ];
 
 /** Whether a code is internal: in every area, or in this one. */

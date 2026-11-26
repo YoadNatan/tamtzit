@@ -391,7 +391,10 @@ select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, 
                          -- section S 2 (past exams): the worker's claim, saves and finish of an exam's unit, each refusing without the key
                          'study_claim_exam', 'study_exam_save_items', 'study_exam_save_keys', 'study_finish_exam_job',
                          -- section I: the personal code's redeem, called by /api/study/code, refusing without the key
-                         'study_code_redeem');
+                         'study_code_redeem',
+                         -- section R: the push worker's claim and report (refusing without the key), and
+                         -- /api/study/health's four booleans (wired, on, pilot, stuck)
+                         'study_notify_claim', 'study_notify_done', 'study_notify_ok');
 
 -- F28 (review of F0, SEC-1): the slide pictures stay with their lecture. The
 -- app of before F0 deletes a lecture's files first and then its row, which
@@ -9450,3 +9453,660 @@ delete from public.study_groups where id = '19000000-0000-4000-8000-0000000000a1
 delete from auth.sessions where id::text like '29000000-%';
 delete from auth.users where id::text like '19000000-%';
 -- ════ END SECTION I ════
+
+-- ════ BEGIN SECTION R ════ (checks for supabase/tests/study.sql)
+-- Notifications and the inbox (R 1): who sees which rows, the devices, the
+-- hooks, coalescing, the claim's decisions (off, none, held, capped, quiet,
+-- nosub), the worker's report, the minute job's sign-in scan, the kick and
+-- its breaker, seen, and loading the section twice. All titles are invented.
+-- (Giving up on a lock after 200 ms needs two sessions: notify-concurrency.sh.)
+\set ON_ERROR_STOP 1
+\pset tuples_only on
+reset role;
+create or replace function pg_temp.rok(p_name text, p_ok boolean, p_what text) returns text language sql as $$
+  select p_name || '. ' || case when coalesce(p_ok, false) then 'ok' else 'FAIL' end || ': ' || p_what $$;
+insert into vault.decrypted_secrets (name, decrypted_secret) values
+  ('study_worker_key', 'k-0123456789abcdef0123456789abcdef'),
+  ('study_site_url', 'https://tamtzit.vercel.app')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+\set rkey 'k-0123456789abcdef0123456789abcdef'
+\set ru1 '1a000000-0000-4000-8000-000000000001'
+\set ru2 '1a000000-0000-4000-8000-000000000002'
+\set ru3 '1a000000-0000-4000-8000-000000000003'
+\set ru4 '1a000000-0000-4000-8000-000000000004'
+\set ru5 '1a000000-0000-4000-8000-000000000005'
+\set rg '1a000000-0000-4000-8000-0000000000a1'
+\set rl1 '1a000000-0000-4000-8000-0000000000b1'
+\set rl2 '1a000000-0000-4000-8000-0000000000b2'
+insert into auth.users (id, raw_user_meta_data) values
+ (:'ru1', '{"app":"study","full_name":"אלה"}'), (:'ru2', '{"app":"study","full_name":"בני"}'),
+ (:'ru3', '{"app":"study","full_name":"גל"}'), (:'ru4', '{"app":"study","full_name":"דור"}'),
+ (:'ru5', '{"app":"study","full_name":"הדר"}');
+insert into public.study_groups (id, name, join_code, created_by) values (:'rg', 'קבוצת ההתראות', 'RNOTE1', :'ru1');
+insert into public.study_members (group_id, user_id, name) values
+ (:'rg', :'ru1', 'אלה'), (:'rg', :'ru2', 'בני'), (:'rg', :'ru3', 'גל'), (:'rg', :'ru5', 'הדר');
+insert into public.study_lectures (id, group_id, title, source_kind, slides, created_by) values
+ (:'rl1', :'rg', 'הרצאה בדויה על Invented Kinetics', 'pptx', '[]', :'ru1'),
+ (:'rl2', :'rg', 'הרצאה בדויה שנייה', 'pptx', '[]', :'ru2');
+-- Every check below is about one rule at a time: no night, no Shabbat, unless a check sets them.
+insert into public.study_notify_prefs (user_id, quiet) values (:'ru1', false), (:'ru2', false), (:'ru3', false);
+
+-- ── The section, its switches and loading it twice ──
+select pg_temp.rok('R1', public.study_schema() ->> 'R' = '1', 'the registry has R 1');
+select pg_temp.rok('R1b', (select bool_and(case name when 'notify' then not enabled else enabled end) and count(*) = 2
+                             from study_private.features where name in ('notify', 'notify_hooks')),
+  'the switches: notify inserted off, notify_hooks on');
+select pg_temp.rok('R1c',
+  (select count(*) from pg_policies where tablename in ('study_notices', 'study_notify_prefs', 'study_push_subs')) = 2
+  and (select count(*) from pg_trigger where tgname like 'study\_r\_%' and not tgisinternal) = 4
+  and (select count(*) from cron.job where jobname = 'study-notify' and schedule = '* * * * *') = 1
+  and (select count(*) from cron.job where jobname = 'study-notify-clean' and schedule = '41 3 * * *') = 1
+  and (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'study_notices') = 1
+  and (select count(*) from study_private.notice_kinds) = 10
+  and (select count(*) from study_private.notify_kick) = 1,
+  'loaded twice: one policy each, four hooks, two jobs, published once, ten kinds, one kick row');
+select pg_temp.rok('R1d', (select count(*) from pg_publication_tables where pubname = 'supabase_realtime'
+                            and tablename in ('study_push_subs', 'study_notify_prefs')) = 0,
+  'devices and settings are never published');
+select pg_temp.rok('R1e', (select string_agg(kind || ':' || cat || ':' || push, ',' order by kind) from study_private.notice_kinds
+                            where kind in ('set_shared', 'similar_ready', 'lab_new')) = 'lab_new:inapp:false,set_shared:mine:true,similar_ready:mine:true',
+  'the kinds of packages not built yet are reserved');
+
+-- ── The defaults, in one place ──
+insert into public.study_notify_prefs (user_id) values (:'ru4');
+select pg_temp.rok('R2', (to_jsonb(study_private.notify_prefs_of(:'ru5')) - 'user_id' - 'updated_at')
+                         = (select to_jsonb(p) - 'user_id' - 'updated_at' from public.study_notify_prefs p where p.user_id = :'ru4'),
+  'no row reads exactly as the column defaults (live, mine on; reminder off at 19:30; nights 23:00-07:30; no Shabbat)');
+delete from public.study_notify_prefs where user_id = :'ru4';
+
+-- ── Who may read and call what ──
+select pg_temp.rok('R3', (select bool_and(c.relrowsecurity) from pg_class c
+                           where c.oid in ('public.study_push_subs'::regclass, 'public.study_notify_prefs'::regclass, 'public.study_notices'::regclass))
+  and not has_table_privilege('authenticated', 'public.study_push_subs', 'select')
+  and not has_table_privilege('anon', 'public.study_notices', 'select')
+  and not has_table_privilege('authenticated', 'public.study_notices', 'insert')
+  and not has_table_privilege('authenticated', 'public.study_notices', 'update')
+  and not has_table_privilege('authenticated', 'public.study_notify_prefs', 'update')
+  and not has_schema_privilege('authenticated', 'study_private', 'usage'),
+  'row security on; nobody reads devices; members only read their rows, and write none directly');
+select pg_temp.rok('R3b',
+  not has_function_privilege('anon', 'public.study_push_subscribe(text, text, text, text, text, text)', 'execute')
+  and not has_function_privilege('anon', 'public.study_notices_mine(uuid, bigint, int)', 'execute')
+  and not has_function_privilege('anon', 'public.study_notify_test()', 'execute')
+  and not has_function_privilege('anon', 'public.study_quiz_quiet(uuid)', 'execute')
+  and has_function_privilege('authenticated', 'public.study_notices_seen(uuid, bigint[])', 'execute')
+  and not has_function_privilege('authenticated', 'study_private.notice_add(uuid, uuid, text, jsonb, jsonb, text, text, uuid, timestamptz)', 'execute'),
+  'the member RPCs are signed-in only; notice_add is nobody''s to call');
+set role authenticated; set request.jwt.claim.sub = :'ru4';
+do $$ begin perform public.study_notify_state(); raise notice 'R3c. FAIL: a signed-in stranger read the state';
+exception when others then raise notice 'R3c. %: a signed-in stranger is refused (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_push_subscribe('https://fcm.googleapis.com/fcm/send/r-stranger', 'B' || repeat('p', 86), repeat('a', 22), 'kid12345');
+  raise notice 'R3d. FAIL: a stranger subscribed';
+exception when others then raise notice 'R3d. %: a stranger cannot add a device (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+
+-- ── Devices ──
+select pg_temp.rok('R4', study_private.push_host_ok('https://fcm.googleapis.com/fcm/send/abc123')
+  and study_private.push_host_ok('https://updates.push.services.mozilla.com/wpush/v2/abc')
+  and study_private.push_host_ok('https://web.push.apple.com/QAbcdefgh123')
+  and study_private.push_host_ok('https://api.push.apple.com/3/device/abc')
+  and study_private.push_host_ok('https://wns2-par02p.notify.windows.com/w/?token=BQYAAAB'),
+  'the five kinds of push service are accepted');
+select pg_temp.rok('R4b', not (study_private.push_host_ok('http://fcm.googleapis.com/fcm/send/abc123')
+  or study_private.push_host_ok('https://evil.com/fcm/send/abc12345678')
+  or study_private.push_host_ok('https://fcm.googleapis.com.evil.com/fcm/send/abc')
+  or study_private.push_host_ok('https://user@fcm.googleapis.com/fcm/send/abc')
+  or study_private.push_host_ok('https://fcm.googleapis.com:8443/fcm/send/abc')
+  or study_private.push_host_ok('https://push.apple.com.evil.org/x/abcdef')
+  or study_private.push_host_ok('https://xpush.apple.com/abcdefghijkl')
+  or study_private.push_host_ok('https://fcm.googleapis.com/a b c d e f')
+  or coalesce(study_private.push_host_ok(null), false)),
+  'refused: http, another host, a look-alike suffix, a user, a port, a space, nothing');
+set role authenticated; set request.jwt.claim.sub = :'ru1';
+do $$ begin perform public.study_push_subscribe('https://evil.com/fcm/send/abcdefgh', 'B' || repeat('p', 86), repeat('a', 22), 'kid12345');
+  raise notice 'R4c. FAIL: an endpoint off the list was stored';
+exception when others then raise notice 'R4c. %: an endpoint off the list is refused (%)', case when sqlerrm = 'bad endpoint' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_push_subscribe('https://fcm.googleapis.com/fcm/send/r-01x', 'short', repeat('a', 22), 'kid12345');
+  raise notice 'R4d. FAIL: bad keys were stored';
+exception when others then raise notice 'R4d. %: bad keys are refused (%)', case when sqlerrm = 'bad keys' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_push_subscribe('https://fcm.googleapis.com/fcm/send/r-01a', 'B' || repeat('p', 86), repeat('a', 22), 'kid12345', 'iphone', 'Safari') as sub1 \gset
+set request.jwt.claim.sub = :'ru2';
+select public.study_push_subscribe('https://fcm.googleapis.com/fcm/send/r-shared', 'B' || repeat('p', 86), repeat('a', 22), 'kid12345', 'android', 'Chrome') is not null as x \gset
+set request.jwt.claim.sub = :'ru3';
+select public.study_push_subscribe('https://fcm.googleapis.com/fcm/send/r-shared', 'C' || repeat('q', 86), repeat('b', 22), 'kid12345', 'android', 'Chrome') is not null as x \gset
+reset role;
+select pg_temp.rok('R5', (select user_id = :'ru3' and p256dh like 'C%' from public.study_push_subs where endpoint like '%/r-shared'),
+  'one endpoint, one row: it moves to the member now signed in on that device (the personal code)');
+set role authenticated; set request.jwt.claim.sub = :'ru3';
+select count(*) from (select public.study_push_subscribe('https://updates.push.services.mozilla.com/wpush/v2/r-03-' || g, 'B' || repeat('p', 86), repeat('a', 22), 'kid12345', 'linux', 'Firefox')
+                        from generate_series(1, 12) g) s \gset
+select public.study_push_subscribe('https://web.push.apple.com/r-03-main', 'B' || repeat('p', 86), repeat('a', 22), 'kid12345', 'mac', 'Safari') as sub3 \gset
+reset role;
+select pg_temp.rok('R6', (select count(*) from public.study_push_subs where user_id = :'ru3') = 10
+  and exists (select 1 from public.study_push_subs where id = :sub3),
+  'at most 10 devices a person: the longest unseen go');
+set role authenticated; set request.jwt.claim.sub = :'ru3';
+select pg_temp.rok('R6b', public.study_push_keep_only('https://web.push.apple.com/r-03-main') = 9, 'keep only this device: the other nine go');
+set request.jwt.claim.sub = :'ru2';
+select public.study_push_subscribe('https://fcm.googleapis.com/fcm/send/r-02a', 'B' || repeat('p', 86), repeat('a', 22), 'kid12345', 'android', 'Chrome') as sub2 \gset
+set request.jwt.claim.sub = :'ru1';
+select pg_temp.rok('R7', (select jsonb_array_length(d) = 1 and (d -> 0 ->> 'this')::boolean and d -> 0 ->> 'device' = 'iphone'
+                                and not (d -> 0 ? 'endpoint') and not (d -> 0 ? 'p256dh') and not (d -> 0 ? 'auth')
+                           from public.study_push_devices('https://fcm.googleapis.com/fcm/send/r-01a') d),
+  'the device list: kind and browser, which one is this; no endpoint, no keys');
+select pg_temp.rok('R7b', (select count(*) from public.study_notify_prefs) = 1, 'a member reads only their own settings');
+set request.jwt.claim.sub = :'ru2';
+do $$ declare n int; begin select count(*) into n from public.study_push_subs; raise notice 'R7c. FAIL: a member read devices (%)', n;
+exception when insufficient_privilege then raise notice 'R7c. ok: nobody reads the devices table'; end $$;
+reset role;
+
+-- ── Replies: the opener and the earlier repliers, never the one replying ──
+set role authenticated; set request.jwt.claim.sub = :'ru1';
+insert into public.study_comments (lecture_id, part_idx, anchor, quote, kind, body)
+values (:'rl1', 2, 4, 'משפט בדוי', 'question', 'שאלה בדויה?') returning id as rroot \gset
+set request.jwt.claim.sub = :'ru2';
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id) values (:'rl1', 2, 4, 'comment', 'תשובה בדויה', :'rroot');
+reset role;
+select pg_temp.rok('R8', (select count(*) = 1 and bool_and(kind = 'answer' and cat = 'mine' and count = 1 and group_id = :'rg' and lecture_id = :'rl1'
+                                   and args = jsonb_build_object('lecture', 'הרצאה בדויה על Invented Kinetics', 'part', 3)
+                                   and route = jsonb_build_object('v', 'lecture', 'l', :'rl1', 'at', jsonb_build_object('part', 2, 'anchor', 4))
+                                   and obj is null and dedupe = 'reply:' || :'rroot')
+                           from public.study_notices where user_id = :'ru1')
+  and not exists (select 1 from public.study_notices where user_id = :'ru2'),
+  'a reply to a question: "answer" to its opener (lecture, part 3, the paragraph''s route); none to the one replying');
+select pg_temp.rok('R8b', (select o.state = 'due' and o.cat = 'mine' and o.not_before <= now() and o.expires_at > now() + interval '71 hours'
+                           from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.user_id = :'ru1'),
+  'with a device, its push waits in the outbox, due now, for 3 days');
+set role authenticated; set request.jwt.claim.sub = :'ru3';
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id) values (:'rl1', 2, 4, 'comment', 'עוד תשובה', :'rroot');
+reset role;
+select pg_temp.rok('R8c', (select count = 2 and kind = 'answer' from public.study_notices where user_id = :'ru1')
+  and (select count(*) = 1 and bool_and(kind = 'reply' and count = 1) from public.study_notices where user_id = :'ru2')
+  and not exists (select 1 from public.study_notices where user_id = :'ru3'),
+  'a second reply: the opener''s row counts 2; the earlier replier gets "reply"');
+set role authenticated; set request.jwt.claim.sub = :'ru1';
+select pg_temp.rok('R8d', public.study_notices_seen(:'rg') = 1, 'the opener opens the inbox: one row seen');
+set request.jwt.claim.sub = :'ru2';
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id) values (:'rl1', 2, 4, 'comment', 'שלישית', :'rroot');
+set request.jwt.claim.sub = :'ru1';
+select public.study_notices_seen(:'rg') as x \gset
+set request.jwt.claim.sub = :'ru3';
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id) values (:'rl1', 2, 4, 'comment', 'רביעית', :'rroot');
+reset role;
+select pg_temp.rok('R8e', (select string_agg(count::text || coalesce(':' || (seen_at is not null)::text, ''), ',' order by id)
+                            from public.study_notices where user_id = :'ru1') = '2:true,1:true,1:false',
+  'after seen, each later reply starts a new row: nothing is lost');
+select pg_temp.rok('R8f', (select count(*) from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id
+                            where n.user_id = :'ru1' and o.state = 'none') = 2,
+  'seen rows drop their waiting push');
+
+-- A hook that fails never fails the write; with notify_hooks off, nothing at all.
+alter table public.study_notices add constraint r_test_refuse check (kind not in ('reply', 'answer')) not valid;
+set role authenticated; set request.jwt.claim.sub = :'ru2';
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id) values (:'rl1', 2, 4, 'comment', 'בזמן תקלה', :'rroot');
+reset role;
+alter table public.study_notices drop constraint r_test_refuse;
+select pg_temp.rok('R9', exists (select 1 from public.study_comments where body = 'בזמן תקלה')
+  and (select count(*) from public.study_notices where user_id = :'ru1') = 3,
+  'a notice that cannot be written: the reply is saved all the same, without it');
+update study_private.features set enabled = false where name = 'notify_hooks';
+set role authenticated; set request.jwt.claim.sub = :'ru2';
+insert into public.study_comments (lecture_id, part_idx, anchor, kind, body, parent_id) values (:'rl1', 2, 4, 'comment', 'בלי התראות', :'rroot');
+reset role;
+select pg_temp.rok('R10', (select count from public.study_notices where user_id = :'ru1' and seen_at is null) = 1
+  and study_private.notice_add(:'ru1', :'rg', 'reply', '{}', '{}', null, 'x') is null,
+  'notify_hooks off: no notice from any hook, nor from notice_add');
+update study_private.features set enabled = true where name = 'notify_hooks';
+select study_private.notice_add(:'ru1', :'rg', 'mystery', '{"title":"x"}', '{"v":"mystery"}', null, 'mystery:1') as myst \gset
+select pg_temp.rok('R10b', (select cat = 'inapp' from public.study_notices where id = :myst)
+  and not exists (select 1 from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.kind = 'mystery'),
+  'an unknown kind stays in the inbox and never pushes');
+select pg_temp.rok('R10c', study_private.notice_add(:'ru1', :'rg', 'Bad Kind', '{}', '{}', null, 'bad') is null
+  and study_private.notice_add(:'ru1', :'rg', 'reply', jsonb_build_object('t', repeat('x', 2000)), '{}', null, 'big') is null,
+  'bad input: null, never an error');
+
+-- ── A group quiz opened ──
+delete from net.calls;
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, host_id, created_by)
+values ('1a000000-0000-4000-8000-0000000000c1', :'rg', 'race', 'עצירה: כותרת בדויה', array[:'rl1', :'rl2']::uuid[], 5, 30, :'ru1', :'ru1');
+select pg_temp.rok('R11', (select string_agg(m.name, ',' order by m.name) from public.study_notices n
+                             join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                            where n.kind = 'quiz_open') = 'בני,גל,הדר'
+  and (select bool_and(args = jsonb_build_object('mode', 'race', 'lecture', 'הרצאה בדויה על Invented Kinetics', 'more', 1,
+                                                  'title', 'עצירה: כותרת בדויה', 'name', 'אלה')
+                       and route = '{"v":"quiz","q":"1a000000-0000-4000-8000-0000000000c1"}'::jsonb
+                       and obj = 'quiz:1a000000-0000-4000-8000-0000000000c1' and cat = 'live' and lecture_id = :'rl1')
+         from public.study_notices where kind = 'quiz_open'),
+  'a quiz opened: every member but its host, with the first lecture, the mode, the title and the host''s name for the inbox');
+select pg_temp.rok('R11b', (select count(*) = 2 and bool_and(o.state = 'due' and o.not_before between now() + interval '14 seconds' and now() + interval '16 seconds'
+                                                           and o.expires_at between now() + interval '19 minutes' and now() + interval '21 minutes')
+                           from study_private.notify_outbox o where o.kind = 'quiz_open'),
+  'two pushes (the member without a device has none), held 15 s, alive 20 minutes');
+select pg_temp.rok('R11c', (select count(*) from net.calls) = 0, 'the switch is off and nobody is in the pilot: no kick');
+set role authenticated; set request.jwt.claim.sub = :'ru2';
+do $$ begin perform public.study_quiz_quiet('1a000000-0000-4000-8000-0000000000c1'); raise notice 'R12. FAIL: a player silenced the host''s quiz';
+exception when others then raise notice 'R12. %: only the host may uncheck "להודיע לקבוצה" (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+set request.jwt.claim.sub = :'ru1';
+select public.study_quiz_quiet('1a000000-0000-4000-8000-0000000000c1') is null as x \gset
+reset role;
+select pg_temp.rok('R12b', (select string_agg(state, ',') from study_private.notify_outbox where kind = 'quiz_open') = 'held,held'
+  and (select count(*) from public.study_notices where kind = 'quiz_open') = 3,
+  'the host unchecked it: the pushes are held, the inbox keeps the rows');
+update public.study_quizzes set state = 'ended', ended_at = now() where id = '1a000000-0000-4000-8000-0000000000c1';
+select study_private.notify_plan() as x \gset
+select pg_temp.rok('R12c', (select bool_and(ends_at is not null) from public.study_notices where kind = 'quiz_open'),
+  'the minute job ends the rows of a quiz that ended');
+select pg_temp.rok('R12d', (select count(*) from study_private.notify_cursor where name = 'code') = 1,
+  'its first run notes where the sign-in log ends');
+set role authenticated; set request.jwt.claim.sub = :'ru2';
+select pg_temp.rok('R12e', (public.study_notices_unseen(:'rg') ->> 'n')::int = 1, 'a live row that is over leaves the bell''s count');
+reset role;
+
+-- ── The claim (the switch on) ──
+update study_private.features set enabled = true where name = 'notify';
+update study_private.notify_outbox set state = 'none' where state = 'due';
+-- A quiz that ended before the claim: held.
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, host_id, created_by)
+values ('1a000000-0000-4000-8000-0000000000c2', :'rg', 'coop', 'מבחן בדוי', array[:'rl1']::uuid[], 5, 30, :'ru1', :'ru1');
+update public.study_quizzes set state = 'cancelled' where id = '1a000000-0000-4000-8000-0000000000c2';
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+do $$ begin perform public.study_notify_claim('wrong-key'); raise notice 'R13. FAIL: claimed without the key';
+exception when others then raise notice 'R13. %: no claim without the server key (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+do $$ begin perform public.study_notify_done(null, '[]'); raise notice 'R13a. FAIL: reported without the key';
+exception when others then raise notice 'R13a. %: no report without the server key (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R13b', jsonb_array_length((:'c'::jsonb) -> 'rows') = 0
+  and (select string_agg(o.state, ',') from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id
+        where n.dedupe = 'quiz:1a000000-0000-4000-8000-0000000000c2') = 'held,held',
+  'a quiz over before its push: held');
+-- A quiz still open: sent to both devices.
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, host_id, created_by)
+values ('1a000000-0000-4000-8000-0000000000c3', :'rg', 'coop', 'מבחן בדוי', array[:'rl1']::uuid[], 5, 30, :'ru2', :'ru2');
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R13c', jsonb_array_length((:'c'::jsonb) -> 'rows') = 2
+  and (select bool_and(r -> 'notice' ->> 'kind' = 'quiz_open' and r -> 'notice' ? 'args' and r -> 'notice' ? 'route'
+                       and (r -> 'notice' ->> 'silent')::boolean = false and jsonb_array_length(r -> 'subs') = 1
+                       and r -> 'subs' -> 0 ?& array['id', 'endpoint', 'p256dh', 'auth'])
+         from jsonb_array_elements((:'c'::jsonb) -> 'rows') r)
+  and (select string_agg(state, ',') from study_private.notify_outbox where kind = 'quiz_open' and state = 'sending') = 'sending,sending'
+  and (select bool_and(lease_until > now() + interval '170 seconds' and attempts = 1) from study_private.notify_outbox where state = 'sending'),
+  'an open quiz: claimed for 180 s, each with its devices and keys');
+set role anon;
+select public.study_notify_done(:'rkey', (select jsonb_agg(jsonb_build_object('notice', (r -> 'notice' ->> 'id')::bigint,
+                                                                               'sub', (r -> 'subs' -> 0 ->> 'id')::bigint, 'status', 201))
+                                            from jsonb_array_elements((:'c'::jsonb) -> 'rows') r)) as d \gset
+reset role;
+select pg_temp.rok('R13d', :d = 2 and (select count(*) from study_private.notify_outbox where state = 'sent' and pushed_at is not null) = 2
+  and (select count(*) from public.study_push_subs where ok_at is not null) = 2
+  and (select count(*) from study_private.push_log where status = 201) = 2,
+  'reported 201: sent, the devices fine, the log has ids and statuses');
+update public.study_quizzes set state = 'ended', ended_at = now() where id = '1a000000-0000-4000-8000-0000000000c3';
+-- Another quiz in the group within 10 minutes: capped.
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, host_id, created_by)
+values ('1a000000-0000-4000-8000-0000000000c4', :'rg', 'coop', 'מבחן בדוי', array[:'rl1']::uuid[], 5, 30, :'ru3', :'ru3');
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R13e', (select string_agg(o.state, ',') from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id
+                             where n.dedupe = 'quiz:1a000000-0000-4000-8000-0000000000c4') = 'capped,capped',
+  'a second quiz of the group within 10 minutes: capped (the inbox has it)');
+update public.study_quizzes set state = 'ended', ended_at = now() where id = '1a000000-0000-4000-8000-0000000000c4';
+-- The same host 15 minutes later: still capped (30); another host: sent.
+update study_private.notify_outbox set pushed_at = now() - interval '15 minutes' where state = 'sent';
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, host_id, created_by)
+values ('1a000000-0000-4000-8000-0000000000c5', :'rg', 'coop', 'מבחן בדוי', array[:'rl1']::uuid[], 5, 30, :'ru2', :'ru2');
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+update public.study_quizzes set state = 'ended', ended_at = now() where id = '1a000000-0000-4000-8000-0000000000c5';
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, host_id, created_by)
+values ('1a000000-0000-4000-8000-0000000000c6', :'rg', 'coop', 'מבחן בדוי', array[:'rl1']::uuid[], 5, 30, :'ru3', :'ru3');
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R13f', (select string_agg(o.state, ',') from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id
+                             where n.dedupe = 'quiz:1a000000-0000-4000-8000-0000000000c5') = 'capped,capped'
+  and (select string_agg(o.state, ',') from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id
+        where n.dedupe = 'quiz:1a000000-0000-4000-8000-0000000000c6') = 'sending,sending',
+  'the same host within 30 minutes: capped; another host after 10: sent');
+set role anon;
+select public.study_notify_done(:'rkey', (select jsonb_agg(jsonb_build_object('notice', (r -> 'notice' ->> 'id')::bigint,
+                                                                               'sub', (r -> 'subs' -> 0 ->> 'id')::bigint, 'status', 201))
+                                            from jsonb_array_elements((:'c'::jsonb) -> 'rows') r)) as d \gset
+reset role;
+update public.study_quizzes set state = 'ended', ended_at = now() where id = '1a000000-0000-4000-8000-0000000000c6';
+update study_private.notify_outbox set pushed_at = now() - interval '2 hours' where kind = 'quiz_open' and state = 'sent';
+
+-- ── The switch off: only the pilot ──
+update study_private.features set enabled = false where name = 'notify';
+update public.study_lectures set status = 'ready' where id = :'rl2';
+select study_private.notice_add(:'ru3', :'rg', 'reply', '{"lecture":"x","part":1}', '{"v":"library"}', null, 'r-off') as x \gset
+insert into study_private.notify_pilot (user_id) values (:'ru2');
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R14', (select o.state from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.dedupe = 'r-off') = 'off'
+  and (select o.state from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id
+        where n.user_id = :'ru2' and n.kind = 'summary_ready') = 'sending'
+  and (select n.route = jsonb_build_object('v', 'lecture', 'l', :'rl2') and n.obj = 'lec:' || :'rl2' and n.args = '{"lecture":"הרצאה בדויה שנייה"}'
+         from public.study_notices n where n.user_id = :'ru2' and n.kind = 'summary_ready'),
+  'switched off: only the pilot''s push goes (here, the uploader''s "summary ready")');
+set role authenticated; set request.jwt.claim.sub = :'ru2';
+select pg_temp.rok('R14b', (public.study_notify_state() ->> 'send')::boolean, 'the pilot may turn pushes on');
+set request.jwt.claim.sub = :'ru3';
+select pg_temp.rok('R14c', not (public.study_notify_state() ->> 'send')::boolean, 'others may not, while the switch is off');
+reset role;
+-- 410: the device is gone; with none left, nosub.
+set role anon;
+select public.study_notify_done(:'rkey', jsonb_build_array(jsonb_build_object('notice', ((:'c'::jsonb) -> 'rows' -> 0 -> 'notice' ->> 'id')::bigint,
+                                                                              'sub', :sub2, 'status', 410))) as d \gset
+reset role;
+select pg_temp.rok('R15', not exists (select 1 from public.study_push_subs where id = :sub2)
+  and (select o.state from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id
+        where n.user_id = :'ru2' and n.kind = 'summary_ready') = 'nosub',
+  'reported 410: the device is deleted; none left, the push is nosub');
+delete from study_private.notify_pilot;
+update study_private.features set enabled = true where name = 'notify';
+-- 500 and 429: again later; five tries: failed. A push coalesced while sending goes again.
+update study_private.notify_outbox o set state = 'due', not_before = now() from public.study_notices n where n.id = o.notice_id and n.dedupe = 'r-off';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+select public.study_notify_done(:'rkey', jsonb_build_array(jsonb_build_object('notice', ((:'c'::jsonb) -> 'rows' -> 0 -> 'notice' ->> 'id')::bigint,
+                                                                              'sub', :sub3, 'status', 500))) as d \gset
+reset role;
+select pg_temp.rok('R15b', (select o.state = 'due' and o.not_before between now() + interval '119 seconds' and now() + interval '121 seconds' and o.attempts = 1
+                             from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.dedupe = 'r-off'),
+  'reported 500: due again in 2 minutes (the first of five tries)');
+update study_private.notify_outbox o set not_before = now() from public.study_notices n where n.id = o.notice_id and n.dedupe = 'r-off';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+select public.study_notify_done(:'rkey', jsonb_build_array(jsonb_build_object('notice', ((:'c'::jsonb) -> 'rows' -> 0 -> 'notice' ->> 'id')::bigint,
+                                                                              'sub', :sub3, 'status', 429, 'retry_after', 600))) as d \gset
+reset role;
+select pg_temp.rok('R15c', (select o.state = 'due' and o.not_before between now() + interval '599 seconds' and now() + interval '601 seconds'
+                             from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.dedupe = 'r-off'),
+  'reported 429 with Retry-After 600: due again in 10 minutes');
+update study_private.notify_outbox o set not_before = now(), attempts = 4 from public.study_notices n where n.id = o.notice_id and n.dedupe = 'r-off';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+select public.study_notify_done(:'rkey', jsonb_build_array(jsonb_build_object('notice', ((:'c'::jsonb) -> 'rows' -> 0 -> 'notice' ->> 'id')::bigint,
+                                                                              'sub', :sub3, 'status', 0))) as d \gset
+reset role;
+select pg_temp.rok('R15d', (select o.state = 'failed' from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.dedupe = 'r-off'),
+  'the fifth try timed out: failed');
+select study_private.notice_add(:'ru3', :'rg', 'reply', '{"lecture":"x","part":1}', '{"v":"library"}', null, 'r-again') as x \gset
+update study_private.notify_outbox o set not_before = now() from public.study_notices n where n.id = o.notice_id and n.dedupe = 'r-again';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select study_private.notice_add(:'ru3', :'rg', 'reply', '{"lecture":"x","part":1}', '{"v":"library"}', null, 'r-again') as x \gset
+set role anon;
+select public.study_notify_done(:'rkey', jsonb_build_array(jsonb_build_object('notice', ((:'c'::jsonb) -> 'rows' -> 0 -> 'notice' ->> 'id')::bigint,
+                                                                              'sub', :sub3, 'status', 201))) as d \gset
+reset role;
+select pg_temp.rok('R15e', (select o.state = 'due' and not o.again and n.count = 2
+                             from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.dedupe = 'r-again'),
+  'a reply that came while its push was being sent: sent, then due once more with the count');
+update study_private.notify_outbox set state = 'none' where state = 'due';
+
+-- ── Quiet hours ──
+update public.study_notify_prefs set quiet = true,
+  quiet_from = ((now() at time zone 'Asia/Jerusalem') - interval '1 hour')::time,
+  quiet_to = ((now() at time zone 'Asia/Jerusalem') + interval '1 hour')::time
+ where user_id = :'ru3';
+select study_private.notice_add(:'ru3', :'rg', 'reply', '{"lecture":"x","part":1}', '{"v":"library"}', null, 'r-night') as x \gset
+insert into public.study_quizzes (id, group_id, mode, title, lecture_ids, n_wanted, seconds, host_id, created_by)
+values ('1a000000-0000-4000-8000-0000000000c7', :'rg', 'coop', 'מבחן בדוי', array[:'rl1']::uuid[], 5, 30, :'ru5', :'ru5');
+select study_private.notice_add(:'ru3', null, 'code_used', jsonb_build_object('at', now() + interval '1 minute'), '{"v":"me"}', null, 'code:night') as x \gset
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R16', (select o.state = 'due' and o.not_before between now() + interval '59 minutes' and now() + interval '61 minutes'
+                            from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.dedupe = 'r-night')
+  and (select o.state from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id
+        where n.user_id = :'ru3' and n.dedupe = 'quiz:1a000000-0000-4000-8000-0000000000c7') = 'quiet'
+  and (select o.state from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.dedupe = 'code:night') = 'sending'
+  and (select bool_or((r -> 'notice' ->> 'silent')::boolean) from jsonb_array_elements((:'c'::jsonb) -> 'rows') r where r -> 'notice' ->> 'kind' = 'code_used'),
+  'quiet hours: "בשבילך" waits for their end, a live quiz stays in the inbox, the security notice goes silently');
+update public.study_quizzes set state = 'ended', ended_at = now() where id = '1a000000-0000-4000-8000-0000000000c7';
+update public.study_notify_prefs set quiet = false where user_id = :'ru3';
+update study_private.notify_outbox set state = 'none' where state in ('due', 'sending');
+select pg_temp.rok('R16b',
+  study_private.notify_quiet(:'ru5', '2026-11-26 21:30+00') = '2026-11-27 05:30+00'          -- 23:30 Israel: until 07:30
+  and study_private.notify_quiet(:'ru5', '2026-11-27 04:00+00') = '2026-11-27 05:30+00'      -- 06:00 Israel
+  and study_private.notify_quiet(:'ru5', '2026-11-27 05:30+00') is null                      -- 07:30 Israel: open
+  and study_private.notify_quiet(:'ru5', '2026-11-26 20:59+00') is null                      -- 22:59 Israel
+  and study_private.notify_quiet(:'ru5', '2026-03-27 00:30+00') = '2026-03-27 04:30+00'      -- the night summer time starts (07:30 is UTC+3)
+  and study_private.notify_quiet(:'ru5', '2026-10-24 21:30+00') = '2026-10-25 05:30+00',     -- the night it ends (07:30 is UTC+2)
+  'the default night, 23:00 to 07:30 Israel time, on both clock changes');
+update public.study_notify_prefs set quiet = true, shabbat = true where user_id = :'ru1';
+select pg_temp.rok('R16c',
+  study_private.notify_quiet(:'ru1', '2026-11-27 14:30+00') = '2026-11-28 18:30+00'          -- Friday 16:30 Israel: Saturday 20:30
+  and study_private.notify_quiet(:'ru1', '2026-11-28 03:00+00') = '2026-11-28 18:30+00'      -- Saturday 05:00: the night ends inside Shabbat
+  and study_private.notify_quiet(:'ru1', '2026-11-27 13:59+00') is null                      -- Friday 15:59
+  and study_private.notify_quiet(:'ru1', '2026-11-28 18:30+00') is null,                     -- Saturday 20:30
+  'Shabbat, Friday 16:00 to Saturday 20:30, and a night that ends inside it');
+update public.study_notify_prefs set quiet = true, quiet_from = '07:00', quiet_to = '09:00', shabbat = false where user_id = :'ru1';
+select pg_temp.rok('R16d', study_private.notify_quiet(:'ru1', '2026-11-26 06:00+00') = '2026-11-26 07:00+00'
+  and study_private.notify_quiet(:'ru1', '2026-11-26 07:00+00') is null,
+  'a window inside one day');
+update public.study_notify_prefs set quiet = false, quiet_from = '23:00', quiet_to = '07:30' where user_id = :'ru1';
+
+-- ── A summary stopped for the budget: pushed once a month ──
+update public.study_lectures set status = 'failed', error = 'budget' where id = :'rl1';
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+select public.study_notify_done(:'rkey', (select jsonb_agg(jsonb_build_object('notice', (r -> 'notice' ->> 'id')::bigint,
+                                                                               'sub', (r -> 'subs' -> 0 ->> 'id')::bigint, 'status', 201))
+                                            from jsonb_array_elements((:'c'::jsonb) -> 'rows') r)) as d \gset
+reset role;
+select pg_temp.rok('R17', (select n.kind = 'summary_failed' and n.args ->> 'why' = 'budget' and n.dedupe = 'lec:' || :'rl1' || ':failed' and o.state = 'sent'
+                            from public.study_notices n join study_private.notify_outbox o on o.notice_id = n.id
+                           where n.user_id = :'ru1' and n.lecture_id = :'rl1' and n.kind like 'summary%'),
+  'a summary stopped: "summary_failed" to its uploader, with why');
+update public.study_lectures set status = 'outlining', error = null where id = :'rl1';
+update public.study_lectures set status = 'failed', error = 'budget' where id = :'rl1';
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R17b', (select n.count = 2 and o.state = 'none' from public.study_notices n join study_private.notify_outbox o on o.notice_id = n.id
+                             where n.user_id = :'ru1' and n.kind = 'summary_failed'),
+  'stopped for the budget again this month: the inbox counts it, no second push');
+
+-- ── The sign-in scan (code_used) ──
+insert into study_private.code_log (user_id, event) values (:'ru1', 'new'), (:'ru1', 'redeemed'), (:'ru5', 'redeemed');
+set role authenticated; set request.jwt.claim.sub = :'ru1';
+select public.study_push_subscribe('https://fcm.googleapis.com/fcm/send/r-01b', 'B' || repeat('p', 86), repeat('a', 22), 'kid12345', 'android', 'Chrome') as sub1b \gset
+reset role;
+select pg_temp.rok('R18', not exists (select 1 from public.study_notices where kind = 'code_used' and user_id = :'ru1'),
+  'a redeem adds no notice by itself (nothing in the redeem changed)');
+select study_private.notify_plan() as plan_n \gset
+select pg_temp.rok('R18b', :plan_n = 1
+  and (select count(*) = 1 and bool_and(group_id is null and route = '{"v":"me"}' and cat = 'security' and args ? 'at')
+         from public.study_notices where kind = 'code_used' and user_id = :'ru1')
+  and not exists (select 1 from public.study_notices where kind = 'code_used' and user_id = :'ru5'),
+  'the minute job: one code_used for the member with a device (none for one without)');
+select pg_temp.rok('R18c', study_private.notify_plan() = 0, 'read once: the next run adds nothing');
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R18d', (select string_agg(s ->> 'id', ',') from jsonb_array_elements((:'c'::jsonb) -> 'rows') r, jsonb_array_elements(r -> 'subs') s
+                             where r -> 'notice' ->> 'kind' = 'code_used') = :'sub1'::text,
+  'it skips the device that synced after the sign-in');
+update study_private.notify_outbox set state = 'none' where state in ('due', 'sending');
+
+-- ── A person's day: 6 in "בשבילך", 12 in all, 3 security notices ──
+update study_private.notify_outbox set state = 'none' where user_id = :'ru1';
+insert into study_private.notify_outbox (notice_id, user_id, group_id, kind, cat, state, pushed_at, expires_at)
+select study_private.notice_add(:'ru1', :'rg', 'mystery', '{}', '{}', null, 'cap-mine-' || g), :'ru1', :'rg', 'reply', 'mine', 'sent', now(), now() + interval '1 day'
+  from generate_series(1, 6) g;
+select study_private.notice_add(:'ru1', :'rg', 'reply', '{}', '{"v":"library"}', null, 'cap-mine-7') as x \gset
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R19', (select o.state from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id where n.dedupe = 'cap-mine-7') = 'capped',
+  'the 7th "בשבילך" push of the day: capped');
+insert into study_private.notify_outbox (notice_id, user_id, group_id, kind, cat, state, pushed_at, expires_at)
+select study_private.notice_add(:'ru1', :'rg', 'mystery', '{}', '{}', null, 'cap-live-' || g), :'ru1', :'rg', 'meeting_soon', 'live', 'sent', now(), now() + interval '1 day'
+  from generate_series(1, 6) g;
+insert into study_private.notify_outbox (notice_id, user_id, group_id, kind, cat, state, not_before, expires_at)
+values (study_private.notice_add(:'ru1', :'rg', 'mystery', '{}', '{}', null, 'cap-live-13'), :'ru1', :'rg', 'meeting_soon', 'live', 'due', now(), now() + interval '1 day');
+select count(study_private.notice_add(:'ru1', null, 'code_used', '{}', '{"v":"me"}', null, 'cap-sec-' || g)) from generate_series(1, 3) g \gset
+update study_private.notify_outbox set state = 'sent', pushed_at = now() where user_id = :'ru1' and kind = 'code_used' and state = 'due';
+select study_private.notice_add(:'ru1', null, 'code_used', '{}', '{"v":"me"}', null, 'cap-sec-4') as x \gset
+set role authenticated; set request.jwt.claim.sub = :'ru1';
+select public.study_notify_test() as t1 \gset
+reset role;
+update study_private.notify_outbox set not_before = now() where state = 'due';
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R19b', (select string_agg(n.dedupe || '=' || o.state, ',' order by n.dedupe) from study_private.notify_outbox o join public.study_notices n on n.id = o.notice_id
+                             where n.dedupe in ('cap-live-13', 'cap-sec-4')) = 'cap-live-13=capped,cap-sec-4=capped'
+  and (select o.state from study_private.notify_outbox o where o.notice_id = :t1) = 'sending',
+  'the 13th push of the day and the 4th security notice: capped; a test push is never capped');
+update study_private.notify_outbox set state = 'none' where state in ('due', 'sending');
+
+-- ── The test push, prefs and the inbox ──
+set role authenticated; set request.jwt.claim.sub = :'ru1';
+select public.study_notify_test() is not null and public.study_notify_test() is not null as x \gset
+do $$ begin perform public.study_notify_test(); raise notice 'R20. FAIL: a 4th test push in an hour';
+exception when others then raise notice 'R20. %: at most 3 test pushes an hour (%)', case when sqlerrm = 'too many' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+select pg_temp.rok('R20b', not exists (select 1 from jsonb_array_elements(public.study_notices_mine(:'rg')) e where e ->> 'kind' = 'test'),
+  'test pushes never enter the inbox');
+select pg_temp.rok('R21', public.study_notify_prefs_set('{"mine": false, "quiet_from": "22:30", "digest_at": "06:00"}')
+  = '{"live": true, "mine": false, "quiet": false, "digest": false, "shabbat": false, "quiet_to": "07:30", "digest_at": "06:00", "quiet_from": "22:30"}'::jsonb,
+  'settings: a patch saves its keys and answers the whole row');
+do $$ declare p text; begin
+  foreach p in array array['{"x": 1}', '{"live": "yes"}', '{"quiet_from": "22:15"}', '{"digest_at": "05:30"}', '{"digest_at": "22:30"}', '[]', '{"quiet_to": "24:00"}'] loop
+    begin
+      perform public.study_notify_prefs_set(p::jsonb);
+      raise notice 'R21b. FAIL: % was saved', p;
+    exception when others then
+      if sqlerrm <> 'bad prefs' then raise notice 'R21b. FAIL: % refused for another reason (%)', p, sqlerrm; end if;
+    end;
+  end loop;
+  raise notice 'R21b. ok: unknown keys, wrong types, times off the half hour and a reminder outside 06:00-22:00 are refused';
+end $$;
+reset role;
+select study_private.notice_add(:'ru1', :'rg', 'reply', '{}', '{"v":"library"}', null, 'r-mine-off') as rmo \gset
+select pg_temp.rok('R21c', not exists (select 1 from study_private.notify_outbox where notice_id = :rmo),
+  '"בשבילך" off: the inbox still gets it, no push is queued');
+update public.study_notify_prefs set mine = true, digest_at = '19:30', quiet_from = '23:00' where user_id = :'ru1';
+set role authenticated; set request.jwt.claim.sub = :'ru1';
+select public.study_notices_seen(:'rg') as x \gset
+reset role;
+select study_private.notice_add(:'ru1', :'rg', 'summary_ready', '{"lecture":"x"}', jsonb_build_object('v', 'lecture', 'l', :'rl1'), 'lec:' || :'rl1', 'obj-1') as x \gset
+select study_private.notice_add(:'ru1', :'rg', 'reply', '{"lecture":"x"}', jsonb_build_object('v', 'lecture', 'l', :'rl1'), 'lec:' || :'rl1', 'obj-2') as x \gset
+select study_private.notice_add(:'ru1', :'rg', 'quiz_open', '{}', '{"v":"quiz","q":"1a000000-0000-4000-8000-0000000000c9"}', 'quiz:1a000000-0000-4000-8000-0000000000c9', 'obj-3') as x \gset
+set role authenticated; set request.jwt.claim.sub = :'ru1';
+select pg_temp.rok('R22', public.study_notices_unseen(:'rg')
+  = jsonb_build_object('n', 3, 'objs', jsonb_build_array('lec:' || :'rl1', 'quiz:1a000000-0000-4000-8000-0000000000c9')),
+  'the bell: three unseen, about two objects');
+select public.study_notices_seen_obj(:'rg', 'lec:' || :'rl1') as seen_n \gset
+select pg_temp.rok('R22b', :seen_n = 2
+  and public.study_notices_unseen(:'rg') = '{"n": 1, "objs": ["quiz:1a000000-0000-4000-8000-0000000000c9"]}'::jsonb,
+  'opening the lecture marks only its own two rows seen');
+select jsonb_array_length(public.study_notices_mine(:'rg')) as mine_n \gset
+select (public.study_notices_mine(:'rg', null, 3) -> 2 ->> 'id')::bigint as page_end \gset
+select pg_temp.rok('R22c', :mine_n >= 10
+  and jsonb_array_length(public.study_notices_mine(:'rg', :page_end, 100)) = :mine_n - 3
+  and (select bool_and(ok) from (select (e ->> 'updated_at')::timestamptz <= lag((e ->> 'updated_at')::timestamptz) over (order by o) as ok
+                                    from jsonb_array_elements(public.study_notices_mine(:'rg')) with ordinality x (e, o)) y where ok is not null)
+  and exists (select 1 from jsonb_array_elements(public.study_notices_mine(:'rg')) e where e ->> 'kind' = 'code_used' and e ->> 'group_id' is null),
+  'the inbox: newest first in pages, the group-less security notice included');
+set request.jwt.claim.sub = :'ru2';
+select pg_temp.rok('R22d', not exists (select 1 from jsonb_array_elements(public.study_notices_mine(:'rg')) e
+                                        where e ->> 'kind' in ('code_used', 'summary_failed'))
+  and (select count(*) from public.study_notices where user_id = :'ru1') = 0
+  and (select count(*) from public.study_notices) > 0,
+  'another member never sees these rows, through the RPC or the table');
+reset role;
+set role anon;
+do $$ declare n int; begin select count(*) into n from public.study_notices; raise notice 'R22e. FAIL: anon read % notices', n;
+exception when insufficient_privilege then raise notice 'R22e. ok: signed out, no inbox'; end $$;
+reset role;
+
+-- ── The kick: once, throttled, and the breaker ──
+update study_private.notify_kick set at = null, kicks_since_claim = 0, stuck_at = null;
+delete from net.calls;
+select study_private.notice_add(:'ru1', :'rg', 'reply', '{}', '{"v":"library"}', null, 'r-kick') as x \gset
+select study_private.notify_dispatch(true) as k1, study_private.notify_dispatch(true) as k2 \gset
+select pg_temp.rok('R23', :k1 = 1 and :k2 = 0
+  and (select count(*) = 1 and bool_and(url = 'https://tamtzit.vercel.app/api/study/work' and body = '{"notify": true}'
+                                        and headers ->> 'Authorization' = 'Bearer ' || :'rkey' and timeout_milliseconds = 10000)
+         from net.calls),
+  'a due push kicks /api/study/work {notify:true} once with the server key; a second kick within 3 s waits');
+do $$ begin
+  for i in 1..16 loop
+    update study_private.notify_kick set at = now() - interval '2 minutes';
+    perform study_private.notify_dispatch();
+  end loop;
+end $$;
+select pg_temp.rok('R23b', (select count(*) from net.calls) = 15
+  and (select kicks_since_claim = 15 and stuck_at is not null from study_private.notify_kick)
+  and (public.study_notify_ok() ->> 'stuck')::boolean,
+  '15 kicks nobody claimed: the breaker stops them, and health can say so');
+update study_private.notify_kick set at = now() - interval '2 hours';
+select pg_temp.rok('R23c', study_private.notify_dispatch() = 1, 'one probe an hour');
+set role anon;
+select public.study_notify_claim(:'rkey') as c \gset
+reset role;
+select pg_temp.rok('R23d', (select kicks_since_claim = 0 and stuck_at is null from study_private.notify_kick)
+  and public.study_notify_ok() = '{"on": true, "pilot": false, "stuck": false, "wired": true}'::jsonb,
+  'a claim resets the breaker; health''s four booleans');
+update study_private.notify_outbox set state = 'none' where state in ('due', 'sending');
+update study_private.notify_kick set at = null;
+delete from net.calls;
+select study_private.notice_add(:'ru1', :'rg', 'summary_ready', '{}', '{"v":"library"}', null, 'r-later') as x \gset
+select pg_temp.rok('R23e', study_private.notify_dispatch(true) = 0
+  and (public.study_notify_claim(:'rkey') = '{"more": false, "rows": [], "wait_ms": null}'::jsonb),
+  'a push held 90 s: no kick yet, nothing to claim');
+update study_private.notify_outbox o set not_before = now() + interval '10 seconds' from public.study_notices n where n.id = o.notice_id and n.dedupe = 'r-later';
+select pg_temp.rok('R23f', study_private.notify_dispatch(true) = 1
+  and (select (c -> 'rows') = '[]'::jsonb and (c ->> 'more')::boolean and (c ->> 'wait_ms')::int between 8000 and 10500
+         from public.study_notify_claim(:'rkey') c),
+  'due within 20 s: the kick comes now and the worker is told how long to wait');
+update study_private.notify_outbox set state = 'none' where state in ('due', 'sending');
+
+-- ── Gone with their lecture and their group ──
+select pg_temp.rok('R24', (select count(*) from public.study_notices where lecture_id = :'rl2') > 0, 'notices about the second lecture exist');
+delete from public.study_lectures where id = :'rl2';
+select pg_temp.rok('R24b', (select count(*) from public.study_notices where lecture_id = :'rl2') = 0, 'deleting a lecture deletes its notices');
+delete from public.study_members where group_id = :'rg' and user_id = :'ru3';
+select pg_temp.rok('R24c', not exists (select 1 from public.study_notices where user_id = :'ru3' and group_id = :'rg')
+  and exists (select 1 from public.study_notices where user_id = :'ru3' and group_id is null),
+  'leaving the group deletes that group''s notices (the group-less security notice stays)');
+set role authenticated; set request.jwt.claim.sub = :'ru3';
+do $$ begin perform public.study_notices_mine('1a000000-0000-4000-8000-0000000000a1'); raise notice 'R24d. FAIL: a former member read the inbox';
+exception when others then raise notice 'R24d. %: a former member is refused (%)', case when sqlerrm = 'forbidden' then 'ok' else 'FAIL' end, sqlerrm; end $$;
+reset role;
+
+-- The fixtures go; the switches go back to how the section inserts them.
+update study_private.features set enabled = false where name = 'notify';
+update study_private.features set enabled = true where name = 'notify_hooks';
+update study_private.notify_kick set at = null, kicks_since_claim = 0, stuck_at = null;
+delete from study_private.notify_pilot;
+delete from study_private.quiz_quiet;
+delete from study_private.code_log where user_id::text like '1a000000-%';
+delete from public.study_groups where id = :'rg';
+delete from auth.users where id::text like '1a000000-%';
+delete from net.calls;
+select pg_temp.rok('R25', not exists (select 1 from study_private.notify_outbox where user_id::text like '1a000000-%')
+  and not exists (select 1 from public.study_push_subs where endpoint like '%/r-0%'),
+  'nothing of these checks is left (notices, pushes and devices go with their user)');
+-- ════ END SECTION R ════

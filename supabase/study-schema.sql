@@ -17800,7 +17800,8 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 --    insert into study_private.features (name, enabled) values ('codes', false)
 --    on conflict (name) do update set enabled = excluded.enabled, changed_at = now();
 --
---  Re-runnable. Part 9 of supabase/parts is this section alone.
+--  Re-runnable. Part 9 of supabase/parts starts with this section; the
+--  sections after it (R, notifications, first) follow it there.
 
 -- The install check, before anything is created: the definer (postgres on
 -- Supabase) writes these auth.users columns, bypasses the table's row level
@@ -18141,3 +18142,1054 @@ end $$;
 insert into study_private.schema_sections (section, version) values ('I', 1)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION I ════
+
+-- ════ BEGIN SECTION R · notifications and the inbox (package R) ════
+--  docs/study/DECISIONS-2026-11-26.md (notifications, section R, revision 2).
+--  A member hears about the few things worth a tap. Every notice is first a
+--  row in the member's inbox (public.study_notices, the bell); a push to the
+--  member's phones and computers is only a way of delivering it, kept apart
+--  in study_private.notify_outbox so Realtime never carries push state.
+--
+--  R 1 (this version): the tables, the kind registry, notice_add() (the one
+--  way any package adds a notice), the member and worker RPCs, the hooks of
+--  a group quiz opened, a reply in a thread, a summary ready or stopped, a
+--  member leaving, the "someone signed in with your personal code" scan,
+--  the minute job and the switches. R 2 adds the remaining hooks.
+--
+--  The database stores no Hebrew: a notice keeps kind, args, count, route
+--  and obj; shared/study/notifyCopy.ts writes the words for the lock screen
+--  and the inbox. No lock screen ever shows a quiz title, a name, or comment,
+--  question or summary text.
+--
+--  The switches (study_private.features):
+--    notify        inserted off: nothing is pushed, except to the users in
+--                  study_private.notify_pilot; the inbox keeps filling.
+--    notify_hooks  inserted on: off, no new notice at all (every hook stops
+--                  at its first line).
+--      update study_private.features set enabled = true, changed_at = now() where name = 'notify';
+--
+--  Another package adds notices only through
+--    study_private.notice_add(user, group, kind, args, route, obj, dedupe, lecture, ends)
+--  after checking to_regprocedure('study_private.notice_add(uuid,uuid,text,jsonb,jsonb,text,text,uuid,timestamptz)'),
+--  and registers its kinds in study_private.notice_kinds. An unknown kind is
+--  safe: it stays in the inbox for a day and never pushes.
+--
+--  A hook never fails the write that fired it: each catches its own errors,
+--  and notice_add gives up on a lock after 200 ms.
+--
+--  Needs sections F and W (feature_on, server_on, secret, is_worker) and I
+--  (code_log, for the sign-in scan). Re-runnable throughout.
+
+-- ── Devices: one row per push subscription; a member has several ──
+create table if not exists public.study_push_subs (
+  id         bigint      generated always as identity primary key,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  endpoint   text        not null unique check (char_length(endpoint) between 20 and 1000),
+  p256dh     text        not null check (p256dh ~ '^[A-Za-z0-9_-]{86,88}$'),
+  auth       text        not null check (auth ~ '^[A-Za-z0-9_-]{21,24}$'),
+  key_id     text        not null check (char_length(key_id) between 8 and 16),   -- prefix of sha256(the VAPID public key)
+  device     text        not null default 'other'
+                         check (device in ('iphone', 'ipad', 'android', 'mac', 'windows', 'linux', 'other')),
+  browser    text        not null default '' check (char_length(browser) <= 20),
+  created_at timestamptz not null default now(),
+  seen_at    timestamptz not null default now(),   -- the app's last resync on that device
+  ok_at      timestamptz,                          -- the push service's last 2xx
+  fails      int         not null default 0
+);
+create index if not exists study_push_subs_user on public.study_push_subs (user_id);
+alter table public.study_push_subs enable row level security;   -- no policy: only the definer RPCs below
+revoke all on public.study_push_subs from anon, authenticated;
+
+-- ── Each person's settings (the defaults are Yoad's answers of 26 Nov 2026) ──
+-- No row: the defaults (study_private.notify_prefs_of, which a check compares).
+create table if not exists public.study_notify_prefs (
+  user_id    uuid        primary key default auth.uid() references auth.users (id) on delete cascade,
+  live       boolean     not null default true,    -- "עכשיו בקבוצה": a quiz opened, a meeting starting
+  mine       boolean     not null default true,    -- "בשבילך": replies, answers, what I uploaded is ready
+  digest     boolean     not null default false,   -- the daily reminder (R 2), off by default
+  digest_at  time        not null default '19:30',
+  quiet      boolean     not null default true,    -- no push at night
+  quiet_from time        not null default '23:00',
+  quiet_to   time        not null default '07:30',
+  shabbat    boolean     not null default false,   -- Friday 16:00 to Saturday 20:30, Israel time
+  updated_at timestamptz not null default now()
+);
+alter table public.study_notify_prefs enable row level security;
+drop policy if exists "study notify prefs own" on public.study_notify_prefs;
+create policy "study notify prefs own" on public.study_notify_prefs for select to authenticated using (user_id = auth.uid());
+revoke all on public.study_notify_prefs from anon, authenticated;
+grant select on public.study_notify_prefs to authenticated;
+
+-- ── The inbox. A row changes only when it is added, coalesced or seen ──
+-- obj: what a screen "sees" ('lec:<id>', 'quiz:<id>', 'exam:<id>', 'meet:<id>',
+-- 'disp:<id>', 'wall:<id>'): opening that screen marks the row seen.
+-- dedupe: rows with the same key coalesce (count + 1) while unseen.
+create table if not exists public.study_notices (
+  id         bigint      generated always as identity primary key,
+  user_id    uuid        not null references auth.users (id) on delete cascade,
+  group_id   uuid        references public.study_groups (id) on delete cascade,     -- null: the security notice
+  lecture_id uuid        references public.study_lectures (id) on delete cascade,   -- titles go with their lecture
+  kind       text        not null check (kind ~ '^[a-z_]{2,20}$'),
+  cat        text        not null check (cat in ('live', 'mine', 'digest', 'security', 'inapp')),
+  args       jsonb       not null default '{}' check (jsonb_typeof(args) = 'object' and pg_column_size(args) <= 1200),
+  route      jsonb       not null default '{}' check (jsonb_typeof(route) = 'object' and pg_column_size(route) <= 400),
+  obj        text        check (char_length(obj) <= 60),
+  count      int         not null default 1 check (count between 1 and 999),
+  dedupe     text        not null check (char_length(dedupe) between 1 and 120),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  seen_at    timestamptz,
+  ends_at    timestamptz
+);
+-- Coalescing: only an unseen row conflicts, so a seen row never swallows a new event.
+create unique index if not exists study_notices_open on public.study_notices (user_id, dedupe) where seen_at is null;
+create index if not exists study_notices_mine on public.study_notices (user_id, updated_at desc);
+create index if not exists study_notices_obj on public.study_notices (user_id, obj) where seen_at is null;
+create index if not exists study_notices_lecture on public.study_notices (lecture_id) where lecture_id is not null;
+create index if not exists study_notices_group on public.study_notices (group_id, user_id);
+alter table public.study_notices enable row level security;
+drop policy if exists "study notices own" on public.study_notices;
+create policy "study notices own" on public.study_notices for select to authenticated using (user_id = auth.uid());
+revoke all on public.study_notices from anon, authenticated;
+grant select on public.study_notices to authenticated;
+do $$ begin
+  alter publication supabase_realtime add table public.study_notices;
+exception
+  when duplicate_object then null;
+  when undefined_object then raise notice 'no supabase_realtime publication: the bell updates on each open only';
+end $$;
+
+-- ── The push side, private: members never read it and Realtime never carries it ──
+create table if not exists study_private.notify_outbox (
+  notice_id   bigint      primary key references public.study_notices (id) on delete cascade,
+  user_id     uuid        not null,
+  group_id    uuid,
+  kind        text        not null,
+  cat         text        not null,
+  state       text        not null default 'due'
+              check (state in ('due', 'sending', 'sent', 'quiet', 'capped', 'held', 'nosub', 'off', 'none', 'failed', 'expired')),
+  not_before  timestamptz not null default now(),
+  expires_at  timestamptz not null,
+  lease_until timestamptz,
+  attempts    int         not null default 0,
+  again       boolean     not null default false,   -- coalesced while 'sending': send once more
+  pushed_at   timestamptz
+);
+create index if not exists notify_outbox_due on study_private.notify_outbox (not_before) where state = 'due';
+create index if not exists notify_outbox_sent on study_private.notify_outbox (user_id, pushed_at) where state = 'sent';
+create index if not exists notify_outbox_group on study_private.notify_outbox (group_id, kind, pushed_at);
+
+-- ── The kind registry. cat: live, mine, digest, security or inapp; push
+-- false means inbox only; delay holds the push (a quiz's 15 s, so a host can
+-- still uncheck "להודיע לקבוצה"; a summary's 90 s, so a member watching it
+-- finish gets no push). Each package registers its own kinds in its section.
+create table if not exists study_private.notice_kinds (
+  kind  text     primary key check (kind ~ '^[a-z_]{2,20}$'),
+  cat   text     not null check (cat in ('live', 'mine', 'digest', 'security', 'inapp')),
+  ttl   interval not null,
+  delay interval not null default '0',
+  push  boolean  not null default true
+);
+insert into study_private.notice_kinds (kind, cat, ttl, delay, push) values
+  ('quiz_open',      'live',     '20 minutes', '15 seconds', true),
+  ('reply',          'mine',     '3 days',     '0',          true),
+  ('answer',         'mine',     '3 days',     '0',          true),
+  ('summary_ready',  'mine',     '2 days',     '90 seconds', true),
+  ('summary_failed', 'mine',     '2 days',     '90 seconds', true),
+  ('code_used',      'security', '1 day',      '0',          true),
+  ('test',           'security', '10 minutes', '5 seconds',  true),
+  -- Reserved for packages not built yet (Yoad, 26 Nov 2026): their sections
+  -- wire them. A practice set shared with the group, similar questions
+  -- ready, a new run of the model comparison.
+  ('set_shared',     'mine',     '7 days',     '0',          true),
+  ('similar_ready',  'mine',     '2 days',     '90 seconds', true),
+  ('lab_new',        'inapp',    '7 days',     '0',          false)
+on conflict (kind) do update set cat = excluded.cat, ttl = excluded.ttl, delay = excluded.delay, push = excluded.push;
+
+-- What was pushed: ids and the push service's status only (never an endpoint, args or a key).
+create table if not exists study_private.push_log (
+  id        bigint      generated always as identity primary key,
+  notice_id bigint,
+  sub_id    bigint,
+  status    int,
+  at        timestamptz not null default now()
+);
+create index if not exists push_log_at on study_private.push_log (at);
+-- The kick to /api/study/work, its throttle and its circuit breaker.
+create table if not exists study_private.notify_kick (
+  id                int         primary key default 1 check (id = 1),
+  at                timestamptz,
+  kicks_since_claim int         not null default 0,
+  stuck_at          timestamptz
+);
+insert into study_private.notify_kick (id) values (1) on conflict (id) do nothing;
+-- Who gets pushes while the switch "notify" is off (the pilot, OD5).
+create table if not exists study_private.notify_pilot (
+  user_id  uuid        primary key,
+  added_at timestamptz not null default now()
+);
+-- How far the sign-in scan has read study_private.code_log.
+create table if not exists study_private.notify_cursor (
+  name    text   primary key,
+  last_id bigint not null default 0
+);
+-- Quizzes whose host unchecked "להודיע לקבוצה".
+create table if not exists study_private.quiz_quiet (
+  quiz_id uuid        primary key,
+  at      timestamptz not null default now()
+);
+
+insert into study_private.features (name, enabled) values ('notify', false), ('notify_hooks', true)
+on conflict (name) do nothing;
+
+-- ── Helpers ──
+
+-- A push endpoint the server may post to: https, one of the push services'
+-- hosts, no user, no port (OD: the same list as server/study/push.ts).
+create or replace function study_private.push_host_ok(p_endpoint text)
+returns boolean language plpgsql immutable set search_path = public as $$
+declare m text[];
+begin
+  if p_endpoint is null or char_length(p_endpoint) not between 20 and 1000 then return false; end if;
+  m := regexp_match(p_endpoint, '^https://([a-z0-9.-]+)(/[!-~]*)?$');
+  if m is null then return false; end if;
+  return m[1] in ('fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com')
+      or m[1] ~ '^[a-z0-9-]+(\.[a-z0-9-]+)*\.push\.apple\.com$'
+      or m[1] ~ '^[a-z0-9-]+(\.[a-z0-9-]+)*\.notify\.windows\.com$';
+end;
+$$;
+
+-- A route's id, or null when it is not one (a route is data: never a failed cast).
+create or replace function study_private.uuid_or_null(p text)
+returns uuid language sql immutable set search_path = public as $$
+  select case when p ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then p::uuid end
+$$;
+
+-- A person's settings, or the defaults when there is no row (the column defaults above).
+create or replace function study_private.notify_prefs_of(p_user uuid)
+returns public.study_notify_prefs language sql stable security definer set search_path = public as $$
+  select coalesce(
+    (select p from public.study_notify_prefs p where p.user_id = p_user),
+    row(p_user, true, true, false, time '19:30', true, time '23:00', time '07:30', false, null::timestamptz)::public.study_notify_prefs)
+$$;
+
+-- Does this person want pushes of this category? Security always; inapp never.
+create or replace function study_private.notify_cat_on(p_user uuid, p_cat text)
+returns boolean language plpgsql stable security definer set search_path = public as $$
+declare p public.study_notify_prefs := study_private.notify_prefs_of(p_user);
+begin
+  return case p_cat when 'live' then p.live when 'mine' then p.mine when 'digest' then p.digest
+                    when 'security' then true else false end;
+end;
+$$;
+
+-- Null when a push may go now; otherwise when the person's quiet window (the
+-- night, Shabbat) ends, Israel time. Windows that touch are passed together
+-- (a night ending inside Shabbat waits for Shabbat's end).
+-- shared/study/notifyQuiet.ts is the same rule for the settings screen.
+create or replace function study_private.notify_quiet(p_user uuid, p_at timestamptz default now())
+returns timestamptz language plpgsql stable security definer set search_path = public as $$
+declare
+  p  public.study_notify_prefs := study_private.notify_prefs_of(p_user);
+  t  timestamptz := p_at;
+  e  timestamptz;
+  lt timestamp;
+  tm time;
+  dw int;
+begin
+  for i in 1..4 loop
+    e := null;
+    lt := t at time zone 'Asia/Jerusalem';
+    tm := lt::time;
+    if p.quiet and p.quiet_from <> p.quiet_to then
+      if p.quiet_from < p.quiet_to then
+        if tm >= p.quiet_from and tm < p.quiet_to then e := (lt::date + p.quiet_to) at time zone 'Asia/Jerusalem'; end if;
+      elsif tm >= p.quiet_from then
+        e := ((lt::date + 1) + p.quiet_to) at time zone 'Asia/Jerusalem';
+      elsif tm < p.quiet_to then
+        e := (lt::date + p.quiet_to) at time zone 'Asia/Jerusalem';
+      end if;
+    end if;
+    if p.shabbat then
+      dw := extract(isodow from lt)::int;
+      if (dw = 5 and tm >= time '16:00') or (dw = 6 and tm < time '20:30') then
+        e := greatest(e, ((lt::date + case when dw = 5 then 1 else 0 end) + time '20:30') at time zone 'Asia/Jerusalem');
+      end if;
+    end if;
+    exit when e is null or e <= t;
+    t := e;
+  end loop;
+  return case when t = p_at then null else t end;
+end;
+$$;
+
+-- The one way to add a notice (§4.2 of the design). Never raises: a notice is
+-- never worth a failed quiz, comment or upload. Coalesces with the person's
+-- unseen row of the same dedupe key, then queues the push when the kind
+-- pushes, the person's category is on and the person has a device.
+create or replace function study_private.notice_add(
+  p_user uuid, p_group uuid, p_kind text, p_args jsonb, p_route jsonb, p_obj text, p_dedupe text,
+  p_lecture uuid default null, p_ends timestamptz default null)
+returns bigint language plpgsql volatile security definer set search_path = public set lock_timeout = '200ms' as $$
+declare
+  k    study_private.notice_kinds;
+  v_id bigint;
+begin
+  if p_user is null or not study_private.feature_on('notify_hooks') then return null; end if;
+  select * into k from study_private.notice_kinds where kind = p_kind;
+  if not found then
+    k := row(p_kind, 'inapp', interval '1 day', interval '0', false)::study_private.notice_kinds;
+  end if;
+  insert into public.study_notices as n (user_id, group_id, lecture_id, kind, cat, args, route, obj, dedupe, ends_at)
+  values (p_user, p_group, p_lecture, p_kind, k.cat, coalesce(p_args, '{}'), coalesce(p_route, '{}'), p_obj,
+          coalesce(p_dedupe, p_kind), p_ends)
+  on conflict (user_id, dedupe) where seen_at is null
+  do update set count = least(n.count + 1, 999), args = excluded.args, route = excluded.route,
+                ends_at = excluded.ends_at, updated_at = now()
+  returning n.id into v_id;
+  if k.push and study_private.notify_cat_on(p_user, k.cat)
+     and exists (select 1 from public.study_push_subs s where s.user_id = p_user) then
+    insert into study_private.notify_outbox as o (notice_id, user_id, group_id, kind, cat, state, not_before, expires_at)
+    values (v_id, p_user, p_group, p_kind, k.cat, 'due', now() + k.delay, now() + k.ttl)
+    on conflict (notice_id) do update set
+      again       = o.state = 'sending' or o.again,
+      state       = case when o.state = 'sending' then 'sending' else 'due' end,
+      not_before  = case when o.state = 'sending' then o.not_before else excluded.not_before end,
+      attempts    = case when o.state = 'sending' then o.attempts else 0 end,
+      lease_until = case when o.state = 'sending' then o.lease_until end,
+      expires_at  = excluded.expires_at;
+  end if;
+  return v_id;
+exception when others then
+  raise warning 'notice_add % %', p_kind, sqlstate;
+  return null;
+end;
+$$;
+
+-- notice_add for every member of a group but one (the person who did it).
+create or replace function study_private.notice_group(
+  p_group uuid, p_except uuid, p_kind text, p_args jsonb, p_route jsonb, p_obj text, p_dedupe text,
+  p_lecture uuid default null, p_ends timestamptz default null)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare u uuid; n int := 0;
+begin
+  for u in select m.user_id from public.study_members m
+            where m.group_id = p_group and m.user_id is distinct from p_except order by m.user_id loop
+    if study_private.notice_add(u, p_group, p_kind, p_args, p_route, p_obj, p_dedupe, p_lecture, p_ends) is not null then
+      n := n + 1;
+    end if;
+  end loop;
+  return n;
+end;
+$$;
+
+-- Kick /api/study/work {notify:true} when a push is due (or within 20 s: the
+-- worker waits for a held quiz instead of the next minute). Once a 3 s with
+-- p_now, once a 50 s otherwise. After 15 kicks nobody claimed (no VAPID keys,
+-- a broken deploy) it stops, except one probe an hour; a claim resets it.
+create or replace function study_private.notify_dispatch(p_now boolean default false)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare k study_private.notify_kick;
+begin
+  if not study_private.server_on() then return 0; end if;
+  if not exists (select 1 from study_private.notify_outbox o
+                  where o.state = 'due' and o.not_before <= now() + interval '20 seconds'
+                    and (study_private.feature_on('notify')
+                         or exists (select 1 from study_private.notify_pilot p where p.user_id = o.user_id))
+                    and exists (select 1 from public.study_push_subs s where s.user_id = o.user_id)) then
+    return 0;
+  end if;
+  select * into k from study_private.notify_kick where id = 1 for update skip locked;
+  if not found then return 0; end if;   -- another caller is kicking now
+  if k.at > now() - (case when p_now then interval '3 seconds' else interval '50 seconds' end) then return 0; end if;
+  if k.kicks_since_claim >= 15 then
+    update study_private.notify_kick set stuck_at = coalesce(stuck_at, now()) where id = 1;
+    if k.at > now() - interval '1 hour' then return 0; end if;
+  end if;
+  perform net.http_post(
+    url := rtrim(study_private.secret('study_site_url'), '/') || '/api/study/work',
+    body := jsonb_build_object('notify', true),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || study_private.secret('study_worker_key')),
+    timeout_milliseconds := 10000);
+  update study_private.notify_kick set at = now(), kicks_since_claim = kicks_since_claim + 1 where id = 1;
+  return 1;
+end;
+$$;
+
+-- Every minute (pg_cron), before notify_dispatch():
+--   1. the sign-in scan: each new 'redeemed' row of study_private.code_log
+--      becomes a code_used notice for that member, when the member has a
+--      device to warn (not inside the redeem itself, which stays as it was);
+--      the first run only notes where the log ends;
+--   2. pushes whose worker died go back to 'due'; 3. pushes past their
+--      time-to-live are dropped; 4. a quiz that ended ends its inbox row.
+create or replace function study_private.notify_plan()
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  v_last bigint;
+  v_max  bigint;
+  r      record;
+  v_n    int := 0;
+begin
+  if to_regclass('study_private.code_log') is not null then
+    select c.last_id into v_last from study_private.notify_cursor c where c.name = 'code' for update;
+    if not found then
+      insert into study_private.notify_cursor (name, last_id)
+      values ('code', coalesce((select max(l.id) from study_private.code_log l), 0))
+      on conflict (name) do nothing;
+    else
+      select max(x.id) into v_max from (select l.id from study_private.code_log l where l.id > v_last order by l.id limit 500) x;
+      if v_max is not null then
+        for r in select l.id, l.user_id, l.at from study_private.code_log l
+                  where l.id > v_last and l.id <= v_max and l.event = 'redeemed' order by l.id loop
+          if exists (select 1 from public.study_push_subs s where s.user_id = r.user_id)
+             and study_private.notice_add(r.user_id, null, 'code_used', jsonb_build_object('at', r.at),
+                                          jsonb_build_object('v', 'me'), null, 'code:' || r.id) is not null then
+            v_n := v_n + 1;
+          end if;
+        end loop;
+        update study_private.notify_cursor set last_id = v_max where name = 'code';
+      end if;
+    end if;
+  end if;
+  update study_private.notify_outbox set state = 'due', lease_until = null
+   where state = 'sending' and lease_until < now();
+  update study_private.notify_outbox set state = 'expired', lease_until = null
+   where state = 'due' and expires_at < now();
+  update public.study_notices n set ends_at = coalesce(q.ended_at, q.updated_at)
+    from public.study_quizzes q
+   where n.kind = 'quiz_open' and n.ends_at is null and n.seen_at is null
+     and q.id = study_private.uuid_or_null(n.route ->> 'q') and q.state in ('ended', 'cancelled');
+  if v_n > 0 then perform study_private.notify_dispatch(true); end if;
+  return v_n;
+end;
+$$;
+
+-- A member RPC's caller: signed in and a member of this group (or, with no
+-- group, of some group). Otherwise 'forbidden'.
+create or replace function study_private.notify_member(p_group uuid)
+returns uuid language plpgsql stable security definer set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null or not exists (select 1 from public.study_members m
+                                where m.user_id = me and (p_group is null or m.group_id = p_group)) then
+    raise exception 'forbidden';
+  end if;
+  return me;
+end;
+$$;
+
+revoke all on function study_private.push_host_ok(text), study_private.notify_prefs_of(uuid),
+  study_private.notify_cat_on(uuid, text), study_private.notify_quiet(uuid, timestamptz),
+  study_private.notice_add(uuid, uuid, text, jsonb, jsonb, text, text, uuid, timestamptz),
+  study_private.notice_group(uuid, uuid, text, jsonb, jsonb, text, text, uuid, timestamptz),
+  study_private.notify_dispatch(boolean), study_private.notify_plan(), study_private.notify_member(uuid) from public;
+
+-- ── The worker's RPCs (/api/study/work {notify:true}, the server key) ──
+
+-- Claims up to p_limit due pushes, oldest first, and decides each one now:
+--   off     the switch is off and the person is not in the pilot;
+--   none    the category is off, the notice was seen, or a "budget" stop of
+--           this lecture was already pushed this month;
+--   held    the quiz ended, or its host unchecked "להודיע לקבוצה";
+--   capped  another quiz of the group was pushed in the last 10 minutes, or
+--           of the same host in the last 30; or the person's day is full
+--           (Israel day: 6 in "בשבילך", 12 in all, 3 security notices);
+--   quiet   a live notice inside the person's quiet hours (the inbox has it);
+--           a "בשבילך" one waits for the window's end; a security one goes
+--           now, silently;
+--   nosub   no device left.
+-- The rest become 'sending' for 180 s with their devices. At most 60 pushes
+-- a minute in all. more: another push is due within 20 s (wait_ms from now).
+create or replace function public.study_notify_claim(p_key text, p_limit int default 20)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  o       record;
+  n       public.study_notices;
+  q       public.study_quizzes;
+  v_lim   int := least(greatest(coalesce(p_limit, 20), 1), 50);
+  v_on    boolean;
+  v_day   timestamptz := ((now() at time zone 'Asia/Jerusalem')::date)::timestamp at time zone 'Asia/Jerusalem';
+  v_month timestamptz := date_trunc('month', now() at time zone 'Asia/Jerusalem') at time zone 'Asia/Jerusalem';
+  v_min   int;
+  v_n     int := 0;
+  v_rows  jsonb := '[]';
+  v_subs  jsonb;
+  v_quiet timestamptz;
+  v_silent boolean;
+  v_at    timestamptz;
+  v_full  boolean := false;
+  v_next  timestamptz;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  update study_private.notify_kick set kicks_since_claim = 0, stuck_at = null where id = 1;
+  perform pg_advisory_xact_lock(hashtext('study_notify'));
+  v_on := study_private.feature_on('notify');
+  select count(*) into v_min from study_private.notify_outbox x
+   where (x.state = 'sent' and x.pushed_at > now() - interval '1 minute') or x.state = 'sending';
+  for o in select x.* from study_private.notify_outbox x
+            where x.state = 'due' and x.not_before <= now()
+            order by x.not_before, x.notice_id
+            for update skip locked loop
+    exit when v_n >= v_lim;
+    select * into n from public.study_notices where id = o.notice_id;
+    if not found then continue; end if;
+    if not v_on and not exists (select 1 from study_private.notify_pilot p where p.user_id = o.user_id) then
+      update study_private.notify_outbox set state = 'off' where notice_id = o.notice_id; continue;
+    end if;
+    if not study_private.notify_cat_on(o.user_id, o.cat) or n.seen_at is not null then
+      update study_private.notify_outbox set state = 'none' where notice_id = o.notice_id; continue;
+    end if;
+    if o.kind in ('quiz_open', 'boss_open') then
+      select * into q from public.study_quizzes x where x.id = study_private.uuid_or_null(n.route ->> 'q');
+      if not found or q.state in ('ended', 'cancelled')
+         or exists (select 1 from study_private.quiz_quiet z where z.quiz_id = q.id) then
+        update study_private.notify_outbox set state = 'held' where notice_id = o.notice_id; continue;
+      end if;
+      -- The members of one quiz are never capped against each other (same dedupe).
+      if exists (select 1 from study_private.notify_outbox o2 join public.study_notices n2 on n2.id = o2.notice_id
+                  where o2.group_id = o.group_id and o2.kind in ('quiz_open', 'boss_open') and n2.dedupe <> n.dedupe
+                    and ((o2.state = 'sent' and o2.pushed_at > now() - interval '10 minutes') or o2.state = 'sending'))
+         or exists (select 1 from study_private.notify_outbox o2 join public.study_notices n2 on n2.id = o2.notice_id
+                      join public.study_quizzes q2 on q2.id = study_private.uuid_or_null(n2.route ->> 'q')
+                  where o2.kind in ('quiz_open', 'boss_open') and n2.dedupe <> n.dedupe and q2.created_by = q.created_by
+                    and ((o2.state = 'sent' and o2.pushed_at > now() - interval '30 minutes') or o2.state = 'sending')) then
+        update study_private.notify_outbox set state = 'capped' where notice_id = o.notice_id; continue;
+      end if;
+    end if;
+    v_silent := false;
+    v_quiet := study_private.notify_quiet(o.user_id, now());
+    if v_quiet is not null then
+      if o.cat = 'live' then
+        update study_private.notify_outbox set state = 'quiet' where notice_id = o.notice_id; continue;
+      elsif o.cat = 'security' then
+        v_silent := true;
+      else
+        update study_private.notify_outbox set not_before = v_quiet where notice_id = o.notice_id; continue;
+      end if;
+    end if;
+    if o.kind <> 'test' and (
+         (o.cat in ('mine', 'digest') and (select count(*) from study_private.notify_outbox x
+             where x.user_id = o.user_id and x.cat in ('mine', 'digest')
+               and ((x.state = 'sent' and x.pushed_at >= v_day) or x.state = 'sending')) >= 6)
+      or (o.cat <> 'security' and (select count(*) from study_private.notify_outbox x
+             where x.user_id = o.user_id and x.cat <> 'security'
+               and ((x.state = 'sent' and x.pushed_at >= v_day) or x.state = 'sending')) >= 12)
+      or (o.cat = 'security' and (select count(*) from study_private.notify_outbox x
+             where x.user_id = o.user_id and x.cat = 'security' and x.kind <> 'test'
+               and ((x.state = 'sent' and x.pushed_at >= v_day) or x.state = 'sending')) >= 3)) then
+      update study_private.notify_outbox set state = 'capped' where notice_id = o.notice_id; continue;
+    end if;
+    if o.kind = 'summary_failed' and n.args ->> 'why' in ('budget', 'reserve', 'member_share')
+       and exists (select 1 from study_private.notify_outbox o2 join public.study_notices n2 on n2.id = o2.notice_id
+                    where o2.user_id = o.user_id and o2.kind = 'summary_failed' and n2.lecture_id = n.lecture_id
+                      and n2.args ->> 'why' in ('budget', 'reserve', 'member_share') and o2.pushed_at >= v_month) then
+      update study_private.notify_outbox set state = 'none' where notice_id = o.notice_id; continue;
+    end if;
+    -- The security notice skips the devices that synced after the sign-in
+    -- (most likely the device that signed in).
+    v_at := null;
+    if o.kind = 'code_used' then
+      begin v_at := (n.args ->> 'at')::timestamptz; exception when others then v_at := null; end;
+    end if;
+    select coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth) order by s.id), '[]')
+      into v_subs from public.study_push_subs s where s.user_id = o.user_id and (v_at is null or s.seen_at < v_at);
+    if jsonb_array_length(v_subs) = 0 then
+      update study_private.notify_outbox set state = 'nosub' where notice_id = o.notice_id; continue;
+    end if;
+    if v_min >= 60 then v_full := true; exit; end if;   -- stays due for the next minute
+    update study_private.notify_outbox
+       set state = 'sending', lease_until = now() + interval '180 seconds', attempts = attempts + 1, again = false
+     where notice_id = o.notice_id;
+    v_min := v_min + 1;
+    v_n := v_n + 1;
+    v_rows := v_rows || jsonb_build_array(jsonb_build_object(
+      'notice', jsonb_build_object('id', n.id, 'kind', n.kind, 'cat', n.cat, 'args', n.args, 'route', n.route,
+                                   'count', n.count, 'dedupe', n.dedupe, 'expires_at', o.expires_at, 'silent', v_silent),
+      'subs', v_subs));
+  end loop;
+  if not v_full then
+    select min(x.not_before) into v_next from study_private.notify_outbox x
+     where x.state = 'due' and x.not_before <= now() + interval '20 seconds'
+       and (v_on or exists (select 1 from study_private.notify_pilot p where p.user_id = x.user_id))
+       and exists (select 1 from public.study_push_subs s where s.user_id = x.user_id);
+  end if;
+  return jsonb_build_object('rows', v_rows, 'more', v_next is not null,
+    'wait_ms', case when v_next is null then null else greatest(0, ceil(extract(epoch from v_next - now()) * 1000))::int end);
+end;
+$$;
+
+-- The worker's report as rows: [{notice, sub, status, retry_after?}].
+create or replace function study_private.notify_results(p jsonb)
+returns table (nid bigint, sid bigint, status int, retry int) language sql immutable set search_path = public as $$
+  select (e ->> 'notice')::bigint, (e ->> 'sub')::bigint, coalesce((e ->> 'status')::int, 0),
+         least(greatest(coalesce((e ->> 'retry_after')::int, 0), 0), 86400)
+    from jsonb_array_elements(p) e
+$$;
+revoke all on function study_private.notify_results(jsonb), study_private.uuid_or_null(text) from public;
+
+-- The worker reports after each batch: [{notice, sub, status, retry_after?}].
+-- A device: 2xx fine; 404/410 gone (deleted); 400/401/403 three times and it
+-- goes. A push: any 2xx is sent (and sent again if it coalesced meanwhile);
+-- no device left is nosub; 413 failed; anything else (429, 5xx, a redirect,
+-- 0 for a timeout) tries again later, five tries within its time to live.
+create or replace function public.study_notify_done(p_key text, p_results jsonb)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  r record;
+  o study_private.notify_outbox;
+  v_n int := 0;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if jsonb_typeof(p_results) is distinct from 'array' or jsonb_array_length(p_results) > 500 then
+    raise exception 'bad results';
+  end if;
+  insert into study_private.push_log (notice_id, sub_id, status)
+  select nid, sid, status from study_private.notify_results(p_results);
+  update public.study_push_subs s set ok_at = now(), fails = 0
+   where s.id in (select sid from study_private.notify_results(p_results) where status between 200 and 299);
+  delete from public.study_push_subs s
+   where s.id in (select sid from study_private.notify_results(p_results) where status in (404, 410));
+  update public.study_push_subs s set fails = s.fails + 1
+   where s.id in (select sid from study_private.notify_results(p_results) where status in (400, 401, 403));
+  delete from public.study_push_subs s
+   where s.fails >= 3 and s.id in (select sid from study_private.notify_results(p_results) where status in (400, 401, 403));
+  for r in select nid, bool_or(status between 200 and 299) as ok, bool_or(status = 413) as big, max(retry) as retry
+             from study_private.notify_results(p_results) where nid is not null group by nid loop
+    select * into o from study_private.notify_outbox where notice_id = r.nid and state = 'sending' for update;
+    if not found then continue; end if;
+    v_n := v_n + 1;
+    if r.ok then
+      update study_private.notify_outbox
+         set state = case when o.again then 'due' else 'sent' end, pushed_at = now(), lease_until = null,
+             again = false, not_before = now(), attempts = case when o.again then 0 else o.attempts end
+       where notice_id = r.nid;
+    elsif not exists (select 1 from public.study_push_subs s where s.user_id = o.user_id) then
+      update study_private.notify_outbox set state = 'nosub', lease_until = null where notice_id = r.nid;
+    elsif r.big or o.attempts >= 5 or o.expires_at <= now() then
+      update study_private.notify_outbox set state = 'failed', lease_until = null where notice_id = r.nid;
+    else
+      update study_private.notify_outbox
+         set state = 'due', lease_until = null,
+             not_before = now() + greatest(make_interval(secs => r.retry), interval '1 minute' * power(2, o.attempts))
+       where notice_id = r.nid;
+    end if;
+  end loop;
+  return v_n;
+end;
+$$;
+
+-- For /api/study/health: is sending wired, on, piloted or stuck? No ids, no counts.
+create or replace function public.study_notify_ok()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'wired', study_private.server_on(),
+    'on', study_private.feature_on('notify'),
+    'pilot', exists (select 1 from study_private.notify_pilot),
+    'stuck', coalesce((select k.stuck_at is not null from study_private.notify_kick k where k.id = 1), false))
+$$;
+
+-- ── The member's RPCs (signed in, a member of a group) ──
+
+-- May this member turn pushes on at all (the switch, or the pilot)?
+create or replace function public.study_notify_state()
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare me uuid := study_private.notify_member(null);
+begin
+  return jsonb_build_object('send', study_private.feature_on('notify')
+                                    or exists (select 1 from study_private.notify_pilot p where p.user_id = me));
+end;
+$$;
+
+-- This device's push subscription. The endpoint moves to the caller when it
+-- was another user's (the personal code brought this device to its member).
+-- At most 10 devices a person: the longest unseen goes.
+create or replace function public.study_push_subscribe(p_endpoint text, p_p256dh text, p_auth text, p_key_id text,
+                                                       p_device text default 'other', p_browser text default '')
+returns bigint language plpgsql volatile security definer set search_path = public as $$
+declare
+  me   uuid := study_private.notify_member(null);
+  v_id bigint;
+begin
+  if not study_private.push_host_ok(p_endpoint) then raise exception 'bad endpoint'; end if;
+  if coalesce(p_p256dh, '') !~ '^[A-Za-z0-9_-]{86,88}$' or coalesce(p_auth, '') !~ '^[A-Za-z0-9_-]{21,24}$'
+     or coalesce(char_length(p_key_id), 0) not between 8 and 16 then
+    raise exception 'bad keys';
+  end if;
+  insert into public.study_push_subs as s (user_id, endpoint, p256dh, auth, key_id, device, browser)
+  values (me, p_endpoint, p_p256dh, p_auth, p_key_id,
+          case when p_device in ('iphone', 'ipad', 'android', 'mac', 'windows', 'linux') then p_device else 'other' end,
+          left(coalesce(p_browser, ''), 20))
+  on conflict (endpoint) do update set
+    user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth, key_id = excluded.key_id,
+    device = excluded.device, browser = excluded.browser, seen_at = now(), fails = 0,
+    created_at = case when s.user_id = excluded.user_id then s.created_at else now() end
+  returning s.id into v_id;
+  delete from public.study_push_subs s
+   where s.user_id = me and s.id not in (select x.id from public.study_push_subs x where x.user_id = me
+                                          order by x.seen_at desc, x.id desc limit 10);
+  return v_id;
+end;
+$$;
+
+-- This device stops (sign-out, "לא במכשיר הזה").
+create or replace function public.study_push_unsubscribe(p_endpoint text)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := study_private.notify_member(null); v_n int;
+begin
+  delete from public.study_push_subs where user_id = me and endpoint = p_endpoint;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+-- The caller's devices, without keys or endpoints; "this" marks the one asking.
+create or replace function public.study_push_devices(p_endpoint text default null)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare me uuid := study_private.notify_member(null);
+begin
+  return coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'device', s.device, 'browser', s.browser,
+                                                       'created_at', s.created_at, 'seen_at', s.seen_at, 'ok_at', s.ok_at,
+                                                       'this', s.endpoint = p_endpoint) order by s.seen_at desc, s.id desc)
+                     from public.study_push_subs s where s.user_id = me), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.study_push_remove(p_id bigint)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := study_private.notify_member(null); v_n int;
+begin
+  delete from public.study_push_subs where user_id = me and id = p_id;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+-- "ניתוק המכשירים האחרים": every device of the caller's but this one.
+create or replace function public.study_push_keep_only(p_endpoint text)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare me uuid := study_private.notify_member(null); v_n int;
+begin
+  delete from public.study_push_subs where user_id = me and endpoint is distinct from p_endpoint;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+-- Settings: only the known keys, each of its type; times on the half hour,
+-- the reminder between 06:00 and 22:00. Answers the whole row (times "HH:MM").
+create or replace function public.study_notify_prefs_set(p jsonb)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := study_private.notify_member(null);
+  k  text;
+  r  public.study_notify_prefs;
+begin
+  if jsonb_typeof(p) is distinct from 'object' then raise exception 'bad prefs'; end if;
+  for k in select jsonb_object_keys(p) loop
+    if k in ('live', 'mine', 'digest', 'quiet', 'shabbat') then
+      if jsonb_typeof(p -> k) <> 'boolean' then raise exception 'bad prefs'; end if;
+    elsif k in ('digest_at', 'quiet_from', 'quiet_to') then
+      if jsonb_typeof(p -> k) <> 'string' or (p ->> k) !~ '^([01][0-9]|2[0-3]):(00|30)$' then raise exception 'bad prefs'; end if;
+      if k = 'digest_at' and (p ->> k)::time not between time '06:00' and time '22:00' then raise exception 'bad prefs'; end if;
+    else
+      raise exception 'bad prefs';
+    end if;
+  end loop;
+  insert into public.study_notify_prefs (user_id) values (me) on conflict (user_id) do nothing;
+  update public.study_notify_prefs set
+    live       = coalesce((p ->> 'live')::boolean, live),
+    mine       = coalesce((p ->> 'mine')::boolean, mine),
+    digest     = coalesce((p ->> 'digest')::boolean, digest),
+    digest_at  = coalesce((p ->> 'digest_at')::time, digest_at),
+    quiet      = coalesce((p ->> 'quiet')::boolean, quiet),
+    quiet_from = coalesce((p ->> 'quiet_from')::time, quiet_from),
+    quiet_to   = coalesce((p ->> 'quiet_to')::time, quiet_to),
+    shabbat    = coalesce((p ->> 'shabbat')::boolean, shabbat),
+    updated_at = now()
+  where user_id = me
+  returning * into r;
+  return jsonb_build_object('live', r.live, 'mine', r.mine, 'digest', r.digest, 'digest_at', to_char(r.digest_at, 'HH24:MI'),
+                            'quiet', r.quiet, 'quiet_from', to_char(r.quiet_from, 'HH24:MI'), 'quiet_to', to_char(r.quiet_to, 'HH24:MI'),
+                            'shabbat', r.shabbat);
+end;
+$$;
+
+-- The inbox: the caller's rows of this group and the group-less ones, last
+-- changed first, 30 days back; p_before is the last row of the page before.
+create or replace function public.study_notices_mine(p_group uuid, p_before bigint default null, p_limit int default 50)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  me uuid := study_private.notify_member(p_group);
+  c  public.study_notices;
+begin
+  if p_before is not null then
+    select * into c from public.study_notices where id = p_before and user_id = me;
+    if not found then return '[]'::jsonb; end if;
+  end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'group_id', x.group_id, 'kind', x.kind, 'cat', x.cat,
+                                                       'args', x.args, 'route', x.route, 'obj', x.obj, 'count', x.count,
+                                                       'created_at', x.created_at, 'updated_at', x.updated_at,
+                                                       'seen_at', x.seen_at, 'ends_at', x.ends_at) order by x.updated_at desc, x.id desc)
+                     from (select n.* from public.study_notices n
+                            where n.user_id = me and (n.group_id = p_group or n.group_id is null) and n.kind <> 'test'
+                              and n.updated_at > now() - interval '30 days'
+                              and (p_before is null or (n.updated_at, n.id) < (c.updated_at, c.id))
+                            order by n.updated_at desc, n.id desc
+                            limit least(greatest(coalesce(p_limit, 50), 1), 100)) x), '[]'::jsonb);
+end;
+$$;
+
+-- The bell: how many unseen (at most 99; no test, no live row already over),
+-- and which objects they are about (so a screen knows to mark its own seen).
+create or replace function public.study_notices_unseen(p_group uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare me uuid := study_private.notify_member(p_group);
+begin
+  return jsonb_build_object(
+    'n', (select count(*) from (select 1 from public.study_notices n
+                                 where n.user_id = me and n.seen_at is null and (n.group_id = p_group or n.group_id is null)
+                                   and n.kind <> 'test' and not (n.cat = 'live' and coalesce(n.ends_at < now(), false)) limit 99) x),
+    'objs', coalesce((select jsonb_agg(o order by o) from (select distinct n.obj as o from public.study_notices n
+                                 where n.user_id = me and n.seen_at is null and n.obj is not null
+                                   and (n.group_id = p_group or n.group_id is null) and n.kind <> 'test' limit 50) y), '[]'::jsonb));
+end;
+$$;
+
+-- Seen: these rows (null: all of them). A push still waiting for them is dropped.
+create or replace function public.study_notices_seen(p_group uuid, p_ids bigint[] default null)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  me    uuid := study_private.notify_member(p_group);
+  v_ids bigint[];
+begin
+  with s as (update public.study_notices n set seen_at = now()
+              where n.user_id = me and n.seen_at is null and (n.group_id = p_group or n.group_id is null)
+                and (p_ids is null or n.id = any (p_ids))
+             returning n.id)
+  select array_agg(id) into v_ids from s;
+  update study_private.notify_outbox set state = 'none', lease_until = null
+   where notice_id = any (coalesce(v_ids, '{}')) and state = 'due';
+  return coalesce(cardinality(v_ids), 0);
+end;
+$$;
+
+-- Seen: the caller's unseen rows about one object (the screen just opened).
+create or replace function public.study_notices_seen_obj(p_group uuid, p_obj text)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  me    uuid := study_private.notify_member(p_group);
+  v_ids bigint[];
+begin
+  with s as (update public.study_notices n set seen_at = now()
+              where n.user_id = me and n.seen_at is null and n.obj = p_obj
+                and (n.group_id = p_group or n.group_id is null)
+             returning n.id)
+  select array_agg(id) into v_ids from s;
+  update study_private.notify_outbox set state = 'none', lease_until = null
+   where notice_id = any (coalesce(v_ids, '{}')) and state = 'due';
+  return coalesce(cardinality(v_ids), 0);
+end;
+$$;
+
+-- "שליחת התראת ניסיון": a test push to the caller's devices in about 5 s.
+-- Never in the inbox. 3 an hour a person, 30 an hour in all ('too many').
+create or replace function public.study_notify_test()
+returns bigint language plpgsql volatile security definer set search_path = public as $$
+declare
+  me   uuid := study_private.notify_member(null);
+  v_id bigint;
+begin
+  if (select count(*) from public.study_notices n where n.user_id = me and n.kind = 'test' and n.created_at > now() - interval '1 hour') >= 3
+     or (select count(*) from public.study_notices n where n.kind = 'test' and n.created_at > now() - interval '1 hour') >= 30 then
+    raise exception 'too many';
+  end if;
+  v_id := study_private.notice_add(me, null, 'test', '{}'::jsonb, jsonb_build_object('v', 'me'), null,
+                                   'test:' || md5(random()::text || clock_timestamp()::text));
+  perform study_private.notify_dispatch(true);
+  return v_id;
+end;
+$$;
+
+-- The host unchecked "להודיע לקבוצה" (within 2 minutes of opening the quiz):
+-- the quiz's pushes, still held for 15 s, are not sent. The inbox keeps it.
+create or replace function public.study_quiz_quiet(p_quiz uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  me uuid := study_private.notify_member(null);
+  q  public.study_quizzes;
+begin
+  select * into q from public.study_quizzes where id = p_quiz;
+  if not found or me is distinct from q.host_id and me is distinct from q.created_by then raise exception 'forbidden'; end if;
+  if q.created_at < now() - interval '2 minutes' then raise exception 'too late'; end if;
+  insert into study_private.quiz_quiet (quiz_id) values (p_quiz) on conflict (quiz_id) do nothing;
+  update study_private.notify_outbox o set state = 'held', lease_until = null
+    from public.study_notices n
+   where n.id = o.notice_id and n.dedupe = 'quiz:' || p_quiz and o.state = 'due';
+end;
+$$;
+
+-- ── The hooks (R 1). Each stops at its first line when notify_hooks is off,
+-- and never fails the write that fired it. ──
+
+-- A group quiz opened: every other member, held 15 s (study_quiz_quiet).
+-- The lock screen shows the first lecture's title, never the quiz's title or a name.
+create or replace function study_private.r_quiz()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_who  uuid;
+  v_lec  text;
+  v_name text;
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  v_who := coalesce(new.created_by, new.host_id);
+  select left(l.title, 120) into v_lec from public.study_lectures l where l.id = new.lecture_ids[1];
+  select left(m.name, 60) into v_name from public.study_members m where m.group_id = new.group_id and m.user_id = v_who;
+  perform study_private.notice_group(new.group_id, v_who, 'quiz_open',
+    jsonb_strip_nulls(jsonb_build_object('mode', new.mode, 'lecture', v_lec, 'more', nullif(cardinality(new.lecture_ids) - 1, 0),
+                                         'title', left(new.title, 120), 'name', v_name)),
+    jsonb_build_object('v', 'quiz', 'q', new.id), 'quiz:' || new.id, 'quiz:' || new.id, new.lecture_ids[1], null);
+  perform study_private.notify_dispatch(true);
+  return null;
+exception when others then
+  raise warning 'study_r_quiz %', sqlstate;
+  return null;
+end;
+$$;
+
+-- A reply in a thread: its opener ("יש תשובה לשאלה שלך" when it opened with
+-- a question) and everyone who replied before, except the one replying, while
+-- still members. One row a thread, counting replies until seen.
+create or replace function study_private.r_reply()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_root public.study_comments;
+  v_grp  uuid;
+  v_lec  text;
+  u      uuid;
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  with recursive up (id, parent_id, depth) as (
+    select c.id, c.parent_id, 0 from public.study_comments c where c.id = new.parent_id
+    union all
+    select c.id, c.parent_id, up.depth + 1 from public.study_comments c join up on c.id = up.parent_id where up.depth < 50)
+  select c.* into v_root from public.study_comments c where c.id = (select up.id from up where up.parent_id is null limit 1);
+  if not found then return null; end if;
+  select l.group_id, left(l.title, 120) into v_grp, v_lec from public.study_lectures l where l.id = new.lecture_id;
+  for u in
+    with recursive down (id) as (
+      select v_root.id
+      union
+      select c.id from public.study_comments c join down on c.parent_id = down.id)
+    select distinct c.author_id from public.study_comments c join down on down.id = c.id
+     where c.id <> new.id and c.author_id <> new.author_id
+       and exists (select 1 from public.study_members m where m.group_id = v_grp and m.user_id = c.author_id)
+  loop
+    perform study_private.notice_add(u, v_grp,
+      case when u = v_root.author_id and v_root.kind = 'question' then 'answer' else 'reply' end,
+      jsonb_strip_nulls(jsonb_build_object('lecture', v_lec, 'part', new.part_idx + 1)),
+      jsonb_build_object('v', 'lecture', 'l', new.lecture_id, 'at', jsonb_build_object('part', new.part_idx, 'anchor', new.anchor)),
+      null, 'reply:' || v_root.id, new.lecture_id, null);
+  end loop;
+  return null;
+exception when others then
+  raise warning 'study_r_reply %', sqlstate;
+  return null;
+end;
+$$;
+
+-- A summary ready, or stopped (why: the stop's code, such as 'budget'), to
+-- the member who uploaded it.
+create or replace function study_private.r_lecture()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if not study_private.feature_on('notify_hooks') then return null; end if;
+  if not exists (select 1 from public.study_members m where m.group_id = new.group_id and m.user_id = new.created_by) then
+    return null;
+  end if;
+  perform study_private.notice_add(new.created_by, new.group_id,
+    case new.status when 'ready' then 'summary_ready' else 'summary_failed' end,
+    jsonb_strip_nulls(jsonb_build_object('lecture', left(new.title, 120),
+                                         'why', case when new.status = 'failed' then left(new.error, 40) end)),
+    jsonb_build_object('v', 'lecture', 'l', new.id), 'lec:' || new.id, 'lec:' || new.id || ':' || new.status, new.id, null);
+  return null;
+exception when others then
+  raise warning 'study_r_lecture %', sqlstate;
+  return null;
+end;
+$$;
+
+-- Leaving a group (or being removed) takes that group's notices with it,
+-- whatever the switch.
+create or replace function study_private.r_leave()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.study_notices where user_id = old.user_id and group_id = old.group_id;
+  return null;
+exception when others then
+  raise warning 'study_r_leave %', sqlstate;
+  return null;
+end;
+$$;
+
+revoke all on function study_private.r_quiz(), study_private.r_reply(), study_private.r_lecture(), study_private.r_leave() from public;
+
+do $$
+begin
+  if to_regclass('public.study_quizzes') is not null then
+    drop trigger if exists study_r_quiz on public.study_quizzes;
+    create trigger study_r_quiz after insert on public.study_quizzes
+      for each row when (new.state = 'lobby') execute function study_private.r_quiz();
+  end if;
+  drop trigger if exists study_r_reply on public.study_comments;
+  create trigger study_r_reply after insert on public.study_comments
+    for each row when (new.parent_id is not null) execute function study_private.r_reply();
+  drop trigger if exists study_r_lecture on public.study_lectures;
+  create trigger study_r_lecture after update of status on public.study_lectures
+    for each row when (old.status is distinct from new.status and new.status in ('ready', 'failed'))
+    execute function study_private.r_lecture();
+  drop trigger if exists study_r_leave on public.study_members;
+  create trigger study_r_leave after delete on public.study_members
+    for each row execute function study_private.r_leave();
+end $$;
+
+-- ── Who may call what ──
+revoke all on function public.study_notify_claim(text, int), public.study_notify_done(text, jsonb), public.study_notify_ok() from public;
+-- The server calls these with the anon key; claim and done refuse without the server key (F27's allow-list).
+grant execute on function public.study_notify_claim(text, int), public.study_notify_done(text, jsonb), public.study_notify_ok() to anon, authenticated;
+revoke all on function public.study_notify_state(), public.study_push_subscribe(text, text, text, text, text, text),
+  public.study_push_unsubscribe(text), public.study_push_devices(text), public.study_push_remove(bigint),
+  public.study_push_keep_only(text), public.study_notify_prefs_set(jsonb), public.study_notices_mine(uuid, bigint, int),
+  public.study_notices_unseen(uuid), public.study_notices_seen(uuid, bigint[]), public.study_notices_seen_obj(uuid, text),
+  public.study_notify_test(), public.study_quiz_quiet(uuid) from public, anon;
+grant execute on function public.study_notify_state(), public.study_push_subscribe(text, text, text, text, text, text),
+  public.study_push_unsubscribe(text), public.study_push_devices(text), public.study_push_remove(bigint),
+  public.study_push_keep_only(text), public.study_notify_prefs_set(jsonb), public.study_notices_mine(uuid, bigint, int),
+  public.study_notices_unseen(uuid), public.study_notices_seen(uuid, bigint[]), public.study_notices_seen_obj(uuid, text),
+  public.study_notify_test(), public.study_quiz_quiet(uuid) to authenticated;
+
+-- ── Every minute, and the daily clean-up (only with pg_cron) ──
+do $$
+begin
+  if to_regnamespace('cron') is null then
+    raise notice 'pg_cron is off: notices fill the inbox, but nothing is pushed. Integrations → Cron → enable pg_cron, then run this part again.';
+  else
+    perform cron.schedule('study-notify', '* * * * *', 'select study_private.notify_plan(); select study_private.notify_dispatch()');
+    perform cron.schedule('study-notify-clean', '41 3 * * *', $c$
+      delete from public.study_notices where seen_at < now() - interval '30 days' or created_at < now() - interval '60 days'
+         or (kind = 'test' and created_at < now() - interval '1 day');
+      delete from study_private.push_log where at < now() - interval '14 days';
+      delete from public.study_push_subs where seen_at < now() - interval '120 days' and (ok_at is null or ok_at < now() - interval '120 days');
+      delete from study_private.quiz_quiet where at < now() - interval '1 day';
+      delete from cron.job_run_details where jobid in (select jobid from cron.job where jobname like 'study-notify%') and end_time < now() - interval '2 days'$c$);
+  end if;
+  if not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'net' and p.proname = 'http_post')
+     or coalesce(length(study_private.secret('study_worker_key')), 0) < 32
+     or coalesce(study_private.secret('study_site_url'), '') not like 'https://%' then
+    raise notice 'Server writing is not set up (pg_net, Vault): the inbox works, pushes wait until it is (section W).';
+  end if;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('R', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION R ════

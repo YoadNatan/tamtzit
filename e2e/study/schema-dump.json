@@ -1864,6 +1864,86 @@
     "required": 3
    }
   ],
+  "study_notices_mine": [
+   {
+    "args": [
+     "p_group",
+     "p_before",
+     "p_limit"
+    ],
+    "required": 1
+   }
+  ],
+  "study_notices_seen": [
+   {
+    "args": [
+     "p_group",
+     "p_ids"
+    ],
+    "required": 1
+   }
+  ],
+  "study_notices_seen_obj": [
+   {
+    "args": [
+     "p_group",
+     "p_obj"
+    ],
+    "required": 2
+   }
+  ],
+  "study_notices_unseen": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_notify_claim": [
+   {
+    "args": [
+     "p_key",
+     "p_limit"
+    ],
+    "required": 1
+   }
+  ],
+  "study_notify_done": [
+   {
+    "args": [
+     "p_key",
+     "p_results"
+    ],
+    "required": 2
+   }
+  ],
+  "study_notify_ok": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_notify_prefs_set": [
+   {
+    "args": [
+     "p"
+    ],
+    "required": 1
+   }
+  ],
+  "study_notify_state": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
+  "study_notify_test": [
+   {
+    "args": [],
+    "required": 0
+   }
+  ],
   "study_open_mistakes": [
    {
     "args": [
@@ -2113,6 +2193,51 @@
    {
     "args": [
      "p_lecture"
+    ],
+    "required": 1
+   }
+  ],
+  "study_push_devices": [
+   {
+    "args": [
+     "p_endpoint"
+    ],
+    "required": 0
+   }
+  ],
+  "study_push_keep_only": [
+   {
+    "args": [
+     "p_endpoint"
+    ],
+    "required": 1
+   }
+  ],
+  "study_push_remove": [
+   {
+    "args": [
+     "p_id"
+    ],
+    "required": 1
+   }
+  ],
+  "study_push_subscribe": [
+   {
+    "args": [
+     "p_endpoint",
+     "p_p256dh",
+     "p_auth",
+     "p_key_id",
+     "p_device",
+     "p_browser"
+    ],
+    "required": 4
+   }
+  ],
+  "study_push_unsubscribe": [
+   {
+    "args": [
+     "p_endpoint"
     ],
     "required": 1
    }
@@ -2499,6 +2624,14 @@
    {
     "args": [
      "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_quiz_quiet": [
+   {
+    "args": [
+     "p_quiz"
     ],
     "required": 1
    }
@@ -3517,6 +3650,35 @@
    "created_at",
    "deleted_at"
   ],
+  "study_notices": [
+   "id",
+   "user_id",
+   "group_id",
+   "lecture_id",
+   "kind",
+   "cat",
+   "args",
+   "route",
+   "obj",
+   "count",
+   "dedupe",
+   "created_at",
+   "updated_at",
+   "seen_at",
+   "ends_at"
+  ],
+  "study_notify_prefs": [
+   "user_id",
+   "live",
+   "mine",
+   "digest",
+   "digest_at",
+   "quiet",
+   "quiet_from",
+   "quiet_to",
+   "shabbat",
+   "updated_at"
+  ],
   "study_plan_checks": [
    "plan_id",
    "day",
@@ -3614,6 +3776,20 @@
    "slides",
    "closed_week",
    "cutoff"
+  ],
+  "study_push_subs": [
+   "id",
+   "user_id",
+   "endpoint",
+   "p256dh",
+   "auth",
+   "key_id",
+   "device",
+   "browser",
+   "created_at",
+   "seen_at",
+   "ok_at",
+   "fails"
   ],
   "study_question_batches": [
    "id",
@@ -4299,6 +4475,16 @@
    "update": [],
    "delete": false
   },
+  "study_notices": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_notify_prefs": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
   "study_plan_checks": {
    "insert": [
     "plan_id",
@@ -4351,6 +4537,11 @@
    "delete": false
   },
   "study_pulse_topics": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_push_subs": {
    "insert": [],
    "update": [],
    "delete": false

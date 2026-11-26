@@ -33,5 +33,7 @@ test("every part is at most 170 KB", async () => {
     assert.ok(written <= PART_MAX_BYTES, `parts/${k + 1}.sql is ${written} bytes`);
   });
   assert.match(parts[7], /^-- ═══ study-schema\.sql, part 8 of 9 \(section S\) ═══/);
-  assert.match(parts[8], /^-- ═══ study-schema\.sql, part 9 of 9 \(section I\) ═══/);
+  // Part 9: the personal code, then notifications (R), which ship before the
+  // wave's other sections (Yoad, 26 Nov 2026); those follow R there.
+  assert.match(parts[8], /^-- ═══ study-schema\.sql, part 9 of 9 \(sections I, R\) ═══/);
 });
