@@ -35,6 +35,10 @@ import { myDangerDue, myRewordings } from "../lib/progress";
 import type { Route } from "../lib/route";
 import { groupExams, keyOrigins, listExamQuestions, listQuestionsAll, mockGet, notCounted, type KeyOrigin } from "../lib/exams";
 import { PageCrop } from "./ExamParts";
+import { keepAll } from "../lib/practice2";
+import { attemptFinish, attemptStart, myNamesPref, openSet, setNamesPref, setProgress, setRequests, setStats, shareSet, type Finish, type Stats } from "../lib/sets";
+import { genAddReady, genAdded, SETS } from "../lib/setsCopy";
+import SetStats from "./SetStats";
 import FlagSheet from "./FlagSheet";
 import PracticeQuestion from "./PracticeQuestion";
 import { backTarget, Head, Loading, StickyActions } from "./Shell";
@@ -137,6 +141,13 @@ async function scopeQuestions(scope: S.Scope, groupId: string): Promise<PublicQu
       const ids = [...new Set(again.flatMap((a) => [a.ask, a.question_id]))];
       return ids.length ? listQuestionsByIds(ids) : [];
     }
+    case "set": {
+      // A practice set (docs/study/sets.md): its questions, in the set's order.
+      const d = await openSet(scope.set);
+      const at = new Map(d.items.map((i) => [i.question_id, i.pos]));
+      const qs = d.items.length ? await listQuestionsByIds(d.items.map((i) => i.question_id)) : [];
+      return qs.sort((a, b) => (at.get(a.id) ?? 0) - (at.get(b.id) ?? 0));
+    }
     case "paragraph": {
       // "לתרגל את הפסקה" (N): the questions section N places on the paragraph.
       const tab = await paragraphPractice(scope.lecture, scope.part, scope.anchor);
@@ -169,6 +180,7 @@ function parentOf(scope: S.Scope | null): Route {
   if (scope?.kind === "mistakes" && scope.lecture) return { v: "practice", l: scope.lecture };
   if (scope?.kind === "paragraph") return { v: "lecture", l: scope.lecture, at: { part: scope.part, anchor: scope.anchor } };
   if (scope?.kind === "again") return { v: "progress" };
+  if (scope?.kind === "set") return { v: "sets", k: scope.set };
   return { v: "practice" };
 }
 
@@ -197,6 +209,12 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
   const [, setTick] = useState(0);
   const sRef = useRef(s);
   sRef.current = s;
+  /** A practice set (s=k.<set>): its title and lecture, whether it is still being made, the round's end. */
+  const [setInfo, setSetInfo] = useState<{ title: string; lecture: string | null; making: boolean; size: number } | null>(null);
+  const [finish, setFinish] = useState<Finish | null>(null);
+  const [endStats, setEndStats] = useState<Stats | null>(null);
+  const [askName, setAskName] = useState(false);
+  const setId = scope?.kind === "set" ? scope.set : null;
   const timedOut = useRef<string | null>(null);
 
   const save = useCallback(
@@ -234,7 +252,9 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         again: more.again,
         signals,
       });
-      const state = ids.length ? S.startSession({ key, timed, queue: ids.map((id) => byId[id]), now: Date.now(), pick }) : null;
+      // A practice set: every answer of the round is stamped with the member's attempt.
+      const attempt = scope.kind === "set" && ids.length ? (await attemptStart(scope.set)).id : undefined;
+      const state = ids.length ? S.startSession({ key, timed, queue: ids.map((id) => byId[id]), now: Date.now(), pick, attempt }) : null;
       const info = await examInfo(byId);
       return { data: { byId, candidates, latest, mistakes, hidden, ...more, ...info }, state };
     },
@@ -334,6 +354,109 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     };
   }, [over, s?.results.length, data, groupId, key]);
 
+  // A practice set: its title and lecture for the top bar, and whether it is still being made.
+  useEffect(() => {
+    if (!setId) return;
+    let alive = true;
+    openSet(setId)
+      .then((d) => alive && setSetInfo({ title: d.set.title, lecture: d.set.lecture_id, making: d.set.state !== "ready", size: d.set.size }))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [setId]);
+
+  // While the set is being made (slice B, design §5.5): questions kept since
+  // join the end of the round ("נוספו n שאלות לסט"); checked ones not yet in
+  // the bank are offered once per count ("n שאלות חדשות מוכנות · להוסיף
+  // לסט"), which keeps them (the existing keep-all) and adds them.
+  const offered = useRef(0);
+  const making = Boolean(setInfo?.making);
+  const appendNew = useCallback(async () => {
+    if (!setId) return 0;
+    const d = await openSet(setId);
+    const cur = sRef.current;
+    if (!cur) return 0;
+    const fresh = d.items.map((i) => i.question_id).filter((id) => !cur.ids.includes(id));
+    if (!fresh.length) return 0;
+    const qs = await listQuestionsByIds(fresh);
+    const at = new Map(d.items.map((i) => [i.question_id, i.pos]));
+    const add = qs.filter(isActive).sort((a, b) => (at.get(a.id) ?? 0) - (at.get(b.id) ?? 0));
+    const now = sRef.current ?? cur;
+    const next = S.appendQueue(now, add, { now: Date.now() });
+    if (next === now) return 0;
+    setData((x) => (x ? { ...x, byId: { ...x.byId, ...Object.fromEntries(add.map((q) => [q.id, q])) }, candidates: [...x.candidates, ...add] } : x));
+    save(next);
+    return next.ids.length - now.ids.length;
+  }, [setId, save]);
+  useEffect(() => {
+    if (!setId || !making || phase !== "ready") return;
+    let alive = true;
+    const tick = async () => {
+      if (document.visibilityState === "hidden" || navigator.onLine === false) return;
+      const p = await setProgress(setId).catch(() => null);
+      if (!alive || !p) return;
+      if (p.size > (sRef.current?.ids.length ?? 0)) {
+        const n = await appendNew().catch(() => 0);
+        if (alive && n > 0) ctx.say(genAdded(n));
+      }
+      const waiting = p.made - p.size;
+      if (waiting > 0 && waiting !== offered.current) {
+        offered.current = waiting;
+        ctx.say(genAddReady(waiting), {
+          label: SETS.gen.add,
+          run: () => {
+            void setRequests(setId)
+              .then((r) => Promise.all(r.map((id) => keepAll(id))))
+              .then(() => appendNew())
+              .then((n) => n > 0 && ctx.say(genAdded(n)))
+              .catch((e) => ctx.say(failText(codeOf(e), "practice")));
+          },
+        });
+      }
+      if (p.state === "ready" && waiting <= 0) setSetInfo((x) => (x ? { ...x, making: false } : x));
+    };
+    const t = setInterval(() => void tick(), 10_000);
+    void tick();
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [setId, making, phase, appendNew, ctx]);
+
+  // The round's end in a set: the attempt is finished once (scored on the
+  // first answer per question), then the group's numbers; the first finished
+  // set asks once whether to show the member's name among who solved (OD7).
+  const finishing = useRef<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!setId || !over || !s) return;
+    const attempt = s.attempt;
+    // Not cancelled when the state changes under it (finishing clears the attempt): only on leaving.
+    (async () => {
+      if (attempt && finishing.current !== attempt) {
+        finishing.current = attempt;
+        const f = await attemptFinish(attempt);
+        if (!mounted.current) return;
+        setFinish(f);
+        const cur = sRef.current;
+        if (cur && cur.attempt === attempt) save({ ...cur, attempt: undefined });
+        if (f.first) {
+          const pref = await myNamesPref().catch(() => ({ show_name: false, asked_at: "x" }));
+          if (mounted.current && !pref?.asked_at) setAskName(true);
+        }
+      }
+      const st = await setStats(setId);
+      if (mounted.current) setEndStats(st);
+    })().catch(() => undefined);
+  }, [setId, over, s?.attempt, s?.results.length]);
+
   const close = useCallback(() => {
     const parent = parentOf(scope);
     if (backTarget(parent).inApp) history.back();
@@ -353,15 +476,22 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
       setSending(true);
       try {
         const bet = shown === null ? null : withBet;
-        const { feedback: fb, choice } =
+        const send = (attempt: string | undefined) =>
           flags.qtypes && qq && isSetForm(qq.form)
-            ? await answerAny(qq, cur.orders[cur.i], shown, cur.mode, ms, bet)
-            : await (async () => {
+            ? answerAny(qq, cur.orders[cur.i], shown, cur.mode, ms, bet, attempt)
+            : (async () => {
                 const args = S.answerArgs(cur, typeof shown === "number" ? shown : null, Date.now(), withBet);
-                return { feedback: await answerQuestion(args.p_question, args.p_choice, args.p_mode, args.p_ms, args.p_confidence), choice: args.p_choice };
+                return { feedback: await answerQuestion(args.p_question, args.p_choice, args.p_mode, args.p_ms, args.p_confidence, attempt), choice: args.p_choice };
               })();
+        let attempt = cur.attempt;
+        const { feedback: fb, choice } = await send(attempt).catch(async (e) => {
+          // A set's attempt that ended elsewhere (another tab finished it, or 12 hours passed): a new one.
+          if (!setId || !attempt || !["attempt finished", "attempt not found"].includes(codeOf(e))) throw e;
+          attempt = (await attemptStart(setId)).id;
+          return send(attempt);
+        });
         const now = S.currentId(sRef.current ?? cur) === qid ? (sRef.current ?? cur) : cur;
-        save(S.recordAnswer(now, choice, fb, Date.now(), bet));
+        save(S.recordAnswer(attempt && attempt !== now.attempt ? { ...now, attempt } : now, choice, fb, Date.now(), bet));
         if (withBet !== null) guideMark("bet"); // the guide's first step "לענות על שאלה ולהמר" (nothing without VITE_STUDY_GUIDE)
         if (!(fb.correct ?? choice === fb.answer))
           setData((d) => (d ? { ...d, mistakes: [...d.mistakes.filter((m) => m.question_id !== qid), { question_id: qid, wrong_at: new Date().toISOString() }] } : d));
@@ -376,7 +506,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         setSending(false);
       }
     },
-    [sending, save, ctx, data],
+    [sending, save, ctx, data, setId],
   );
   const check = useCallback(() => {
     if (!ready || bet === null) return;
@@ -508,6 +638,11 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
       "חוזרות היום"
     ) : scope?.kind === "mockWrong" ? (
       "הטעויות מהסימולציה"
+    ) : scope?.kind === "set" ? (
+      <>
+        תרגול{setInfo?.title ? " · " : ""}
+        <bdi>{setInfo?.title ?? ""}</bdi>
+      </>
     ) : examTitle ? (
       <>
         תרגול · <bdi>{examTitle}</bdi>
@@ -532,6 +667,8 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
             ? "התרגול לא נטען. כדאי לבדוק את החיבור ולנסות שוב."
             : scope?.kind === "again"
               ? "היום אין שאלות שחוזרות. טעות חוזרת ביום שאחרי, בניסוח אחר."
+              : scope?.kind === "set"
+                ? SETS.gen.readyNone
               : scope?.kind === "mistakes" && flags.mistakes
                 ? "אין טעויות פתוחות. שאלה שטועים בה נכנסת לכאן, וחוזרת למחרת בניסוח אחר."
                 : "אין כאן שאלות לתרגל כרגע."}
@@ -771,8 +908,54 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
             <b>
               {sc.right} מתוך {sc.of}
             </b>{" "}
-            <span>נכונות</span> <span className="a-chip">רק לך</span>
+            <span>נכונות</span> <span className="a-chip">{setId ? SETS.stats.onlyMe : "רק לך"}</span>
           </p>
+          {setId ? (
+            <div className="pq-set-end">
+              <SetStats stats={endStats} size={finish?.total || total} compact />
+              {askName ? (
+                <div className="a-callout quiet qs-optin" role="group" aria-label={SETS.stats.optin}>
+                  <span>{SETS.stats.optin}</span>
+                  <div className="a-row">
+                    <button
+                      type="button"
+                      className="a-btn small"
+                      onClick={() => {
+                        setAskName(false);
+                        void setNamesPref(true).then(() => setStats(setId).then(setEndStats)).catch(() => undefined);
+                      }}
+                    >
+                      {SETS.stats.optinYes}
+                    </button>
+                    <button
+                      type="button"
+                      className="a-btn small ghost"
+                      onClick={() => {
+                        setAskName(false);
+                        void setNamesPref(false).catch(() => undefined);
+                      }}
+                    >
+                      {SETS.stats.optinNo}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              <p className="pq-set-links">
+                {wrong.length && setInfo?.lecture ? (
+                  <button type="button" className="a-link" onClick={() => ctx.go({ v: "practice", l: setInfo.lecture!, x: "new", from: "m" })}>
+                    {SETS.entryMistakesNew} ‹
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="a-link"
+                  onClick={() => void shareSet(setId, setInfo?.size ?? total).then((r) => r === "copied" && ctx.say(SETS.set.linkCopied))}
+                >
+                  {SETS.set.link} ‹
+                </button>
+              </p>
+            </div>
+          ) : null}
           {wrong.length ? (
             <>
               <div className="a-sec">
@@ -804,16 +987,28 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
             חזרה לתרגול
           </button>
         </section>
-        <StickyActions>
-          <button type="button" className="a-btn primary wide" onClick={() => void again()}>
-            סבב נוסף
-          </button>
-          {wrongAgain.length ? (
-            <button type="button" className="a-btn" onClick={onlyWrong}>
-              רק הטעויות מהסבב
+        {setId && wrongAgain.length ? (
+          // A set's end (design §5.10): going over the mistakes is the free primary.
+          <StickyActions>
+            <button type="button" className="a-btn primary wide" onClick={onlyWrong}>
+              {SETS.gen.again}
             </button>
-          ) : null}
-        </StickyActions>
+            <button type="button" className="a-btn" onClick={() => void again()}>
+              סבב נוסף
+            </button>
+          </StickyActions>
+        ) : (
+          <StickyActions>
+            <button type="button" className="a-btn primary wide" onClick={() => void again()}>
+              סבב נוסף
+            </button>
+            {wrongAgain.length ? (
+              <button type="button" className="a-btn" onClick={onlyWrong}>
+                רק הטעויות מהסבב
+              </button>
+            ) : null}
+          </StickyActions>
+        )}
         {sheets}
       </main>
     );

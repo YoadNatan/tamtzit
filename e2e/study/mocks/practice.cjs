@@ -644,6 +644,8 @@ module.exports = {
       P.keys.set(q.id, P.draftKeys.get(d.id));
       Object.assign(d, { status: "kept", question_id: q.id, decided_by: who, decided_at: now(), lease_until: null, updated_at: now() });
       notify("study_questions", "INSERT", q);
+      // Section L's trigger: a question kept from a set's request joins the set (mocks/sets.cjs).
+      db.qsetsMock?.kept(q);
       notify("study_question_drafts", "UPDATE", d);
       return q.id;
     };
@@ -771,6 +773,9 @@ module.exports = {
     const RPCS = new Set([
       "study_question_round",
       "study_answer_question",
+      // practice sets (section L, mocks/sets.cjs checks the attempt): the same answers, stamped
+      "study_qset_answer",
+      "study_qset_answer_seq",
       "study_question_feedback",
       "study_practice_overview",
       "study_my_mistakes",
@@ -825,7 +830,10 @@ module.exports = {
         if (!made) return refuse("no slides");
         return json([{ round, batches: made, fresh: true }]);
       }
+      case "study_qset_answer":
       case "study_answer_question": {
+        const attempt = fn === "study_qset_answer" ? db.qsetsMock?.attemptFor(me, body.p_attempt, body.p_question) : null;
+        if (attempt?.error) return refuse(attempt.error);
         const q = qOf(body.p_question);
         if (!q) return refuse("question not found");
         if (q.retired_at) return refuse("retired");
@@ -839,7 +847,7 @@ module.exports = {
         const bet = body.p_confidence ?? null;
         if (bet !== null && ![1, 2, 3].includes(bet)) return refuse("bad bet");
         const correct = choice === k.answer;
-        P.answers.push({ user_id: me, question_id: q.id, choice, correct, mode: body.p_mode ?? "lecture", ms: body.p_ms ?? null, confidence: bet, answered_at: now() });
+        P.answers.push({ user_id: me, question_id: q.id, choice, correct, mode: body.p_mode ?? "lecture", ms: body.p_ms ?? null, confidence: bet, answered_at: now(), set_attempt: attempt?.id ?? null });
         return json([{ answer: k.answer, explanations: k.explanations, takeaway: k.takeaway, correct, whens: k.whens ?? [] }]);
       }
       case "study_question_feedback": {
@@ -960,7 +968,10 @@ module.exports = {
         notify("study_questions", "UPDATE", q);
         return json(null);
       }
+      case "study_qset_answer_seq":
       case "study_answer_set": {
+        const attempt = fn === "study_qset_answer_seq" ? db.qsetsMock?.attemptFor(me, body.p_attempt, body.p_question) : null;
+        if (attempt?.error) return refuse(attempt.error);
         const q = qOf(body.p_question);
         if (!q) return refuse("question not found");
         if (q.retired_at) return refuse("retired");
@@ -982,7 +993,7 @@ module.exports = {
         if (bet !== null && ![1, 2, 3].includes(bet)) return refuse("bad bet");
         const right = ch ? k.seq.filter((v, i) => ch[i] === v).length : 0;
         const correct = Boolean(ch) && right === k.seq.length;
-        P.answers.push({ user_id: me, question_id: q.id, choice: null, choices: ch, correct, mode: body.p_mode ?? "lecture", ms: body.p_ms ?? null, confidence: bet, answered_at: now() });
+        P.answers.push({ user_id: me, question_id: q.id, choice: null, choices: ch, correct, mode: body.p_mode ?? "lecture", ms: body.p_ms ?? null, confidence: bet, answered_at: now(), set_attempt: attempt?.id ?? null });
         return json([{ seq: k.seq, explanations: k.explanations, takeaway: k.takeaway, correct, whens: k.whens ?? [], right_n: right, total: k.seq.length }]);
       }
       case "study_question_set_feedback": {
@@ -1353,6 +1364,11 @@ async function p2Action({ res, db, P, body, me, lectureId, send, notify }) {
     case "create": {
       const r = readOptions(body.options);
       if (r.code) return send({ error: r.code }, 400);
+      // A practice set (section L 1, mocks/sets.cjs): an open set on the lecture is 409 unless forced (OD20).
+      if (body.set && db.qsetsMock) {
+        const open = db.qsetsMock.openOn(lectureId, me);
+        if (open && body.force !== true) return send({ error: "already making", ...open }, 409);
+      }
       const plan = planOf(db, P, lectureId, r.options);
       if (plan.stale.length) return send({ error: "points stale" }, 409);
       if (!plan.total) return send({ error: "no points" }, 400);
@@ -1388,11 +1404,13 @@ async function p2Action({ res, db, P, body, me, lectureId, send, notify }) {
           batches.push(b);
         });
       });
+      const qset = body.set && db.qsetsMock ? db.qsetsMock.begin({ lectureId, request: rq, want: Number(body.set.want) || rq.count, by: me }) : null;
       return send({
         request: { id: rq.id, round: rq.round, level: rq.level, count: rq.count, parts: rq.parts, styles: rq.styles, difficulty: rq.difficulty },
         batches: batches.map((b) => ({ id: b.id, part_idx: b.part_idx, seq: b.seq, wanted: b.wanted })),
         plan: plan.answer.plan.parts,
         estimate: { questionsUsd: plan.answer.estimate.questionsUsd },
+        ...(qset ? { set: { id: qset.id, state: "making" } } : {}),
       });
     }
     case "reword": {

@@ -9,6 +9,7 @@ import { deleteSet, hideSet, markSeen, openSet, renameSet, setRequests, setStats
 import { questionsWord, setBy, SETS, setReview, setUnchecked } from "../lib/setsCopy";
 import "../styles/sets.css";
 import MakeProgress from "./MakeProgress";
+import { HowChoice } from "./PracticeRound";
 import SetStats from "./SetStats";
 import { Avatar, BackLink, Head, Loading, OFFLINE_LINE, RouteLink, Sheet, StickyActions, useOnline } from "./Shell";
 
@@ -61,7 +62,7 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
       const d = await openSet(setId);
       setData(d);
       setPhase("ready");
-      if (d.set.state !== "ready") setRequest((await setRequests(setId).catch(() => []))[0] ?? null);
+      if (d.set.state !== "ready" || d.set.made > d.set.size) setRequest((await setRequests(setId).catch(() => []))[0] ?? null);
       setStatsState(await setStats(setId).catch(() => null));
       if (d.set.is_new) void markSeen([setId]).catch(() => undefined);
     } catch (e) {
@@ -110,9 +111,12 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
 
   const s = data.set;
   const by = s.author_name ? setBy(s.author_name, setWhen(s.created_at)) : setWhen(s.created_at);
-  // Being made: the generating screen, for the set (its page takes over once it is ready).
-  if (s.state !== "ready" && s.lecture_id) {
-    if (request) {
+  // Being made, or checked questions still waiting for "להתחיל לפתור" (auto-keep
+  // ships off, OD15): the generating screen, for the set. Its page takes over once
+  // the set is ready and nothing waits to be kept.
+  if ((s.state !== "ready" || s.made > s.size) && s.lecture_id) {
+    if (request || s.state === "ready") {
+      if (!request) return <Loading />;
       return (
         <MakeProgress
           key={request}
@@ -202,17 +206,12 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
         </details>
       ) : null}
       {data.unchecked.length && s.lecture_id ? <UncheckedLink setId={s.id} lectureId={s.lecture_id} n={data.unchecked.length} ctx={ctx} /> : null}
-      <fieldset className="qs-how">
-        <legend className="a-small">{SETS.set.how}</legend>
-        <div className="a-seg" role="radiogroup" aria-label={SETS.set.how}>
-          <button type="button" role="radio" aria-checked={!timed} className="a-btn" onClick={() => setTimed(false)}>
-            {SETS.set.howPlain}
-          </button>
-          <button type="button" role="radio" aria-checked={timed} className="a-btn" onClick={() => setTimed(true)}>
-            {SETS.set.howExam}
-          </button>
+      <section className="qs-how" aria-labelledby="qs-how-h">
+        <div className="a-sec">
+          <h2 id="qs-how-h">{SETS.set.how}</h2>
         </div>
-      </fieldset>
+        <HowChoice timed={timed} onChange={setTimed} labelledBy="qs-how-h" />
+      </section>
       <StickyActions>
         <button type="button" className="a-btn primary wide qs-go" disabled={s.size < 1} onClick={solve}>
           {SETS.set.solve}

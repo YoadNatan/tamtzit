@@ -212,21 +212,7 @@ export default function PracticeRound({ route, ctx }: ScreenProps<"practice">) {
           <div className="a-sec">
             <h2 id="how-h">איך</h2>
           </div>
-          <div className="a-stack pr-mode" role="radiogroup" aria-labelledby="how-h">
-            {[
-              { exam: false, name: "תרגול", line: "הסבר אחרי כל שאלה" },
-              { exam: true, name: "מצב מבחן", line: "עם שעון, ההסברים בסוף" },
-            ].map((m) => (
-              <button key={m.name} type="button" role="radio" aria-checked={timed === m.exam} className={`a-opt${timed === m.exam ? " picked" : ""}`} onClick={() => setTimed(m.exam)}>
-                <span className="l" aria-hidden="true">
-                  {timed === m.exam ? "◉" : "○"}
-                </span>
-                <span>
-                  <b>{m.name}</b> · {m.line}
-                </span>
-              </button>
-            ))}
-          </div>
+          <HowChoice timed={timed} onChange={setTimed} labelledBy="how-h" />
         </>
       )}
       {present.length && !n ? <p className="a-small a-muted pr-none">אין שאלות שמתאימות לבחירה הזו.</p> : null}
@@ -237,5 +223,28 @@ export default function PracticeRound({ route, ctx }: ScreenProps<"practice">) {
         </button>
       </StickyActions>
     </main>
+  );
+}
+
+/** "איך": practice (the autopsy after each question) or exam mode (a clock,
+ *  the autopsies at the end). סבב חדש's choice, and a practice set's page's
+ *  (design-practice §5.6: "לפתור" offers the same choice). */
+export function HowChoice({ timed, onChange, labelledBy }: { timed: boolean; onChange: (timed: boolean) => void; labelledBy: string }) {
+  return (
+    <div className="a-stack pr-mode" role="radiogroup" aria-labelledby={labelledBy}>
+      {[
+        { exam: false, name: "תרגול", line: "הסבר אחרי כל שאלה" },
+        { exam: true, name: "מצב מבחן", line: "עם שעון, ההסברים בסוף" },
+      ].map((m) => (
+        <button key={m.name} type="button" role="radio" aria-checked={timed === m.exam} className={`a-opt${timed === m.exam ? " picked" : ""}`} onClick={() => onChange(m.exam)}>
+          <span className="l" aria-hidden="true">
+            {timed === m.exam ? "◉" : "○"}
+          </span>
+          <span>
+            <b>{m.name}</b> · {m.line}
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }
