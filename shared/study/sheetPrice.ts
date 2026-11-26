@@ -89,8 +89,8 @@ export const SHEET_PROMPT_CHARS = { read: 4481, key: 1614, solve: 1924 } as cons
 export const SHEET_READ_PAGES = 3;
 export const SHEET_SOLVE_PER_UNIT = 4;
 /** The sheet reader's max_tokens: a read unit, the answers file's unit, and a solve unit of n items. */
-export const SHEET_UNIT_TOKENS = { read: 16_000, key: 6_000, solveMax: 14_000 } as const;
-export const sheetSolveTokens = (n: number): number => Math.min(SHEET_UNIT_TOKENS.solveMax, 2_000 + 2_500 * Math.max(1, Math.round(n)));
+export const SHEET_UNIT_TOKENS = { read: 12_000, key: 6_000, solveMax: 14_000 } as const;
+export const sheetSolveTokens = (n: number): number => Math.min(SHEET_UNIT_TOKENS.solveMax, 1_500 + 2_000 * Math.max(1, Math.round(n)));
 /** What a usual unit writes: a page copied exactly (with thinking), a key page, an item solved with its worked solution. */
 const SHEET_TYPICAL = { outPerPage: 1_800, keyOutPerPage: 900, solveOutPerItem: 1_000, itemsPerPage: 3, missedPerPage: 0.75 };
 

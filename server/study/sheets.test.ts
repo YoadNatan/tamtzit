@@ -313,7 +313,7 @@ test("unit sizes: 3 pages a read unit; solve units of 4 as section O 2 queues th
   const sql = readFileSync(join(process.cwd(), "supabase", "study-schema.sql"), "utf8");
   assert.match(sql, new RegExp(`study_private\\.sheet_solve_items\\(\\)\\nreturns int language sql immutable as \\$\\$ select ${SHEET_SOLVE_PER_UNIT} \\$\\$`));
   assert.match(sql, /for i in 0 \.\. \(cardinality\(reads\) - 1\) \/ 3 loop/, "study_sheet_pages_done's 3-page units");
-  assert.equal(sheetSolveTokens(4), 12_000);
+  assert.equal(sheetSolveTokens(4), 9_500);
   assert.equal(sheetSolveTokens(8), 14_000);
 });
 
