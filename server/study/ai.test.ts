@@ -132,6 +132,7 @@ test("the per-op needs are §12.2.2's (questions at Q 2, cards at C 2 and ask at
   // Courses (sources.md B8): an op's variant needs section S too; the variants are not ops.
   assert.deepEqual(schemaFor("ask_course"), { ...REQUIRED_SCHEMA, K: 2, S: 1 });
   assert.deepEqual(schemaFor("questions_plan"), { ...REQUIRED_SCHEMA, Q: 2, S: 1 });
+  assert.deepEqual(schemaFor("notify"), { ...REQUIRED_SCHEMA, R: 1 }, "work.ts's {notify} branch (section R)");
   assert.ok(!Object.hasOwn(OP_SCHEMA, "ask_course") && !Object.hasOwn(OP_SCHEMA, "questions_plan"));
 });
 

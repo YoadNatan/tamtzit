@@ -78,6 +78,8 @@ let reserveAnswer: { status: number; body: unknown } = { status: 200, body: 41 }
 let progressAnswer = true;
 let finishStatus = 200;
 let inputStatus = 200;
+/** Section R's claim (notifications): what study_notify_claim answers, in turn. */
+let notifyClaims: unknown[] = [];
 
 const readAll = (req: IncomingMessage) =>
   new Promise<string>((ok) => {
@@ -100,6 +102,10 @@ const rest = createServer(async (req, res) => {
       return send(res, 200, schemaBody);
     case "/rest/v1/rpc/study_claim":
       return send(res, 200, claimRows);
+    case "/rest/v1/rpc/study_notify_claim":
+      return send(res, 200, notifyClaims.shift() ?? { rows: [], more: false, wait_ms: null });
+    case "/rest/v1/rpc/study_notify_done":
+      return send(res, 200, 1);
     case "/rest/v1/rpc/study_writing_input":
       return inputStatus === 200 ? send(res, 200, input) : send(res, inputStatus, { code: "XX000", message: "boom" });
     case "/rest/v1/rpc/study_reserve":
@@ -269,6 +275,69 @@ test("2. a wrong key, no key on Vercel, or a short one: 401, and the database is
 test("a bad body answers 400 lectureId", async () => {
   for (const id of ["", "x", 7, null, `${LECTURE}x`]) assert.deepEqual([(await kick(id)).status], [400], String(id));
   assert.equal(rpcs("study_claim").length, 0);
+});
+
+/* ── {notify:true}: the pushes (notifications, section R; server/study/notify.ts) ── */
+const notifyKick = (body: unknown = { notify: true }, auth = `Bearer ${KEY}`) =>
+  work.fetch(new Request("https://study.example/api/study/work", { method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: JSON.stringify(body) }));
+async function vapidEnv(): Promise<void> {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  process.env.STUDY_VAPID_PUBLIC = Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey)).toString("base64url");
+  process.env.STUDY_VAPID_PRIVATE = (await crypto.subtle.exportKey("jwk", pair.privateKey)).d;
+  process.env.STUDY_VAPID_SUBJECT = "https://study.example";
+}
+const noVapid = () => {
+  delete process.env.STUDY_VAPID_PUBLIC;
+  delete process.env.STUDY_VAPID_PRIVATE;
+  delete process.env.STUDY_VAPID_SUBJECT;
+};
+
+test("notify: 401 without the key, 400 for anything but true, 503 without section R; nothing claimed", async () => {
+  await vapidEnv();
+  try {
+    assert.equal((await notifyKick({ notify: true }, `Bearer ${KEY}x`)).status, 401);
+    assert.equal((await notifyKick({ notify: true }, "")).status, 401);
+    assert.deepEqual(log, []);
+    for (const bad of ["x", 1, false, null, {}]) {
+      const res = await notifyKick({ notify: bad });
+      assert.equal(res.status, 400, JSON.stringify(bad));
+      assert.deepEqual(await res.json(), { error: "notify" });
+    }
+    schemaBody = { ...REQUIRED_SCHEMA }; // no R
+    const res = await notifyKick();
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { error: "schema" });
+    assert.equal(rpcs("study_notify_claim").length, 0);
+  } finally {
+    noVapid();
+  }
+});
+
+test("notify: without VAPID keys 200 reason vapid and no claim; with them 200 when nothing is due, 202 and done() when something is", async () => {
+  schemaBody = { ...REQUIRED_SCHEMA, R: 1 };
+  noVapid();
+  let res = await notifyKick();
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { claimed: false, reason: "vapid" });
+  assert.equal(rpcs("study_notify_claim").length, 0);
+  await vapidEnv();
+  try {
+    res = await notifyKick();
+    assert.deepEqual([res.status, await res.json()], [200, { claimed: false }]);
+    assert.deepEqual(rpcs("study_notify_claim")[0].body, { p_limit: 20, p_key: KEY });
+    // A device on a host that is not a push service: never asked (-1), and reported.
+    const sub = { id: 4, endpoint: "https://attacker.example/push/abcdefghijkl", p256dh: "B".repeat(87), auth: "A".repeat(22) };
+    notifyClaims = [{ rows: [{ notice: { id: 9, kind: "test", cat: "security", args: {}, route: { v: "me" }, count: 1, dedupe: "test:x", expires_at: new Date(Date.now() + 600_000).toISOString(), silent: false }, subs: [sub] }], more: false, wait_ms: null }];
+    res = await notifyKick();
+    assert.equal(res.status, 202);
+    assert.deepEqual(await res.json(), { claimed: true, n: 1 });
+    await settle();
+    const [done] = rpcs("study_notify_done");
+    assert.deepEqual(done.body, { p_results: [{ notice: 9, sub: 4, status: -1 }], p_key: KEY });
+  } finally {
+    noVapid();
+    notifyClaims = [];
+  }
 });
 
 test("a database older than the code (no section W, or W without W2's hardening): 503 schema, and nothing is claimed", async () => {

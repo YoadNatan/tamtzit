@@ -197,6 +197,9 @@ export const VARIANT_SCHEMA: Readonly<Record<string, Readonly<Record<string, num
   // Past exams (sources.md phase 2): op "exam_read" (its start and the
   // phone's unit) and work.ts's {exam} branch read and save through S 2.
   exams: { Q: 2, S: 2 },
+  // Notifications (section R, docs/study/DECISIONS-2026-11-26.md): work.ts's
+  // {notify} branch claims pushes and reports them through R 1.
+  notify: { R: 1 },
 };
 
 /** What a call of `op` (or of a variant, VARIANT_SCHEMA) needs of the

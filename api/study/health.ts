@@ -14,10 +14,22 @@
  *   codes     the personal code works end to end (docs/study/personal-code.md):
  *             section I is loaded, the server key matches, the switch
  *             "codes" is not off, and Auth's email sign-in is on (its
- *             public settings). The app shows the code only when it is true. */
+ *             public settings). The app shows the code only when it is true.
+ *   notify    pushes can go out (notifications, docs/study/DECISIONS-2026-11-26.md):
+ *             section R is loaded, the VAPID keys are set on Vercel and are a
+ *             pair, the server key matches, and the database can kick the
+ *             worker (pg_net, Vault's key and site). The app offers pushes
+ *             only when it is true.
+ *   vapid     the VAPID PUBLIC key whenever the keys are set and a pair (the
+ *             browser subscribes with it), else null; a device that reads
+ *             null removes its push-only service worker (the kill path).
+ *             The private key never appears here.
+ *   notifyOn  the switch "notify" (off: only the pilot's members get pushes)
+ *   notifyStuck  the sender's breaker stopped the kicks (15 without a claim) */
 
 /// <reference path="../../server/study/env.d.ts" />
 import { monthlyCap } from "../../server/study/budget.js";
+import { vapidFromEnv, vapidPairOk } from "../../server/study/push.js";
 import { healthSchema, keyed, schemaOk, serverClient, supabaseAnonKey, supabaseUrl, workerKey } from "../../server/study/study.js";
 
 // Node.js runtime: the Anthropic SDK imports @opentelemetry/api, which Vercel's
@@ -27,7 +39,7 @@ export const config = { maxDuration: 10 };
 const TIMEOUT_MS = 4_000;
 
 /** A read-only RPC's answer, or null when it fails or takes over 4 s. */
-async function read(fn: "study_schema" | "study_features"): Promise<unknown> {
+async function read(fn: "study_schema" | "study_features" | "study_notify_ok"): Promise<unknown> {
   try {
     const { data, error } = await serverClient().rpc(fn).abortSignal(AbortSignal.timeout(TIMEOUT_MS));
     return error ? null : data;
@@ -78,12 +90,30 @@ async function codesOn(schema: unknown, features: unknown, workerOk: boolean): P
   return emailSignInOn();
 }
 
+/** The VAPID public key when the three keys are set and the private one is
+ *  the public one's pair; null otherwise. Worked out here, without the
+ *  database, so a slow database never reads as "keys removed". */
+async function vapidPublic(): Promise<string | null> {
+  const v = vapidFromEnv(process.env);
+  return v && (await vapidPairOk(v)) ? v.publicKey : null;
+}
+
+type NotifyOk = { wired?: unknown; on?: unknown; stuck?: unknown };
+
+/** Section R's state (study_notify_ok()), asked only when R is loaded. */
+async function notifyOk(schema: unknown): Promise<NotifyOk | null> {
+  const r = schema && typeof schema === "object" ? (schema as Record<string, unknown>).R : undefined;
+  if (typeof r !== "number" || r < 1) return null;
+  const ok = await read("study_notify_ok");
+  return ok && typeof ok === "object" ? (ok as NotifyOk) : null;
+}
+
 async function handler(): Promise<Response> {
   const supabase = Boolean(process.env.VITE_STUDY_SUPABASE_URL || process.env.VITE_SUPABASE_URL);
   const [schema, features, workerOk] = supabase
     ? await Promise.all([read("study_schema"), read("study_features"), workerMatches()])
     : [null, null, false];
-  const codes = supabase ? await codesOn(schema, features, workerOk) : false;
+  const [codes, vapid, rOk] = await Promise.all([supabase ? codesOn(schema, features, workerOk) : false, vapidPublic(), supabase ? notifyOk(schema) : null]);
   const body = {
     ok: true,
     anthropicKey: Boolean(process.env.ANTHROPIC_API_KEY),
@@ -96,6 +126,10 @@ async function handler(): Promise<Response> {
     schemaOk: schemaOk(schema, healthSchema(process.env)),
     features,
     codes,
+    notify: Boolean(vapid && workerOk && rOk?.wired === true),
+    vapid,
+    notifyOn: rOk?.on === true,
+    notifyStuck: rOk?.stuck === true,
   };
   return new Response(JSON.stringify(body), {
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },

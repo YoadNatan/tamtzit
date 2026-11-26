@@ -19,6 +19,8 @@ let schema: { status: number; body: unknown } = { status: 200, body: CURRENT };
 let features: Record<string, boolean> = { exams: false, recordings: false };
 let authSettings: { status: number; body: unknown } = { status: 200, body: { external: { email: true, anonymous_users: true } } };
 let calls: Array<{ path: string; body: string }> = [];
+/** Section R's study_notify_ok() (notifications), or a failure. */
+let notifyOk: { status: number; body: unknown } = { status: 200, body: { wired: true, on: false, pilot: true, stuck: false } };
 let base = "";
 
 const readAll = (req: IncomingMessage) =>
@@ -38,6 +40,7 @@ const rest = createServer(async (req, res) => {
   calls.push({ path, body });
   if (path === "/rest/v1/rpc/study_schema") return send(res, schema.status, schema.body);
   if (path === "/rest/v1/rpc/study_features") return send(res, 200, features);
+  if (path === "/rest/v1/rpc/study_notify_ok") return send(res, notifyOk.status, notifyOk.body);
   if (path === "/auth/v1/settings") {
     if (req.headers.apikey !== "anon-key") return send(res, 401, { message: "no apikey" });
     return send(res, authSettings.status, authSettings.body);
@@ -63,7 +66,9 @@ beforeEach(() => {
   schema = { status: 200, body: CURRENT };
   features = { exams: false, recordings: false };
   authSettings = { status: 200, body: { external: { email: true, anonymous_users: true } } };
+  notifyOk = { status: 200, body: { wired: true, on: false, pilot: true, stuck: false } };
   calls = [];
+  for (const k of ["STUDY_VAPID_PUBLIC", "STUDY_VAPID_PRIVATE", "STUDY_VAPID_SUBJECT"]) delete process.env[k];
 });
 
 const check = async () => {
@@ -87,8 +92,13 @@ test("wired: the key is set on Vercel and is Vault's, the schema has F and the m
     schemaOk: true,
     features: { exams: false, recordings: false },
     codes: false,
+    notify: false,
+    vapid: null,
+    notifyOn: false,
+    notifyStuck: false,
   });
   assert.equal(calls.filter((c) => c.path === "/auth/v1/settings").length, 0, "Auth is not asked without section I");
+  assert.equal(calls.filter((c) => c.path === "/rest/v1/rpc/study_notify_ok").length, 0, "section R is not asked without it");
   const spent = calls.filter((c) => c.path === "/rest/v1/rpc/study_spent");
   assert.equal(spent.length, 1);
   assert.deepEqual(JSON.parse(spent[0].body), { p_group: "00000000-0000-0000-0000-000000000000", p_key: KEY });
@@ -178,4 +188,59 @@ test('"codes": section I, the server key, the switch not off, and Auth\'s email 
   assert.equal((await check()).codes, false, "section I not loaded");
   schema = { status: 200, body: { ...CURRENT, I: 2 } };
   assert.equal((await check()).codes, true, "a later version of I");
+});
+
+/* ── Notifications (section R): notify, vapid, notifyOn, notifyStuck ── */
+async function vapidPair(): Promise<{ pub: string; priv: string }> {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  return {
+    pub: Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey)).toString("base64url"),
+    priv: (await crypto.subtle.exportKey("jwk", pair.privateKey)).d!,
+  };
+}
+
+test('"notify": section R, a VAPID pair, the server key and a wired database; "vapid" is the public key whenever the pair is set; the private key never appears', async () => {
+  const k = await vapidPair();
+  Object.assign(process.env, { STUDY_VAPID_PUBLIC: k.pub, STUDY_VAPID_PRIVATE: k.priv, STUDY_VAPID_SUBJECT: "https://study.example" });
+  schema = { status: 200, body: { ...CURRENT, R: 1 } };
+  const text = async () => {
+    const t = await (await health.fetch()).text();
+    assert.ok(!t.includes(k.priv), "the private key never appears");
+    return JSON.parse(t) as Record<string, unknown>;
+  };
+  let h = await text();
+  assert.deepEqual([h.notify, h.vapid, h.notifyOn, h.notifyStuck], [true, k.pub, false, false]);
+  notifyOk = { status: 200, body: { wired: true, on: true, pilot: false, stuck: true } };
+  h = await text();
+  assert.deepEqual([h.notify, h.notifyOn, h.notifyStuck], [true, true, true]);
+  // The database cannot kick the worker (pg_net, Vault's key or site missing).
+  notifyOk = { status: 200, body: { wired: false, on: true, pilot: false, stuck: false } };
+  h = await text();
+  assert.deepEqual([h.notify, h.vapid], [false, k.pub]);
+  // study_notify_ok() fails: notify false, the public key still given (only removed keys remove the worker).
+  notifyOk = { status: 500, body: { message: "down" } };
+  h = await text();
+  assert.deepEqual([h.notify, h.vapid, h.notifyOn, h.notifyStuck], [false, k.pub, false, false]);
+  notifyOk = { status: 200, body: { wired: true, on: false, pilot: true, stuck: false } };
+  // The server key is not Vault's.
+  vaultKey = null;
+  h = await text();
+  assert.deepEqual([h.notify, h.vapid], [false, k.pub]);
+  vaultKey = KEY;
+  // Section R not loaded: not asked.
+  schema = { status: 200, body: CURRENT };
+  calls = [];
+  h = await text();
+  assert.deepEqual([h.notify, h.vapid], [false, k.pub]);
+  assert.equal(calls.filter((c) => c.path === "/rest/v1/rpc/study_notify_ok").length, 0);
+  // Keys that are not a pair, or one of them missing: vapid null (the devices' kill path).
+  schema = { status: 200, body: { ...CURRENT, R: 1 } };
+  const other = await vapidPair();
+  process.env.STUDY_VAPID_PRIVATE = other.priv;
+  h = await text();
+  assert.deepEqual([h.notify, h.vapid], [false, null]);
+  delete process.env.STUDY_VAPID_SUBJECT;
+  process.env.STUDY_VAPID_PRIVATE = k.priv;
+  h = await text();
+  assert.deepEqual([h.notify, h.vapid], [false, null]);
 });

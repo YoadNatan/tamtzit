@@ -2,6 +2,7 @@
 import { getDeadline, waitUntil } from "@vercel/functions"; // 3.10.5, pinned
 import { pointsAheadStep } from "../../server/study/bank.js";
 import { claimExam, runExamUnit, UNIT_STOP_MS, type ExamClaim } from "../../server/study/exams.js";
+import { notifyStep } from "../../server/study/notify.js";
 import { assertSchema, errorText, HttpError, json, serverClient, workerKey } from "../../server/study/study.js";
 import { rpcStore, writeUnit, type Unit } from "../../server/study/writer.js";
 
@@ -16,6 +17,10 @@ import { rpcStore, writeUnit, type Unit } from "../../server/study/writer.js";
  *                                      items without a key; section S 2,
  *                                      server/study/exams.ts), kicked by
  *                                      study_private.exam_dispatch
+ * POST /api/study/work  { notify:true } the same key: send the pushes that
+ *                                      are due (notifications, section R;
+ *                                      server/study/notify.ts), kicked by
+ *                                      study_private.notify_dispatch
  *
  * The server writer (spec §2.3, §4.3.3). Only pg_net calls it: study_queue
  * kicks it when a lecture is saved or "המשך כתיבה" is tapped, study_finish
@@ -36,7 +41,10 @@ import { rpcStore, writeUnit, type Unit } from "../../server/study/writer.js";
  * waitUntil), 503 schema (no section B) or 500. An exam's unit ({exam})
  * answers 200 {claimed:false}, 202 {claimed:true, kind} (the unit runs on
  * in waitUntil and stops at 200 s), 400 {error:"exam"}, 503 schema (no
- * section S at 2) or 500.
+ * section S at 2) or 500. The pushes ({notify:true}) answer 200
+ * {claimed:false} (none due, or reason "vapid": the keys are missing or
+ * not a pair, and nothing is claimed), 202 {claimed:true, n} (they go out
+ * in waitUntil), 400 {error:"notify"}, 503 schema (no section R) or 500.
  *
  * The unit stops 25 s before the invocation's deadline (getDeadline(), which
  * includes waitUntil) and never after 270 s, so it is saved in time. A
@@ -71,13 +79,20 @@ async function handler(req: Request): Promise<Response> {
   let lectureId: unknown = "";
   let points: unknown;
   let exam: unknown;
+  let notify: unknown;
   try {
-    const body = (await req.json()) as { lectureId?: unknown; points?: unknown; exam?: unknown };
+    const body = (await req.json()) as { lectureId?: unknown; points?: unknown; exam?: unknown; notify?: unknown };
     lectureId = body.lectureId ?? "";
     points = body.points;
     exam = body.exam;
+    notify = body.notify;
   } catch {
     /* below */
+  }
+  if (notify !== undefined) {
+    if (notify !== true) return json(400, { error: "notify" });
+    // pg_net posts to study_site_url, so this is the site's own address: the pushes' links open it.
+    return notifyStep(new URL(req.url).origin);
   }
   if (exam !== undefined) {
     if (typeof exam !== "string" || !UUID.test(exam)) return json(400, { error: "exam" });
