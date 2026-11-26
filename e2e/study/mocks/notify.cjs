@@ -12,9 +12,12 @@
 //   rpc/study_notices_seen_obj   the caller's unseen rows about one object;
 //   rpc/study_notify_state       {send}: db.notifyMock.send, or the pilot list;
 //   rpc/study_notify_prefs_set   only the known keys and types; the whole row back;
+//   GET study_notify_prefs       the caller's row only (times "HH:MM:SS", as
+//                                PostgREST sends a time), none when unsaved;
 //   rpc/study_push_subscribe, _unsubscribe, _devices, _remove, _keep_only;
 //   rpc/study_notify_test, study_quiz_quiet;
-// every one refused ("forbidden") to a caller who is not in the group.
+// every one refused ("forbidden") to a caller who is not in the group, except
+// unsubscribe, remove and keep_only (a signed-in caller's own devices).
 // db.notifyMock.add(row) inserts a notice (the hooks' and the minute job's
 // work on the server) and returns it; the script then sends Realtime's INSERT
 // with mock.notify("study_notices", "INSERT", row) (see e2e/study/notify.cjs).
@@ -63,8 +66,18 @@ module.exports = {
     return true;
   },
 
-  async rest({ method, path, body, who, db, notify, json: answer, refuse: deny, check }) {
+  async rest({ method, path, query, body, who, db, notify, json: answer, refuse: deny, check }) {
     const N = db.notifyMock;
+    if (N && method === "GET" && path === "/rest/v1/study_notify_prefs") {
+      const cols = (query.get("select") || "*").split(",").map((c) => c.trim()).filter(Boolean);
+      check.cols("study_notify_prefs", cols, `${method} ${path}`);
+      const me = who?.id ?? null;
+      N.calls.push({ fn: "GET study_notify_prefs", who: me, body: null });
+      const row = me && N.prefs.get(me);
+      if (!row) return (await answer([]), true);
+      const full = { user_id: me, ...row, digest_at: `${row.digest_at}:00`, quiet_from: `${row.quiet_from}:00`, quiet_to: `${row.quiet_to}:00` };
+      return (await answer([Object.fromEntries((cols.includes("*") ? Object.keys(full) : cols).map((c) => [c, full[c]]))]), true);
+    }
     if (!N || method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return undefined;
     const fn = path.slice("/rest/v1/rpc/".length);
     if (!FNS.includes(fn)) return undefined;
@@ -73,12 +86,15 @@ module.exports = {
     check.rpc(fn, body, `${method} ${path}`);
     const me = who?.id ?? null;
     N.calls.push({ fn, who: me, body });
-    // notify_member(p_group): a signed-in member (of this group, when one is named).
-    if (!me || !db.members.some((m) => m.user_id === me)) return refuse("forbidden");
+    // notify_member(p_group): a signed-in member (of this group, when one is named);
+    // the three removals need only a signed-in caller (they touch only the caller's rows).
+    if (!me) return refuse("forbidden");
+    const removal = ["study_push_unsubscribe", "study_push_remove", "study_push_keep_only"].includes(fn);
+    if (!removal && !db.members.some((m) => m.user_id === me)) return refuse("forbidden");
     if (body && "p_group" in body && body.p_group !== db.group.id) return refuse("forbidden");
     const now = Date.now();
     const mine = (n) => n.user_id === me && (n.group_id === body.p_group || n.group_id === null) && n.kind !== "test";
-    const out = (n) => ({ id: n.id, group_id: n.group_id, kind: n.kind, cat: n.cat, args: n.args, route: n.route, obj: n.obj, count: n.count, created_at: n.created_at, updated_at: n.updated_at, seen_at: n.seen_at, ends_at: n.ends_at });
+    const out = (n) => ({ id: n.id, group_id: n.group_id, lecture_id: n.lecture_id ?? null, kind: n.kind, cat: n.cat, args: n.args, route: n.route, obj: n.obj, count: n.count, created_at: n.created_at, updated_at: n.updated_at, seen_at: n.seen_at, ends_at: n.ends_at });
     const newest = (a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : b.id - a.id);
     const see = (rows) => {
       const t = new Date().toISOString();
@@ -107,7 +123,7 @@ module.exports = {
       }
       case "study_notices_seen": {
         const ids = body.p_ids ?? null;
-        return json(see(N.notices.filter((n) => n.user_id === me && !n.seen_at && (n.group_id === body.p_group || n.group_id === null) && (ids === null || ids.includes(n.id)))));
+        return json(see(N.notices.filter((n) => n.user_id === me && !n.seen_at && (ids === null ? n.group_id === body.p_group || n.group_id === null : ids.includes(n.id)))));
       }
       case "study_notices_seen_obj":
         return json(see(N.notices.filter((n) => n.user_id === me && !n.seen_at && n.obj === body.p_obj && (n.group_id === body.p_group || n.group_id === null))));
@@ -133,8 +149,10 @@ module.exports = {
         if (!okHost) return refuse("bad endpoint");
         if (!/^[A-Za-z0-9_-]{86,88}$/.test(body.p_p256dh || "") || !/^[A-Za-z0-9_-]{21,24}$/.test(body.p_auth || "")) return refuse("bad keys");
         let s = N.subs.find((x) => x.endpoint === body.p_endpoint);
+        // Another member's endpoint moves only with the same keys (the same browser subscription).
+        if (s && s.user_id !== me && (s.p256dh !== body.p_p256dh || s.auth !== body.p_auth)) return refuse("bad endpoint");
         if (!s) N.subs.push((s = { id: N.subSeq++, created_at: new Date().toISOString(), ok_at: null }));
-        Object.assign(s, { user_id: me, endpoint: body.p_endpoint, device: body.p_device ?? "other", browser: body.p_browser ?? "", seen_at: new Date().toISOString() });
+        Object.assign(s, { user_id: me, endpoint: body.p_endpoint, p256dh: body.p_p256dh, auth: body.p_auth, device: body.p_device ?? "other", browser: body.p_browser ?? "", seen_at: new Date().toISOString() });
         return json(s.id);
       }
       case "study_push_unsubscribe": {

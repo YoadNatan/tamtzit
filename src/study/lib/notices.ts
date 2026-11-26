@@ -17,6 +17,8 @@ import type { Route, Tab } from "./route";
 export type Notice = {
   id: number;
   group_id: string | null;
+  /** The lecture it is about (an ended meeting's row links there); absent from older servers. */
+  lecture_id?: string | null;
   kind: string;
   cat: "live" | "mine" | "digest" | "security" | "inapp";
   args: Record<string, unknown>;
@@ -30,6 +32,9 @@ export type Notice = {
 };
 export type Unseen = { n: number; objs: string[] };
 export type Prefs = { live: boolean; mine: boolean; digest: boolean; digest_at: string; quiet: boolean; quiet_from: string; quiet_to: string; shabbat: boolean };
+/** No row saved: section R's column defaults (Yoad's answers of 26 Nov 2026). */
+export const DEFAULT_PREFS: Prefs = { live: true, mine: true, digest: false, digest_at: "19:30", quiet: true, quiet_from: "23:00", quiet_to: "07:30", shabbat: false };
+const PREF_COLS = "live,mine,digest,digest_at,quiet,quiet_from,quiet_to,shabbat";
 export type Device = { id: number; device: string; browser: string; created_at: string; seen_at: string; ok_at: string | null; this: boolean };
 
 /** An RPC of section R; throws an Error whose message is the refusal's code. */
@@ -49,7 +54,7 @@ export function noticesMine(group: string, before: number | null = null, limit =
 export function noticesUnseen(group: string): Promise<Unseen> {
   return rpc<Unseen>("study_notices_unseen", { p_group: group }).then((r) => ({ n: Number(r?.n) || 0, objs: Array.isArray(r?.objs) ? r.objs : [] }));
 }
-/** Marks these notices seen (null: every one); a push still waiting for them is dropped. */
+/** Marks these notices seen, in whichever of the member's groups (null: every one of this group); a push still waiting for them is dropped. */
 export function noticesSeen(group: string, ids: number[] | null = null): Promise<number> {
   return rpc<number>("study_notices_seen", { p_group: group, p_ids: ids });
 }
@@ -80,9 +85,26 @@ export function unsubscribeDevice(endpoint: string): Promise<number> {
 export function keepOnlyDevice(endpoint: string | null): Promise<number> {
   return rpc<number>("study_push_keep_only", { p_endpoint: endpoint });
 }
-/** The caller's settings (the defaults when nothing was saved): an empty patch saves nothing new. */
-export function readPrefs(): Promise<Prefs> {
-  return savePrefs({});
+/** The caller's settings, read (the select-own policy), never written: the defaults when nothing was saved. */
+export async function readPrefs(): Promise<Prefs> {
+  if (!sb) throw new Error("not-configured");
+  const { data, error } = await sb.from("study_notify_prefs").select(PREF_COLS).limit(1);
+  if (error) throw error instanceof Error ? error : new Error((error as { message?: string }).message || "unknown");
+  const r = (data as Array<Record<string, unknown>> | null)?.[0];
+  if (!r) return { ...DEFAULT_PREFS };
+  const t = (v: unknown, d: string) => (typeof v === "string" && /^\d\d:\d\d/.test(v) ? v.slice(0, 5) : d);
+  const b = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
+  const D = DEFAULT_PREFS;
+  return {
+    live: b(r.live, D.live),
+    mine: b(r.mine, D.mine),
+    digest: b(r.digest, D.digest),
+    digest_at: t(r.digest_at, D.digest_at),
+    quiet: b(r.quiet, D.quiet),
+    quiet_from: t(r.quiet_from, D.quiet_from),
+    quiet_to: t(r.quiet_to, D.quiet_to),
+    shabbat: b(r.shabbat, D.shabbat),
+  };
 }
 export function sendTest(): Promise<number> {
   return rpc<number>("study_notify_test");

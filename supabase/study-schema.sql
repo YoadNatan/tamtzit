@@ -18183,6 +18183,12 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 --  A hook never fails the write that fired it: each catches its own errors,
 --  and notice_add gives up on a lock after 200 ms.
 --
+--  Realtime carries study_notices only so the bell can count: its INSERT and
+--  UPDATE events follow the select-own policy, but Supabase sends DELETE
+--  events (the primary key only) to any subscriber of the table. Those ids
+--  and their timing are all it can leak; the app subscribes to inserts and
+--  updates only.
+--
 --  Needs sections F and W (feature_on, server_on, secret, is_worker) and I
 --  (code_log, for the sign-in scan). Re-runnable throughout.
 
@@ -18253,6 +18259,8 @@ create index if not exists study_notices_mine on public.study_notices (user_id, 
 create index if not exists study_notices_obj on public.study_notices (user_id, obj) where seen_at is null;
 create index if not exists study_notices_lecture on public.study_notices (lecture_id) where lecture_id is not null;
 create index if not exists study_notices_group on public.study_notices (group_id, user_id);
+-- The minute job's ending of live rows (a quiz over, a meeting cancelled) reads only unseen live rows.
+create index if not exists study_notices_live on public.study_notices (kind) where seen_at is null and cat = 'live';
 alter table public.study_notices enable row level security;
 drop policy if exists "study notices own" on public.study_notices;
 create policy "study notices own" on public.study_notices for select to authenticated using (user_id = auth.uid());
@@ -18284,6 +18292,7 @@ create table if not exists study_private.notify_outbox (
 create index if not exists notify_outbox_due on study_private.notify_outbox (not_before) where state = 'due';
 create index if not exists notify_outbox_sent on study_private.notify_outbox (user_id, pushed_at) where state = 'sent';
 create index if not exists notify_outbox_group on study_private.notify_outbox (group_id, kind, pushed_at);
+create index if not exists notify_outbox_lease on study_private.notify_outbox (lease_until) where state = 'sending';
 
 -- ── The kind registry. cat: live, mine, digest, security or inapp; push
 -- false means inbox only; delay holds the push (a quiz's 15 s, so a host can
@@ -18359,6 +18368,22 @@ create table if not exists study_private.notify_cursor (
   name    text   primary key,
   last_id bigint not null default 0
 );
+-- Devices a member removed (this device, another one, "ניתוק המכשירים
+-- האחרים", or the 10-device cap) within 10 minutes of a sign-in with their
+-- personal code, kept aside for 15 minutes: the notice "נכנסו עם הקוד האישי"
+-- still reaches them, so whoever signed in with the code cannot silence it by
+-- removing the other devices first (study_private.push_set_aside).
+create table if not exists study_private.push_removed (
+  id         bigint      generated always as identity primary key,
+  user_id    uuid        not null references auth.users (id) on delete cascade,
+  endpoint   text        not null,
+  p256dh     text        not null,
+  auth       text        not null,
+  key_id     text        not null,
+  seen_at    timestamptz not null,
+  removed_at timestamptz not null default now()
+);
+create index if not exists push_removed_user on study_private.push_removed (user_id, removed_at);
 -- Quizzes whose host unchecked "להודיע לקבוצה".
 create table if not exists study_private.quiz_quiet (
   quiz_id uuid        primary key,
@@ -18389,6 +18414,47 @@ $$;
 create or replace function study_private.uuid_or_null(p text)
 returns uuid language sql immutable set search_path = public as $$
   select case when p ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then p::uuid end
+$$;
+
+-- Devices about to be removed by their member, set aside for 15 minutes when
+-- that member's personal code was redeemed in the last 10 (see push_removed).
+create or replace function study_private.push_set_aside(p_user uuid, p_ids bigint[])
+returns void language plpgsql volatile security definer set search_path = public as $$
+begin
+  if p_user is null or cardinality(coalesce(p_ids, '{}')) = 0 or to_regclass('study_private.code_log') is null then return; end if;
+  if not exists (select 1 from study_private.code_log l
+                  where l.user_id = p_user and l.event = 'redeemed' and l.at > now() - interval '10 minutes') then
+    return;
+  end if;
+  insert into study_private.push_removed (user_id, endpoint, p256dh, auth, key_id, seen_at)
+  select s.user_id, s.endpoint, s.p256dh, s.auth, s.key_id, s.seen_at
+    from public.study_push_subs s where s.user_id = p_user and s.id = any (p_ids);
+end;
+$$;
+
+-- Whether a security notice still has somewhere to go: a device, or one set aside.
+create or replace function study_private.push_reachable(p_user uuid, p_cat text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.study_push_subs s where s.user_id = p_user)
+      or (p_cat = 'security' and exists (select 1 from study_private.push_removed r
+                                          where r.user_id = p_user and r.removed_at > now() - interval '15 minutes'))
+$$;
+
+-- Who created the meeting or the study day a live notice is about (for the
+-- per-creator throttle), or null.
+create or replace function study_private.notify_live_by(p_kind text, p_m text)
+returns uuid language plpgsql stable security definer set search_path = public as $$
+declare v uuid;
+begin
+  if p_kind = 'session_soon' then
+    if to_regclass('public.study_marathons') is null then return null; end if;
+    select k.created_by into v from public.study_marathons k where k.id = study_private.uuid_or_null(p_m);
+  elsif p_kind in ('meeting_soon', 'reading') then
+    if to_regclass('public.study_meetings') is null then return null; end if;
+    select m.created_by into v from public.study_meetings m where m.id = study_private.uuid_or_null(p_m);
+  end if;
+  return v;
+end;
 $$;
 
 -- A person's settings, or the defaults when there is no row (the column defaults above).
@@ -18473,8 +18539,7 @@ begin
   do update set count = least(n.count + 1, 999), args = excluded.args, route = excluded.route,
                 ends_at = excluded.ends_at, updated_at = now()
   returning n.id into v_id;
-  if k.push and study_private.notify_cat_on(p_user, k.cat)
-     and exists (select 1 from public.study_push_subs s where s.user_id = p_user) then
+  if k.push and study_private.notify_cat_on(p_user, k.cat) and study_private.push_reachable(p_user, k.cat) then
     insert into study_private.notify_outbox as o (notice_id, user_id, group_id, kind, cat, state, not_before, expires_at)
     values (v_id, p_user, p_group, p_kind, k.cat, 'due', now() + k.delay, now() + k.ttl)
     on conflict (notice_id) do update set
@@ -18522,7 +18587,7 @@ begin
                   where o.state = 'due' and o.not_before <= now() + interval '20 seconds'
                     and (study_private.feature_on('notify')
                          or exists (select 1 from study_private.notify_pilot p where p.user_id = o.user_id))
-                    and exists (select 1 from public.study_push_subs s where s.user_id = o.user_id)) then
+                    and study_private.push_reachable(o.user_id, o.cat)) then
     return 0;
   end if;
   select * into k from study_private.notify_kick where id = 1 for update skip locked;
@@ -18680,7 +18745,8 @@ begin
       if v_max is not null then
         for r in select l.id, l.user_id, l.at from study_private.code_log l
                   where l.id > v_last and l.id <= v_max and l.event = 'redeemed' order by l.id loop
-          if exists (select 1 from public.study_push_subs s where s.user_id = r.user_id)
+          if (exists (select 1 from public.study_push_subs s where s.user_id = r.user_id)
+              or exists (select 1 from study_private.push_removed x where x.user_id = r.user_id and x.removed_at >= r.at))
              and study_private.notice_add(r.user_id, null, 'code_used', jsonb_build_object('at', r.at),
                                           jsonb_build_object('v', 'me'), null, 'code:' || r.id) is not null then
             v_n := v_n + 1;
@@ -18690,18 +18756,21 @@ begin
       end if;
     end if;
   end if;
+  delete from study_private.push_removed where removed_at < now() - interval '15 minutes';
   update study_private.notify_outbox set state = 'due', lease_until = null
    where state = 'sending' and lease_until < now();
   update study_private.notify_outbox set state = 'expired', lease_until = null
    where state = 'due' and expires_at < now();
   update public.study_notices n set ends_at = coalesce(q.ended_at, q.updated_at)
     from public.study_quizzes q
-   where n.kind in ('quiz_open', 'boss_open') and n.ends_at is null and n.seen_at is null
+   where n.kind in ('quiz_open', 'boss_open') and n.cat = 'live' and n.ends_at is null and n.seen_at is null
      and q.id = study_private.uuid_or_null(n.route ->> 'q') and q.state in ('ended', 'cancelled');
   if to_regclass('public.study_meetings') is not null then
-    update public.study_notices n set ends_at = now()
+    -- (A cancelled meeting's rows say so: args.off, "הפגישה בוטלה".)
+    update public.study_notices n set ends_at = now(),
+           args = case when m.cancelled_at is not null and n.kind = 'meeting_soon' then n.args || '{"off": true}'::jsonb else n.args end
       from public.study_meetings m
-     where n.kind in ('meeting_soon', 'reading') and n.seen_at is null and n.ends_at > now()
+     where n.kind in ('meeting_soon', 'reading') and n.cat = 'live' and n.seen_at is null and n.ends_at > now()
        and m.id = study_private.uuid_or_null(n.route ->> 'm')
        and (m.cancelled_at is not null or (n.kind = 'reading' and not m.reading));
 
@@ -18768,24 +18837,31 @@ revoke all on function study_private.push_host_ok(text), study_private.notify_pr
   study_private.notice_add(uuid, uuid, text, jsonb, jsonb, text, text, uuid, timestamptz),
   study_private.notice_group(uuid, uuid, text, jsonb, jsonb, text, text, uuid, timestamptz),
   study_private.notify_dispatch(boolean), study_private.notify_plan(), study_private.notify_member(uuid),
-  study_private.notify_needs(timestamp), study_private.notify_digest(timestamp) from public;
+  study_private.notify_needs(timestamp), study_private.notify_digest(timestamp),
+  study_private.push_set_aside(uuid, bigint[]), study_private.push_reachable(uuid, text),
+  study_private.notify_live_by(text, text) from public;
 
 -- ── The worker's RPCs (/api/study/work {notify:true}, the server key) ──
 
 -- Claims up to p_limit due pushes, oldest first, and decides each one now:
 --   off     the switch is off and the person is not in the pilot;
---   none    the category is off, the notice was seen, a "budget" stop of
---           this lecture was already pushed this month, or "the reading
---           started" after "the meeting starts in 15 minutes" was pushed;
+--   none    the category is off, the notice was seen (never a security
+--           notice: opening the inbox does not silence it), its lecture was
+--           deleted, a "budget" stop of this lecture was already pushed this
+--           month, or "the reading started" after "the meeting starts in 15
+--           minutes" was pushed;
 --   held    the quiz ended, or its host unchecked "להודיע לקבוצה"; the
 --           meeting was cancelled, or its reading stopped;
 --   capped  another quiz of the group was pushed in the last 10 minutes, or
---           of the same host in the last 30; or the person's day is full
+--           of the same host in the last 30; the same for meetings and study
+--           days (another one of the group in 10 minutes, of the same creator
+--           in 30); or the person's day is full
 --           (Israel day: 6 in "בשבילך", 12 in all, 3 security notices);
 --   quiet   a live notice inside the person's quiet hours (the inbox has it);
 --           a "בשבילך" one waits for the window's end; a security one goes
 --           now, silently;
---   nosub   no device left.
+--   nosub   no device left (a security notice also goes to the devices set
+--           aside in push_removed after the sign-in).
 -- The rest become 'sending' for 180 s with their devices. At most 60 pushes
 -- a minute in all. more: another push is due within 20 s (wait_ms from now).
 create or replace function public.study_notify_claim(p_key text, p_limit int default 20)
@@ -18807,6 +18883,8 @@ declare
   v_at    timestamptz;
   v_full  boolean := false;
   v_next  timestamptz;
+  v_m     text;
+  v_by    uuid;
 begin
   if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
   update study_private.notify_kick set kicks_since_claim = 0, stuck_at = null where id = 1;
@@ -18824,7 +18902,8 @@ begin
     if not v_on and not exists (select 1 from study_private.notify_pilot p where p.user_id = o.user_id) then
       update study_private.notify_outbox set state = 'off' where notice_id = o.notice_id; continue;
     end if;
-    if not study_private.notify_cat_on(o.user_id, o.cat) or n.seen_at is not null then
+    if not study_private.notify_cat_on(o.user_id, o.cat) or (n.seen_at is not null and o.cat <> 'security')
+       or (n.lecture_id is not null and exists (select 1 from public.study_lectures l where l.id = n.lecture_id and l.deleted_at is not null)) then
       update study_private.notify_outbox set state = 'none' where notice_id = o.notice_id; continue;
     end if;
     if o.kind in ('quiz_open', 'boss_open') then
@@ -18856,6 +18935,24 @@ begin
            select 1 from study_private.notify_outbox o2 join public.study_notices n2 on n2.id = o2.notice_id
             where o2.user_id = o.user_id and o2.kind = 'meeting_soon' and n2.obj = n.obj and o2.state in ('sent', 'sending')) then
         update study_private.notify_outbox set state = 'none' where notice_id = o.notice_id; continue;
+      end if;
+    end if;
+    -- Meetings and study days, like quizzes: one of the group in 10 minutes,
+    -- one of the same creator in 30 (one member cannot spend the others' day
+    -- of live pushes). The members of one meeting are never capped against each other.
+    if o.kind in ('meeting_soon', 'reading', 'session_soon') then
+      v_m := coalesce(n.route ->> 'm', '');
+      v_by := study_private.notify_live_by(o.kind, v_m);
+      if exists (select 1 from study_private.notify_outbox o2 join public.study_notices n2 on n2.id = o2.notice_id
+                  where o2.group_id = o.group_id and o2.kind in ('meeting_soon', 'reading', 'session_soon')
+                    and coalesce(n2.route ->> 'm', '') <> v_m
+                    and ((o2.state = 'sent' and o2.pushed_at > now() - interval '10 minutes') or o2.state = 'sending'))
+         or (v_by is not null and exists (
+               select 1 from study_private.notify_outbox o2 join public.study_notices n2 on n2.id = o2.notice_id
+                where o2.kind in ('meeting_soon', 'reading', 'session_soon') and coalesce(n2.route ->> 'm', '') <> v_m
+                  and ((o2.state = 'sent' and o2.pushed_at > now() - interval '30 minutes') or o2.state = 'sending')
+                  and study_private.notify_live_by(o2.kind, n2.route ->> 'm') = v_by)) then
+        update study_private.notify_outbox set state = 'capped' where notice_id = o.notice_id; continue;
       end if;
     end if;
     v_silent := false;
@@ -18893,8 +18990,16 @@ begin
     if o.kind = 'code_used' then
       begin v_at := (n.args ->> 'at')::timestamptz; exception when others then v_at := null; end;
     end if;
-    select coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth) order by s.id), '[]')
+    select coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'endpoint', s.endpoint, 'p256dh', s.p256dh, 'auth', s.auth, 'key_id', s.key_id) order by s.id), '[]')
       into v_subs from public.study_push_subs s where s.user_id = o.user_id and (v_at is null or s.seen_at < v_at);
+    -- …and the devices removed after the sign-in (set aside 15 minutes; their ids negative: done() leaves them be).
+    if o.kind = 'code_used' and v_at is not null then
+      v_subs := v_subs || coalesce((select jsonb_agg(jsonb_build_object('id', -r.id, 'endpoint', r.endpoint, 'p256dh', r.p256dh, 'auth', r.auth, 'key_id', r.key_id) order by r.id)
+                                      from study_private.push_removed r
+                                     where r.user_id = o.user_id and r.seen_at < v_at and r.removed_at >= v_at
+                                       and r.removed_at > now() - interval '15 minutes'
+                                       and not exists (select 1 from public.study_push_subs s where s.endpoint = r.endpoint)), '[]'::jsonb);
+    end if;
     if jsonb_array_length(v_subs) = 0 then
       update study_private.notify_outbox set state = 'nosub' where notice_id = o.notice_id; continue;
     end if;
@@ -18913,7 +19018,7 @@ begin
     select min(x.not_before) into v_next from study_private.notify_outbox x
      where x.state = 'due' and x.not_before <= now() + interval '20 seconds'
        and (v_on or exists (select 1 from study_private.notify_pilot p where p.user_id = x.user_id))
-       and exists (select 1 from public.study_push_subs s where s.user_id = x.user_id);
+       and study_private.push_reachable(x.user_id, x.cat);
   end if;
   return jsonb_build_object('rows', v_rows, 'more', v_next is not null,
     'wait_ms', case when v_next is null then null else greatest(0, ceil(extract(epoch from v_next - now()) * 1000))::int end);
@@ -18965,7 +19070,7 @@ begin
          set state = case when o.again then 'due' else 'sent' end, pushed_at = now(), lease_until = null,
              again = false, not_before = now(), attempts = case when o.again then 0 else o.attempts end
        where notice_id = r.nid;
-    elsif not exists (select 1 from public.study_push_subs s where s.user_id = o.user_id) then
+    elsif not study_private.push_reachable(o.user_id, o.cat) then
       update study_private.notify_outbox set state = 'nosub', lease_until = null where notice_id = r.nid;
     elsif r.big or o.attempts >= 5 or o.expires_at <= now() then
       update study_private.notify_outbox set state = 'failed', lease_until = null where notice_id = r.nid;
@@ -19002,20 +19107,27 @@ begin
 end;
 $$;
 
--- This device's push subscription. The endpoint moves to the caller when it
--- was another user's (the personal code brought this device to its member).
+-- This device's push subscription. An endpoint another member saved moves to
+-- the caller only with the same keys (the same browser subscription, now
+-- signed in as the caller); with other keys it is refused ('bad endpoint'),
+-- so nobody can take over a device whose endpoint they learned.
 -- At most 10 devices a person: the longest unseen goes.
 create or replace function public.study_push_subscribe(p_endpoint text, p_p256dh text, p_auth text, p_key_id text,
                                                        p_device text default 'other', p_browser text default '')
 returns bigint language plpgsql volatile security definer set search_path = public as $$
 declare
-  me   uuid := study_private.notify_member(null);
-  v_id bigint;
+  me    uuid := study_private.notify_member(null);
+  v_id  bigint;
+  v_old public.study_push_subs;
 begin
   if not study_private.push_host_ok(p_endpoint) then raise exception 'bad endpoint'; end if;
   if coalesce(p_p256dh, '') !~ '^[A-Za-z0-9_-]{86,88}$' or coalesce(p_auth, '') !~ '^[A-Za-z0-9_-]{21,24}$'
      or coalesce(char_length(p_key_id), 0) not between 8 and 16 then
     raise exception 'bad keys';
+  end if;
+  select * into v_old from public.study_push_subs s where s.endpoint = p_endpoint;
+  if found and v_old.user_id <> me and (v_old.p256dh <> p_p256dh or v_old.auth <> p_auth) then
+    raise exception 'bad endpoint';
   end if;
   insert into public.study_push_subs as s (user_id, endpoint, p256dh, auth, key_id, device, browser)
   values (me, p_endpoint, p_p256dh, p_auth, p_key_id,
@@ -19026,6 +19138,10 @@ begin
     device = excluded.device, browser = excluded.browser, seen_at = now(), fails = 0,
     created_at = case when s.user_id = excluded.user_id then s.created_at else now() end
   returning s.id into v_id;
+  perform study_private.push_set_aside(me, array(
+    select s.id from public.study_push_subs s
+     where s.user_id = me and s.id not in (select x.id from public.study_push_subs x where x.user_id = me
+                                            order by x.seen_at desc, x.id desc limit 10)));
   delete from public.study_push_subs s
    where s.user_id = me and s.id not in (select x.id from public.study_push_subs x where x.user_id = me
                                           order by x.seen_at desc, x.id desc limit 10);
@@ -19033,11 +19149,15 @@ begin
 end;
 $$;
 
--- This device stops (sign-out, "לא במכשיר הזה").
+-- This device stops (sign-out, "לא במכשיר הזה"). The three removals below
+-- act only on the caller's own rows, so they need a signed-in caller, not a
+-- membership: a member removed from every group can still stop their devices.
 create or replace function public.study_push_unsubscribe(p_endpoint text)
 returns int language plpgsql volatile security definer set search_path = public as $$
-declare me uuid := study_private.notify_member(null); v_n int;
+declare me uuid := auth.uid(); v_n int;
 begin
+  if me is null then raise exception 'forbidden'; end if;
+  perform study_private.push_set_aside(me, array(select id from public.study_push_subs where user_id = me and endpoint = p_endpoint));
   delete from public.study_push_subs where user_id = me and endpoint = p_endpoint;
   get diagnostics v_n = row_count;
   return v_n;
@@ -19058,8 +19178,10 @@ $$;
 
 create or replace function public.study_push_remove(p_id bigint)
 returns int language plpgsql volatile security definer set search_path = public as $$
-declare me uuid := study_private.notify_member(null); v_n int;
+declare me uuid := auth.uid(); v_n int;
 begin
+  if me is null then raise exception 'forbidden'; end if;
+  perform study_private.push_set_aside(me, array[p_id]);
   delete from public.study_push_subs where user_id = me and id = p_id;
   get diagnostics v_n = row_count;
   return v_n;
@@ -19069,8 +19191,10 @@ $$;
 -- "ניתוק המכשירים האחרים": every device of the caller's but this one.
 create or replace function public.study_push_keep_only(p_endpoint text)
 returns int language plpgsql volatile security definer set search_path = public as $$
-declare me uuid := study_private.notify_member(null); v_n int;
+declare me uuid := auth.uid(); v_n int;
 begin
+  if me is null then raise exception 'forbidden'; end if;
+  perform study_private.push_set_aside(me, array(select id from public.study_push_subs where user_id = me and endpoint is distinct from p_endpoint));
   delete from public.study_push_subs where user_id = me and endpoint is distinct from p_endpoint;
   get diagnostics v_n = row_count;
   return v_n;
@@ -19128,7 +19252,7 @@ begin
     select * into c from public.study_notices where id = p_before and user_id = me;
     if not found then return '[]'::jsonb; end if;
   end if;
-  return coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'group_id', x.group_id, 'kind', x.kind, 'cat', x.cat,
+  return coalesce((select jsonb_agg(jsonb_build_object('id', x.id, 'group_id', x.group_id, 'lecture_id', x.lecture_id, 'kind', x.kind, 'cat', x.cat,
                                                        'args', x.args, 'route', x.route, 'obj', x.obj, 'count', x.count,
                                                        'created_at', x.created_at, 'updated_at', x.updated_at,
                                                        'seen_at', x.seen_at, 'ends_at', x.ends_at) order by x.updated_at desc, x.id desc)
@@ -19136,6 +19260,7 @@ begin
                             where n.user_id = me and (n.group_id = p_group or n.group_id is null) and n.kind <> 'test'
                               and n.updated_at > now() - interval '30 days'
                               and (p_before is null or (n.updated_at, n.id) < (c.updated_at, c.id))
+                              and not exists (select 1 from public.study_lectures l where l.id = n.lecture_id and l.deleted_at is not null)
                             order by n.updated_at desc, n.id desc
                             limit least(greatest(coalesce(p_limit, 50), 1), 100)) x), '[]'::jsonb);
 end;
@@ -19150,14 +19275,19 @@ begin
   return jsonb_build_object(
     'n', (select count(*) from (select 1 from public.study_notices n
                                  where n.user_id = me and n.seen_at is null and (n.group_id = p_group or n.group_id is null)
-                                   and n.kind <> 'test' and not (n.cat = 'live' and coalesce(n.ends_at < now(), false)) limit 99) x),
+                                   and n.kind <> 'test' and not (n.cat = 'live' and coalesce(n.ends_at < now(), false))
+                                   and not exists (select 1 from public.study_lectures l where l.id = n.lecture_id and l.deleted_at is not null) limit 99) x),
     'objs', coalesce((select jsonb_agg(o order by o) from (select distinct n.obj as o from public.study_notices n
                                  where n.user_id = me and n.seen_at is null and n.obj is not null
-                                   and (n.group_id = p_group or n.group_id is null) and n.kind <> 'test' limit 50) y), '[]'::jsonb));
+                                   and (n.group_id = p_group or n.group_id is null) and n.kind <> 'test'
+                                   and not exists (select 1 from public.study_lectures l where l.id = n.lecture_id and l.deleted_at is not null) limit 50) y), '[]'::jsonb));
 end;
 $$;
 
--- Seen: these rows (null: all of them). A push still waiting for them is dropped.
+-- Seen: these rows, whichever of the caller's groups they are in (a push
+-- about another group tapped while the app shows this one); null: all of this
+-- group's and the group-less ones. A push still waiting for them is dropped,
+-- except a security notice's (opening the inbox never silences it).
 create or replace function public.study_notices_seen(p_group uuid, p_ids bigint[] default null)
 returns int language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -19165,12 +19295,12 @@ declare
   v_ids bigint[];
 begin
   with s as (update public.study_notices n set seen_at = now()
-              where n.user_id = me and n.seen_at is null and (n.group_id = p_group or n.group_id is null)
-                and (p_ids is null or n.id = any (p_ids))
+              where n.user_id = me and n.seen_at is null
+                and (case when p_ids is null then n.group_id = p_group or n.group_id is null else n.id = any (p_ids) end)
              returning n.id)
   select array_agg(id) into v_ids from s;
   update study_private.notify_outbox set state = 'none', lease_until = null
-   where notice_id = any (coalesce(v_ids, '{}')) and state = 'due';
+   where notice_id = any (coalesce(v_ids, '{}')) and state = 'due' and cat <> 'security';
   return coalesce(cardinality(v_ids), 0);
 end;
 $$;
@@ -19188,7 +19318,7 @@ begin
              returning n.id)
   select array_agg(id) into v_ids from s;
   update study_private.notify_outbox set state = 'none', lease_until = null
-   where notice_id = any (coalesce(v_ids, '{}')) and state = 'due';
+   where notice_id = any (coalesce(v_ids, '{}')) and state = 'due' and cat <> 'security';
   return coalesce(cardinality(v_ids), 0);
 end;
 $$;
