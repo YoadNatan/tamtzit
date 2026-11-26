@@ -227,8 +227,8 @@ const MIN = 60_000;
         await page.locator("main.notify-inbox").waitFor({ timeout: 15000 });
         await page.getByText("אין התראות חדשות. כשמשהו יקרה בקבוצה, הוא יופיע כאן.").waitFor({ timeout: 8000 });
         check("an empty inbox says so", true);
-        check("x=set opens the inbox until pushes come (slice 2)", new URL(page.url()).search === "?v=notify", page.url());
-        check("no settings gear in slice 1", (await page.getByRole("link", { name: "הגדרות התראות" }).count()) === 0);
+        check("x=set opens the inbox while pushes are not offered (e2e/study/notify-push.cjs has the rest)", new URL(page.url()).search === "?v=notify", page.url());
+        check("no settings gear while pushes are not offered", (await page.getByRole("link", { name: "הגדרות התראות" }).count()) === 0);
         await shot(page, "3-empty");
         // A failed read: the line and "לנסות שוב".
         await page.route("**/rest/v1/rpc/study_notices_mine", (r) => r.fulfill({ status: 500, contentType: "application/json", body: '{"message":"boom"}' }));

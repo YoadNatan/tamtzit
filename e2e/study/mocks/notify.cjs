@@ -19,6 +19,9 @@
 // work on the server) and returns it; the script then sends Realtime's INSERT
 // with mock.notify("study_notices", "INSERT", row) (see e2e/study/notify.cjs).
 // db.notifyMock.calls keeps every call (fn, who, body).
+// db.notifyMock.health: when set ({notify, vapid, notifyOn?, notifyStuck?}),
+// /api/study/health answers the mock's base answer with these (pushes,
+// slice 2); unset, health stays the base answer (no pushes offered).
 const DAY = 86_400_000;
 const PREFS = { live: true, mine: true, digest: false, digest_at: "19:30", quiet: true, quiet_from: "23:00", quiet_to: "07:30", shabbat: false };
 const FNS = [
@@ -29,7 +32,7 @@ const CATS = { quiz_open: "live", boss_open: "live", meeting_soon: "live", readi
 
 module.exports = {
   seed(db) {
-    const N = { notices: [], prefs: new Map(), subs: [], pilot: new Set(), send: false, calls: [], seq: 1, subSeq: 1 };
+    const N = { notices: [], prefs: new Map(), subs: [], pilot: new Set(), send: false, calls: [], seq: 1, subSeq: 1, health: null, healthCalls: 0 };
     db.notifyMock = N;
     /** A notice for a user, as section R's notice_add() writes it (coalesced while unseen, by dedupe). */
     N.add = (o) => {
@@ -48,6 +51,16 @@ module.exports = {
       N.notices.push(row);
       return row;
     };
+  },
+
+  async api(req, res, db) {
+    const N = db.notifyMock;
+    if (!N || new URL(req.url, "http://x").pathname !== "/api/study/health") return undefined;
+    N.healthCalls += 1;
+    if (!N.health) return undefined;
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, anthropicKey: true, supabase: true, worker: true, workerOk: true, budgetUsd: db.budgetUsd, schema: db.schema, schemaOk: true, features: {}, notifyOn: false, notifyStuck: false, ...N.health }));
+    return true;
   },
 
   async rest({ method, path, body, who, db, notify, json: answer, refuse: deny, check }) {
