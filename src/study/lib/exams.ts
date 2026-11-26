@@ -407,9 +407,12 @@ export function cropStyle(box: Omit<PageBox, "page">, page: { w: number; h: numb
 }
 
 /** "סומנה ע״י נועה: ג׳" (a member's key; "אושרה" when the member confirmed the suggested one), or "". */
-export function keyByLine(q: Pick<ReviewItem, "origin" | "key_by" | "answer">, confirmed = false): string {
-  if (q.origin !== "member" || q.answer === null) return "";
-  return `${confirmed ? "אושרה" : "סומנה"} ע״י ${q.key_by || "מישהו מהקבוצה"}: ${letter(q.answer)}`;
+export function keyByLine(q: Pick<ReviewItem, "origin" | "key_by" | "answer"> & { seq?: number[] | null }, confirmed = false): string {
+  if (q.origin !== "member") return "";
+  const who = `${confirmed ? "אושרה" : "סומנה"} ע״י ${q.key_by || "מישהו מהקבוצה"}`;
+  if (q.answer !== null) return `${who}: ${letter(q.answer)}`;
+  // A true/false or match item keyed by hand (uploaded sheets, section O 1): who, without the statements.
+  return q.seq?.length ? who : "";
 }
 
 /** The item's standing key is a confirmation of the suggested answer (its last change not undone kept the same key). */

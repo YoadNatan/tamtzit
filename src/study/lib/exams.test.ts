@@ -110,6 +110,8 @@ test("the review's numbers: 98 found · 91 with an answer · 7 to check; suggest
   assert.equal(X.itemState({ parse_conf: 3, origin: "solved", answer: null, seq: [1, 0, 1] }), "suggested", "a set item's suggested key");
   assert.equal(X.keyByLine({ origin: "member", key_by: "נועה", answer: 2 }), "סומנה ע״י נועה: ג׳");
   assert.equal(X.keyByLine({ origin: "exam", key_by: null, answer: 2 }), "");
+  assert.equal(X.keyByLine({ origin: "member", key_by: "נועה", answer: null, seq: [1, 0, 1, 0] }), "סומנה ע״י נועה", "a true/false item keyed by hand: who");
+  assert.equal(X.keyByLine({ origin: "member", key_by: "נועה", answer: null, seq: [] }), "", "nothing keyed: no line");
   assert.equal(X.examLengthLine({ found: 100, minutes: 180 }), "100 שאלות · 3 שעות");
 });
 
