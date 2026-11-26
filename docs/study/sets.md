@@ -16,7 +16,7 @@ a view over bank questions.
 
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
-| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | WP0 (docs) built; WP1-WP3 and the screens follow |
+| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | WP0 (docs) and WP1 (bundle owner) built; WP2, WP3 and the screens follow |
 | B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | not built yet |
 | C | The notices `set_shared` and `set_solved` (WP17), with section R | (R's) | L 1, R | not built yet |
 
@@ -42,8 +42,34 @@ The daily limit is 5 new sets a member (`POLICY.qsets.daily`, OD13).
 
 ## The bundle (WP1)
 
-To come with WP1: the bundle owner `QS` (a 2,000 B cap, OD2) and the
-measured numbers.
+The study entry chunk's limit is 410,000 B (notifications' OD2). This
+design's static share of it is capped at **2,000 B**: bundle owner `QS` in
+`tools/study-bundle.mjs`, which owns `src/study/features/qsets.tsx` (the slot:
+`lazy()` stubs and flag conditions only, no Hebrew), the screens `MakeScreen`,
+`MakeParts`, `MakeProgress`, `SetPage`, `SetsShelf`, `SetStats` and
+`SetCard`, the libraries `make`, `setsCopy` and `sets`, and `styles/sets.css`.
+`QS` keeps only its slot module in the entry chunk (`SLOT_ONLY`), and the
+check fails when its share passes 2,000 B. The tool also turns on
+`VITE_STUDY_MAKE` and `VITE_STUDY_SETS` with every other flag.
+
+Measured on 26 Nov 2026, before any of the package's code (`npm run
+test:bundle`, every flag on):
+
+| | Bytes |
+|---|---|
+| The study entry chunk, every flag on | 400,398 |
+| Left under the 410,000 B limit | 9,602 |
+| The same with every flag off (`--flags off`) | 399,653 |
+| `QS`'s share | 0 (no module yet; cap 2,000) |
+| R's share (notifications, for comparison) | 747 (cap 1,200) |
+
+The design's estimate of the package's entry code is about 1,900 B (the slot
+about 900, and in F's modules `route.ts` about 600, `flags.ts` about 150,
+`guideScreens.ts` about 100, the chip and card conditions about 150). Only the
+slot counts toward `QS`'s cap; the rest is F's and counts toward the limit.
+WP1's move of 6 kB of entry code to lazy chunks is not needed now (OD2): the
+room left is enough for this wave's designs together (about 1.9 kB here, 1.5
+notifications, 1 exams, 1 models).
 
 ## What a set costs (WP2)
 

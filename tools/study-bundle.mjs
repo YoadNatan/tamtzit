@@ -16,8 +16,11 @@
 //
 // and lists each package's static share of the entry chunk (budget: 8 kB a
 // package; F's shell and the libraries have none). A package of the wave has
-// a hard cap of its own (notifications, R: 1,200 B) and only its slot module
-// in the entry: every other module of it must load lazily.
+// a hard cap of its own (notifications, R: 1,200 B; practice sets, QS:
+// 2,000 B, design-practice §10 and OD2) and only its slot module in the
+// entry: every other module of it must load lazily. Practice sets did not
+// move entry code to lazy chunks first (the design's WP1 "6 kB"): under the
+// 410 kB limit the wave fits without it (docs/study/sets.md has the numbers).
 //
 //   npm run test:bundle
 //   node tools/study-bundle.mjs --flags off      the same with every flag off
@@ -34,7 +37,7 @@ const FLAGS = [
   "QUESTIONS", "PRACTICE", "QUIZ", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "ASK", "RECORDINGS", "PDF", "ACCOUNT",
   "PROGRESS", "MARATHONS", "EXAMS", "MEETING", "ANCHOR", "VAR", "WALL", "TODAY", "GUESS", "NEEDS_ME", "PULSE",
   "MUSEUM", "BOSS", "GROUP_PLAN", "TRAPS", "BLANK_TABLE", "QUIZ_ROUNDS", "EVE", "GUIDE", "QTYPES", "COURSES", "INSTALL",
-  "NOTIFY",
+  "NOTIFY", "MAKE", "SETS",
 ];
 for (const f of FLAGS) {
   if (flagsOff) delete process.env[`VITE_STUDY_${f}`];
@@ -44,9 +47,9 @@ for (const f of FLAGS) {
 const LIMIT = 410_000;
 const PACKAGE_BUDGET = 8_000;
 /** A package's hard cap on its static share, where it has one (failing the check). */
-const PACKAGE_CAP = { R: 1_200 };
+const PACKAGE_CAP = { R: 1_200, QS: 2_000 };
 /** Packages whose only module in the entry may be their slot (features/<slot>.tsx). */
-const SLOT_ONLY = ["R"];
+const SLOT_ONLY = ["R", "QS"];
 const FORBIDDEN = ["מבחן חי", "תחרותי", "נקודות על תשובה נכונה ומהירה"];
 /** A package's screen: never in the entry chunk. */
 const SCREEN = /^src\/study\/components\/(?:\w+Screen|Catchup|Museum|Pulse|Wall|Boss)\.tsx$/;
@@ -59,7 +62,10 @@ const SLOT = {
   courses: "S", // courses and past exams (docs/study/sources.md)
   install: "L", // adding the app to the home screen (docs/study/install.md)
   notify: "R", // notifications: the bell, the inbox, pushes (section R)
+  qsets: "QS", // practice sets: "סט חדש", the shelf, the set page (docs/study/sets.md)
 };
+/** A style sheet named otherwise than its package's slot. */
+const STYLE = { sets: "QS" };
 const COMPONENT = {
   Q: ["PracticeHome", "LecturePractice", "PracticeSession", "PracticeQuestion", "PracticeCreate", "PracticeBank", "PracticeRound", "FlagSheet", "FixSheet", "Exams"],
   Z: ["QuizSetup", "Quiz", "QuizParts", "QuizBanner", "QuizQuestion"],
@@ -80,6 +86,7 @@ const COMPONENT = {
   S: ["CourseScreen", "UploadMany", "CourseAsk"],
   L: ["InstallScreen", "InstallParts"],
   R: ["NotifyScreen", "InboxScreen", "NotifyParts"],
+  QS: ["MakeScreen", "MakeParts", "MakeProgress", "SetPage", "SetsShelf", "SetStats", "SetCard"],
 };
 const LIB = {
   W: ["generate", "writing", "transcript", "transcribe", "transcribe.worker", "pdf-export"],
@@ -93,6 +100,7 @@ const LIB = {
   S: ["courses", "batch"],
   L: ["install", "installPrompt", "installCopy", "installLazy"],
   R: ["notify", "notices", "notifyText"],
+  QS: ["make", "setsCopy", "sets"],
 };
 const SHARED = {
   C: ["cloze", "fsrs"], K: ["edits"], T: ["today"], G: ["lane"], E: ["blankTable", "extras"], A: ["estimates", "plan", "agenda"], U: ["pulse"], S: ["batch"],
@@ -110,7 +118,7 @@ function ownerOf(id) {
   if ((m = /^src\/study\/features\/(\w+)\.tsx?$/.exec(rel))) return SLOT[m[1]] ?? "F";
   if ((m = /^src\/study\/components\/([\w.]+)\.tsx?$/.exec(rel))) return COMPONENT_OF[m[1]] ?? "F";
   if ((m = /^src\/study\/lib\/([\w.]+)\.tsx?$/.exec(rel))) return LIB_OF[m[1]] ?? "F";
-  if ((m = /^src\/study\/styles\/(\w+)\.css$/.exec(rel))) return SLOT[m[1]] ?? m[1];
+  if ((m = /^src\/study\/styles\/(\w+)\.css$/.exec(rel))) return STYLE[m[1]] ?? SLOT[m[1]] ?? m[1];
   if ((m = /^shared\/study\/(\w+)\.ts$/.exec(rel))) return SHARED_OF[m[1]] ?? "F";
   if (rel.startsWith("src/study/") || rel === "index.html") return "F";
   return "other";
@@ -167,11 +175,11 @@ for (const [id, m] of Object.entries(entry.modules)) {
 for (const [who, cap] of Object.entries(PACKAGE_CAP)) {
   if (!flagsOff && (share[who] ?? 0) > cap) problems.push(`package ${who}'s share of the study entry chunk is ${share[who]} B (its cap: ${cap.toLocaleString("en")} B)`);
 }
-const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "S", "L", "R", "libraries", "other"];
+const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "S", "L", "R", "QS", "libraries", "other"];
 const lines = [...ORDER, ...Object.keys(share).filter((k) => !ORDER.includes(k))]
-  .filter((k) => k in share)
+  .filter((k) => k in share || k in PACKAGE_CAP) // a capped package shows its 0 too
   .map((k) => {
-    const n = share[k];
+    const n = share[k] ?? 0;
     const budgeted = k.length === 1 && k !== "F";
     const cap = PACKAGE_CAP[k];
     const note = cap ? `  (cap ${cap.toLocaleString("en")} B)` : budgeted ? (n > PACKAGE_BUDGET ? "  over the 8 kB budget" : "") : "  (no budget)";
