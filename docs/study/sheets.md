@@ -26,9 +26,9 @@ path, queue, lease, worker, review screen and ledger kind `exam` as past exams
 | O0 | The synthetic fixture, the time measurement on it, Yoad's read-only checks | none | none | Built |
 | A0 (O1) | The kind and one lecture of an upload, the switch `sheets`, "a new sheet", keying true/false and match items by hand, simulations of past exams only, the sheets line's figures (`study_sheet_room`) | `VITE_STUDY_SHEETS` | O 1 | Built (part 11 since O 2; it was part 10, after L) |
 | A0 (O2, O3) | The upload (two kinds, desktop drop and paste, camera checks, the cover page), a sheet's bounds on the server (40 pages, the $6 line, the headroom, the $3 confirmation), the course page by kind, the wide review with its page and the keyboard, hand keying in the review, the exactness flags, printed order after answering, the landing card | `VITE_STUDY_SHEETS` | O 1 | Built |
-| A0 (O4) | The A0 e2e script (`e2e/study/sheets.cjs`, flag set `o`) at 320/390/820/1440, a ready sheet in the mock (`mocks/sheets.cjs`), `devices.cjs` and `wide.cjs` with the new screens, the fixes they found, the copy list, Yoad's release steps | — | — | Built |
+| A0 (O4) | The A0 e2e script (`e2e/study/sheets.cjs`, flag set `o0`; it was `o` until O8) at 320/390/820/1440, a ready sheet in the mock (`mocks/sheets.cjs`), `devices.cjs` and `wide.cjs` with the new screens, the fixes they found, the copy list, Yoad's release steps | — | — | Built |
 | A1 (O5, O6) | The SQL (O 2: forms open and numeric, exact items by label, answers files and worked solutions, edits, open-add, the budget pause; the pickers' in-place edits) and the server (the sheet reader, its answers file, solving with worked solutions, open-add, resume) | `VITE_STUDY_SHEETS_FORMS` (the client's, O7) | O 2 | Built (part 11; parts 2 to 9 changed in place) |
-| A1 (O7, O8) | The client: the forms in practice, the edit sheet, add and retire, solutions, the paused state, the lecture page's row; its e2e | `VITE_STUDY_SHEETS_FORMS` | O 2 | Not built yet |
+| A1 (O7, O8) | The client: the forms in practice, the edit sheet, add and retire, answers and worked solutions, open-add, the paused state, the lecture page's row; its e2e (`e2e/study/sheets-forms.cjs`, flag set `o`) | `VITE_STUDY_SHEETS_FORMS` | O 2 | Built |
 | B (O9-O12) | Similar questions after a wrong answer and for the whole sheet, in the sheet's set on L's shelf | `VITE_STUDY_SIMILAR` | O 3 | Not built yet |
 
 ## The fixture (O0)
@@ -464,19 +464,21 @@ entry chunk (owner `O`, capped at 1,500 B): 686 B; the entry chunk is
 On the shared mock (`e2e/study/mock.cjs`), with the synthetic sheet only: no
 real host, no paid call, no course material. Build the mock dists as the
 other packages do (every s2 flag with `VITE_STUDY_INSTALL`, `VITE_STUDY_NOTIFY`,
-`VITE_STUDY_MAKE`, `VITE_STUDY_SETS` and `VITE_STUDY_SHEETS` for set `o`; the
-same without `VITE_STUDY_SHEETS` for `ps`), then, one at a time
+`VITE_STUDY_MAKE`, `VITE_STUDY_SETS` and `VITE_STUDY_SHEETS` for set `o0`; the
+same without `VITE_STUDY_SHEETS` for `ps`; since O8 the set `o` is release A1's,
+`o0` with `VITE_STUDY_SHEETS_FORMS`), then, one at a time
 (`NODE_PATH=$(npm root -g)`):
 
 ```
-E2E_FLAGS=o  node e2e/study/sheets.cjs  <dist-o>  <out>   # release A0, every step below
+E2E_FLAGS=o0 node e2e/study/sheets.cjs  <dist-o0> <out>   # release A0, every step below
 E2E_FLAGS=ps node e2e/study/sheets.cjs  <dist-ps> <out>   # without the flag: nothing of it shows
-E2E_FLAGS=o  node e2e/study/devices.cjs <dist-o>  <out>   # + the screens sheet-upload and sheet-review
-E2E_FLAGS=o  node e2e/study/wide.cjs    <dist-o>  <out>   # + a sheet's review and upload, phone / 760+ / keys
+E2E_FLAGS=o  node e2e/study/devices.cjs <dist-o>  <out>   # + the screens sheet-upload and sheet-review (o0 or o)
+E2E_FLAGS=o  node e2e/study/wide.cjs    <dist-o>  <out>   # + a sheet's review and upload, phone / 760+ / keys (o0 or o)
 E2E_FLAGS=s2 node e2e/study/exams.cjs   <dist-s2> <out>   # past exams, unchanged
 ```
 
-**`e2e/study/sheets.cjs`** (set `o`), in order:
+**`e2e/study/sheets.cjs`** (set `o0`; it refuses `o`, release A1's, whose
+upload reads a sheet with the sheet reader: that is `sheets-forms.cjs`), in order:
 
 1. Help's "מבחנים ותרגילים" row has the material line (OD6) and the
    providers line (OD5).
@@ -539,10 +541,10 @@ images, keySource })`: a ready sheet as the reading leaves it (its 5 pages
 without the cover, their lines, the exam reader's replies, the answers file
 read by number) through the exams mock's own worker. `devices.cjs` and
 `wide.cjs` use it with `make-sheet.cjs`'s `pageShots` (clean page JPEGs).
-**`devices.cjs`** (set `o`) adds the screens `sheet-upload` (the PDF chosen)
+**`devices.cjs`** (set `o0` or `o`) adds the screens `sheet-upload` (the PDF chosen)
 and `sheet-review` (an item open) on its eight devices, with its usual checks
 (sideways scroll, text under 14 px, contrast, hit areas, the Tab walk under
-the bars) and that the two columns start at 760. **`wide.cjs`** (set `o`)
+the bars) and that the two columns start at 760. **`wide.cjs`** (set `o0` or `o`)
 checks a sheet's review and upload as one column on a phone and two from
 760, and the keys with a mouse.
 
@@ -628,9 +630,181 @@ says more fit: then `study_private.sheet_solve_items()` (one number in part
 11) and `SHEET_SOLVE_PER_UNIT` (`shared/study/sheetPrice.ts`; a unit test
 pins the two together) change.
 
-**Not in O6:** the client (O7: the forms in practice, the edit sheet, the
-paused state, the lecture page's row, the button for open-add, sending
-`forms: true`); the A1 e2e (O8); similar questions (O9-O12).
+**Not in O6:** the client (O7, below); the A1 e2e (O8, below); similar
+questions (O9-O12).
+
+## Release A1 in the app (O7; `VITE_STUDY_SHEETS_FORMS`)
+
+The flag needs release A0's (`VITE_STUDY_SHEETS`, so past exams, courses and
+practice) and section O 2 (`requiredSchema`: `O: 2`). Without it nothing
+below shows: a sheet is read by the exam reader, and a build without it never
+asks an open or numeric item (a sheet read by the sheet reader keeps its
+choice items in practice). No new SQL: O 2 is in part 11 (O5).
+
+**The upload** sends `forms: true` for a sheet (op `exam_read`: the sheet
+reader, 3-page units) with the sheet reader's usual price on the button
+(`sheetReaderPriceUsd`: the synthetic 5-page sheet with its answers file
+"כ-$0.40"). A past exam is read as before.
+
+**The review** (`ExamView.tsx` reads `study_sheet_review`, the lazy
+`SheetText.tsx` and `SheetEdit.tsx`):
+
+- each item as printed: its label ("שאלה 3א"), the form's tag ("· מספרית",
+  "· פתוחה"), a multi-part question's part ("סעיף ב׳ מתוך 3") with the
+  shared case on each part, its lines, a pipe table as a table in a
+  focusable region labelled "טבלה בשאלה 5" (it scrolls sideways on a phone),
+  "[?]" as the chip "מילה לא ברורה", "[…]" as "הטקסט ארוך מדי ונחתך · כדאי
+  לבדוק מול העמוד"; the sheet reader's stored exactness flags "לבדוק מול
+  הדף" too;
+- a numeric item's answer ("התשובה: 3 שעות") and an open item's model answer
+  and rubric, each with where it came from ("מקובץ התשובות", "תשובה מוצעת ·
+  לא נבדקה", "נבדקה ע״י שוהם"); "פתרון מלא" (the worked solution, its origin,
+  a numeric item's tolerance); "לאשר" confirms a suggested number or model
+  answer; "לתקן תשובה" (`study_item_solution`): the number, unit and
+  tolerance, the model answer and up to 6 rubric points, a worked solution;
+  a choice item's worked solution through "⋯ עוד";
+- "⋯ עוד": "לתקן את השאלה" (the edit sheet: label, form, case text, question,
+  options up to 10 for one answer and 6 for true/false and match, moved,
+  removed and added, a match item's rows, up to 4 figure boxes; only what
+  changed is sent to `study_exam_item_fix`; once anyone answered or marked
+  the item, the form and the number of options are locked: "כבר ענו על
+  השאלה: אפשר לתקן רק טקסט."), "לסמן איור" (the same sheet on its figures:
+  "לסמן על העמוד" opens the page with the "לסמן" toggle, a drag draws a
+  box, with it off the page scrolls and zooms; "כל העמוד כאיור" takes the
+  whole page in one tap, the way with a screen reader; "להסיר"), "להוציא את
+  השאלה" (asked first: "להוציא את שאלה 10 מהדף?");
+- "לתקן טקסט" saves through the fix, keeping the lines and any length;
+- under the list "+ להוסיף שאלה שלא הועתקה" (the edit sheet with a page,
+  `study_exam_item_add`) and the items taken out ("שאלה אחת הוצאה מהדף"),
+  each with who took it out and "להחזיר" (by anyone within 24 hours, then
+  only by whoever took it out);
+- a ready past exam, or a release A0 sheet, with open questions skipped:
+  "להעתיק גם 2 שאלות פתוחות · כ-$0.58" on the mock (the price from the op's dry run;
+  fresh links; the upload stays ready, "מעתיקים גם את השאלות הפתוחות… 1/2",
+  then "הועתקו גם 2 שאלות פתוחות.");
+- a sheet the budget held (D23: reading, error `budget`): "נעצר: נגמר
+  התקציב החודשי.", what was copied, "להמשיך" (refused while the lines are
+  spent: "התקציב החודשי עוד לא מספיק להמשך…") and "לסיים בלי תשובות מוצעות"
+  (the held solve units dropped; the items keep no suggested answer and can
+  be keyed by hand).
+
+**Practice "כמו בדף"** (`PracticeSession.tsx`, the lazy `SheetAnswer.tsx`):
+an uploaded item shows its label ("שאלה 3א") and a part its line ("סעיף ב׳
+מתוך 3"), the case folded ("המקרה (להראות)") once the part before was
+answered; a choice item with lines or a table shows them as printed.
+
+- Numeric: one field, "התשובה (שעות)" with the unit as a fixed suffix,
+  `inputmode="text"` (iOS's decimal pad has no minus), `enterkeyhint="done"`;
+  "," or "." as the point, "-" or "−", "1.2e-3" and "1.2×10^-3"
+  (`numericParse`). "לבדוק" in the bottom bar (as every question's) calls
+  `study_answer_value`: "✓ נכון · 3 שעות" or "✗ התשובה: 200 מ״ג", the
+  answer a `study_answers` row with its value (OD7), and "פתרון מלא" with
+  "בטווח של ±1%". "לא יודעים" sends no number.
+- Open: "התשובה שלך" (placeholder "לכתוב תשובה (נשאר במכשיר)"), a draft
+  per item in `localStorage` (inside try/catch; it survives a reload or a
+  lock, is never sent, and is cleared once marked); "להראות פתרון" in the
+  bottom bar (`study_open_show`) shows what was written, the model answer,
+  the rubric and "פתרון מלא"; "איך הלך?" צדקתי · חלקית · טעיתי (a radio
+  group, `study_open_mark`): the member's own mark, never an answer row,
+  and the round's score leaves it out (OD8).
+- No network during "לבדוק" or "להראות פתרון": "אין חיבור · התשובה נשארת כאן
+  · לנסות שוב". In "מצב מבחן" an open or numeric item whose clock runs out is
+  a miss of the round, with no row.
+- A topic session (`t.<topic>`) and every group-wide list draw only the
+  choice forms and never a similar question (`plainOnly`, design D15: the
+  client's side of `study_private.q_plain`).
+
+**The lecture page's row** (`SheetsLecture.tsx`, lazy through the slot
+`features/sheets.tsx`, with its own boundary): "דפי תרגילים של ההרצאה", the
+sheets uploaded with the lecture (each a link to its review; "· מעתיקים…"
+while read), "עוד אין דף תרגילים להרצאה הזו." and "+ העלאת דף תרגילים"
+(`?v=exams&new=sheet&c=<course>&l=<lecture>`). Nothing while the lecture
+has no course on the course pages.
+
+**Help**: "מבחנים ותרגילים" gains two lines (how open and numeric questions
+are answered; what "⋯ עוד" fixes, open-add and the pause); the review's
+guide gains "⋯ עוד" and "+ להוסיף", and the guide never presses the new
+buttons that change things for the group or spend.
+
+**Bundle**: O's static share of the entry chunk is 1,167 B of its 1,500
+(the slot module with the lecture row's condition); the entry chunk is
+405,524 B of 410,000 with every flag on, 4,476 B free (at least 1,500 B are
+kept for the models package). Everything else of A1 is in lazy chunks.
+
+**Fixed on the way** (the A1 e2e found it): on a computer, dragging over the
+page's picture started the browser's own image drag, which cancelled the box
+being drawn (the picture is now not draggable).
+
+## The A1 e2e (O8)
+
+On the shared mock, the synthetic sheet only. Build set `o` (set `o0`'s
+flags with `VITE_STUDY_SHEETS_FORMS`), then (`NODE_PATH=$(npm root -g)`):
+
+```
+E2E_FLAGS=o  node e2e/study/sheets-forms.cjs <dist-o>  <out>   # release A1, every step below
+E2E_FLAGS=o0 node e2e/study/sheets-forms.cjs <dist-o0> <out>   # without the flag: nothing of it
+E2E_FLAGS=ps node e2e/study/sheets-forms.cjs <dist-ps> <out>
+E2E_FLAGS=o0 node e2e/study/sheets.cjs       <dist-o0> <out>   # release A0, unchanged
+E2E_FLAGS=o  node e2e/study/devices.cjs      <dist-o>  <out>
+E2E_FLAGS=o  node e2e/study/wide.cjs         <dist-o>  <out>
+E2E_FLAGS=s2 node e2e/study/exams.cjs        <dist-s2> <out>   # past exams, unchanged
+```
+
+**`e2e/study/sheets-forms.cjs`** (set `o`), in order:
+
+1. Help: open and numeric answers, "⋯ עוד", the pause.
+2. The lecture page's row, empty; "+ העלאת דף תרגילים" opens the upload as
+   a sheet with the lecture and its course.
+3. The upload (the cover left out, the answers file) sends `forms: true`
+   with the sheet reader's price; the review has all 11 printed items (the
+   8-option one too, nothing skipped), labels as printed with the forms'
+   tags; item 5's table is a table with its header in a focusable labelled
+   region; 3ב says "סעיף ב׳ מתוך 3", carries the case, its answer "3 שעות
+   · מקובץ התשובות" and its worked solution; item 8's model answer and its 3
+   rubric points; item 9's 8 options.
+4. "⋯ עוד": the edit sheet's five forms; the question's lines kept and an
+   option added (only what changed is sent; logged); "כל העמוד כאיור" in one
+   tap; "לתקן תשובה" sets item 4's tolerance (origin member, "נבדקה ע״י
+   שוהם"); "+ להוסיף שאלה שלא הועתקה" adds open item 10; "להוציא את
+   השאלה" asks, takes it out, and "להחזיר" brings it back; at 1440 a box is
+   drawn on the page with "לסמן" and saved. The lecture page's row then
+   lists the sheet.
+5. "לתרגל כמו בדף": 3ב with its part line and folded case, "3,0" → "✓ נכון ·
+   3 שעות" and an answer row with value 3; item 4 "−200" → "✗ התשובה: 200
+   מ״ג" (value -200); 3ג's draft survives a reload and is never sent,
+   "להראות פתרון" shows the rubric, "צדקתי" is an open mark and no answer
+   row; item 5's table in practice; the choice items answered "לא יודעים".
+6. Open-add on a past exam read by the exam reader (`db.examsMock.seedRead`):
+   the dry price "להעתיק גם 2 שאלות פתוחות · כ-$…", the exam ready all along
+   while its open and numeric items are copied, then "הועתקו גם 2 שאלות
+   פתוחות." and no button.
+7. The budget pause (`db.sheetsMock.seed({forms, keySource: "none", pause})`):
+   "נעצר: נגמר התקציב החודשי.", "להמשיך" refused while the line is spent,
+   "לסיים בלי תשובות מוצעות" (resume with `skipSolve`) and the review.
+8. A topic session with a choice item and two copied open and numeric items
+   asks the choice item only ("1/1").
+9. No sideways scroll at 320, 390, 820 and 1440 px, light and dark (the
+   review, practice's numeric and open items, the paused card), and the a11y
+   check on every screen (the primary action in the bottom bar, 44 px hit
+   areas, contrast). `problems: []`, `a11y: []`.
+
+Without the flag (`o0`, `ps`): the lecture page has no row, practising a
+sheet read by the sheet reader asks its choice items only, and no upload
+sends `forms`.
+
+**The mock** (`mocks/exams.cjs`, `mocks/sheets.cjs`) plays section O 2 as
+the SQL does: op `exam_read`'s `forms` (3-page units saving the fixture's
+`truth` by label, the answers file by label, solve units of 4), `open_add`
+(dry and real; `extra` units that keep the upload ready) and `resume`; the
+lever `pauseSolve` holds a sheet's solve unit for the budget; the member's
+RPCs of O 2 (above). `db.sheetsMock.seed({ forms, pause })` and
+`db.examsMock.seedRead()` give ready screens without an upload.
+
+What the e2e does not reach, and where it is tested instead: the quiz, the
+meeting, the boss and Today never drawing an open or numeric item are the
+SQL's (`study_private.q_plain`, O5's tests in `supabase/tests/study.sql`);
+the server's refusals for a fix (`answered`, `label taken`) are the SQL
+tests' and the mock's; the op's prices and gates are `server/study/sheets.test.ts`.
 
 ## Stopping and rolling back (release A0)
 

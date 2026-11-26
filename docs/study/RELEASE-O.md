@@ -7,7 +7,8 @@ $6 a month, similar questions $5, other providers may see this material, one
 practice set per sheet, simulations of past exams only) are in
 [`DECISIONS-2026-11-26.md`](DECISIONS-2026-11-26.md) ("Uploaded sheets").
 Built on `dev`; each release point below works on its own and rolls back on
-its own. Release points not built yet are marked so.
+its own. Release points not built yet are marked so. Release A1 (open and numeric
+questions) is built too: "Release A1, start to finish" below.
 
 ## Rules for all of it
 
@@ -214,28 +215,72 @@ sheets at once; unset `VITE_STUDY_SHEETS` and redeploy to hide the screens.
 A build without the flag never lists a sheet, and a simulation never takes
 one, whatever the flag.
 
-## Release point 3 (release A1: open and numeric questions) — the SQL and the server are built, the client is not
+## Release A1, start to finish (release point 3: open and numeric questions)
 
-Built on `dev` (O5, O6): SQL section O 2 (part 11, with the pickers' edits in
-parts 2, 3, 5 and 7) and the server's sheet reader ([`sheets.md`](sheets.md),
-"SQL section O 2" and "The sheet reader on the server"). It runs only for a
-client that sends `forms: true`, which comes with `VITE_STUDY_SHEETS_FORMS`
-(O7, not built yet); until then nothing of it shows or spends. When the
-client is built, this point will be:
+Built and tested on `dev`: the SQL (O5: section O 2 in part 11, with the
+pickers' edits in parts 2, 3, 5 and 7), the server's sheet reader (O6) and
+the client (O7, `VITE_STUDY_SHEETS_FORMS`), with its e2e (O8:
+`e2e/study/sheets-forms.cjs` on the mock, flag set `o`). What members get:
+an exercise sheet copied exactly as printed, open questions, calculations,
+multi-part questions and tables included; answering a calculation (checked at
+$0) and an open question (self-marked, personal); "⋯ עוד" in the review to
+fix a question, its figure or its answer, add a missed one or take one out;
+"להעתיק גם N שאלות פתוחות" on past exams; a sheet the budget stopped can go
+on or finish; the lecture page lists its sheets ([`sheets.md`](sheets.md),
+"Release A1 in the app"). It comes after release A0 (above). Nothing here
+spends money until step 7. Do them in order; each says what to see.
 
-1. Parts 2 to 11 in order, if release point 1 ran before O 2 was merged
-   (`select public.study_schema() ->> 'O';` says `1`). Then, read only:
+1. **The read-only check** "2. The monthly line and last two months' spend
+   by kind" below (OD2), if it was not sent since release A0. Send Claude the
+   rows. If the spend without sheets is above about $15 a month, stop here:
+   the sheets line goes down first. Optional: query 3 (the model's speed).
+2. **Merge `dev` into `main`** and let Vercel deploy Production. The new flag
+   is off, so the app does not change.
+   `https://<the app's address>/api/study/health` says `"schemaOk": true`.
+3. **The SQL, only if needed.** Supabase → SQL Editor, read only:
+   ```sql
+   select public.study_schema() ->> 'O' as o;                                                   -- 2
+   ```
+   If it says `2`, the SQL is in already (release A0's run of parts 2 to 11
+   from this `dev` has O 2): go on to step 4. If it says `1` or nothing: run
+   **`supabase/parts/2.sql`, `3.sql`, … `11.sql` in order**, each to the end
+   (part 11 alone stops at once with "section O 2 needs parts 2 to 9 run
+   first"; nothing is half done). Then, read only:
    ```sql
    select public.study_schema() ->> 'O' as o;                                                   -- 2
    select conname, pg_get_constraintdef(oid) like '%numeric%' as widened from pg_constraint
     where conname = 'study_questions_form_x' and conrelid = 'public.study_questions'::regclass;  -- true
    select count(*) as rows_not_plain from public.study_questions
     where not study_private.q_plain(source, form);                                              -- 0 before any sheet is read by the sheet reader
+   select name, enabled from study_private.features where name in ('exams', 'sheets') order by name;  -- both true since release A0
    ```
-2. Vercel (Production only): `VITE_STUDY_SHEETS_FORMS` = `1`, with
-   `STUDY_SHEETS_MONTHLY_USD` = `6` and `STUDY_MONTHLY_USD` = `33` as for A0.
-   Redeploy. `/api/study/health`: `"schemaOk": true`, `"schema"` has `"O": 2`.
-3. The first sheet read by the sheet reader (spends; read only afterwards):
+4. **Vercel → Settings → Environment Variables → Production only:**
+   `VITE_STUDY_SHEETS_FORMS` = `1` (it needs `VITE_STUDY_SHEETS`, which
+   release A0 set); `STUDY_SHEETS_MONTHLY_USD` = `6` and `STUDY_MONTHLY_USD`
+   = `33` stay as release A0 set them. Never on Preview: Preview shares the
+   production database. Redeploy Production (Deployments → the latest →
+   Redeploy).
+5. **Check, without spending:**
+   - `/api/study/health`: `"schemaOk": true` (it now asks for `O: 2`),
+     `"schema"` has `"O": 2`.
+   - Help → "מבחנים ותרגילים" has the two new lines (open and numeric
+     answers; "⋯ עוד", open-add and the pause).
+   - A lecture's page, under the summary: "דפי תרגילים של ההרצאה" (its
+     sheets, or "עוד אין דף תרגילים להרצאה הזו.") and "+ העלאת דף תרגילים".
+   - A sheet's review (an existing one, read in release A0): each item's
+     card has "⋯ עוד" (do not save anything); at the end "+ להוסיף שאלה
+     שלא הועתקה".
+   - A past exam with skipped open questions: "להעתיק גם N שאלות פתוחות ·
+     כ-$…" with its price. Do not press it yet (it spends).
+6. **(Optional) the first open-add** on one past exam with skipped open
+   questions: press the button; the exam stays usable while they are copied
+   (a few minutes); then "הועתקו גם N שאלות פתוחות.".
+7. **The first sheet read by the sheet reader (spends about $0.07 a page and
+   $0.02 an item solved, from the sheets line):** one member uploads one
+   short exercise sheet of the course staff's from a lecture's page ("+
+   העלאת דף תרגילים"), with open questions or calculations, answers in a
+   file or marked. Within about 10 minutes it is in "דפי תרגילים" with every
+   question, open and numeric ones too. Then, read only:
    ```sql
    select q.form, count(*), round(avg(q.exact)::numeric, 2) as exact, count(*) filter (where q.parse_conf = 1) as to_check
      from public.study_questions q join public.study_exams e on e.id = q.exam_id
@@ -245,12 +290,20 @@ client is built, this point will be:
     where e.kind = 'sheet' and e.created_at > now() - interval '1 day' order by j.created_at;
    ```
    Send Claude the rows (the exactness line, 0.55, and the unit sizes are
-   set from them).
+   set from them) and, if any copy reads wrong, its labels.
+8. **WhatsApp to the group (optional):**
+   > חדש בתמצית: דפי תרגילים מועתקים עכשיו כמו בדף, גם שאלות פתוחות, חישובים וטבלאות. בחישוב כותבים מספר ובודקים; בשאלה פתוחה כותבים, ״להראות פתרון״, ומסמנים איך הלך (זה רק אצלך). טעות בהעתקה? ״⋯ עוד״ ← ״לתקן את השאלה״. בעמוד ההרצאה: ״דפי תרגילים של ההרצאה״.
 
 **Stopping A1's spend:** the switch `sheets` off stops a sheet's units at once
 (the claim refuses them; a unit already running finishes, at most 200 s). A
 unit the budget refuses holds its sheet ("נעצר: נגמר התקציב החודשי") until a
-member resumes it within the lines.
+member resumes it within the lines or finishes it without suggested answers.
+
+**Rolling back release A1:** unset `VITE_STUDY_SHEETS_FORMS` and redeploy.
+The app is release A0's again: sheets are read by the exam reader, a sheet's
+open and numeric items stay in the database but are never asked (the client
+draws choice items only), and the quiz, the meeting, the boss and Today never
+drew them (`q_plain`). The SQL stays (nothing to undo).
 
 ## Release point 4 (release B: similar questions) — not built yet
 

@@ -920,3 +920,54 @@ Also decided for this build:
 - **Left for the client slices:** the flag `sheetForms` (`VITE_STUDY_SHEETS_FORMS`,
   requiredSchema O 2) and the e2e flag set `os` (O7/O11; `o` gains the forms
   flag then), as the mock's comment says.
+
+### Uploaded sheets, O7 and O8 (release A1's client and its e2e), built on 26 November 2026
+
+- **The flag `VITE_STUDY_SHEETS_FORMS`** (`flags.sheetForms`) needs release
+  A0's flag and asks for section O 2 (`requiredSchema` `O: 2`). It changes
+  nothing else (tested). No new SQL: release A1 is O 2 (part 11, with the
+  pickers' edits in parts 2 to 7), already in every run of parts 2 to 11 from
+  this `dev`; `RELEASE-O.md` says to check `study_schema() ->> 'O'` first and
+  run parts 2 to 11 only when it is not 2.
+- **e2e flag sets: `o0` is release A0, `o` is release A1** (the design's
+  `o`: A0 with the forms flag). O4 had named A0's set `o`; it is `o0` now,
+  and `sheets.cjs` (A0's script) refuses `o`, whose upload reads a sheet with
+  the sheet reader. Release A1's flows are a script of their own,
+  `e2e/study/sheets-forms.cjs` (the design put them in `sheets.cjs`; the two
+  releases' uploads read differently, so one script would branch at every
+  step). `devices.cjs` and `wide.cjs` run on either. The design's `os`
+  (similar questions, on L's `ps`) is release B's, with its flag (O11-O12).
+- **The primary action of an open or numeric question is in the session's
+  bottom bar** ("לבדוק" / "להראות פתרון"), as every question's "לבדוק" (the
+  design's sketch had it in the card; the a11y check wants the primary
+  action within thumb reach). "לא יודעים" and "לדלג" are links in the card.
+- **An open item's own mark counts in no score**, the round's included (OD8:
+  personal only); "צדקתי" is a right answer only for the member's own
+  progress (`study_sheet_progress`). In "מצב מבחן" an open or numeric item
+  whose clock runs out is a miss of the round, with no answer row.
+- **A build without release A1 never asks an open or numeric item**, in any
+  scope (the exam's replay, a course session, the mistakes): its practice
+  draws choice items only. Group-wide lists (a topic's session) draw only the
+  choice forms and never a similar question, whatever the flag (`plainOnly`,
+  the client's side of `study_private.q_plain`, design D15).
+- **"לתקן טקסט" with release A1 saves through `study_exam_item_fix`** (the
+  lines kept, no 600-character limit), not S's `study_exam_item_edit`; the
+  edit sheet sends only what changed, so an answered item's text can be fixed
+  without touching its form or options.
+- **The lecture page's row is a slot condition in `LectureView`** beside
+  practice sets' (`SheetsLectureRow` in `features/sheets.tsx`, the row
+  itself lazy with its own boundary): the design said "not an edit to
+  LectureView"; the one line is the slot's registration, as `MakeLectureRow`'s.
+- **The review's "⋯" in the head (design §5.6) is not built**: open-add is a
+  priced button in the summary card (shown only with its price, from the op's
+  dry run), and delete stays the course page's; the whole-sheet similar offer
+  (B) will add the head's menu.
+- **Drawing a box**: `PageView`'s "לסמן" toggle; "כל העמוד כאיור" is the way
+  without a drag (keyboard, screen readers). The page's picture is not
+  draggable (a native image drag cancelled the box on a computer: the e2e
+  found it).
+- **Bundle:** O's static share of the entry chunk is 1,167 B of its 1,500;
+  the entry chunk is 405,524 B of 410,000 with every flag on (4,476 B free,
+  at least 1,500 B kept for the models package).
+- **Not reached by the e2e**: the quiz, meeting, boss and Today pickers (SQL
+  `q_plain`, O5's tests); the e2e checks a topic session.

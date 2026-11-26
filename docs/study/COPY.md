@@ -349,6 +349,45 @@ The sheet solver writes its worked solutions in Hebrew, impersonally (no
 "you", no gendered forms), English terms and units as printed
 (`SHEET_SOLVE_SYSTEM`).
 
+### New words: uploaded sheets, release A1 (`sheets.md`, O7)
+
+**תשובה** is the final answer (a number with its unit, a model answer, a
+choice); **פתרון** only the worked steps ("פתרון מלא"); every model answer is
+"תשובה מוצעת · לא נבדקה" until a member confirms it. Impersonal, infinitive
+or first-person-past forms only. The words live in their lazy components
+(`SheetAnswer.tsx`, `SheetText.tsx`, `SheetEdit.tsx`, `SheetsLecture.tsx`,
+`ExamView.tsx`) and `src/study/lib/sheetPure.ts`.
+
+| Where | Now |
+|---|---|
+| An item's head | שאלה {label} (as printed: שאלה 3א) · מספרית / · פתוחה · סעיף {letter}׳ מתוך {n} |
+| Exact text | a table: region "טבלה בשאלה {label}"; [?]: מילה לא ברורה; [...]: הטקסט ארוך מדי ונחתך · כדאי לבדוק מול העמוד |
+| An item's answer in the review | התשובה: {n} {unit} · תשובה לדוגמה (with the rubric) · מקובץ התשובות / מסומנת על הדף / תשובה מוצעת · לא נבדקה / נבדקה ע״י {name} · עוד אין תשובה. ״לתקן תשובה״ מוסיף אותה לכל הקבוצה. |
+| The worked solution | פתרון מלא (a disclosure) · בטווח של ±{t}% |
+| Item actions | לאשר · לתקן תשובה · לתקן טקסט · ⋯ עוד → (choice items: להוסיף פתרון מלא / לתקן את הפתרון המלא) · לתקן את השאלה · לסמן איור · להוציא את השאלה |
+| The edit sheet | לתקן את שאלה {label} / להוסיף שאלה שלא הועתקה · מספור · עמוד · סוג: בחירה · נכון/לא נכון · התאמה · פתוחה · מספרית · טקסט המקרה · השאלה · השורות נשמרות כמו שהן. טבלה: שורה לכל שורה בטבלה, עם | בין התאים. · מה להתאים (+ שורה) · אפשרויות / משפטים (+ אפשרות / + משפט; ↑ ↓ ✕) · איור: איור {i} · עמוד {p} (· כל העמוד) · אין איור. · לסמן על העמוד · כל העמוד כאיור · להסיר · ״לסמן״ פעיל: גוררים מסגרת סביב האיור. כבוי: אפשר לגלול ולהגדיל. עד 4 איורים. · כבר ענו על השאלה: אפשר לתקן רק טקסט. · להוציא את השאלה · ביטול · לשמור (שומרים…) |
+| Its checks | צריך מספור, כמו בדף (למשל 3 או 3א). · צריך את טקסט השאלה. · לכל אפשרות צריך טקסט, ולפחות שתיים. · בשאלת התאמה צריך לפחות שתי שורות להתאים. |
+| After saving | התיקון נשמר. · שאלה {label} נוספה. · התשובה עודכנה לכל הקבוצה. |
+| The answer editor | לתקן תשובה · שאלה {label} · התשובה · יחידה · טווח (אחוזים) · תשובה לדוגמה · מה צריך להיות בתשובה (נקודה בכל שורה, עד 6) · פתרון מלא · התשובה תשתנה לכל הקבוצה, עם השם שלך. · צריך מספר, למשל 6.9. · הטווח הוא בין 0 ל-50 אחוז. · צריך תשובה לדוגמה. · עד 6 נקודות. |
+| Taking an item out | להוציא את שאלה {label} מהדף? · היא לא תופיע בתרגול ולא תיספר. אפשר להחזיר אותה מתחתית הרשימה. · להוציא · ביטול · שאלה {label} הוצאה מהדף. |
+| Items taken out | שאלה אחת הוצאה מהדף / {n} שאלות הוצאו מהדף · הוצאה ע״י {name} · להחזיר · שאלה {label} חזרה לדף. · אחרי 24 שעות, השאלה חוזרת רק מהחשבון שהוציא אותה. |
+| Adding | + להוסיף שאלה שלא הועתקה |
+| Open-add | להעתיק גם {n} שאלות פתוחות · כ-$… (one: שאלה פתוחה אחת) · מעתיקים את השאלות הפתוחות. הן יופיעו כאן בעוד כמה דקות. · מעתיקים גם את השאלות הפתוחות… {k}/{n} · הועתקו גם {n} שאלות פתוחות. |
+| The budget pause | נעצר: נגמר התקציב החודשי. · ✓ {n} שאלות הועתקו · {k} עוד בלי תשובה · מה שכבר הועתק נשמר. אפשר להמשיך כשיש שוב תקציב החודש, או לסיים עכשיו: השאלות יישארו בלי תשובות מוצעות, ואפשר לסמן להן תשובה ביד. · להמשיך · לסיים בלי תשובות מוצעות · ההעתקה ממשיכה. · הדף נשמר בלי תשובות מוצעות. · התקציב החודשי עוד לא מספיק להמשך. הוא מתחדש ב-1 בחודש; אפשר גם לסיים בלי תשובות מוצעות. |
+| Reading a sheet (A1) | כל השאלות מועתקות כמו בדף: שאלות בחירה, שאלות פתוחות, חישובים וטבלאות. |
+| Practice: numeric | שאלה מספרית · התשובה ({unit}) · לבדוק (בודקים…) · לא יודעים · לדלג · ✓ נכון · {n} {unit} / ✗ התשובה: {n} {unit} · צריך לכתוב מספר, למשל 6.9 או -0.5 · צריך לכתוב תשובה |
+| Practice: open | שאלה פתוחה · התשובה שלך (placeholder: לכתוב תשובה (נשאר במכשיר)) · להראות פתרון (רגע…) · שאלות פתוחות נבדקות לבד ונספרות רק בהתקדמות האישית. · מה שכתבת: · אין עדיין תשובה לשאלה הזו. · איך הלך? · צדקתי · חלקית · טעיתי · סימנת: צדקתי |
+| Practice: the case of a part | המקרה / המקרה (להראות) |
+| No network | אין חיבור · התשובה נשארת כאן · לנסות שוב |
+| The lecture page | דפי תרגילים של ההרצאה · עוד אין דף תרגילים להרצאה הזו. · + העלאת דף תרגילים · {title} · מעתיקים… |
+| Help (מבחנים ותרגילים) | דף תרגילים מועתק כמו בדף: גם שאלות פתוחות, חישובים, שאלות עם כמה סעיפים וטבלאות. … שאלות פתוחות נבדקות לבד ונספרות רק בהתקדמות האישית. · בבדיקת ההעתקה, ״⋯ עוד״: … ״לסיים בלי תשובות מוצעות״. |
+
+`e2e/study/sheets-forms.cjs` (O8) asserts these words as they are on screen
+(the labels and tags, the answers' origins, the edit sheet's buttons, the
+verdicts, the pause, open-add, the lecture page's row), and
+`src/study/lib/sheetPure.test.ts` pins the vocabulary of the A1 components
+(no "פתרון מוצע", no "פותר עיוור"; "תשובה מוצעת · לא נבדקה").
+
 `e2e/study/sheets.cjs` (O4) asserts these words as they are on screen
 (help's two lines, the tiles and the Word line, the cover, the answers
 file's question, the exactness line, the landing card, the refusals), so a
