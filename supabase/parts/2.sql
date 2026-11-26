@@ -2582,4 +2582,16 @@ revoke all on function study_private.form_parse(jsonb, text[], uuid, text) from 
 insert into study_private.schema_sections (section, version) values ('Q', 3)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 
+-- O 2 (uploaded sheets, docs/study/sheets.md "The pickers"; design-exams
+-- D15): what a screen outside practice can draw. The quiz, the boss, the
+-- meeting's quiz and Today's cards draw the five choice forms only, and
+-- never a similar question (section O 3's source 'twin', which belongs to
+-- its sheet's set). Section O 2 adds open and numeric items (a sheet's), so
+-- those pickers ask here. True for every row before O 2.
+create or replace function study_private.q_plain(p_source text, p_form text)
+returns boolean language sql immutable as $$
+  select coalesce(p_form in ('one', 'tap', 'tf', 'match', 'order'), false) and p_source is distinct from 'twin'
+$$;
+revoke all on function study_private.q_plain(text, text) from public;
+
 -- ════ END SECTION Q ════

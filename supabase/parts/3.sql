@@ -892,6 +892,7 @@ language sql stable set search_path = public as $$
     from public.study_questions q
    where q.group_id = p_group and q.retired_at is null and q.has_key
      and q.form = 'one' and coalesce(q.step, 1) = 1   -- Z 3: what a quiz can ask
+     and q.source is distinct from 'twin'              -- O 2 (q_plain's rule; this function runs as the caller)
      and coalesce(q.lecture_id, q.ref_lecture) is not null
    group by 1;
 $$;
@@ -1179,6 +1180,7 @@ begin
        and q.hidden_at is null                                   -- review F-6: two flags hide it everywhere
        and q.has_key
        and q.form = 'one' and coalesce(q.step, 1) = 1   -- Z 3: one answer, a staged case's step 1 only
+       and study_private.q_plain(q.source, q.form)   -- O 2: never an open, numeric or similar question
        and (z.kinds = 'all' or q.kind = z.kinds)
        and (z.part_from is null or coalesce(q.part_idx, -1) between z.part_from and z.part_to)
   ),

@@ -4269,6 +4269,18 @@ revoke all on function study_private.form_parse(jsonb, text[], uuid, text) from 
 insert into study_private.schema_sections (section, version) values ('Q', 3)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 
+-- O 2 (uploaded sheets, docs/study/sheets.md "The pickers"; design-exams
+-- D15): what a screen outside practice can draw. The quiz, the boss, the
+-- meeting's quiz and Today's cards draw the five choice forms only, and
+-- never a similar question (section O 3's source 'twin', which belongs to
+-- its sheet's set). Section O 2 adds open and numeric items (a sheet's), so
+-- those pickers ask here. True for every row before O 2.
+create or replace function study_private.q_plain(p_source text, p_form text)
+returns boolean language sql immutable as $$
+  select coalesce(p_form in ('one', 'tap', 'tf', 'match', 'order'), false) and p_source is distinct from 'twin'
+$$;
+revoke all on function study_private.q_plain(text, text) from public;
+
 -- ════ END SECTION Q ════
 
 -- ════ BEGIN SECTION Z · the live quiz (package Z) ════
@@ -5160,6 +5172,7 @@ language sql stable set search_path = public as $$
     from public.study_questions q
    where q.group_id = p_group and q.retired_at is null and q.has_key
      and q.form = 'one' and coalesce(q.step, 1) = 1   -- Z 3: what a quiz can ask
+     and q.source is distinct from 'twin'              -- O 2 (q_plain's rule; this function runs as the caller)
      and coalesce(q.lecture_id, q.ref_lecture) is not null
    group by 1;
 $$;
@@ -5447,6 +5460,7 @@ begin
        and q.hidden_at is null                                   -- review F-6: two flags hide it everywhere
        and q.has_key
        and q.form = 'one' and coalesce(q.step, 1) = 1   -- Z 3: one answer, a staged case's step 1 only
+       and study_private.q_plain(q.source, q.form)   -- O 2: never an open, numeric or similar question
        and (z.kinds = 'all' or q.kind = z.kinds)
        and (z.part_from is null or coalesce(q.part_idx, -1) between z.part_from and z.part_to)
   ),
@@ -10396,6 +10410,7 @@ begin
      where q.group_id = z.group_id and q.lecture_id = any (z.lecture_ids)
        and q.retired_at is null and q.stale_at is null and q.hidden_at is null and q.has_key
        and q.form = 'one' and coalesce(q.step, 1) = 1   -- M 3: what a quiz can ask
+       and study_private.q_plain(q.source, q.form)   -- O 2
        and not (q.lecture_id = m.lecture_id and q.part_idx between m.part_from and m.part_to and q.part_idx > readto)
        and exists (select 1 from public.study_meetings y
                     where y.group_id = z.group_id and y.day = prev and y.cancelled_at is null and y.lecture_id = q.lecture_id
@@ -10412,6 +10427,7 @@ begin
            where c.group_id = z.group_id and c.lecture_id = any (z.lecture_ids)
              and c.retired_at is null and c.stale_at is null and c.hidden_at is null and c.has_key and not (c.id = any (pick))
              and c.form = 'one' and coalesce(c.step, 1) = 1   -- M 3
+             and study_private.q_plain(c.source, c.form)   -- O 2
              and not (c.lecture_id = m.lecture_id and c.part_idx between m.part_from and m.part_to and c.part_idx > readto)
            order by not exists (select 1 from public.study_meetings y
                                  where y.group_id = z.group_id and y.day = prev and y.lecture_id = c.lecture_id
@@ -10451,6 +10467,7 @@ begin
       select array_agg(x.lecture_id) into lecs
         from (select q.lecture_id from public.study_questions q join public.study_lectures l on l.id = q.lecture_id and l.deleted_at is null
                where q.group_id = m.group_id and q.has_key and q.retired_at is null and q.form = 'one' and coalesce(q.step, 1) = 1   -- M 3
+                 and study_private.q_plain(q.source, q.form)   -- O 2
                group by q.lecture_id order by max(q.created_at) desc limit 40) x;
     end if;
     qid := public.study_quiz_create(m.group_id, 'coop', coalesce(lecs, array[m.lecture_id]), 3, 45, 'all', 'coffee', p_meeting);
@@ -13801,6 +13818,7 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (select 1 from public.study_questions q
                   where q.id = p_question and q.retired_at is null and q.hidden_at is null and q.has_key
                     and q.form = 'one' and coalesce(q.step, 1) = 1   -- H 3: what a quiz can ask (the heads and the rounds)
+                    and study_private.q_plain(q.source, q.form)   -- O 2
                     and (to_jsonb(q) ->> 'stale_at') is null
                     and not exists (select 1 from public.study_question_flags f
                                      where f.question_id = q.id and f.reason in ('wrong_key', 'two_answers', 'not_in_slides')))
@@ -15278,7 +15296,7 @@ begin
                             order by d.wrong_at), '[]'::jsonb)
     into danger
     from public.study_my_danger(p_group) d
-    join public.study_questions q on q.id = d.ask_id
+    join public.study_questions q on q.id = d.ask_id and study_private.q_plain(q.source, q.form)   -- O 2: the card answers a choice
     left join public.study_lectures l on l.id = coalesce(q.lecture_id, q.ref_lecture);
   if to_regprocedure('public.study_my_unclear(uuid)') is not null then        -- section M
     execute 'select coalesce(jsonb_agg(to_jsonb(x) order by x.tapped_at), ''[]''::jsonb) from public.study_my_unclear($1) x' into unclear using p_group;

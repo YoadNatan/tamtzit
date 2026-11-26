@@ -1658,6 +1658,7 @@ begin
      where q.group_id = z.group_id and q.lecture_id = any (z.lecture_ids)
        and q.retired_at is null and q.stale_at is null and q.hidden_at is null and q.has_key
        and q.form = 'one' and coalesce(q.step, 1) = 1   -- M 3: what a quiz can ask
+       and study_private.q_plain(q.source, q.form)   -- O 2
        and not (q.lecture_id = m.lecture_id and q.part_idx between m.part_from and m.part_to and q.part_idx > readto)
        and exists (select 1 from public.study_meetings y
                     where y.group_id = z.group_id and y.day = prev and y.cancelled_at is null and y.lecture_id = q.lecture_id
@@ -1674,6 +1675,7 @@ begin
            where c.group_id = z.group_id and c.lecture_id = any (z.lecture_ids)
              and c.retired_at is null and c.stale_at is null and c.hidden_at is null and c.has_key and not (c.id = any (pick))
              and c.form = 'one' and coalesce(c.step, 1) = 1   -- M 3
+             and study_private.q_plain(c.source, c.form)   -- O 2
              and not (c.lecture_id = m.lecture_id and c.part_idx between m.part_from and m.part_to and c.part_idx > readto)
            order by not exists (select 1 from public.study_meetings y
                                  where y.group_id = z.group_id and y.day = prev and y.lecture_id = c.lecture_id
@@ -1713,6 +1715,7 @@ begin
       select array_agg(x.lecture_id) into lecs
         from (select q.lecture_id from public.study_questions q join public.study_lectures l on l.id = q.lecture_id and l.deleted_at is null
                where q.group_id = m.group_id and q.has_key and q.retired_at is null and q.form = 'one' and coalesce(q.step, 1) = 1   -- M 3
+                 and study_private.q_plain(q.source, q.form)   -- O 2
                group by q.lecture_id order by max(q.created_at) desc limit 40) x;
     end if;
     qid := public.study_quiz_create(m.group_id, 'coop', coalesce(lecs, array[m.lecture_id]), 3, 45, 'all', 'coffee', p_meeting);

@@ -115,6 +115,7 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (select 1 from public.study_questions q
                   where q.id = p_question and q.retired_at is null and q.hidden_at is null and q.has_key
                     and q.form = 'one' and coalesce(q.step, 1) = 1   -- H 3: what a quiz can ask (the heads and the rounds)
+                    and study_private.q_plain(q.source, q.form)   -- O 2
                     and (to_jsonb(q) ->> 'stale_at') is null
                     and not exists (select 1 from public.study_question_flags f
                                      where f.question_id = q.id and f.reason in ('wrong_key', 'two_answers', 'not_in_slides')))
@@ -1592,7 +1593,7 @@ begin
                             order by d.wrong_at), '[]'::jsonb)
     into danger
     from public.study_my_danger(p_group) d
-    join public.study_questions q on q.id = d.ask_id
+    join public.study_questions q on q.id = d.ask_id and study_private.q_plain(q.source, q.form)   -- O 2: the card answers a choice
     left join public.study_lectures l on l.id = coalesce(q.lecture_id, q.ref_lecture);
   if to_regprocedure('public.study_my_unclear(uuid)') is not null then        -- section M
     execute 'select coalesce(jsonb_agg(to_jsonb(x) order by x.tapped_at), ''[]''::jsonb) from public.study_my_unclear($1) x' into unclear using p_group;
