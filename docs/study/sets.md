@@ -886,6 +886,10 @@ What changed, beyond the lines above:
   the latency is not bounded, and is accepted).
 - **A finished set round** never reopens: the set's 10-second poll stops at
   the round's end and nothing is appended to a finished round.
+- **Back online while a part is still failing** (found by the final e2e
+  run, `sets.cjs` step 4): the generating screen remembers that the
+  connection came back during the round and writes on once the round stops,
+  instead of waiting for "להמשיך ליצור".
 
 Rejected, with the reason: the silent fallback for `x=new` without a lecture
 and for `x=review` when MAKE is off (the review's nit) would break the app's
