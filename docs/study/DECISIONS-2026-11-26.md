@@ -181,3 +181,80 @@ browser's permission and nothing is pushed yet (slice 2).
   `e2e/study/mocks/notify.cjs`, the mock's flag set `notify` ("i" with
   `VITE_STUDY_NOTIFY`) and its Realtime filter on `user_id`; unit tests for
   the route and the words.
+
+### Notifications, pushes for the pilot (slice 2), built on 26 November 2026
+
+The server sends pushes and a member can turn them on, on this device, from
+"שלי" → "הגדרות התראות" (`?v=notify&x=set`). Nothing is sent until the owner
+sets the VAPID keys on Production and adds the pilot (below); the switch
+`notify` stays off.
+
+- **Server:** `server/study/push.ts` encrypts with WebCrypto only (RFC 8291,
+  checked byte for byte against its Appendix A; the VAPID JWT of RFC 8292)
+  and posts only to the push services' hosts (the same list as section R's
+  `push_host_ok`, compared by a test), never following a redirect.
+  `server/study/notify.ts` is `POST /api/study/work {notify:true}` (the same
+  server key): it claims, answers 202 and sends in `waitUntil`.
+  `/api/study/health` adds `notify`, `vapid`, `notifyOn`, `notifyStuck`.
+  `tools/vapid-keys.mjs` prints a key pair and writes nothing.
+- **Service worker:** `public/sw.js`, push only (no fetch handler, no cache),
+  served by `vercel.json` with `Cache-Control: no-cache`; its header holds
+  the two-line kill version. `install.md` says so.
+- **Client:** `lib/notify.ts` (the device's state, turning on from a tap,
+  the re-sync on each open, the kill path), `components/NotifyScreen.tsx`,
+  the row in "שלי", the inbox's gear, and the hooks in signing out
+  (`study_push_unsubscribe` first) and "ניתוק המכשירים האחרים"
+  (`study_push_keep_only`). R's share of the entry chunk is 947 B of 1,200
+  (the slot now loads one lazy part that picks the inbox or the settings).
+- **Choices the design left open, taken here:**
+  - Health gives `vapid` (the public key) whenever the three keys are set
+    and are a pair, without asking the database; `notify` also needs
+    section R, the server key and a wired database. So a slow or failed
+    database never reads as "the keys were removed": only removed (or
+    broken) keys remove the devices' worker.
+  - The worker waits what the claim says (`wait_ms`, at most 20 s) and
+    claims at most 3 more times; a batch holds whole notices (about 8
+    devices, a notice with more alone), so one `study_notify_done` settles
+    each notice.
+  - Without sending: a device whose stored keys cannot be used is reported
+    as 400 (section R removes it after three), a payload too large as 413,
+    an endpoint off the push services' list as -1.
+  - A notice's tag and the push service's `Topic` are the same: 22
+    characters of sha256(dedupe). Urgency: high for live and security,
+    normal for "בשבילך", low for the reminder. A route too long for a push
+    links to the home (still with `nt`).
+  - The worker is registered when the settings show "להפעיל" (so the tap
+    goes straight to the browser's question), on turning on, and by the
+    re-sync. The re-sync runs once the page is idle, on each open and when
+    another member signs in on the device; it subscribes whenever the
+    browser's permission is granted and health gives a key.
+  - The settings read the member's preferences through
+    `study_notify_prefs_set({})` (which saves the defaults row), so no table
+    read is added.
+  - New words: "אפשר לשלוח עד 3 התראות ניסיון בשעה. אפשר לנסות שוב מאוחר
+    יותר." (the test's limit), the device names ("אייפון", "מחשב · כרום"),
+    and the iOS and Chrome paths from `installCopy.ts` `OS` (new keys,
+    unchecked on a device, as the install flow's are).
+  - A push tapped while the app is open, for a notice of another group:
+    the screen opens, but the group is not switched (not built).
+- **Checks:** unit tests for `push.ts`, `notify.ts`, `public/sw.js` (in
+  `node:vm`), `lib/notify.ts` and the new words; `work.test.ts` and
+  `health.test.ts` cases; `e2e/study/notify-push.cjs` (the design's cases
+  1-4, 8-9, 12-13, with a fake PushManager; case 9 delivers a real push to
+  `public/sw.js` over CDP, in Playwright's full Chromium, headless, since
+  the headless shell has no notifications).
+- **Not in this slice (slice 3):** the asks (the first-launch card, the
+  upload ask, the inbox's off-bar), the quiz setup's checkbox, guide step
+  S10, the help rows, SQL R 2, `RELEASE-R1.md`.
+
+**Owner steps for the pilot (Production only; never Preview):**
+1. On your computer: `node tools/vapid-keys.mjs https://<the app's address>`.
+   It prints three lines and writes nothing. Keep the private key in your
+   password manager; never paste it in a chat, an issue or git.
+2. Vercel → Production: `STUDY_VAPID_PUBLIC`, `STUDY_VAPID_PRIVATE` (mark it
+   Sensitive), `STUDY_VAPID_SUBJECT`; redeploy. `/api/study/health` should
+   show `"notify": true`, a `vapid` value and `"notifyStuck": false`.
+3. Supabase → SQL Editor, the pilot (your group's join code):
+   `insert into study_private.notify_pilot (user_id) select created_by from public.study_groups where join_code = '<code>' on conflict do nothing;`
+4. From the home-screen icon: שלי → הגדרות התראות → "להפעיל התראות במכשיר
+   הזה" → "שליחת התראת ניסיון"; then the design's device checklist (§13.4).
