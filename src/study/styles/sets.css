@@ -1,0 +1,487 @@
+/* ── Practice sets (docs/study/sets.md): "סט חדש" and "סט בהכנה" ──
+   Placement and grids only: the kit's classes and tokens, logical
+   properties (right to left). Bundle owner QS: loaded with the lazy
+   screens, never in the study entry chunk. */
+
+/* ═════════════ "סט חדש" ═════════════ */
+
+.mk-grid {
+  display: grid;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+.mk-start,
+.mk-end {
+  display: grid;
+  gap: var(--sp-6);
+  align-content: start;
+  min-width: 0;
+}
+
+/* The lecture row: its hue, its title and course, "להחליף ‹". */
+.mk-lecture {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  padding-inline-start: calc(var(--sp-8) + var(--sp-4));
+}
+.mk-lecture-t {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.mk-lecture-t b {
+  overflow-wrap: anywhere;
+}
+.mk-change {
+  flex: none;
+  min-height: 44px;
+  padding-inline: var(--sp-4);
+}
+
+.mk-field {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.mk-field .a-sec {
+  margin: 0;
+}
+.mk-field h3 {
+  margin: 0;
+  font-size: var(--text-para);
+}
+.mk-size {
+  max-width: 420px;
+}
+.mk-size > .a-btn {
+  flex: 1;
+  min-height: 48px;
+  font-size: var(--text-h2, 1.125rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.mk-keys {
+  margin: 0;
+}
+@media (pointer: coarse) {
+  .mk-keys {
+    display: none;
+  }
+}
+
+/* The preview: the tiles, the check, the coverage, the lines. */
+.mk-preview {
+  display: grid;
+  gap: var(--sp-5);
+  border-color: var(--accent-soft);
+}
+.mk-preview h2 {
+  margin: 0;
+}
+.mk-types {
+  display: grid;
+  gap: var(--sp-3);
+}
+.mk-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.mk-tiles > i,
+.mk-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--accent);
+}
+.mk-dot {
+  width: 10px;
+  height: 10px;
+  margin-inline-end: var(--sp-2);
+  vertical-align: 0.05em;
+}
+.mk-tiles > i[data-g="case"],
+.mk-dot[data-g="case"] {
+  background: var(--group-pop);
+}
+.mk-tiles > i[data-g="table"],
+.mk-dot[data-g="table"] {
+  background: var(--sun-pop);
+}
+.mk-tiles > i[data-g="picture"],
+.mk-dot[data-g="picture"] {
+  background: var(--fun-pop);
+}
+.mk-tiles > i:is([data-g="tf"], [data-g="match"], [data-g="order"]),
+.mk-dot:is([data-g="tf"], [data-g="match"], [data-g="order"]) {
+  background: var(--ok-pop);
+}
+.mk-legend {
+  margin: 0;
+}
+.mk-check,
+.mk-bank,
+.mk-lines p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.mk-cover {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.mk-cover p {
+  margin: 0;
+}
+.mk-lines {
+  display: grid;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: var(--b) solid var(--line);
+}
+.mk-warn {
+  color: var(--ink);
+  font-weight: 700;
+}
+.mk-skel {
+  display: grid;
+  gap: var(--sp-4);
+}
+.mk-skel > i {
+  display: block;
+  height: 14px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+}
+.mk-skel > i:nth-child(2) {
+  width: 70%;
+}
+.mk-skel > i:nth-child(3) {
+  width: 45%;
+}
+.mk-note {
+  display: grid;
+  gap: var(--sp-4);
+  justify-items: start;
+}
+.mk-note p {
+  margin: 0;
+}
+.mk-price bdi {
+  font-variant-numeric: tabular-nums;
+}
+/* The create button inside the preview: only where the bottom bar is gone (L). */
+.mk-go-in {
+  display: none;
+}
+.mk-free {
+  justify-self: start;
+}
+
+/* "עוד אפשרויות": closed at every width until opened (remembered on the device). */
+.mk-more {
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.mk-more > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  padding-inline: var(--sp-8);
+  font-weight: 700;
+  cursor: pointer;
+}
+.mk-more-body {
+  display: grid;
+  gap: var(--sp-8);
+  padding: 0 var(--sp-8) var(--sp-8);
+}
+.mk-level {
+  max-width: 420px;
+}
+.mk-level > .a-btn {
+  flex: 1;
+}
+.mk-parts {
+  margin: 0;
+}
+.mk-part {
+  justify-content: flex-start;
+  align-items: center;
+  min-height: 44px;
+  padding-block: var(--sp-2);
+  cursor: pointer;
+}
+.mk-part input {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  accent-color: var(--accent);
+}
+.mk-ex-btns {
+  flex-wrap: wrap;
+}
+.mk-custom .a-input {
+  max-width: 140px;
+}
+
+/* The lecture sheet. */
+.mk-sheet .mk-search {
+  margin-bottom: var(--sp-6);
+}
+.mk-sheet-list {
+  display: grid;
+  gap: var(--sp-6);
+}
+.mk-course-h {
+  margin: 0 0 var(--sp-2);
+  color: var(--muted);
+}
+.mk-course .a-list {
+  margin: 0;
+}
+.mk-lecture-opt {
+  width: 100%;
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--sp-6);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  min-height: 48px;
+  cursor: pointer;
+}
+.mk-radio {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: var(--b) solid var(--hue, var(--accent));
+}
+.mk-lecture-opt[aria-checked="true"] .mk-radio {
+  background: radial-gradient(var(--accent) 45%, transparent 50%);
+  border-color: var(--accent);
+}
+.mk-big-line {
+  margin: 0 0 var(--sp-8);
+  font-weight: 700;
+}
+
+/* M (600-1023): one column at --measure, wide buttons at most 480 px. */
+@media (min-width: 600px) {
+  .make-screen .ph-foot .mk-go {
+    max-width: 480px;
+    margin-inline: auto;
+  }
+}
+
+/* L (≥ 1024): two columns inside --measure-wide; the preview sticks at the
+   end side with the create button inside it, and there is no bottom bar. */
+@media (min-width: 1024px) {
+  main.make-screen,
+  main.make-progress {
+    max-width: var(--measure-wide);
+  }
+  .mk-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    align-items: start;
+    gap: var(--sp-12);
+  }
+  .mk-end {
+    position: sticky;
+    top: calc(var(--study-banner-h, 0px) + 72px);
+  }
+  .mk-go-in {
+    display: block;
+    padding-top: var(--sp-4);
+  }
+  .mk-go-in .mk-go {
+    width: 100%;
+  }
+  .make-screen > .ph-foot {
+    display: none;
+  }
+}
+
+/* ═════════════ "סט בהכנה" ═════════════ */
+
+.mk-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding-block: var(--sp-6);
+}
+.mk-ring {
+  width: 88px;
+  height: 88px;
+  font-size: 1.5rem;
+}
+.mk-hero-t {
+  display: grid;
+  gap: var(--sp-3);
+  flex: 1;
+  min-width: 0;
+}
+.mk-hero-t h2 {
+  margin: 0;
+}
+.mk-read-bar {
+  max-width: 360px;
+}
+.mk-keep {
+  font-size: var(--text-small);
+}
+.mk-offline {
+  margin: 0;
+  font-weight: 700;
+}
+.mk-budget,
+.mk-paused {
+  display: grid;
+  gap: var(--sp-4);
+}
+.mk-budget p {
+  margin: 0;
+}
+.mk-failed {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+}
+.mk-pgrid {
+  display: grid;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+.mk-pstart,
+.mk-pend {
+  display: grid;
+  gap: var(--sp-6);
+  align-content: start;
+  min-width: 0;
+}
+.mk-details > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+  cursor: pointer;
+}
+/* A tile per question: 10 to a row from M. */
+.mk-qtiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(28px, 1fr));
+  gap: var(--sp-3);
+  margin: var(--sp-4) 0;
+  padding: 0;
+  list-style: none;
+}
+.mk-qtiles > li {
+  display: grid;
+  place-items: center;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--track);
+  color: var(--muted);
+  font-weight: 800;
+  font-size: var(--text-small);
+}
+.mk-qtiles > li[data-s="ready"] {
+  background: var(--ok-pop);
+  color: var(--pop-ink, #1c1838);
+}
+.mk-qtiles > li[data-s="failed"] {
+  background: var(--surface-2);
+  color: var(--bad);
+  border: var(--b) dashed var(--bad);
+}
+.mk-qlegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  margin: 0;
+}
+/* The two disclosures ("עוד אפשרויות", "פרטים"): a chevron that turns when open. */
+.mk-more > summary,
+.mk-details > summary {
+  list-style: none;
+  gap: var(--sp-4);
+}
+.mk-more > summary::-webkit-details-marker,
+.mk-details > summary::-webkit-details-marker {
+  display: none;
+}
+.mk-more > summary::before,
+.mk-details > summary::before {
+  content: "‹";
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  color: var(--accent);
+  font-weight: 800;
+  transition: transform 0.15s ease;
+}
+.mk-more[open] > summary::before,
+.mk-details[open] > summary::before {
+  transform: rotate(-90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mk-more > summary::before,
+  .mk-details > summary::before {
+    transition: none;
+  }
+}
+.mk-ready-h {
+  margin: 0;
+  color: var(--muted);
+}
+.mk-ready {
+  margin: 0;
+}
+.mk-stem {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-slide {
+  flex: none;
+  white-space: nowrap;
+}
+.mk-review {
+  justify-self: start;
+}
+.mk-start-wrap {
+  flex: 1;
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: stretch;
+}
+.mk-start-note {
+  margin: 0;
+  text-align: center;
+}
+@media (min-width: 600px) {
+  .mk-qtiles {
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    max-width: 480px;
+  }
+  .mk-start-wrap {
+    max-width: 480px;
+    margin-inline: auto;
+  }
+}
+@media (min-width: 1024px) {
+  .mk-pgrid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--sp-12);
+  }
+}

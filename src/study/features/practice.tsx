@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from
 import { Head, Loading, RouteLink } from "../components/Shell";
 import { flags } from "../lib/flags";
 import { BlankTableSession } from "./extras";
+import { MakeProgress, MakeScreen } from "./qsets";
 import "../styles/practice.css";
 import type { Ctx, ScreenProps } from "./types";
 
@@ -15,7 +16,10 @@ import type { Ctx, ScreenProps } from "./types";
  * upload (?v=exams&new=1&c=), one exam's reading and review (?v=exams&e=),
  * the simulation's setup (?v=mock&c=) and the simulation itself
  * (?v=practice&s=x.<attempt>), each a lazy chunk. They replace the seed's
- * "בקרוב" screen; ?v=exams with neither goes to the course pages. */
+ * "בקרוב" screen; ?v=exams with neither goes to the course pages.
+ * Practice sets (flags.make, features/qsets.tsx): "סט חדש" (x=new, also
+ * without a lecture) and "סט בהכנה" (x=bank&r=) take the place of practice
+ * 2.0's screens; a request's drafts one by one stay at x=review&r=. */
 
 const PracticeHome = lazy(() => import("../components/PracticeHome"));
 const LecturePractice = lazy(() => import("../components/LecturePractice"));
@@ -46,10 +50,15 @@ export function PracticeScreen({ route, ctx }: ScreenProps<"practice">) {
         <BlankTableSession ctx={ctx} lectureId={blank[1]} slide={Number(blank[2])} />
       ) : route.s ? (
         <PracticeSession key={`${route.s}|${route.n ?? "10"}`} route={route} ctx={ctx} />
+      ) : flags.make && route.x === "new" ? (
+        // One screen whatever the lecture: choosing another keeps the member's choices.
+        <MakeScreen key={`make|${route.from ?? ""}`} route={route} ctx={ctx} />
+      ) : flags.make && route.l && route.x === "bank" && route.r ? (
+        <MakeProgress key={route.r} route={route} ctx={ctx} />
+      ) : route.l && (route.x === "bank" || route.x === "review") ? (
+        <PracticeBank key={`${route.l}|${route.r ?? ""}`} route={route} ctx={ctx} />
       ) : route.l && (route.x === "new" || route.x === "example") ? (
         <PracticeCreate key={`${route.l}|${route.x}`} route={route} ctx={ctx} />
-      ) : route.l && route.x === "bank" ? (
-        <PracticeBank key={`${route.l}|${route.r ?? ""}`} route={route} ctx={ctx} />
       ) : route.l && route.x === "round" ? (
         <PracticeRound key={route.l} route={route} ctx={ctx} />
       ) : route.l ? (
