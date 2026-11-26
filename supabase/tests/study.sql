@@ -10298,7 +10298,9 @@ values (:'re1', :'rg', 'קורס בדוי', 'מבחן בדוי', 2025, 'א', 're
        (:'re2', :'rg', 'קורס בדוי', 'מבחן בדוי שני', 2024, null, 'reading', :'ru1');
 update public.study_exams set status = 'ready' where id = :'re1';
 update public.study_exams set status = 'failed', error = 'no questions' where id = :'re2';
-select pg_temp.rok('R38', (select args = '{"course": "קורס בדוי", "year": 2025, "moed": "א"}'::jsonb and user_id = :'ru2'
+-- (Section O's kind is in args once study_exams has it: 'exam' here, 'sheet' for a sheet.)
+select pg_temp.rok('R38', (select args - 'kind' = '{"course": "קורס בדוי", "year": 2025, "moed": "א"}'::jsonb
+                                  and coalesce(args ->> 'kind', 'exam') = 'exam' and user_id = :'ru2'
                                   and route = jsonb_build_object('v', 'exams', 'e', :'re1') and obj = 'exam:' || :'re1'
                            from public.study_notices where kind = 'exam_ready')
   and (select args ->> 'why' = 'no questions' and user_id = :'ru1' from public.study_notices where kind = 'exam_failed')
@@ -11023,3 +11025,242 @@ select pg_temp.rok('LS15', (select count(*) from public.study_qsets where group_
   and (select count(*) from public.study_qset_attempts a where a.user_id in (:'la', :'lb', :'lc', :'ld', :'le')) = 0,
   'the group''s sets, items and attempts go with it');
 -- ════ END SECTION L ════
+
+-- ════ BEGIN SECTION O ════ (checks for supabase/tests/study.sql)
+-- Uploaded sheets (O 1, docs/study/sheets.md): the kind and the lecture of
+-- an upload, the switch 'sheets', "a new sheet", keying a true/false or
+-- match item by hand and its undo, and section S's functions O 1 redefines
+-- (the course page, the library's count, simulations of past exams only).
+-- On fixtures of their own, removed at the end; every title is invented.
+\set ON_ERROR_STOP 1
+reset role;
+set request.jwt.claim.sub = '';
+\set oa '0e000000-0000-4000-8000-000000000001'
+\set ob '0e000000-0000-4000-8000-000000000002'
+\set oz '0e000000-0000-4000-8000-000000000009'
+\set og '0e000000-0000-4000-8000-0000000000a1'
+\set ozg '0e000000-0000-4000-8000-0000000000a2'
+\set ol1 '0e000000-0000-4000-8000-0000000000b1'
+\set ol2 '0e000000-0000-4000-8000-0000000000b2'
+\set olz '0e000000-0000-4000-8000-0000000000b9'
+\set ox1 '0e000000-0000-4000-8000-0000000000c1'
+insert into auth.users (id, raw_user_meta_data) values
+ (:'oa', '{"app":"study","full_name":"אלון"}'), (:'ob', '{"app":"study","full_name":"בת-אל"}'), (:'oz', '{"app":"study","full_name":"זיו"}');
+insert into public.study_groups (id, name, join_code, created_by) values (:'og', 'קבוצת הדפים', 'OSHEET', :'oa'), (:'ozg', 'קבוצה זרה', 'OSHEEZ', :'oz');
+insert into public.study_members (group_id, user_id, name) values (:'og', :'oa', 'אלון'), (:'og', :'ob', 'בת-אל'), (:'ozg', :'oz', 'זיו');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'ol1', :'og', 'פרמקו דפים', 'פרמקוקינטיקה (בדוי)', 'pptx', '[]', 'ready', :'oa'),
+ (:'ol2', :'og', 'פרמקו דפים', 'משתנים (בדוי)', 'pptx', '[]', 'ready', :'ob'),
+ (:'olz', :'ozg', 'פרמקו דפים', 'זרה (בדוי)', 'pptx', '[]', 'ready', :'oz');
+select id as oc from public.study_courses where group_id = :'og' and name_key = 'פרמקו דפים' \gset
+select id as ozc from public.study_courses where group_id = :'ozg' and name_key = 'פרמקו דפים' \gset
+-- As a user, the result's text or its error ('error: …').
+create or replace function pg_temp.oas(p_user text, p_sql text) returns text language plpgsql as $$
+declare r text;
+begin
+  perform set_config('request.jwt.claim.sub', p_user, true);
+  execute p_sql into r;
+  return coalesce(r, 'null');
+exception when others then
+  return 'error: ' || sqlerrm;
+end $$;
+create or replace function pg_temp.ook(p_label text, p_ok boolean, p_what text) returns text language sql as $$
+  select p_label || case when coalesce(p_ok, false) then '. ok: ' else '. FAIL: ' end || p_what $$;
+grant execute on function pg_temp.oas(text, text) to authenticated;
+\pset tuples_only on
+
+-- ── The registry, the columns, the switch ──
+select pg_temp.ook('O1-reg', (public.study_schema() ->> 'O')::int >= 1
+  and exists (select 1 from study_private.features where name = 'sheets')
+  and (select column_default from information_schema.columns where table_schema = 'public' and table_name = 'study_exams' and column_name = 'kind') = '''exam''::text'
+  and exists (select 1 from pg_constraint where conname = 'study_exams_kind_x')
+  and (select count(*) from public.study_exams where kind not in ('exam', 'sheet')) = 0,
+  'section O at 1 or later, the switch sheets, every upload''s kind exam unless made a sheet');
+select pg_temp.ook('O1-off', not study_private.feature_on('sheets'), 'the switch sheets starts off (Yoad turns it on at release A0)');
+-- The switches as the earlier checks left them, put back at the end.
+select coalesce((select enabled from study_private.features where name = 'exams'), false) as o_exams_was \gset
+update study_private.features set enabled = true where name = 'exams';
+update study_private.features set enabled = false where name = 'sheets';
+select pg_temp.ook('O1a', pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', '{"title":"תרגיל 3"}')) = 'error: off',
+  'with sheets off: no sheet');
+update study_private.features set enabled = true where name = 'sheets';
+update study_private.features set enabled = false where name = 'exams';
+select pg_temp.ook('O1a2', pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', '{"title":"תרגיל 3"}')) = 'error: off',
+  'with exams off: no sheet either (both switches)');
+update study_private.features set enabled = true where name = 'exams';
+
+-- ── "דף תרגילים" ──
+select (pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc',
+         jsonb_build_object('title', E'  תרגיל 3 ·\tפרמקוקינטיקה  ', 'lecture', :'ol1', 'key_source', 'separate'))))::jsonb as o1 \gset
+select (:'o1'::jsonb ->> 'exam_id') as os1 \gset
+select pg_temp.ook('O1b', (select kind || ' · ' || title || ' · ' || status || ' · ' || key_source || ' · ' || (lecture_id = :'ol1')::text || ' · '
+                          || hide_from_profile || ' · ' || coalesce(year::text, '-') || ' · ' || course || ' · ' || (created_by = :'oa')::text
+                     from public.study_exams where id = :'os1')
+                    = 'sheet · תרגיל 3 · פרמקוקינטיקה · uploading · separate · true · true · - · פרמקו דפים · true'
+  and :'o1'::jsonb ->> 'prefix' = :'og' || '/exams/' || :'os1' || '/',
+  'a sheet: kind sheet, its title (spaces made one), uploading, its lecture, hidden from the course''s style, no year; its folder');
+select (pg_temp.oas(:'ob', format('select public.study_sheet_create(%L, %L) ->> %L', :'oc', '{"title":"מאגר שאלות"}', 'exam_id'))) as os2 \gset
+select pg_temp.ook('O1b2', (select coalesce(lecture_id::text, 'none') || ' · ' || key_source from public.study_exams where id = :'os2') = 'none · none',
+  'a bank: a sheet with no lecture; no answers unless said');
+select pg_temp.ook('O1c',
+  pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', '{"title":"   "}')) = 'error: bad sheet'
+  and pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', jsonb_build_object('title', repeat('א', 121)))) = 'error: bad sheet'
+  and pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', '{"title":"x","key_source":"maybe"}')) = 'error: bad sheet'
+  and pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', '{"title":3}')) = 'error: bad sheet'
+  and pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', '{"title":"x","lecture":"nope"}')) = 'error: bad sheet'
+  and pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', '[]')) = 'error: bad sheet',
+  'bad meta: an empty or 121-character title, a key mode it does not know, a title not text, a lecture not an id, not an object');
+reset role;
+update public.study_lectures set deleted_at = now() where id = :'ol2';
+select pg_temp.ook('O1c2',
+  pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', jsonb_build_object('title', 'x', 'lecture', :'olz'))) = 'error: lecture not found'
+  and pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', jsonb_build_object('title', 'x', 'lecture', :'ol2'))) = 'error: lecture not found'
+  and pg_temp.oas(:'oa', format('select public.study_sheet_create(%L, %L)', :'oc', jsonb_build_object('title', 'x', 'lecture', gen_random_uuid()))) = 'error: lecture not found',
+  'a lecture of another group, a deleted lecture, no such lecture');
+select pg_temp.ook('O1c3',
+  pg_temp.oas(:'oz', format('select public.study_sheet_create(%L, %L)', :'oc', '{"title":"x"}')) = 'error: course not found'
+  and pg_temp.oas('', format('select public.study_sheet_create(%L, %L)', :'oc', '{"title":"x"}')) = 'error: not signed in'
+  and not has_function_privilege('anon', 'public.study_sheet_create(uuid, jsonb)', 'execute')
+  and not has_function_privilege('anon', 'public.study_exam_key_set(uuid, int, int[])', 'execute')
+  and has_function_privilege('authenticated', 'public.study_exam_key_set(uuid, int, int[])', 'execute'),
+  'a stranger''s course is not found; signed out; anon reaches neither RPC');
+set role authenticated;
+set request.jwt.claim.sub = '0e000000-0000-4000-8000-000000000001';
+select pg_temp.ook('O1c4', (select string_agg(x, ' · ') from (select pg_temp.oas(:'oa', q) x from unnest(array[
+    format('insert into public.study_exams (group_id, course, title, kind) values (%L, %L, %L, %L) returning 1', :'og', 'פרמקו דפים', 'x', 'sheet'),
+    format('update public.study_exams set kind = %L where id = %L returning 1', 'exam', :'os1'),
+    format('update public.study_exams set lecture_id = null where id = %L returning 1', :'os1')]) with ordinality t(q, o) order by o) y)
+  = 'error: permission denied for table study_exams · error: permission denied for table study_exams · error: permission denied for table study_exams',
+  'a member writes neither the kind nor the lecture directly');
+reset role;
+select pg_temp.ook('O1c5', (select string_agg(x, ' · ') from (select pg_temp.oas(:'oa', format('update public.study_exams set kind = %L where id = %L returning 1', 'quiz', :'os1')) x) y)
+  like 'error: new row for relation "study_exams" violates check constraint "study_exams_kind_x"%',
+  'no third kind');
+
+-- ── The course page and the library (S's functions, redefined) ──
+reset role;
+insert into public.study_exams (id, group_id, course, title, year, status, kind, created_by) values
+ (:'ox1', :'og', 'פרמקו דפים', 'מועד א 2025 (בדוי)', 2025, 'ready', 'exam', :'oa');
+update public.study_exams set status = 'ready' where id = :'os1';
+update public.study_lectures set deleted_at = null where id = :'ol2';
+update public.study_exams set lecture_id = :'ol2' where id = :'os2';
+update public.study_lectures set deleted_at = now() where id = :'ol2';
+select pg_temp.ook('O1d', pg_temp.oas(:'ob', format($q$select string_agg((e ->> 'title') || ' ' || (e ->> 'kind') || ' ' || coalesce((e ->> 'lecture_id') = %L, false)::text
+                                                                        || ' ' || coalesce(e ->> 'lecture_id', 'none'), ' · ' order by e ->> 'title')
+                                                      from jsonb_array_elements(public.study_course_overview(%L) -> 'exams') e
+                                                     where e ->> 'id' in (%L, %L, %L)$q$, :'ol1', :'oc', :'ox1', :'os1', :'os2'))
+  = 'מאגר שאלות sheet false none · מועד א 2025 (בדוי) exam false none · תרגיל 3 · פרמקוקינטיקה sheet true ' || :'ol1',
+  'the course page lists each upload''s kind and lecture (none when its lecture was deleted)');
+select pg_temp.ook('O1e', pg_temp.oas(:'ob', format('select exams from public.study_courses_of(%L) where id = %L', :'og', :'oc')) = '1',
+  'the library counts past exams only: one exam, two sheets');
+
+-- ── Simulations: past exams only (OD9) ──
+insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form, figure, parse_conf, page, has_key, created_by)
+select :'og', e, n, 'exam', 'mcq', 'שאלה בדויה ' || n || ' (synthetic)', array['א', 'ב', 'ג', 'ד'], 'one', '', 3, 1, true, :'oa'
+  from unnest(array[:'ox1', :'os1']::uuid[]) e, generate_series(1, 6) n;
+insert into public.study_question_keys (question_id, answer, key_origin)
+select q.id, 1, 'sheet' from public.study_questions q where q.exam_id in (:'ox1', :'os1');
+select pg_temp.ook('O1f',
+  pg_temp.oas(:'oa', format('select public.study_mock_create(%L, %L, %L, 5)', :'oc', 'exam', :'os1')) = 'error: exam not found'
+  and pg_temp.oas(:'oa', format('select (public.study_mock_create(%L, %L, %L, 5)) ->> %L', :'oc', 'exam', :'ox1', 'pool')) = '6',
+  'a sheet is never a simulation; a past exam is, of its choice items');
+select pg_temp.ook('O1f2', pg_temp.oas(:'oa', format($q$select string_agg(x.form, ',' order by x.form) from (select distinct q.form from public.study_questions q
+                                                     join public.study_mocks m on q.id = any (m.question_ids) where m.exam_id = %L) x$q$, :'ox1')) = 'one',
+  'the simulation''s questions are its exam''s');
+
+-- ── "לסמן תשובה" for a true/false and a match item, and its undo ──
+insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form, figure, parse_conf, page, has_key, created_by)
+values (:'og', :'os1', 7, 'exam', 'mcq', 'סמנו נכון או לא נכון (synthetic)', array['משפט א', 'משפט ב', 'משפט ג'], 'tf', '', 3, 2, true, :'oa')
+returning id as otf \gset
+insert into public.study_question_keys (question_id, seq, key_origin, key_conf) values (:'otf', array[1, 1, 0]::smallint[], 'solved', 2);
+insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, layout, form, figure, parse_conf, page, has_key, created_by)
+values (:'og', :'os1', 8, 'exam', 'mcq', 'התאימו כל תרופה למסלול (synthetic)', array['כבד', 'כליה', 'מרה'],
+        '{"prompts": ["Fictazole", "Mockacillin", "Placebrin"]}', 'match', '', 3, 5, false, :'oa')
+returning id as omt \gset
+insert into public.study_question_keys (question_id, answer) values (:'omt', null);
+select id as oone from public.study_questions where exam_id = :'os1' and exam_no = 1 \gset
+-- (Each call is a statement of its own: a statement does not see what a function it calls wrote.)
+select pg_temp.oas(:'ob', format('select public.study_exam_key_set(%L, null, %L) ->> %L', :'otf', '{1,0,1}', 'origin')) as o_r \gset
+select pg_temp.ook('O1g', :'o_r' = 'member'
+  and (select array_to_string(seq, '') || ' ' || coalesce(answer::text, '-') || ' ' || key_origin || ' ' || coalesce(key_conf::text, '-') || ' ' || (key_by = :'ob')::text
+         from public.study_question_keys where question_id = :'otf') = '101 - member - true'
+  and (select has_key from public.study_questions where id = :'otf')
+  and (select array_to_string(old_seq, '') || '>' || array_to_string(new_seq, '') || ' ' || origin_old || '>' || origin_new || ' ' || conf_old
+         from public.study_exam_key_log where question_id = :'otf' order by id desc limit 1) = '110>101 solved>member 2',
+  'a true/false item keyed by hand: its statements, a member''s, logged with what it replaced');
+select pg_temp.oas(:'oa', format('select public.study_exam_key_set(%L, null, %L) ->> %L', :'omt', '{2,0,1}', 'seq')) as o_r \gset
+select pg_temp.ook('O1g2', :'o_r' = '[2, 0, 1]'
+  and (select has_key from public.study_questions where id = :'omt')
+  and (select array_to_string(old_seq, ',') || '>' || array_to_string(new_seq, ',') from public.study_exam_key_log where question_id = :'omt') = '>2,0,1',
+  'a match item never keyed: keyed by hand, a distinct option per prompt');
+select pg_temp.ook('O1g3', (select string_agg(x, ' · ') from (select pg_temp.oas(:'oa', q) x from unnest(array[
+    format('select public.study_exam_key_set(%L, null, %L)', :'otf', '{1,0}'),
+    format('select public.study_exam_key_set(%L, null, %L)', :'otf', '{1,0,2}'),
+    format('select public.study_exam_key_set(%L, 1, null)', :'otf'),
+    format('select public.study_exam_key_set(%L, null, %L)', :'omt', '{0,0,1}'),
+    format('select public.study_exam_key_set(%L, null, %L)', :'omt', '{0,1,3}'),
+    format('select public.study_exam_key_set(%L, 4, null)', :'oone'),
+    format('select public.study_exam_key_set(%L, null, %L)', :'oone', '{1}')]) with ordinality t(q, o) order by o) y)
+  = 'error: bad answer · error: bad answer · error: bad answer · error: bad answer · error: bad answer · error: bad answer · error: bad answer',
+  'refused: a statement missing or not 0/1, an answer on a set item, one option twice or out of range, a one-answer item''s answer out of range or as statements');
+select pg_temp.oas(:'oa', format('select public.study_exam_key_set(%L, 2, null) ->> %L', :'oone', 'answer')) as o_r \gset
+select pg_temp.ook('O1g4', :'o_r' = '2'
+  and (select answer || ' ' || key_origin from public.study_question_keys where question_id = :'oone') = '2 member'
+  and (select coalesce(old_seq::text, 'null') from public.study_exam_key_log where question_id = :'oone') = 'null',
+  'a one-answer item keyed with it too (its log has no statements)');
+-- The undo of each.
+select pg_temp.oas(:'ob', format('select public.study_exam_key_undo(%L)::text', :'otf')) as o_r \gset
+select pg_temp.ook('O1h', :'o_r'::jsonb = '{"seq": [1, 1, 0], "answer": null, "origin": "solved"}'::jsonb
+  and (select array_to_string(seq, '') || ' ' || key_origin || ' ' || key_conf from public.study_question_keys where question_id = :'otf') = '110 solved 2'
+  and (select has_key from public.study_questions where id = :'otf'),
+  '"לבטל" brings the suggested statements back, with their origin and confidence');
+select pg_temp.oas(:'oa', format('select public.study_exam_key_undo(%L)::text', :'omt')) as o_r \gset
+select pg_temp.ook('O1h2', :'o_r'::jsonb = '{"seq": null, "answer": null, "origin": null}'::jsonb
+  and (select coalesce(seq::text, 'null') || ' ' || coalesce(key_origin, 'null') from public.study_question_keys where question_id = :'omt') = 'null null'
+  and not (select has_key from public.study_questions where id = :'omt'),
+  'the match item''s undo: no key again');
+select pg_temp.oas(:'oa', format('select public.study_exam_key_undo(%L)::text', :'oone')) as o_r \gset
+select pg_temp.ook('O1h3', :'o_r'::jsonb = '{"answer": 1, "origin": "sheet"}'::jsonb
+  and (select answer || ' ' || key_origin from public.study_question_keys where question_id = :'oone') = '1 sheet',
+  'a one-answer item''s undo is section S''s');
+select pg_temp.oas(:'ob', format('select public.study_exam_key_set(%L, null, %L)', :'otf', '{0,0,0}')) is not null as dummy \gset
+reset role;
+update public.study_question_keys set seq = array[1, 1, 1]::smallint[], key_origin = 'sheet', key_by = null where question_id = :'otf';
+select pg_temp.ook('O1h4', pg_temp.oas(:'ob', format('select public.study_exam_key_undo(%L)', :'otf')) = 'error: changed',
+  'the answers file wrote the statements since: the undo would erase them, and is refused');
+-- Cleared, held by a live quiz, a stranger, the switch.
+select pg_temp.oas(:'oa', format('select public.study_exam_key_set(%L, null, null)::text', :'otf')) as o_r \gset
+select pg_temp.ook('O1i', :'o_r'::jsonb = '{"seq": null, "answer": null, "origin": null}'::jsonb
+  and (select coalesce(seq::text, 'null') || ' ' || coalesce(key_origin, 'null') from public.study_question_keys where question_id = :'otf') = 'null null'
+  and not (select has_key from public.study_questions where id = :'otf')
+  and (select array_to_string(old_seq, '') || '>' || coalesce(array_to_string(new_seq, ''), 'null') || ' ' || coalesce(origin_new, 'none')
+         from public.study_exam_key_log where question_id = :'otf' order by id desc limit 1) = '111> none',
+  'both null clear the key, logged');
+reset role;
+update public.study_question_keys set held_until = now() + interval '1 minute' where question_id = :'otf';
+select pg_temp.ook('O1i2',
+  pg_temp.oas(:'oa', format('select public.study_exam_key_set(%L, null, %L)', :'otf', '{1,0,1}')) = 'error: in quiz'
+  and pg_temp.oas(:'oz', format('select public.study_exam_key_set(%L, null, %L)', :'otf', '{1,0,1}')) = 'error: question not found',
+  'a live quiz holds the key; a stranger finds no question');
+update public.study_question_keys set held_until = null where question_id = :'otf';
+update study_private.features set enabled = false where name = 'exams';
+select pg_temp.ook('O1i3', pg_temp.oas(:'oa', format('select public.study_exam_key_set(%L, null, %L)', :'otf', '{1,0,1}')) = 'error: off',
+  'with exams off: no keying');
+update study_private.features set enabled = true where name = 'exams';
+update public.study_exams set deleted_at = now() where id = :'os1';
+select pg_temp.ook('O1i4', pg_temp.oas(:'oa', format('select public.study_exam_key_set(%L, null, %L)', :'otf', '{1,0,1}')) = 'error: question not found',
+  'a deleted sheet''s items are not found');
+
+-- ── The fixtures go ──
+reset role;
+set request.jwt.claim.sub = '';
+update study_private.features set enabled = false where name = 'sheets';
+update study_private.features set enabled = :'o_exams_was'::boolean where name = 'exams';
+delete from public.study_mocks where exam_id = :'ox1';
+delete from public.study_exams where group_id in (:'og', :'ozg');
+delete from public.study_groups where id in (:'og', :'ozg');
+delete from auth.users where id in (:'oa', :'ob', :'oz');
+select pg_temp.ook('O-end', not exists (select 1 from public.study_exams where group_id = :'og')
+  and not exists (select 1 from public.study_courses where group_id in (:'og', :'ozg')),
+  'the fixtures are gone');
+-- ════ END SECTION O ════

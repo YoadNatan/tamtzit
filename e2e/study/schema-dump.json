@@ -926,6 +926,16 @@
     "required": 1
    }
   ],
+  "study_exam_key_set": [
+   {
+    "args": [
+     "p_question",
+     "p_answer",
+     "p_seq"
+    ],
+    "required": 3
+   }
+  ],
   "study_exam_key_undo": [
    {
     "args": [
@@ -3063,6 +3073,15 @@
     "required": 4
    }
   ],
+  "study_sheet_create": [
+   {
+    "args": [
+     "p_course",
+     "p_meta"
+    ],
+    "required": 2
+   }
+  ],
   "study_slide_flag": [
    {
     "args": [
@@ -3568,7 +3587,9 @@
    "by_old",
    "undo_of",
    "member_id",
-   "at"
+   "at",
+   "old_seq",
+   "new_seq"
   ],
   "study_exam_pages": [
    "exam_id",
@@ -3601,7 +3622,9 @@
    "hide_from_profile",
    "deleted_at",
    "retries",
-   "retry_day"
+   "retry_day",
+   "kind",
+   "lecture_id"
   ],
   "study_group_plans": [
    "id",

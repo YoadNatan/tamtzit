@@ -36,9 +36,10 @@ test("every part is at most 170 KB", async () => {
   // Part 9: the personal code, then notifications (R), which ship before the
   // wave's other sections (Yoad, 26 Nov 2026).
   assert.match(parts[8], /^-- ═══ study-schema\.sql, part 9 of 10 \(sections I, R\) ═══/);
-  // Part 10: practice sets (L), which would take part 9 past 170 KB; the
-  // wave's later sections (Y, O) follow L there.
-  assert.match(parts[9], /^-- ═══ study-schema\.sql, part 10 of 10 \(section L\) ═══/);
+  // Part 10: practice sets (L), which would take part 9 past 170 KB, then
+  // uploaded sheets (O), while part 10 stays at most 170 KB (else O starts
+  // part 11: tools/sql-parts.mjs's STARTS gains "O").
+  assert.match(parts[9], /^-- ═══ study-schema\.sql, part 10 of 10 \(sections L, O\) ═══/);
 });
 
 // Section L (practice sets, OD14) redefines study_private.kind_on so the

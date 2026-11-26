@@ -23,7 +23,9 @@ const DIR = join(root, "supabase", "parts");
  *  go into the part of the section before them. Supabase's SQL Editor
  *  refuses a run much larger than about 170 KB, so each part stays at or
  *  under PART_MAX_BYTES (server/study/sqlParts.test.ts checks it). Part 10
- *  starts at L (practice sets): with I and R, part 9 would pass 170 KB. */
+ *  starts at L (practice sets): with I and R, part 9 would pass 170 KB.
+ *  Section O (uploaded sheets) follows L in part 10 while part 10 stays at
+ *  most 170 KB; a version of O that would pass it starts part 11 ("O" here). */
 const STARTS = ["Q", "Z", "C", "P", "V", "H", "S", "I", "L"];
 
 /** 170,000 bytes, not 170 × 1024: whichever way the editor counts "170 KB",

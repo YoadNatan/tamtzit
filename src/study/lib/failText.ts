@@ -214,6 +214,9 @@ const TEXT: Record<string, string> = {
   "exam:in quiz": "השאלה הזו נמצאת עכשיו במבחן קבוצתי. אפשר לחזור אליה אחרי החשיפה.",
   "exam:bad text": "שאלה היא באורך 5 עד 600 תווים, ותשובה עד 400.",
   "exam:set question": "בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד.",
+  // Uploaded sheets (section O 1, docs/study/sheets.md): a sheet's name, a key that does not fit its question.
+  "exam:bad sheet": "כדאי לבדוק את שם הדף: עד 120 תווים.",
+  "exam:bad answer": "התשובה לא מתאימה לשאלה הזו. כדאי לרענן ולסמן שוב.",
   "exam:nothing to undo": "אין שינוי לבטל.",
   "exam:changed": "התשובה השתנתה מאז, אז אי אפשר לבטל. אפשר לסמן את התשובה הנכונה.",
   "exam:nothing to confirm": "אין כאן תשובה מוצעת לאשר.",
