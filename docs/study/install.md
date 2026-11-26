@@ -2,8 +2,9 @@
 
 Built on `dev` on 25 Nov 2026, after the personal code
 ([`personal-code.md`](personal-code.md)). The plan it follows was approved
-with the owner's decisions of 25 Nov 2026: no service worker (a stale-chunk
-reload instead), the title bar and the manifest in the page's paper colour,
+with the owner's decisions of 25 Nov 2026: no service worker for installing
+(a stale-chunk reload instead; notifications later added a push-only one, see
+below), the title bar and the manifest in the page's paper colour,
 and no server record of who installed.
 
 ## What a member sees
@@ -110,9 +111,16 @@ card (Today's "התור שלי"); "קוד חדש" moves it to the confirm's "ב�
   rewrites `/assets/*` to `index.html`, so a missing chunk is a real 404. The
   screen's error boundary shows "המסך לא נטען…" for the moment before the
   reload, or when the reload is spent ([`ux-p1.md`](ux-p1.md), WP1).
-- **No service worker.** Add one only if a real Android shows no
-  `beforeinstallprompt` (then: a pass-through fetch handler, no caching,
-  `Cache-Control: no-cache`).
+- **A push-only service worker** (`public/sw.js`), approved on 26 Nov 2026
+  for notifications ([`DECISIONS-2026-11-26.md`](DECISIONS-2026-11-26.md),
+  OD1): no fetch handler and no cache, so pages, chunks, deploys and the
+  stale-chunk reload behave as without it; `vercel.json` serves it with
+  `Cache-Control: no-cache`. It is registered only on a device whose member
+  turns notifications on (or opens their settings), never for installing.
+  Installing still needs no worker; if a real Android shows no
+  `beforeinstallprompt`, that is a separate decision. Kill path: the app
+  removes it when `/api/study/health` stops giving the VAPID key, and the
+  two-line unregistering `sw.js` in its header can be deployed in its place.
 
 ## Before release: on real devices
 
@@ -121,8 +129,8 @@ card (Today's "התור שלי"); "קוד חדש" moves it to the confirm's "ב�
   is on by default; paste in the icon's "כניסה עם הקוד האישי".
 - WhatsApp on iOS: links still open in Safari. Instagram on iOS: whether
   "פתיחה בספארי" (`x-safari-https://…`) opens Safari.
-- Android Chrome: that `beforeinstallprompt` comes with no service worker
-  (after a tap and 30 s on the page). Samsung Internet: its menu's words.
+- Android Chrome: that `beforeinstallprompt` comes for a member without the
+  push-only worker (after a tap and 30 s on the page). Samsung Internet: its menu's words.
 
 ## Flag and checks
 
