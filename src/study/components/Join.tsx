@@ -5,6 +5,7 @@ import { flags } from "../lib/flags";
 import { markFresh } from "../lib/guideMark";
 import { CodeEntry, openAccount, useCodesOn } from "../features/account";
 import { JoinInstallNote } from "../features/install";
+import { SetJoinNote } from "../features/qsets";
 import { formatCode, parseCode, standalone } from "../lib/personalCode";
 
 /* ── Getting in ──
@@ -160,6 +161,8 @@ export default function Join({ initialCode, onJoined, signedIn = false, codePane
             </button>
           </div>
         ) : null}
+        {/* A practice set's link opened signed out (VITE_STUDY_SETS): how a member reaches it. */}
+        <SetJoinNote />
         {/* Another app's built-in browser: the way out to the real one first (VITE_STUDY_INSTALL). */}
         <JoinInstallNote place="top" />
         <p className="join-kicker">סיכום מלא לכל הרצאה</p>

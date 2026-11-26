@@ -1,7 +1,8 @@
 import { lazy, Suspense } from "react";
 import ErrorBoundary from "../components/ErrorBoundary";
+import { Loading } from "../components/Shell";
 import { flags } from "../lib/flags";
-import type { Ctx } from "./types";
+import type { Ctx, ScreenProps } from "./types";
 
 /* ── Practice sets' slot (docs/study/sets.md; VITE_STUDY_MAKE) ──
  * Only these stubs are in the study entry chunk (bundle owner QS, capped at
@@ -14,8 +15,12 @@ import type { Ctx } from "./types";
  * Without the flag the same routes are practice 2.0's (PracticeCreate,
  * PracticeBank), kept one release (OD22). The lecture page's row after
  * reading ("סט חדש" · "לפתור") is a lazy part too, with its own boundary: a
- * chunk that cannot load costs the row, never the lecture. Slice B's set
- * screens join here. */
+ * chunk that cannot load costs the row, never the lecture.
+ * Slice B (flags.sets): ?v=sets, the group's shelf (SetsShelf), and
+ * ?v=sets&k=<set>, a set being made and then its page (SetPage), each a lazy
+ * chunk; and, on the join screen opened from a set's link, the line that
+ * says how to reach it (a home-screen app keeps its own storage, so a link
+ * that opens in the browser starts signed out). */
 
 export const MakeScreen = lazy(() => import("../components/MakeScreen"));
 export const MakeProgress = lazy(() => import("../components/MakeProgress"));
@@ -27,6 +32,28 @@ export function MakeLectureRow(p: { ctx: Ctx; lectureId: string }) {
     <ErrorBoundary reset="make-row" fallback="none">
       <Suspense fallback={null}>
         <Entry {...p} />
+      </Suspense>
+    </ErrorBoundary>
+  ) : null;
+}
+
+const SetPage = lazy(() => import("../components/SetPage"));
+const SetsShelf = lazy(() => import("../components/SetsShelf"));
+const JoinNote = lazy(() => import("../components/SetJoinNote"));
+
+/** ?v=sets[&l=…] and ?v=sets&k=… (allowed() sends them to the hub without the flag). */
+export function SetsRoute({ route, ctx }: ScreenProps<"sets">) {
+  return <Suspense fallback={<Loading />}>{route.k ? <SetPage key={route.k} route={route} ctx={ctx} /> : <SetsShelf key={route.l ?? ""} route={route} ctx={ctx} />}</Suspense>;
+}
+
+/** Above Join when the address is a set's link; nothing otherwise. */
+export function SetJoinNote() {
+  if (!flags.sets || typeof location === "undefined") return null;
+  const q = new URLSearchParams(location.search);
+  return q.get("v") === "sets" && q.get("k") ? (
+    <ErrorBoundary reset="set-join" fallback="none">
+      <Suspense fallback={null}>
+        <JoinNote />
       </Suspense>
     </ErrorBoundary>
   ) : null;

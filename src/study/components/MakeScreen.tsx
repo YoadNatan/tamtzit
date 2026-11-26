@@ -30,8 +30,8 @@ import {
   type MakeChoices,
 } from "../lib/make";
 import { listQuestionsByIds, myMistakes, practiceOverview } from "../lib/practice";
-import { askPlanInputs, createRequest, markMade, writeRequest } from "../lib/practice2";
-import { makeGo, previewDaily, previewFree, SETS } from "../lib/setsCopy";
+import { askPlanInputs, createRequest, markMade, openOnLecture, writeRequest, type OpenOnLecture } from "../lib/practice2";
+import { makeGo, makeOpen, previewDaily, previewFree, SETS } from "../lib/setsCopy";
 import "../styles/sets.css";
 import FailCode from "./FailCode";
 import { Icon } from "./Icon";
@@ -103,6 +103,8 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
   const [showPaste, setShowPaste] = useState(false);
   const [sheet, setSheet] = useState<"lecture" | "big" | null>(null);
   const [creating, setCreating] = useState(false);
+  /** Slice B (D6, OD20): the set someone is making on this lecture, from a 409 "already making". */
+  const [openSet, setOpenSet] = useState<OpenOnLecture | null>(null);
   const [createError, setCreateError] = useState<{ text: string; code: string; block: Block | null } | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [more, setMore] = useState(() => {
@@ -219,7 +221,7 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
     focus: choices.focus.trim(),
   });
 
-  const create = async (confirmed = false) => {
+  const create = async (confirmed = false, force = false) => {
     if (!ready || !preview || !answer) return;
     if (!confirmed && isBig(preview.usd.total)) return setSheet("big");
     writeSticky(ctx.userId, { size: choices.size, ...(choices.styles?.length ? { styles: choices.styles } : {}) });
@@ -238,13 +240,23 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
     }
     setCreating(true);
     setCreateError(null);
+    setOpenSet(null);
     try {
-      const made = await createRequest(lectureId, options());
+      const o = options();
+      // Slice B: every new set is on the group's shelf from now on (OD3); its page is ?v=sets&k=.
+      const made = await createRequest(lectureId, o, flags.sets ? { set: { want: o.count ?? choices.size }, force } : {});
+      if (made.set && !made.request) return ctx.go({ v: "sets", k: made.set.id }, { replace: true });
       markMade(made.request.id);
       // Written from this phone, outside the screen (rounds.ts): "סט בהכנה" shows them arrive.
       void writeRequest(lectureId, made.request.id, made.batches.map((b) => b.id)).catch(() => undefined);
-      ctx.go({ v: "practice", l: lectureId, x: "bank", r: made.request.id }, { replace: true });
+      ctx.go(made.set ? { v: "sets", k: made.set.id } : { v: "practice", l: lectureId, x: "bank", r: made.request.id }, { replace: true });
     } catch (e) {
+      const open = openOnLecture(e);
+      if (open) {
+        setOpenSet(open);
+        setCreating(false);
+        return;
+      }
       const code = codeOf(e);
       const b = blockOfCode(code);
       setCreateError({ text: b ? "" : failText(code, "practice"), code: b ? "" : failCode(e, "practice"), block: b });
@@ -361,7 +373,7 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
     ) : null,
     preview ? (
       <p key="bank" className="a-small a-muted mk-bank">
-        <Icon name="users" size={14} /> {SETS.preview.bank}
+        <Icon name="users" size={14} /> {flags.sets ? (route.from ? SETS.preview.sharedMistakes : SETS.preview.shared) : SETS.preview.bank}
       </p>
     ) : null,
     offline && answer ? (
@@ -432,6 +444,19 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
           {shownBlock ? (
             <div className="a-callout warn mk-block" role="status">
               {BLOCK_TEXT[shownBlock]}
+            </div>
+          ) : null}
+          {openSet ? (
+            <div className="a-callout warn mk-open" role="status">
+              <b>{makeOpen(openSet.author_name ?? "", openSet.made, openSet.want)}</b>
+              <div className="a-row">
+                <RouteLink to={{ v: "sets", k: openSet.set_id }} go={ctx.go} className="a-btn small">
+                  {SETS.make.openGo}
+                </RouteLink>
+                <button type="button" className="a-link" onClick={() => void create(true, true)}>
+                  {SETS.make.openForce}
+                </button>
+              </div>
             </div>
           ) : null}
           {createError?.text ? (

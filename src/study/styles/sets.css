@@ -485,3 +485,164 @@
     gap: var(--sp-12);
   }
 }
+
+/* ═════════════ Slice B: the shelf, a set's card, its page, its numbers ═════════════ */
+
+.qs-grid {
+  display: grid;
+  gap: var(--sp-3);
+  padding: 0;
+  list-style: none;
+}
+.qs-group {
+  margin-block-start: var(--sp-4);
+}
+.qs-card {
+  display: grid;
+  gap: var(--sp-2);
+  border-inline-start: 4px solid var(--group-line, var(--line));
+}
+.qs-card[data-new] {
+  border-inline-start-color: var(--group-pop);
+}
+.qs-card-top,
+.qs-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.qs-card-link {
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.qs-card-link:focus-visible,
+.qs-card-link:hover {
+  text-decoration: underline;
+}
+.qs-new {
+  background: var(--badge-bg, var(--group-soft));
+  color: var(--badge-ink, var(--ink));
+}
+.qs-card-meta,
+.qs-card-nums {
+  margin: 0;
+}
+.qs-hidden {
+  margin-block-start: var(--sp-6);
+}
+.qs-hidden > summary,
+.qs-review > summary,
+.qs-perq > summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.qs-hidden-row {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+}
+.qs-filter {
+  margin-block: var(--sp-2);
+}
+
+.qs-page-grid {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.qs-head {
+  border-inline-start: 4px solid var(--group-line, var(--line));
+}
+.qs-head h1 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.qs-by {
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0;
+}
+.qs-stats {
+  display: grid;
+  gap: var(--sp-2);
+}
+.qs-stats p {
+  margin: 0;
+}
+.qs-mine {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.qs-band {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  min-height: 32px;
+}
+.qs-review,
+.qs-unchecked,
+.qs-how {
+  display: block;
+  margin-block-start: var(--sp-4);
+}
+.qs-how {
+  border: 0;
+  padding: 0;
+}
+.qs-how .a-seg {
+  max-width: 480px;
+}
+.qs-stems {
+  padding-inline-start: var(--sp-6);
+}
+.qs-stems li {
+  overflow-wrap: anywhere;
+}
+.qs-menu {
+  margin-inline-start: auto;
+}
+.mk-by {
+  margin: 0 0 var(--sp-2);
+}
+.join-set {
+  margin-block-end: var(--sp-4);
+}
+/* The round's end in a set (PracticeSession, s=k.). */
+.pq-set-end {
+  display: grid;
+  gap: var(--sp-3);
+}
+.pq-set-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+
+@media (min-width: 600px) {
+  .qs-shelf .qs-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1024px) {
+  main.qs-shelf,
+  main.qs-page {
+    max-width: var(--measure-wide);
+  }
+  .qs-shelf .qs-grid {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+  .qs-page-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+@media (min-width: 1280px) {
+  .qs-shelf .qs-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

@@ -37,6 +37,14 @@ import { startRound, type RoundResult } from "./rounds";
  * into Hebrew with failText(code, "practice"). The drafts never carry their
  * key: it stays in study_question_draft_keys, which no member reads. */
 
+/** 409 "already making" (practice sets D6): the set open on the lecture. */
+export type OpenOnLecture = { set_id: string; author_name: string | null; made: number; want: number; mine: boolean };
+export function openOnLecture(e: unknown): OpenOnLecture | null {
+  const d = (e as { message?: string; detail?: Record<string, unknown> } | null) ?? null;
+  if (d?.message !== "already making" || !d.detail || typeof d.detail.set_id !== "string") return null;
+  return { set_id: d.detail.set_id, author_name: (d.detail.author_name as string | null) ?? null, made: Number(d.detail.made ?? 0), want: Number(d.detail.want ?? 0), mine: d.detail.mine === true };
+}
+
 export type { CreateAnswer, Draft, Options, PlanAnswer, SessionCount, StyleAnswer, StyleRead } from "../../../shared/study/practice2";
 
 function client() {
@@ -79,7 +87,8 @@ async function action<T>(body: Record<string, unknown>): Promise<T> {
     const code = (json as { error?: unknown } | null)?.error;
     if (typeof code !== "string" || !code) throw coded(res.status === 403 || res.status === 429 ? "blocked" : "server", `http_${res.status}`);
     if (res.status >= 500 && !hasText(code, "practice")) throw coded("server", code);
-    throw new Error(code);
+    // The answer rides along (a 409 "already making" names the open set).
+    throw Object.assign(new Error(code), { detail: json });
   }
   if (json === null || typeof json !== "object") throw coded("bad reply", `http_${res.status}`);
   return json as T;
@@ -140,8 +149,10 @@ export function readStyle(lectureId: string, example: { text?: string; image?: {
 }
 
 /** "ליצור N שאלות": the request and its batches (nothing written yet). */
-export function createRequest(lectureId: string, options: Options): Promise<CreateAnswer> {
-  return action<CreateAnswer>({ action: "create", lectureId, options });
+export function createRequest(lectureId: string, options: Options, more: { set?: { want: number; title?: string }; force?: boolean } = {}): Promise<CreateAnswer> {
+  // Practice sets, slice B (VITE_STUDY_SETS): with `set` the request fills a
+  // new set (section L 1); `force` makes a second set while one is open (OD20).
+  return action<CreateAnswer>({ action: "create", lectureId, options, ...(more.set ? { set: more.set } : {}), ...(more.force ? { force: true } : {}) });
 }
 
 /** Writes one batch of a request: its drafts stream as they are saved, then the blind solver's verdicts. */

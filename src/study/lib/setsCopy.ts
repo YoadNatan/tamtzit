@@ -123,6 +123,8 @@ export const SETS = {
     link: "לשלוח קישור",
     linkCopied: "הקישור הועתק",
     menu: { rename: "לשנות שם", hide: "להסתיר אצלי", unhide: "להחזיר", delete: "למחוק את הסט" },
+    menuLabel: "פעולות על הסט",
+    save: "לשמור",
     deleteConfirm: "למחוק את הסט? השאלות נשארות בבנק של הקבוצה.",
     notFound: "הסט לא נמצא · אולי נמחק",
     signedOut: "הסט נמצא בקבוצה. מי שכבר בקבוצה: כניסה עם הקוד האישי, או פתיחה מהאייקון ← סטים של הקבוצה",
@@ -136,6 +138,9 @@ export const SETS = {
     privacy: "רק מספרים של הקבוצה · שמות רק של מי שבחרו",
     optin: "להציג את השם שלי ברשימת מי פתרו",
     mineNotYet: "שלי: עוד לא",
+    onlyMe: "רק אצלי",
+    optinYes: "להציג",
+    optinNo: "לא עכשיו",
   },
 
   shelf: {
@@ -216,6 +221,9 @@ export const statsAvg = (x: number, n: number): string => `ממוצע הקבוצ
 export const statsMine = (r: number, n: number): string => `שלי: ${r}/${n}`;
 /** "מי פתרו: נועה · עומר" (opted-in names, never with scores). */
 export const statsNames = (names: readonly string[]): string => `מי פתרו: ${names.join(" · ")}`;
+
+/** A question's place in the set: "שאלה 4". */
+export const statsQuestion = (pos: number): string => `שאלה ${pos}`;
 
 /** "בהכנה 6/10". */
 export const shelfMaking = (k: number, n: number): string => `בהכנה ${k}/${n}`;

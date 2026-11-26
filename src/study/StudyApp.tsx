@@ -18,6 +18,7 @@ import { InstallScreen } from "./features/install";
 import { NotifyRoute } from "./features/notify";
 import { CatchupScreen, MeetingScreen } from "./features/meeting";
 import { PlanScreen } from "./features/plan";
+import { SetsRoute } from "./features/qsets";
 import { ExamsScreen, MockScreen, PracticeScreen } from "./features/practice";
 import { EveScreen, MarathonScreen, ProgressScreen } from "./features/progress";
 import { MuseumScreen, PulseScreen } from "./features/pulse";
@@ -457,6 +458,8 @@ function renderRoute(route: Route, ctx: Ctx, courses: string[]) {
       return <InstallScreen route={route} ctx={ctx} />;
     case "notify":
       return <NotifyRoute route={route} ctx={ctx} />;
+    case "sets":
+      return <SetsRoute route={route} ctx={ctx} />;
     case "library":
       return <Library ctx={ctx} />;
     default:

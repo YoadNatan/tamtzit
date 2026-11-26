@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { STYLE_HE, type Options, type Style } from "../../../shared/study/practice2";
 import type { Ctx, ScreenProps } from "../features/types";
 import { lectureTitles } from "../lib/api";
+import { flags } from "../lib/flags";
 import { failCode, failText } from "../lib/failText";
 import { BUDGET_CODES, blockOfCode, progressStep, readyDraft, roundSize, tilesOf, type Block, type TileState } from "../lib/make";
 import {
@@ -123,7 +124,7 @@ export function MakeJob({ ctx, job, onBack }: { ctx: Ctx; job: Job; onBack: () =
     const fail = (code: string, raw?: unknown) => {
       if (!alive.current) return;
       const b = blockOfCode(code);
-      setError({ text: b && BLOCK_TEXT[b] ? BLOCK_TEXT[b]! : code === "points stale" ? SETS.gen.readFail : failText(code, "practice"), code: b ? "" : failCode(raw ?? code, "practice") });
+      setError({ text: b && BLOCK_TEXT[b] ? BLOCK_TEXT[b]! : code === "points stale" ? SETS.gen.readFail : code === "already making" ? SETS.err.alreadyMaking : failText(code, "practice"), code: b ? "" : failCode(raw ?? code, "practice") });
       setStep("failed");
     };
     const run = async () => {
@@ -176,11 +177,17 @@ export function MakeJob({ ctx, job, onBack }: { ctx: Ctx; job: Job; onBack: () =
       if (!alive.current) return;
       setStep("create");
       try {
-        const made = await createRequest(job.lectureId, { ...job.options, ...(style ? { style } : {}) });
+        // Slice B: the set is made once what had to be read was read (its page is ?v=sets&k=).
+        const made = await createRequest(job.lectureId, { ...job.options, ...(style ? { style } : {}) }, flags.sets ? { set: { want: job.options.count ?? 10 } } : {});
+        if (made.set && !made.request) {
+          if (alive.current) ctx.go({ v: "sets", k: made.set.id }, { replace: true });
+          return;
+        }
         markMade(made.request.id);
         void writeRequest(job.lectureId, made.request.id, made.batches.map((b) => b.id)).catch(() => undefined);
-        if (alive.current) ctx.go({ v: "practice", l: job.lectureId, x: "bank", r: made.request.id }, { replace: true });
+        if (alive.current) ctx.go(made.set ? { v: "sets", k: made.set.id } : { v: "practice", l: job.lectureId, x: "bank", r: made.request.id }, { replace: true });
       } catch (e) {
+        if (codeOf(e) === "already making") return fail("already making", e);
         fail(codeOf(e), e);
       }
     };
@@ -251,7 +258,13 @@ export function MakeJob({ ctx, job, onBack }: { ctx: Ctx; job: Job; onBack: () =
 
 /* ─────────────────────────── the set being written ─────────────────────────── */
 
-export default function MakeProgress({ route, ctx }: ScreenProps<"practice">) {
+/** Slice B (VITE_STUDY_SETS): the set this request fills. Its page,
+ *  ?v=sets&k=<set>, shows this screen while the set is made: "להתחיל לפתור"
+ *  then solves the set (s=k.<set>), Back goes to the group's sets, another
+ *  member's screen says who made it, and the page takes over once it is ready. */
+export type ForSet = { id: string; by: string | null; onDone?: () => void };
+
+export default function MakeProgress({ route, ctx, set }: ScreenProps<"practice"> & { set?: ForSet }) {
   const lectureId = route.l ?? "";
   const requestId = route.r ?? "";
   const [request, setRequest] = useState<Request | null>(null);
@@ -365,6 +378,13 @@ export default function MakeProgress({ route, ctx }: ScreenProps<"practice">) {
     try {
       // The checked questions enter the group's bank with one tap (D3), then a round of the lecture's new ones.
       if (drafts.some((d) => d.status === "pending" && readyDraft(d))) await keepAll(request.id);
+      if (set) {
+        // A set: its own questions, in its order (questions ready later join the round, "להוסיף לסט").
+        const r = { v: "practice" as const, s: `k.${set.id}` };
+        requestStart(ctx.userId, r, false);
+        ctx.go(r);
+        return;
+      }
       const r = { v: "practice" as const, l: lectureId, s: `l.${lectureId}`, n: roundSize(t.ready) };
       requestStart(ctx.userId, r, false, { sources: ["new"], parts: request.parts });
       ctx.go(r);
@@ -374,7 +394,19 @@ export default function MakeProgress({ route, ctx }: ScreenProps<"practice">) {
     }
   };
 
-  const head = <Head back={<BackLink go={ctx.go} fallback={{ v: "practice", l: lectureId }} />} title={genTitle(title)} />;
+  // A set's page takes over once nothing is being written any more.
+  const doneOnce = useRef(false);
+  useEffect(() => {
+    if (!set?.onDone || !done || running || doneOnce.current) return;
+    doneOnce.current = true;
+    set.onDone();
+  }, [done, running, set]);
+  const head = (
+    <>
+      <Head back={<BackLink go={ctx.go} fallback={set ? { v: "sets" } : { v: "practice", l: lectureId }} />} title={genTitle(title)} />
+      {set?.by && !mine ? <p className="a-small a-muted mk-by">{set.by}</p> : null}
+    </>
+  );
   if (phase === "loading") return <Loading />;
   if (phase === "none" || phase === "error") {
     return (
