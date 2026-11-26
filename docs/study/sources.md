@@ -320,7 +320,7 @@ Server-key RPCs:
 
 ### B6. Generation pipelines and prompts
 
-All prices use budget.ts: input $4/M, 5-minute cache write $5/M, cache hit $0.20/M, output $20/M. 2.5 Hebrew chars per token (unmeasured, read as ±40%). Image tokens ≈ w×h/750.
+All prices use the default model's row in shared/study/prices.ts (budget.ts prices calls from the same rows): input $4/M, 5-minute cache write $5/M, cache hit $0.20/M, output $20/M. 2.5 Hebrew chars per token (unmeasured, read as ±40%). Image tokens ≈ w×h/750.
 
 **6.1 Phone side (no new dependency)**
 - `pdf.ts` renders each page at **1500 px** long side, JPEG 0.8 (~2.1k image tokens). It releases each canvas before the next page, and keeps the text lines.

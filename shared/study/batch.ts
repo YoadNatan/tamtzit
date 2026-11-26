@@ -1,3 +1,5 @@
+import { CHARS_PER_TOKEN, DEFAULT_MODEL, priceOf } from "./prices.js";
+
 /* ── The batch upload's price, before anything is uploaded (sources.md B8, B9) ──
  *
  * "העלאה של כמה קבצים" shows one card before the upload:
@@ -24,11 +26,16 @@
 export type DeckSize = { slides: number; chars: number; pictures: number };
 
 /** USD per million tokens for the writer's model: input, output, a 5-minute
- *  cache write, a cache hit (budget.ts's PRICES; server/study/batch.test.ts
- *  checks they are the same). */
-export const SUMMARY_PRICES = { in: 4, out: 20, w5m: 5, hit: 0.2 } as const;
-/** 2.5 Hebrew characters a token, as every estimate (budget.ts). */
-const CHARS_PER_TOKEN = 2.5;
+ *  cache write, a cache hit (prices.ts's row for the default model, which
+ *  the server prices with too; server/study/batch.test.ts checks they are
+ *  the same). The writer's model is the default until routes exist. */
+const WRITER = priceOf(DEFAULT_MODEL);
+export const SUMMARY_PRICES: { readonly in: number; readonly out: number; readonly w5m: number; readonly hit: number } = {
+  in: WRITER.in,
+  out: WRITER.out,
+  w5m: WRITER.w5m,
+  hit: WRITER.hit,
+};
 /** A picture as the writer sends it (at most 1,400 px): about 1,600 tokens. */
 const PICTURE_TOKENS = 1_600;
 /** The outline's output (thinking included), and a part's per slide. */

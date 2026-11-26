@@ -12,6 +12,7 @@ import {
   WRITERS_AT_ONCE,
   type DeckSize,
 } from "../../shared/study/batch.js";
+import { DEFAULT_MODEL } from "../../shared/study/prices.js";
 import { costUsd, estimateUsd, POLICY } from "./budget.js";
 import { MODEL } from "./study.js";
 import { PART_TOKENS } from "./writer.js";
@@ -23,6 +24,9 @@ import { PART_TOKENS } from "./writer.js";
 const deck = (slides: number, chars: number, pictures: number): DeckSize => ({ slides, chars, pictures });
 
 test("the writer's prices are budget.ts's for the model that writes", () => {
+  // The registry's default row (shared/study/prices.ts), the same numbers as before the registry.
+  assert.equal(MODEL, DEFAULT_MODEL);
+  assert.deepEqual({ ...SUMMARY_PRICES }, { in: 4, out: 20, w5m: 5, hit: 0.2 });
   const per = (u: object) => costUsd(u, MODEL) * 1_000_000;
   assert.equal(per({ input_tokens: 1 }), SUMMARY_PRICES.in);
   assert.equal(per({ output_tokens: 1 }), SUMMARY_PRICES.out);

@@ -1,4 +1,5 @@
-import { SUMMARY_PRICES } from "./batch";
+import { SUMMARY_PRICES } from "./batch.js";
+import { CHARS_PER_TOKEN } from "./prices.js";
 
 /* ── What reading a past exam usually costs (sources.md B6.2, B10) ──
  *
@@ -19,7 +20,6 @@ export const READ_PAGES = 4;
 const TYPICAL_READ_OUT = 6_000;
 const TYPICAL_SOLVE_OUT = 5_000;
 const ITEMS_PER_PAGE = 3.3;
-const CHARS_PER_TOKEN = 2.5;
 
 /** A picture's input tokens: width × height / 750 (budget.ts's imageTokens). */
 const pictureTokens = (w: number, h: number) => Math.ceil((w * h) / 750);
