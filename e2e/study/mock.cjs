@@ -56,7 +56,7 @@ const SCHEMA_SQL = sqlSchema();
  *  "j" (wave 4's J: the SQL's J 1), "m" (wave 4's M: the SQL's M 1) and "w4"
  *  (all of wave 4), every section for the sets that turn on what is not
  *  built yet. */
-const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i", "notify", "pm", "ps", "o"];
+const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i", "notify", "pm", "ps", "o0", "o"];
 const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_ALL) });
 /** The flag set a build was made with, as the e2e scripts name it: "off", "rel1"
  *  (release 1: VITE_STUDY_QUESTIONS, VITE_STUDY_PRACTICE and VITE_STUDY_CARDS;
@@ -115,18 +115,22 @@ const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_A
  *  "pm" ("notify" with VITE_STUDY_MAKE: practice sets' generator, "סט חדש" and
  *  "סט בהכנה", docs/study/sets.md; e2e/study/sets.cjs; it needs no section);
  *  "ps" ("pm" with VITE_STUDY_SETS: the shelf and the set page, section L 1);
- *  "o" ("ps" with VITE_STUDY_SHEETS: uploaded sheets' release A0, the upload
+ *  "o0" ("ps" with VITE_STUDY_SHEETS: uploaded sheets' release A0, the upload
  *  of a past exam or an exercise sheet, the course page by kind, the wide
- *  review, keying by hand, section O 1; docs/study/sheets.md). The later
- *  slices add VITE_STUDY_SHEETS_FORMS to it and make "os" for similar questions;
+ *  review, keying by hand, section O 1; docs/study/sheets.md; e2e/study/sheets.cjs);
+ *  "o" (the design's: "o0" with VITE_STUDY_SHEETS_FORMS, release A1: the sheet
+ *  reader's open, numeric and multi-part questions in practice, the edit
+ *  sheet, add and retire, answers and worked solutions, open-add, the budget
+ *  pause, the lecture page's row, section O 2; e2e/study/sheets-forms.cjs).
+ *  Release B will make "os" for similar questions;
  *  E2E_ANCHOR=1 says a release's build has
  *  VITE_STUDY_ANCHOR too (package N: a paragraph's comments show in its chip
  *  row, not the dot). `any`: a package's flag is on, so the "תרגול" tab shows
  *  (questions or cards); the others name the features the scripts look for. */
 function flagSetOf(name) {
   const set = name || process.env.E2E_FLAGS || "off";
-  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i", "notify", "pm", "ps", "o"].includes(set))
-    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1, prod, s1, s2, i, notify, pm, ps or o`);
+  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i", "notify", "pm", "ps", "o0", "o"].includes(set))
+    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1, prod, s1, s2, i, notify, pm, ps, o0 or o`);
   if (set === "guide1") return { ...flagSetOf("rel1"), set, guide: true };
   if (set === "s1") return { ...flagSetOf("prod"), set, courses: true };
   if (set === "s2") return { ...flagSetOf("s1"), set, exams: true };
@@ -136,8 +140,10 @@ function flagSetOf(name) {
   // generator; no SQL of its own); ps is slice B, pm with VITE_STUDY_SETS (section L 1).
   if (set === "pm") return { ...flagSetOf("notify"), set, make: true };
   if (set === "ps") return { ...flagSetOf("pm"), set, sets: true };
-  // Uploaded sheets (docs/study/sheets.md): o is release A0, ps with VITE_STUDY_SHEETS (section O 1).
-  if (set === "o") return { ...flagSetOf("ps"), set, sheets: true };
+  // Uploaded sheets (docs/study/sheets.md): o0 is release A0, ps with VITE_STUDY_SHEETS (section O 1);
+  // o is release A1, o0 with VITE_STUDY_SHEETS_FORMS (section O 2).
+  if (set === "o0") return { ...flagSetOf("ps"), set, sheets: true };
+  if (set === "o") return { ...flagSetOf("o0"), set, sheetForms: true };
   const every = set === "all" || set === "notoday";
   const w5x = set === "w5x" || set === "guide" || set === "prod";
   const h5 = set === "h5" || w5x;

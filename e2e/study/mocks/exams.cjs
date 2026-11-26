@@ -45,6 +45,22 @@
 //   seed(o)  a ready exam of the course with n synthetic items (the simulation's lengths)
 //   calls    every exams RPC and op (fn, who, body)
 //   sheetsOn the switch 'sheets' (default true); sheetsCap: a sheet's start is refused 402 sheets_cap
+// Release A1 (section O 2; VITE_STUDY_SHEETS_FORMS; the member's RPCs are in mocks/sheets.cjs):
+//   - op exam_read with forms: true on a sheet: the sheet reader, 3-page units
+//     (range.reader 'sheet'); a read unit saves the synthetic sheet's items
+//     exactly as printed (fixtures/sheet/sheet6.json truth: labels, a
+//     3-part question with its stem on each part, numeric and open items, a
+//     pipe table, a figure, 8 options), a key unit the answers file by label
+//     (numbers with units and worked solutions, model answers), solve units of
+//     4 the items still without an answer (origin solved, confidence 2)
+//   - pauseSolve: a sheet's solve unit is refused by the budget (design D23):
+//     the sheet stays reading with error 'budget'
+//   - op exam_read action open_add (dry: the price) on a ready past exam with
+//     open questions skipped: one unit per read unit that skipped (reader
+//     'open', extra), each adding its open or numeric items under the next
+//     printed numbers, then solved; the exam stays ready
+//   - op exam_read action resume ({skipSolve}): the held units go on, or the
+//     held solve units are dropped and the sheet is ready
 const fs = require("fs");
 const path = require("path");
 
@@ -76,6 +92,8 @@ module.exports = {
       failed: new Set(),
       sheetsOn: true,
       sheetsCap: false,
+      pauseSolve: false,
+      openMarks: [],
     };
     M.now = () => Date.now() + M.offset;
     db.examsMock = M;
@@ -93,7 +111,11 @@ module.exports = {
     const keyRow = (q) => P().keys.get(q.id) ?? null;
     const hasKey = (q) => {
       const k = keyRow(q);
-      return Boolean(k && (k.answer !== null && k.answer !== undefined ? true : Array.isArray(k.seq) && k.seq.length));
+      if (!k) return false;
+      // Section O 2: a numeric item is keyed by its number, an open one by its model answer.
+      if (q.form === "numeric") return k.num !== null && k.num !== undefined;
+      if (q.form === "open") return Boolean(k.model_answer);
+      return Boolean(k.answer !== null && k.answer !== undefined ? true : Array.isArray(k.seq) && k.seq.length);
     };
     M.hasKey = hasKey;
 
@@ -127,6 +149,82 @@ module.exports = {
       if (sheet !== undefined) Object.assign(k, { answer: sheet, origin: "sheet" });
       q.has_key = hasKey(q);
     };
+    /** The sheet reader's item as study_sheet_save_items saves it (release A1). */
+    const PART = { א: 1, ב: 2, ג: 3, ד: 4, ה: 5 };
+    const saveSheetItem = (e, t) => {
+      const Q = P();
+      const shift = Math.max(0, SHEET.pages.length - (e.pages || SHEET.pages.length));
+      const page = t.page - shift;
+      const stem = t.parent ? (SHEET.truth.find((x) => x.parent === t.parent && x.stem)?.stem ?? "") : (t.stem ?? "");
+      const figures = (t.figures ?? []).map((f) => f.replace(/^pg:(\d+):/, (_, n) => `pg:${Number(n) - shift}:`));
+      const row = {
+        group_id: e.group_id, lecture_id: null, batch_id: null, exam_id: e.id, exam_no: page * 100 + t.idx, ref_lecture: e.lecture_id ?? null, source: "exam", part_idx: null,
+        kind: stem ? "case" : "mcq", difficulty: 2, vignette: stem, question: t.question, options: t.options ?? [], slides: [], topic: "", aspect: "other",
+        model: "mock", created_by: e.created_by, retired_at: null, retired_by: null, retire_note: "", anchor: null, quote: "", part_gen: null, teaser: "",
+        figure: figures[0] ?? "", figures, option_tags: [], hidden_at: null, stale_at: null, fixed_at: null, style: null, form: t.form,
+        layout: t.form === "match" ? { kind: "match", prompts: t.prompts } : null, series: t.parent ? `${e.id}:${t.parent}` : null, step: t.parent ? PART[t.part] : null,
+        parse_conf: 2, page, no_label: t.label, no_key: t.label, exact: 0.92,
+      };
+      let q = Q.questions.find((x) => x.exam_id === e.id && x.no_key === t.label);
+      if (!q) {
+        q = { id: hex("e1e00000", ++M.seq), created_at: iso(M.now()), has_key: false, ...row };
+        Q.questions.push(q);
+        Q.keys.set(q.id, { answer: null, seq: null, explanations: (t.options ?? []).map(() => ""), takeaway: "", origin: null, conf: null, by: null, num: null, num_unit: null, num_tol: null, model_answer: null, rubric: [], solution: null, solution_origin: null });
+      }
+      return q;
+    };
+    /** A key by label (an answers file, origin sheet) or a solve unit's answer (origin solved), never over a member's. */
+    const keySheetItem = (q, t, origin) => {
+      const k = keyRow(q);
+      if (!k || k.origin === "member" || (origin === "solved" && hasKey(q))) return;
+      if (q.form === "one") Object.assign(k, { answer: t.answer });
+      if (q.form === "tf" || q.form === "match") Object.assign(k, { seq: t.seq });
+      if (q.form === "numeric") Object.assign(k, { num: t.num, num_unit: t.num_unit, num_tol: 1 });
+      if (q.form === "open") Object.assign(k, { model_answer: t.model_answer, rubric: t.rubric ?? [] });
+      Object.assign(k, { origin, conf: origin === "solved" ? 2 : null });
+      if (t.solution && k.solution_origin !== "member") Object.assign(k, { solution: t.solution, solution_origin: origin });
+      q.has_key = hasKey(q);
+    };
+    const truthOf = (q) => SHEET.truth.find((t) => t.label === q.no_key);
+    /** Open-add's items on a past exam (synthetic): one an open question, the next a calculation. */
+    const OPEN_ITEMS = [
+      { form: "open", question: "הסבירו בקצרה מדוע Mockacillin (בדוי) ניתן פעמיים ביום.", model_answer: "זמן מחצית החיים שלו קצר, ולכן הריכוז יורד מתחת לסף בתוך כ-12 שעות.", rubric: ["זמן מחצית חיים קצר", "שמירה על ריכוז מעל הסף"] },
+      { form: "numeric", question: "חשבו את המינון היומי של Fictazole (בדוי) במ״ג, כשנותנים 250 מ״ג 4 פעמים ביום.", num: 1000, num_unit: "מ״ג", solution: "250 × 4 = 1000 מ״ג ביום." },
+    ];
+    const sheetUnit = (e, u) => {
+      if (u.kind === "read" && u.reader === "open") {
+        // Open-add (OD15): the unit's skipped open questions, under the next printed numbers.
+        const its = itemsOf(e);
+        let no = Math.max(0, ...its.map((q) => q.exam_no));
+        for (let i = 0; i < (u.skipped ?? 1); i++) {
+          const t = OPEN_ITEMS[(e.openSeq = (e.openSeq ?? 0) + 1) % 2 === 1 ? 0 : 1];
+          no += 1;
+          const q = {
+            id: hex("e1e00000", ++M.seq), created_at: iso(M.now()), has_key: false, group_id: e.group_id, lecture_id: null, batch_id: null, exam_id: e.id, exam_no: no, ref_lecture: null,
+            source: "exam", part_idx: null, kind: "mcq", difficulty: 2, vignette: "", question: t.question, options: [], slides: [], topic: "", aspect: "other", model: "mock",
+            created_by: e.created_by, retired_at: null, retired_by: null, retire_note: "", anchor: null, quote: "", part_gen: null, teaser: "", figure: "", figures: [], option_tags: [],
+            hidden_at: null, stale_at: null, fixed_at: null, style: null, form: t.form, layout: null, series: null, step: null, parse_conf: 2, page: u.pages[0], no_label: String(no), no_key: String(no), exact: null,
+          };
+          P().questions.push(q);
+          P().keys.set(q.id, { answer: null, seq: null, explanations: [], takeaway: "", origin: null, conf: null, by: null, num: null, num_unit: null, num_tol: null, model_answer: null, rubric: [], solution: null, solution_origin: null, openAdd: t });
+          u.copied = (u.copied ?? 0) + 1;
+        }
+        e.skipped_open = Math.max(0, (e.skipped_open ?? 0) - (u.copied ?? 0));
+      } else if (u.kind === "read") {
+        const shift = Math.max(0, SHEET.pages.length - (e.pages || SHEET.pages.length));
+        for (const t of SHEET.truth) if (u.pages.includes(t.page - shift)) saveSheetItem(e, t);
+      } else if (u.kind === "key") {
+        for (const q of itemsOf(e)) if (truthOf(q)) keySheetItem(q, truthOf(q), "sheet");
+      } else if (u.kind === "solve") {
+        if (M.pauseSolve && e.kind === "sheet") return Object.assign(u, { status: "failed", error: "budget", held: true });
+        for (const id of u.items) {
+          const q = P().questions.find((x) => x.id === id);
+          const t = q && (truthOf(q) ?? keyRow(q)?.openAdd);
+          if (t) keySheetItem(q, t, "solved");
+        }
+      }
+      Object.assign(u, { status: "done", error: null });
+    };
     /** One unit's work, as the worker does it. */
     const runUnit = (e, u) => {
       if (M.fail(u) && !M.failed.has(u)) {
@@ -134,6 +232,7 @@ module.exports = {
         Object.assign(u, { status: "failed", error: "unreadable" });
         return;
       }
+      if (e.reader === "sheet" || u.reader === "open" || (u.kind === "solve" && u.reader === "sheet")) return sheetUnit(e, u);
       const fx = e.kind === "sheet" ? SHEET.a0 : FIXTURE;
       if (u.kind === "read") {
         for (const f of fx.units) {
@@ -141,6 +240,7 @@ module.exports = {
           // As the exam reader's save path: 2-6 options (the sheet's 8-option item is not saved, release A0).
           f.reply.questions.filter((it) => it.options.length <= 6).forEach((it, i) => save(e, it, i));
           e.skipped_open = (e.skipped_open ?? 0) + (f.reply.skipped_open ?? 0);
+          u.skipped = (u.skipped ?? 0) + (f.reply.skipped_open ?? 0);
         }
       } else if (u.kind === "key") {
         e.sheet = new Map(fx.key.reply.keys.filter((k) => k.answer >= 0).map((k) => [k.no, k.answer]));
@@ -169,18 +269,46 @@ module.exports = {
       const mine = M.units.filter((u) => u.exam_id === e.id);
       if (!mine.some((u) => (u.kind === "read" || u.kind === "key") && (u.status === "pending" || u.status === "running"))) {
         const asked = new Set(mine.filter((u) => u.kind === "solve").flatMap((u) => u.items));
-        const left = itemsOf(e).filter((q) => !hasKey(q) && !asked.has(q.id)).map((q) => q.id);
-        for (let i = 0; i < left.length; i += 20) M.units.push({ exam_id: e.id, kind: "solve", pages: null, items: left.slice(i, i + 20), status: "pending", error: null, reread: false });
+        const left = itemsOf(e).filter((q) => !hasKey(q) && !asked.has(q.id));
+        // Section O 2: the sheet reader's items, and any open or numeric one, 4 a unit (reader sheet); a past exam's choice items 20.
+        const bySheet = left.filter((q) => e.reader === "sheet" || q.form === "open" || q.form === "numeric").map((q) => q.id);
+        const byExam = left.filter((q) => !(e.reader === "sheet" || q.form === "open" || q.form === "numeric")).map((q) => q.id);
+        for (let i = 0; i < byExam.length; i += 20) M.units.push({ exam_id: e.id, kind: "solve", pages: null, items: byExam.slice(i, i + 20), status: "pending", error: null, reread: false });
+        for (let i = 0; i < bySheet.length; i += 4) M.units.push({ exam_id: e.id, kind: "solve", pages: null, items: bySheet.slice(i, i + 4), status: "pending", error: null, reread: false, reader: "sheet", extra: e.status === "ready" });
       }
       e.n_questions = itemsOf(e).length;
-      const active = M.units.some((u) => u.exam_id === e.id && (u.status === "pending" || u.status === "running"));
-      e.status = active ? "reading" : e.n_questions > 0 ? "ready" : "failed";
-      if (!active && !e.n_questions) e.error = "no questions";
+      const live = (u) => u.status === "pending" || u.status === "running";
+      const active = M.units.some((u) => u.exam_id === e.id && live(u) && !u.extra);
+      const held = M.units.some((u) => u.exam_id === e.id && u.held && u.status === "failed");
+      // A ready upload stays ready while only open-add's units run; a sheet the budget held stays reading (D23).
+      if (e.status === "ready" && !active) return;
+      e.status = active || held ? "reading" : e.n_questions > 0 ? "ready" : "failed";
+      e.error = held && !active ? "budget" : e.status === "failed" ? "no questions" : null;
     };
     M.advance = advance;
+    const nameOfU = (uid) => db.members.find((x) => x.user_id === uid)?.name ?? null;
+    /** study_exam_review (section S 2): the upload, its pages, its items with their keys, the logs. */
+    M.reviewOf = (e) => ({
+      exam: { id: e.id, title: e.title, status: e.status, key_source: e.key_source, hidden: e.hide_from_profile, by: nameOfU(e.created_by) },
+      pages: (e.pageRows ?? []).map((x) => ({ n: x.n, path: x.path, w: x.w, h: x.h, key: x.key })),
+      items: P()
+        .questions.filter((q) => q.exam_id === e.id)
+        .sort((a, b) => a.exam_no - b.exam_no)
+        .map((q) => {
+          const k = P().keys.get(q.id) ?? {};
+          return {
+            id: q.id, no: q.exam_no, kind: q.kind, form: q.form, vignette: q.vignette, question: q.question, options: q.options, prompts: q.layout?.prompts ?? [], figure: q.figure,
+            page: q.page, parse_conf: q.parse_conf, retired: Boolean(q.retired_at), answer: k.answer ?? null, seq: k.seq ?? null, origin: k.origin ?? null, conf: k.conf ?? null,
+            key_by: k.by ? nameOfU(k.by) : null, fixed: M.itemLog.some((l) => l.question_id === q.id),
+            answered: (P().answers ?? []).some((a) => a.question_id === q.id),
+          };
+        }),
+      key_log: M.keyLog.filter((l) => l.exam_id === e.id).map((l) => ({ ...l, by: nameOfU(l.member_id) })),
+      item_log: M.itemLog.filter((l) => l.exam_id === e.id).map((l) => ({ ...l, by: nameOfU(l.member_id) })),
+    });
     /** The worker: one unit at a time, on a clock of its own (the phone may be closed). */
     M.tick = () => {
-      for (const e of M.exams.filter((x) => x.status === "reading")) {
+      for (const e of M.exams.filter((x) => x.status === "reading" || (x.status === "ready" && M.units.some((u) => u.exam_id === x.id && u.extra && (u.status === "pending" || u.status === "running"))))) {
         const run = M.units.find((u) => u.exam_id === e.id && u.status === "running");
         if (run) {
           runUnit(e, run);
@@ -195,6 +323,25 @@ module.exports = {
     M.timer = setInterval(() => M.tick(), M.pace);
     M.timer.unref?.();
 
+    /** A past exam read by the exam reader as an upload leaves it (exam12.json's 12 pages, 2 open questions
+     *  skipped in the read units of pages 5-8 and 9-12): ready when it returns (release A1's open-add starts from it). */
+    M.seedRead = (o) => {
+      const id = hex("e0e00000", ++M.seq);
+      const prefix = `${db.group.id}/exams/${id}/`;
+      const pageRows = FIXTURE.pages.map((pg, i) => ({ n: i + 1, path: `${prefix}p${i + 1}.jpg`, w: 1500, h: 2121, lines: [], key: false }));
+      const DOT = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", "base64");
+      pageRows.forEach((r) => db.files.set(r.path, DOT));
+      const e = {
+        id, group_id: db.group.id, course: o.course, title: o.title ?? "מועד א׳ 2023", year: 2023, moed: "א׳", minutes: 90, key_source: "marked", kind: "exam", lecture_id: null,
+        status: "reading", error: null, skipped_open: 0, hide_from_profile: false, deleted_at: null, n_questions: 0, created_by: db.members[0].user_id, created_at: iso(M.now() - 7_200_000), retries: 0,
+        pages: pageRows.length, key_pages: 0, pageRows,
+      };
+      M.exams.push(e);
+      for (let i = 0; i < pageRows.length; i += 4) M.units.push({ exam_id: id, kind: "read", pages: pageRows.slice(i, i + 4).map((r) => r.n), items: [], status: "pending", error: null, reread: false });
+      for (let n = 0; n < 200 && e.status === "reading"; n++) M.tick();
+      if (e.status !== "ready") throw new Error(`the seeded exam is ${e.status}`);
+      return e;
+    };
     /** A ready exam with n synthetic one-answer items (the simulation's lengths). */
     M.seed = (o) => {
       const e = {
@@ -236,6 +383,8 @@ module.exports = {
       if (g) rows = rows.filter((e) => `eq.${e.group_id}` === g);
       const id = query.get("id");
       if (id) rows = rows.filter((e) => `eq.${e.id}` === id);
+      const lec = query.get("lecture_id");
+      if (lec) rows = rows.filter((e) => `eq.${e.lecture_id}` === lec);
       return json(rows.map((e) => Object.fromEntries(cols.map((c) => [c, e[c] ?? null]))));
     }
 
@@ -253,6 +402,8 @@ module.exports = {
 
     const m = /^\/rest\/v1\/rpc\/(study_exam_[a-z_]+|study_set_exam_key|study_mock_[a-z_]+|study_sheet_create)$/.exec(p);
     if (!m) return undefined;
+    // Section O 2's item RPCs are mocks/sheets.cjs's.
+    if (/^study_exam_item_(fix|add|retire|unretire)$/.test(m[1])) return undefined;
     const fn = m[1];
     check.rpc(fn, body, `${method} ${p}`);
     M.calls.push({ fn, who: me, body });
@@ -344,24 +495,7 @@ module.exports = {
       case "study_exam_review": {
         const e = examOf(body.p_exam);
         if (!e) return refuse("exam not found");
-        return json({
-          exam: { id: e.id, title: e.title, status: e.status, key_source: e.key_source, hidden: e.hide_from_profile, by: nameOf(e.created_by) },
-          pages: (e.pageRows ?? []).map((x) => ({ n: x.n, path: x.path, w: x.w, h: x.h, key: x.key })),
-          items: P.questions
-            .filter((q) => q.exam_id === e.id)
-            .sort((a, b) => a.exam_no - b.exam_no)
-            .map((q) => {
-              const k = P.keys.get(q.id) ?? {};
-              return {
-                id: q.id, no: q.exam_no, kind: q.kind, form: q.form, vignette: q.vignette, question: q.question, options: q.options, prompts: q.layout?.prompts ?? [], figure: q.figure,
-                page: q.page, parse_conf: q.parse_conf, retired: Boolean(q.retired_at), answer: k.answer ?? null, seq: k.seq ?? null, origin: k.origin ?? null, conf: k.conf ?? null,
-                key_by: k.by ? nameOf(k.by) : null, fixed: M.itemLog.some((l) => l.question_id === q.id),
-                answered: (P.answers ?? []).some((a) => a.question_id === q.id),
-              };
-            }),
-          key_log: M.keyLog.filter((l) => l.exam_id === e.id).map((l) => ({ ...l, by: nameOf(l.member_id) })),
-          item_log: M.itemLog.filter((l) => l.exam_id === e.id).map((l) => ({ ...l, by: nameOf(l.member_id) })),
-        });
+        return json(M.reviewOf(e));
       }
       case "study_exam_item_edit": {
         const q = qOf(body.p_question);
@@ -593,6 +727,40 @@ module.exports = {
     const e = M.exams.find((x) => x.id === b.examId && !x.deleted_at);
     if (!e) return send(404, { error: "exam not found" });
     if (b.action === "unit") return send(200, { claimed: false, status: e.status });
+    if (b.action === "open_add") {
+      // OD15 (section O 2): a ready past exam (or a sheet read by the exam reader) whose read units skipped open questions.
+      if (e.reader === "sheet" || e.status !== "ready" || !(e.skipped_open > 0)) return send(409, { error: "nothing to copy" });
+      if (M.units.some((u) => u.exam_id === e.id && u.reader === "open")) return send(409, { error: "already" });
+      const reads = M.units.filter((u) => u.exam_id === e.id && u.kind === "read" && u.status === "done" && (u.skipped ?? 0) > 0);
+      if (!reads.length) return send(409, { error: "nothing to copy" });
+      const pages = reads.reduce((n, u) => n + u.pages.length, 0);
+      const priceUsd = Math.round((0.066 * pages + 0.024 * e.skipped_open) * 100) / 100;
+      if (b.dry === true) return send(200, { units: reads.length, pages, skipped: e.skipped_open, priceUsd });
+      if (!b.urls || (e.pageRows ?? []).some((x) => !String(b.urls[x.path] ?? "").includes(`/storage/v1/object/sign/study/${x.path}?token=`))) return send(400, { error: "bad urls" });
+      for (const u of reads) M.units.push({ exam_id: e.id, kind: "read", pages: u.pages, items: [], status: "pending", error: null, reread: false, reader: "open", extra: true, skipped: u.skipped });
+      return send(200, { units: reads.length, priceUsd });
+    }
+    if (b.action === "resume") {
+      // D23: the units the budget held go on; with skipSolve the held solve units are dropped.
+      const held = M.units.filter((u) => u.exam_id === e.id && u.held && u.status === "failed");
+      if (!held.length) return send(409, { error: "nothing to resume" });
+      if (M.sheetsCap) return send(402, { error: "sheets_cap" });
+      const out = { read: 0, key: 0, solve: 0, skipped: 0 };
+      for (const u of held) {
+        if (u.kind === "solve" && b.skipSolve === true) {
+          out.skipped += u.items.length;
+          Object.assign(u, { status: "done", error: "skipped", held: false });
+        } else {
+          if (u.kind === "solve") out.solve += u.items.length;
+          Object.assign(u, { status: "pending", error: null, held: false });
+        }
+      }
+      M.pauseSolve = false;
+      e.error = null;
+      e.status = "reading";
+      M.advance(e);
+      return send(200, out);
+    }
     if (e.status !== "uploading") return send(409, { error: "already started" });
     const pages = Array.isArray(b.pages) ? b.pages : [];
     if (!pages.length) return send(400, { error: "bad request" });
@@ -618,6 +786,14 @@ module.exports = {
     e.pageRows = pages;
     e.pages = reads.length;
     e.key_pages = keys.length;
+    // Release A1: a sheet read by the sheet reader (forms: true), in 3-page units (section O 2).
+    if (e.kind === "sheet" && b.forms === true) {
+      e.reader = "sheet";
+      for (let i = 0; i < reads.length; i += 3) M.units.push({ exam_id: e.id, kind: "read", pages: reads.slice(i, i + 3), items: [], status: "pending", error: null, reread: false, reader: "sheet" });
+      if (keys.length) M.units.push({ exam_id: e.id, kind: "key", pages: keys, items: [], status: "pending", error: null, reread: false, reader: "sheet" });
+      e.status = "reading";
+      return send(200, { units: Math.ceil(reads.length / 3) + (keys.length ? 1 : 0), server: true, priceUsd: 0.5 });
+    }
     for (let i = 0; i < reads.length; i += 4) M.units.push({ exam_id: e.id, kind: "read", pages: reads.slice(i, i + 4), items: [], status: "pending", error: null, reread: false });
     if (keys.length) M.units.push({ exam_id: e.id, kind: "key", pages: keys, items: [], status: "pending", error: null, reread: false });
     e.status = "reading";

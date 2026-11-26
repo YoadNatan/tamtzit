@@ -8,7 +8,7 @@
 //       contents (opened after scrolling on a phone; the side column at
 //       1024 and up), a slide's sheet, a course, a practice session after a
 //       pick, יחד, שלי, the install steps and the personal code's card; with
-//       VITE_STUDY_SHEETS (flag set "o"), uploaded sheets' upload with the
+//       VITE_STUDY_SHEETS (flag sets "o0" and "o"), uploaded sheets' upload with the
 //       synthetic sheet's PDF chosen (the pages and the details: two columns
 //       from 760) and a ready sheet's review with an item open (the text on
 //       the right, the page on the left from 760; the phone's list under it);
@@ -43,7 +43,7 @@
 // One screenshot per screen, device and scheme: <out>/<screen>-<device>-<scheme>.png.
 //
 //   NODE_PATH=$(npm root -g) E2E_FLAGS=s2 node e2e/study/devices.cjs <dist> <out dir>
-//   E2E_FLAGS=o (uploaded sheets) adds the screens sheet-upload and sheet-review.
+//   E2E_FLAGS=o0 or o (uploaded sheets) adds the screens sheet-upload and sheet-review.
 //   DEVICES=iphone-se,desktop-1280 SCREENS=join,reader DARK=all  (to split a run)
 const fs = require("fs");
 const path = require("path");
@@ -240,7 +240,7 @@ const COVERED = () => {
   });
 
   const browser = await chromium.launch();
-  // Uploaded sheets (flag set "o"): the synthetic sheet's files, and a ready sheet of the course (mocks/sheets.cjs).
+  // Uploaded sheets (flag sets "o0" and "o"): the synthetic sheet's files, and a ready sheet of the course (mocks/sheets.cjs).
   let sheetFiles = null;
   let sheetRow = null;
   if (flags.sheets && (wantScreens.has("sheet-upload") || wantScreens.has("sheet-review"))) {

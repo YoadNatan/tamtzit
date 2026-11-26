@@ -47,7 +47,10 @@
 // the upload is past exams' own, an upload's link opened signed out has no
 // card, and study_sheet_create is never called.
 //
-//   NODE_PATH=$(npm root -g) E2E_FLAGS=o node e2e/study/sheets.cjs <dist> <out dir>
+// Release A1's build (VITE_STUDY_SHEETS_FORMS, flag set "o") reads a sheet
+// with the sheet reader: its flows are e2e/study/sheets-forms.cjs.
+//
+//   NODE_PATH=$(npm root -g) E2E_FLAGS=o0 node e2e/study/sheets.cjs <dist> <out dir>
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
@@ -57,7 +60,11 @@ const { makeSheetFiles, pageShots, SHEET } = require("./fixtures/make-sheet.cjs"
 
 const [dist, out] = process.argv.slice(2);
 if (!dist || !out) {
-  console.error("usage: E2E_FLAGS=o node e2e/study/sheets.cjs <dist> <out dir>");
+  console.error("usage: E2E_FLAGS=o0 node e2e/study/sheets.cjs <dist> <out dir>");
+  process.exit(2);
+}
+if (flagSetOf().sheetForms) {
+  console.error("sheets.cjs is release A0's (E2E_FLAGS=o0); release A1 (o) is e2e/study/sheets-forms.cjs");
   process.exit(2);
 }
 fs.mkdirSync(out, { recursive: true });

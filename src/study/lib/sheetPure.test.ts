@@ -82,3 +82,14 @@ test("plainOnly: a group-wide list never gets an open, numeric or similar questi
   ];
   assert.deepEqual(plainOnly(rows).map((r) => r.id), ["a", "b", "f"]);
 });
+
+test("release A1's words: one term per concept (COPY.md: תשובה is the answer, פתרון the worked steps)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const files = ["SheetAnswer.tsx", "SheetText.tsx", "SheetEdit.tsx", "SheetsLecture.tsx", "ExamView.tsx"].map((f) => readFileSync(join(process.cwd(), "src", "study", "components", f), "utf8"));
+  for (const text of files) {
+    assert.ok(!text.includes("פתרון מוצע"), "never 'פתרון מוצע': a suggested answer is 'תשובה מוצעת · לא נבדקה'");
+    assert.ok(!text.includes("פותר עיוור"));
+  }
+  assert.ok(files[0].includes("תשובה מוצעת · לא נבדקה") && files[4].includes("פתרון מלא"));
+});

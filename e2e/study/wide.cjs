@@ -29,7 +29,7 @@
 //       opens the next item and E "לתקן טקסט".
 //
 //   NODE_PATH=$(npm root -g) E2E_FLAGS=s2 node e2e/study/wide.cjs <dist> <out dir>
-//   E2E_FLAGS=o adds uploaded sheets' checks.
+//   E2E_FLAGS=o0 or o adds uploaded sheets' checks.
 const fs = require("fs");
 const path = require("path");
 const { chromium, devices } = require("playwright");
@@ -114,7 +114,7 @@ const FRAME = () => {
   if (flags.qtypes) practicePlugin.seedTypes(db, L, GEO);
 
   const browser = await chromium.launch();
-  // Uploaded sheets (flag set "o"): the synthetic sheet's PDF, and a ready sheet of the course (mocks/sheets.cjs).
+  // Uploaded sheets (flag sets "o0" and "o"): the synthetic sheet's PDF, and a ready sheet of the course (mocks/sheets.cjs).
   let sheetFiles = null;
   let sheetRow = null;
   if (flags.sheets) {
