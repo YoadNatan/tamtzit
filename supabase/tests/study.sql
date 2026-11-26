@@ -390,6 +390,8 @@ select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, 
                          'study_points_ahead_claim', 'study_points_ahead_release', 'study_points_save', 'study_points_fail',
                          -- section S 2 (past exams): the worker's claim, saves and finish of an exam's unit, each refusing without the key
                          'study_claim_exam', 'study_exam_save_items', 'study_exam_save_keys', 'study_finish_exam_job',
+                         -- section O 2 (uploaded sheets): the sheet reader's saves and its answers file's pages, each refusing without the key
+                         'study_sheet_queue_key', 'study_sheet_save_items', 'study_sheet_save_keys',
                          -- section I: the personal code's redeem, called by /api/study/code, refusing without the key
                          'study_code_redeem',
                          -- section R: the push worker's claim and report (refusing without the key), and
@@ -11278,5 +11280,360 @@ delete from public.study_groups where id in (:'og', :'ozg');
 delete from auth.users where id in (:'oa', :'ob', :'oz');
 select pg_temp.ook('O-end', not exists (select 1 from public.study_exams where group_id = :'og')
   and not exists (select 1 from public.study_courses where group_id in (:'og', :'ozg')),
+  'the fixtures are gone');
+-- ── O 2: the sheet reader, open and numeric forms (docs/study/sheets.md, "SQL section O 2") ──
+-- Fixtures of their own (every text invented), removed at the end.
+reset role;
+set request.jwt.claim.sub = '';
+\set pa '0e100000-0000-4000-8000-000000000001'
+\set pb '0e100000-0000-4000-8000-000000000002'
+\set pz '0e100000-0000-4000-8000-000000000009'
+\set pg '0e100000-0000-4000-8000-0000000000a1'
+\set pzg '0e100000-0000-4000-8000-0000000000a2'
+\set pl1 '0e100000-0000-4000-8000-0000000000b1'
+\set pxe '0e100000-0000-4000-8000-0000000000c1'
+insert into auth.users (id, raw_user_meta_data) values
+ (:'pa', '{"app":"study","full_name":"אורי"}'), (:'pb', '{"app":"study","full_name":"בר"}'), (:'pz', '{"app":"study","full_name":"זוהר"}');
+insert into public.study_groups (id, name, join_code, created_by) values (:'pg', 'קבוצת הטפסים', 'OFORMS', :'pa'), (:'pzg', 'קבוצה זרה ב', 'OFORMZ', :'pz');
+insert into public.study_members (group_id, user_id, name) values (:'pg', :'pa', 'אורי'), (:'pg', :'pb', 'בר'), (:'pzg', :'pz', 'זוהר');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'pl1', :'pg', 'פרמקו טפסים', 'פרמקוקינטיקה ב (בדוי)', 'pptx', '[]', 'ready', :'pa');
+select id as pc from public.study_courses where group_id = :'pg' and name_key = 'פרמקו טפסים' \gset
+select count(*) = 0 as p_nokey from vault.decrypted_secrets where name = 'study_worker_key' \gset
+\if :p_nokey
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef');
+\endif
+select decrypted_secret as pkey from vault.decrypted_secrets where name = 'study_worker_key' limit 1 \gset
+select coalesce((select enabled from study_private.features where name = 'exams'), false) as p_exams_was \gset
+update study_private.features set enabled = true where name in ('exams', 'sheets');
+
+-- ── The registry, the columns, the widened checks ──
+select pg_temp.ook('O2-reg', (public.study_schema() ->> 'O')::int >= 2
+  and to_regprocedure('study_private.q_plain(text, text)') is not null
+  and (select count(*) from pg_constraint where conname in ('study_questions_text_x', 'study_questions_options_x', 'study_questions_exam_no_x',
+         'study_questions_label_x', 'study_questions_figures_x', 'study_question_keys_sheet_x', 'study_exam_item_log_field_x')) = 7
+  and (select pg_get_constraintdef(oid) like '%numeric%' from pg_constraint where conname = 'study_questions_form_x' and conrelid = 'public.study_questions'::regclass)
+  and (select pg_get_constraintdef(oid) like '%<= 12)%' from pg_constraint where conname = 'study_questions_step_x' and conrelid = 'public.study_questions'::regclass)
+  and (select pg_get_constraintdef(oid) not like '%numeric%' from pg_constraint where conname = 'study_question_drafts_form_x')
+  and not exists (select 1 from pg_constraint x where x.conrelid = 'public.study_questions'::regclass
+                   and (pg_get_constraintdef(x.oid) like '%char_length(vignette) <= 2500%' or pg_get_constraintdef(x.oid) like '%exam_no >= 1%')
+                   and x.conname not in ('study_questions_text_x', 'study_questions_exam_no_x')),
+  'section O at 2; the widened checks by name, Q 3''s form and step widened (drafts untouched), the inline ones gone');
+select pg_temp.ook('O2-plain', study_private.q_plain('ai', 'one') and study_private.q_plain('exam', 'tf') and not study_private.q_plain('exam', 'open')
+  and not study_private.q_plain('exam', 'numeric') and not study_private.q_plain('twin', 'one') and not study_private.q_plain('exam', null)
+  and study_private.label_key('שאלה 3 (א)') = '3א' and study_private.label_key('2.1.') = '2.1' and study_private.label_key(' 4 סעיף ב ') = '4ב'
+  and study_private.label_key('...') = '',
+  'q_plain: the choice forms only, never a twin; label_key: "שאלה 3 (א)" is 3א, "2.1." is 2.1');
+-- An exam's open, numeric and long items fit; the old shapes are still refused for everything else.
+insert into public.study_exams (id, group_id, course, title, year, status, kind, created_by, key_source)
+values (:'pxe', :'pg', 'פרמקו טפסים', 'מועד ב 2024 (בדוי)', 2024, 'ready', 'exam', :'pa', 'marked');
+select pg_temp.ook('O2-chk', (select string_agg(x, ' · ') from (select pg_temp.oas(:'pa', q) x from unnest(array[
+    format($q$insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form) values (%L, %L, 401, 'exam', 'mcq', 'חשבו (בדוי)', '{}', 'numeric') returning 'ok'$q$, :'pg', :'pxe'),
+    format($q$insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form) values (%L, %L, 402, 'exam', 'mcq', repeat('א', 3000), array['1','2','3','4','5','6','7','8','9','10'], 'one') returning 'ok'$q$, :'pg', :'pxe'),
+    format($q$insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form) values (%L, %L, 12001, 'exam', 'mcq', 'שאלה ארוכה (בדוי)', array['א','ב'], 'one') returning 'ok'$q$, :'pg', :'pxe'),
+    format($q$insert into public.study_questions (group_id, lecture_id, source, kind, question, options) values (%L, %L, 'ai', 'mcq', repeat('א', 601), array['א','ב']) returning 'ok'$q$, :'pg', :'pl1'),
+    format($q$insert into public.study_questions (group_id, lecture_id, source, kind, question, options) values (%L, %L, 'ai', 'mcq', 'שאלה בדויה', array['1','2','3','4','5','6','7']) returning 'ok'$q$, :'pg', :'pl1'),
+    format($q$insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form) values (%L, %L, 403, 'exam', 'mcq', 'נכון או לא (בדוי)', array['1','2','3','4','5','6','7'], 'tf') returning 'ok'$q$, :'pg', :'pxe'),
+    format($q$insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form) values (%L, %L, 404, 'exam', 'mcq', 'פתוחה (בדוי)', array['א','ב'], 'open') returning 'ok'$q$, :'pg', :'pxe'),
+    format($q$insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form, figures) values (%L, %L, 405, 'exam', 'mcq', 'איורים (בדוי)', '{}', 'open', array['pg:1:1,1,1,1','pg:1:1,1,1,1','pg:1:1,1,1,1','pg:1:1,1,1,1','pg:1:1,1,1,1']) returning 'ok'$q$, :'pg', :'pxe')
+  ]) with ordinality t(q, o) order by o) y) ~ '^ok · ok · ok · error: new row .*text_x.* · error: new row .*options_x.* · error: new row .*options_x.* · error: new row .*options_x.* · error: new row .*figures_x.*$',
+  'a numeric item with no options, a 3,000-character exam item with 10 options, number 12001: fit; an ai item over 600 characters or with 7 options, 7 statements, an open item with options, 5 boxes: refused');
+delete from public.study_questions where exam_id = :'pxe';
+
+-- ── A sheet for the sheet reader: 7 pages and a 2-page answers file ──
+select (pg_temp.oas(:'pa', format('select public.study_sheet_create(%L, %L) ->> %L', :'pc',
+         jsonb_build_object('title', 'תרגיל 5 (בדוי)', 'lecture', :'pl1', 'key_source', 'separate'), 'exam_id'))) as ps1 \gset
+select :'pg' || '/exams/' || :'ps1' || '/' as ppfx \gset
+insert into storage.objects (bucket_id, name) select 'study', :'ppfx' || 'p' || n || '.jpg' from generate_series(1, 9) n;
+select jsonb_agg(jsonb_build_object('n', n, 'path', :'ppfx' || 'p' || n || '.jpg', 'w', 1061, 'h', 1500,
+                                    'lines', jsonb_build_array('שאלה ' || n || ' (synthetic)'), 'key', n > 7) order by n) as ppages,
+       jsonb_object_agg(:'ppfx' || 'p' || n || '.jpg', 'https://proj.supabase.co/storage/v1/object/sign/study/' || :'ppfx' || 'p' || n || '.jpg?token=aaa.bbb.ccc') as purls
+  from generate_series(1, 9) n \gset
+select pg_temp.ook('O2a', (select string_agg(x, ' · ') from (select pg_temp.oas(u, q) x from (values
+    (1, :'pa', format('select public.study_sheet_pages_done(%L, %L, %L)', :'ps1', :'ppages', :'purls')),
+    (2, :'pb', format('select public.study_sheet_pages_done(%L, %L, %L, null, %L)', :'ps1', :'ppages', :'purls', :'pkey')),
+    (3, :'pa', format('select public.study_sheet_pages_done(%L, %L, %L, null, %L)', :'pxe', :'ppages', :'purls', :'pkey')),
+    (4, :'pa', format('select public.study_sheet_pages_done(%L, %L, %L, null, %L)', :'ps1',
+                      (select jsonb_agg(jsonb_build_object('n', n, 'path', :'ppfx' || 'p' || n || '.jpg', 'w', 10, 'h', 10)) from generate_series(1, 41) n), :'purls', :'pkey'))
+  ) v(o, u, q) order by o) y) = 'error: forbidden · error: exam not found · error: not a sheet · error: too many pages',
+  'the sheet''s pages: only with the key, only its uploader, only a sheet, at most 40 pages');
+select pg_temp.oas(:'pa', format('select public.study_sheet_pages_done(%L, %L, %L, null, %L)::text', :'ps1', :'ppages', :'purls', :'pkey')) as p_r \gset
+select pg_temp.ook('O2a2', (:'p_r')::jsonb ->> 'units' = '4'
+  and (select string_agg(kind || (range -> 'pages')::text || coalesce(range ->> 'next', '-') || (range ->> 'reader'), ' ' order by kind desc, created_at, range ->> 'next')
+         from study_private.exam_jobs where exam_id = :'ps1') = 'read[1, 2, 3]4sheet read[4, 5, 6]7sheet read[7]-sheet key[8, 9]-sheet'
+  and (select status from public.study_exams where id = :'ps1') = 'reading',
+  '7 pages: read units of 3 with the next as context, the answers file in a key unit, all for the sheet reader');
+-- The claim: the reader, the kind; with sheets off, nothing.
+update study_private.features set enabled = false where name = 'sheets';
+select pg_temp.ook('O2b', public.study_claim_exam(:'ps1', :'pkey') is null, 'with sheets off a sheet''s unit is not taken');
+update study_private.features set enabled = true where name = 'sheets';
+select public.study_claim_exam(:'ps1', :'pkey') as pck \gset
+select public.study_claim_exam(:'ps1', :'pkey') as pc1 \gset
+select pg_temp.ook('O2b2', (:'pck')::jsonb ->> 'kind' = 'key' and (:'pck')::jsonb ->> 'reader' = 'sheet'
+  and (:'pc1')::jsonb ->> 'kind' = 'read' and (:'pc1')::jsonb ->> 'reader' = 'sheet' and (:'pc1')::jsonb -> 'exam' ->> 'kind' = 'sheet'
+  and (:'pc1')::jsonb -> 'exam' ->> 'lecture_id' = :'pl1' and (:'pc1')::jsonb -> 'seen_labels' = '[]'::jsonb
+  and (select string_agg(p ->> 'n', ',') from jsonb_array_elements((:'pc1')::jsonb -> 'pages') p) = '1,2,3',
+  'the key unit first, then pages 1-3: the sheet reader, the kind and lecture, no labels seen yet');
+select ((:'pck'::jsonb ->> 'job')::uuid) as pjk, ((:'pck'::jsonb ->> 'lease')::uuid) as plk,
+       ((:'pc1'::jsonb ->> 'job')::uuid) as pj1, ((:'pc1'::jsonb ->> 'lease')::uuid) as pl_1 \gset
+
+-- ── The answers file first (by label; item 9 is not read yet) ──
+select public.study_sheet_save_keys(:'pjk', :'plk', jsonb_build_array(
+  jsonb_build_object('label', '1', 'answer', 7, 'solution', 'כי זו ההגדרה (בדוי)'),
+  jsonb_build_object('label', '3ב', 'num', 6.93, 'unit', 'שעות', 'tol', 2),
+  jsonb_build_object('label', '3 (ג)', 'answer_text', 'הפינוי יורד (בדוי)', 'solution', 'שלב 1; שלב 2'),
+  jsonb_build_object('label', '9', 'answer', 1),
+  jsonb_build_object('label', '2', 'answer', 12), 'not an object'), :'pkey') as p_nk \gset
+select pg_temp.ook('O2c', :'p_nk' = '0'
+  and (select string_agg(no_key || ':' || coalesce(answer::text, '-') || ':' || coalesce(num::text, '-') || ':' || coalesce(num_unit, '-'), ' ' order by no_key)
+         from study_private.sheet_label_keys where exam_id = :'ps1') = '1:7:-:- 3ב:-:6.93:שעות 3ג:-:-:- 9:1:-:-',
+  'the answers file before its items: kept by label (an answer past 9 and a line that is not one are left out), none applied yet');
+select public.study_finish_exam_job(:'pjk', :'plk', 'done', null, 0.04, :'pkey') is not null as pdone \gset
+
+-- ── The first read unit's items ──
+\set pitems '[{"label":"1","form":"one","question":"מה נכון לגבי Fictazole? (synthetic)","options":["א","ב","ג","ד","ה","ו","ז","ח"],"figures":[],"parse_conf":3,"page":1,"idx":0,"exact":0.92},{"label":"2","form":"tf","question":"נכון או לא נכון (synthetic)","options":["משפט א","משפט ב","משפט ג"],"figures":["pg:1:100,500,800,200"],"parse_conf":3,"page":1,"idx":1},{"label":"3א","main":"3","part":1,"form":"one","vignette":"חולה בן 54 מקבל Mockacillin (synthetic).\\nריכוז 12 מ\\"ג/ל.","question":"מה נפח ההפצה?","options":["10 ל","20 ל"],"figures":[],"parse_conf":3,"page":2,"idx":0},{"label":"3ב","main":"3","part":2,"form":"numeric","question":"חשבו את זמן מחצית החיים.","options":[],"figures":["pg:2:100,100,400,300","pg:3:100,100,400,300"],"parse_conf":3,"page":2,"idx":1},{"label":"3ג","main":"3","part":3,"form":"open","question":"הסבירו מה יקרה לפינוי.","options":[],"figures":[],"parse_conf":2,"page":3,"idx":0},{"label":"4","form":"order","question":"סדרו (synthetic)","options":["a","b"],"page":3,"idx":1},{"label":"5","form":"numeric","question":"x","options":[],"page":3,"idx":2},{"label":"","form":"one","question":"ללא מספור","options":["a","b"],"page":3,"idx":3}]'
+select (r ->> 'saved') || ' ' || (r ->> 'updated') || ' ' || (r ->> 'skipped') as p_sv
+  from public.study_sheet_save_items(:'pj1', :'pl_1', :'pitems', 1, :'pkey') r \gset
+select pg_temp.ook('O2d', :'p_sv' = '5 0 3'
+  and (select string_agg(exam_no || ':' || no_label || ':' || no_key || ':' || form || ':' || cardinality(options) || ':' || coalesce(step::text, '-')
+                         || ':' || cardinality(figures) || ':' || (figure = coalesce(figures[1], ''))::text, ' ' order by exam_no)
+         from public.study_questions where exam_id = :'ps1') = '100:1:1:one:8:-:0:true 101:2:2:tf:3:-:1:true 200:3א:3א:one:2:1:0:true 201:3ב:3ב:numeric:0:2:2:true 300:3ג:3ג:open:0:3:0:true'
+  and (select count(distinct series) = 1 and bool_and(series is not null) from public.study_questions where exam_id = :'ps1' and no_label like '3%')
+  and (select bool_and(ref_lecture = :'pl1') from public.study_questions where exam_id = :'ps1')
+  and (select vignette like E'%\nריכוז%' from public.study_questions where exam_id = :'ps1' and no_label = '3א')
+  and (select exact from public.study_questions where exam_id = :'ps1' and no_label = '1') between 0.91 and 0.93,
+  'five items by label (an order item, a one-word question, no label: refused): page·100 + place, 8 options, the parts one series, the boxes, the lecture, the line break kept, exactness');
+select pg_temp.ook('O2d2', (select string_agg(q.no_label || ':' || coalesce(k.answer::text, '-') || ':' || coalesce(k.num::text, '-') || ':' || coalesce(k.num_tol::text, '-')
+                                          || ':' || coalesce(left(k.model_answer, 6), '-') || ':' || coalesce(k.key_origin, '-') || ':' || coalesce(k.solution_origin, '-')
+                                          || ':' || q.has_key, ' ' order by q.exam_no)
+                          from public.study_questions q join public.study_question_keys k on k.question_id = q.id where q.exam_id = :'ps1')
+  = '1:7:-:-:-:sheet:sheet:true 2:-:-:-:-:-:-:false 3א:-:-:-:-:-:-:false 3ב:-:6.93:2:-:sheet:-:true 3ג:-:-:-:הפינוי:sheet:sheet:true',
+  'the answers file''s lines met their items as they were saved: the eighth option, a numeric answer with its tolerance, an open model answer with its solution');
+select (r ->> 'saved') || ' ' || (r ->> 'updated') as p_sv2 from public.study_sheet_save_items(:'pj1', :'pl_1', :'pitems', 1, :'pkey') r \gset
+select pg_temp.ook('O2d3', :'p_sv2' = '0 5' and (select count(*) from public.study_questions where exam_id = :'ps1') = 5,
+  'the same unit saved again: the same five rows');
+select public.study_finish_exam_job(:'pj1', :'pl_1', 'done', null, 0.2, :'pkey') is not null as pdone \gset
+
+-- The second unit (pages 4-6): label 1 again far away (an exercise that restarts), item 9 meets its answer; solutions from page 6.
+select public.study_claim_exam(:'ps1', :'pkey') as pc2 \gset
+select ((:'pc2'::jsonb ->> 'job')::uuid) as pj2, ((:'pc2'::jsonb ->> 'lease')::uuid) as pl_2 \gset
+select pg_temp.ook('O2e', (select string_agg(x ->> 'label', ',' order by x ->> 'label') from jsonb_array_elements((:'pc2')::jsonb -> 'seen_labels') x) = '1,2,3א,3ב,3ג',
+  'the next unit knows the labels saved already');
+select pg_temp.oas(:'pa', format('select public.study_sheet_queue_key(%L, %L, 6, %L)', :'pj2', :'pl_2', :'pkey')) as p_qk \gset
+\set pitems2 '[{"label":"1","form":"one","question":"תרגיל 2, שאלה 1 (synthetic)","options":["א","ב"],"page":5,"idx":0},{"label":"9","form":"one","question":"שאלה 9 (synthetic)","options":["א","ב","ג"],"page":5,"idx":1}]'
+select (r ->> 'saved') as p_sv3 from public.study_sheet_save_items(:'pj2', :'pl_2', :'pitems2', 0, :'pkey') r \gset
+select pg_temp.ook('O2e2', :'p_qk' = '0' and :'p_sv3' = '2'
+  and (select string_agg(no_key || ':' || exam_no, ' ' order by exam_no) from public.study_questions where exam_id = :'ps1' and page = 5) = '1@5:500 9:501'
+  and (select k.answer || k.key_origin from public.study_questions q join public.study_question_keys k on k.question_id = q.id where q.exam_id = :'ps1' and q.no_key = '9') = '1sheet',
+  'the answers file is the sheet''s key unit already (no second); label 1 on page 5 is another item (1@5); 9 takes the line kept for it');
+select public.study_finish_exam_job(:'pj2', :'pl_2', 'done', null, 0.2, :'pkey') is not null as pdone \gset
+-- A second sheet whose own solutions start on page 3.
+select (pg_temp.oas(:'pb', format('select public.study_sheet_create(%L, %L) ->> %L', :'pc', '{"title":"דף עם פתרונות (בדוי)"}', 'exam_id'))) as ps2 \gset
+insert into storage.objects (bucket_id, name) select 'study', :'pg' || '/exams/' || :'ps2' || '/p' || n || '.jpg' from generate_series(1, 5) n;
+select pg_temp.oas(:'pb', format('select public.study_sheet_pages_done(%L, %L, %L, null, %L)::text', :'ps2',
+  (select jsonb_agg(jsonb_build_object('n', n, 'path', :'pg' || '/exams/' || :'ps2' || '/p' || n || '.jpg', 'w', 1061, 'h', 1500) order by n) from generate_series(1, 5) n),
+  (select jsonb_object_agg(:'pg' || '/exams/' || :'ps2' || '/p' || n || '.jpg', 'https://proj.supabase.co/storage/v1/object/sign/study/' || :'pg' || '/exams/' || :'ps2' || '/p' || n || '.jpg?token=a.b.c') from generate_series(1, 5) n),
+  :'pkey')) as p_r2 \gset
+select public.study_claim_exam(:'ps2', :'pkey') as pc5 \gset
+select ((:'pc5'::jsonb ->> 'job')::uuid) as pj5, ((:'pc5'::jsonb ->> 'lease')::uuid) as pl_5 \gset
+select pg_temp.oas(:'pb', format('select public.study_sheet_queue_key(%L, %L, 3, %L)', :'pj5', :'pl_5', :'pkey')) as p_qk2 \gset
+select pg_temp.ook('O2e3', :'p_qk2' = '3'
+  and (select string_agg(kind || (range -> 'pages')::text || status || coalesce(range ->> 'printed', '') || coalesce(range ->> 'solutions', ''), ' '
+                         order by kind desc, (range -> 'pages' ->> 0)::int)
+         from study_private.exam_jobs where exam_id = :'ps2') = 'read[1, 2, 3]running read[4, 5]donetrue key[3, 4, 5]pendingtrue'
+  and (select array_to_string(key_pages, ',') from public.study_exams where id = :'ps2') = '3,4,5'
+  and (select count(*) from public.study_exam_pages where exam_id = :'ps2' and is_key) = 3,
+  'solutions printed from page 3: pages 3-5 become the answers file, one key unit, the unit of pages 4-5 is not read');
+
+-- ── Solving: units of sheet_solve_items() for the sheet reader ──
+select public.study_claim_exam(:'ps1', :'pkey') as pc3 \gset
+select ((:'pc3'::jsonb ->> 'job')::uuid) as pj3, ((:'pc3'::jsonb ->> 'lease')::uuid) as pl_3 \gset
+select public.study_finish_exam_job(:'pj3', :'pl_3', 'done', null, 0.1, :'pkey') is not null as pdone \gset
+select pg_temp.ook('O2f', (select string_agg(jsonb_array_length(range -> 'items') || (range ->> 'reader'), ' ' order by created_at) from study_private.exam_jobs
+                            where exam_id = :'ps1' and kind = 'solve') = '3sheet'
+  and study_private.sheet_solve_items() = 4,
+  'the items without an answer (2, 3א, 1@5) are solved by the sheet reader''s solver, 4 a unit');
+select public.study_claim_exam(:'ps1', :'pkey') as pc4 \gset
+select ((:'pc4'::jsonb ->> 'job')::uuid) as pj4, ((:'pc4'::jsonb ->> 'lease')::uuid) as pl_4 \gset
+select pg_temp.ook('O2f2', (:'pc4')::jsonb ->> 'reader' = 'sheet'
+  and (select string_agg((x ->> 'label') || ':' || coalesce(x ->> 'step', '-') || ':' || jsonb_array_length(x -> 'figures') || ':' || (x ->> 'page_url' is not null)::text, ' '
+                         order by (x ->> 'no')::int) from jsonb_array_elements((:'pc4')::jsonb -> 'items') x) = '2:-:1:true 3א:1:0:false 1:-:0:false',
+  'the solve unit''s items: their labels, step, boxes, and the page''s link where a figure needs it');
+select (select id from public.study_questions where exam_id = :'ps1' and no_key = '2') as pq2,
+       (select id from public.study_questions where exam_id = :'ps1' and no_key = '3א') as pq3a,
+       (select id from public.study_questions where exam_id = :'ps1' and no_key = '3ב') as pq3b,
+       (select id from public.study_questions where exam_id = :'ps1' and no_key = '3ג') as pq3c,
+       (select id from public.study_questions where exam_id = :'ps1' and no_key = '1') as pq1 \gset
+select public.study_sheet_save_keys(:'pj4', :'pl_4', jsonb_build_array(
+  jsonb_build_object('id', :'pq2', 'seq', jsonb_build_array(1, 0, 1), 'solution', 'משפט ב שגוי (בדוי)', 'conf', 3),
+  jsonb_build_object('id', :'pq3a', 'answer', 1, 'conf', 2),
+  jsonb_build_object('id', :'pq3b', 'num', 99, 'conf', 3),
+  jsonb_build_object('id', :'pq1', 'answer', 0, 'conf', 3)), :'pkey') as p_nk2 \gset
+select pg_temp.ook('O2f3', :'p_nk2' = '2'
+  and (select array_to_string(k.seq, '') || k.key_origin || k.key_conf || k.solution_origin from public.study_question_keys k where k.question_id = :'pq2') = '101solved3solved'
+  and (select k.answer || k.key_origin || k.key_conf from public.study_question_keys k where k.question_id = :'pq3a') = '1solved2'
+  and (select k.num || k.key_origin from public.study_question_keys k where k.question_id = :'pq3b') = '6.93sheet'
+  and (select k.answer || k.key_origin from public.study_question_keys k where k.question_id = :'pq1') = '7sheet',
+  'solved answers: only the unit''s items, never over the answers file''s (3ב, 1 are not in the unit or are the file''s)');
+select public.study_finish_exam_job(:'pj4', :'pl_4', 'done', null, 0.1, :'pkey') is not null as pdone \gset
+select pg_temp.ook('O2f4', (select status || ' ' || n_questions || ' ' || skipped_open || ' ' || study_private.exam_printed(:'ps1') from public.study_exams where id = :'ps1') = 'ready 7 1 8',
+  'everything done: the sheet is ready, 7 items, the one question its first unit could not copy counted (8 printed)');
+
+-- ── The review, edits, add and retire ──
+select pg_temp.oas(:'pb', format('select public.study_sheet_review(%L)::text', :'ps1')) as p_rv \gset
+select pg_temp.ook('O2g', (:'p_rv')::jsonb ->> 'kind' = 'sheet' and (:'p_rv')::jsonb -> 'lecture' ->> 'id' = :'pl1'
+  and (:'p_rv')::jsonb ->> 'reader' = 'sheet' and (:'p_rv')::jsonb -> 'paused' = 'null'::jsonb
+  and jsonb_array_length((:'p_rv')::jsonb -> 'items') = 7
+  and (:'p_rv')::jsonb -> 'items_extra' -> :'pq3b' ->> 'num' = '6.93' and (:'p_rv')::jsonb -> 'items_extra' -> :'pq3b' ->> 'label' = '3ב'
+  and (:'p_rv')::jsonb -> 'items_extra' -> :'pq3c' ->> 'model_answer' like 'הפינוי%'
+  and jsonb_array_length((:'p_rv')::jsonb -> 'items_extra' -> :'pq3b' -> 'figures') = 2
+  and pg_temp.oas(:'pz', format('select public.study_sheet_review(%L)', :'ps1')) = 'error: exam not found',
+  'the sheet''s review: S''s, the kind, the lecture, not paused; each item''s label, boxes, numbers and model answers; a stranger: not found');
+select pg_temp.oas(:'pb', format('select public.study_exam_item_fix(%L, %L)::text', :'pq3a',
+  jsonb_build_object('question', E'מה נפח ההפצה?\n(בליטרים)', 'options', jsonb_build_array('10 ל', '20 ל', '30 ל')))) as p_fx \gset
+select pg_temp.ook('O2h', (:'p_fx')::jsonb ->> 'question' = E'מה נפח ההפצה?\n(בליטרים)' and jsonb_array_length((:'p_fx')::jsonb -> 'options') = 3
+  and (select string_agg(field, ',' order by id) from public.study_exam_item_log where question_id = :'pq3a') = 'question,options'
+  and (select coalesce(k.answer::text, '-') || coalesce(k.key_origin, '-') from public.study_question_keys k where k.question_id = :'pq3a') = '--',
+  'a fix: the question keeps its lines, a third option; each field logged; the suggested key that no longer fits is cleared');
+select pg_temp.ook('O2h2', (select string_agg(x, ' · ') from (select pg_temp.oas(u, q) x from (values
+    (1, :'pb', format('select public.study_exam_item_fix(%L, %L)', :'pq3a', '{"label":"2"}')),
+    (2, :'pb', format('select public.study_exam_item_fix(%L, %L)', :'pq3a', '{"form":"order"}')),
+    (3, :'pb', format('select public.study_exam_item_fix(%L, %L)', :'pq3a', '{"colour":"red"}')),
+    (4, :'pz', format('select public.study_exam_item_fix(%L, %L)', :'pq3a', '{"question":"זר"}')),
+    (5, :'pb', format('select public.study_exam_item_fix(%L, %L)', :'pq3a', '{"figures":["pg:1:1,1,1,1","x"]}'))
+  ) v(o, u, q) order by o) y) = 'error: label taken · error: bad item · error: bad item · error: question not found · error: bad item',
+  'refused: a label another item has, a form a sheet has not, a field it does not know, a stranger, a box that is not one');
+select pg_temp.oas(:'pa', format('select public.study_exam_item_add(%L, %L)', :'ps1',
+  jsonb_build_object('label', '6', 'form', 'numeric', 'question', 'חשבו את הפינוי (synthetic)', 'page', 3))) as pq6 \gset
+select pg_temp.ook('O2h3', (select exam_no || ':' || no_label || ':' || form || ':' || parse_conf from public.study_questions where id = :'pq6'::uuid) = '301:6:numeric:3'
+  and (select field from public.study_exam_item_log where question_id = :'pq6'::uuid) = 'added'
+  and pg_temp.oas(:'pa', format('select public.study_exam_item_add(%L, %L)', :'ps1', jsonb_build_object('label', '6', 'form', 'open', 'question', 'עוד', 'page', 3))) = 'error: label taken'
+  and pg_temp.oas(:'pa', format('select public.study_exam_item_add(%L, %L)', :'ps1', jsonb_build_object('label', '7', 'form', 'open', 'question', 'עוד', 'page', 8))) = 'error: bad item',
+  'an item the reading missed: after its page''s last, logged; a label taken; a page of the answers file');
+select pg_temp.oas(:'pb', format('select public.study_exam_item_retire(%L, %L)', :'pq6', 'כפולה')) as p_rt \gset
+select pg_temp.ook('O2h4a', (select retired_at is not null and retired_by = :'pb' from public.study_questions where id = :'pq6'::uuid)
+  and pg_temp.oas(:'pb', format('select public.study_exam_item_retire(%L, %L)', :'pq6', 'x')) = 'error: retired',
+  'taken out; not twice');
+select pg_temp.oas(:'pa', format('select public.study_exam_item_unretire(%L)', :'pq6')) as p_ur \gset
+select pg_temp.ook('O2h4', :'p_ur' = ''
+  and (select retired_at is null from public.study_questions where id = :'pq6'::uuid)
+  and (select string_agg(field, ',' order by id) from public.study_exam_item_log where question_id = :'pq6'::uuid) = 'added,retired,unretired',
+  'taken out and back (by another member within a day), logged');
+reset role;
+update public.study_questions set retired_at = now() - interval '2 days', retired_by = :'pb' where id = :'pq6';
+select pg_temp.ook('O2h5', pg_temp.oas(:'pa', format('select public.study_exam_item_unretire(%L)', :'pq6')) = 'error: not yours',
+  'after a day only who took it out brings it back');
+update public.study_questions set retired_at = null, retired_by = null where id = :'pq6';
+
+-- ── A member's answer and solution; numeric answers; open self-marks ──
+select pg_temp.oas(:'pa', format('select public.study_item_solution(%L, %L)::text', :'pq6', '{"num": 12.5, "num_unit": "ל/ש", "solution": "CL = k·Vd"}')) as p_so \gset
+select pg_temp.ook('O2i', (:'p_so')::jsonb ->> 'origin' = 'member' and (:'p_so')::jsonb ->> 'solution_origin' = 'member'
+  and (select num || num_unit || num_tol || key_origin from public.study_question_keys where question_id = :'pq6') = '12.5ל/ש1member'
+  and (select has_key from public.study_questions where id = :'pq6'::uuid)
+  and (select origin_new || ' ' || (old_text::jsonb ->> 'num' is null)::text || ' ' || (new_text::jsonb ->> 'num') from public.study_exam_key_log where question_id = :'pq6') = 'member true 12.5'
+  and pg_temp.oas(:'pa', format('select public.study_item_solution(%L, %L)', :'pq6', '{"model_answer":"x"}')) = 'error: bad answer'
+  and pg_temp.oas(:'pa', format('select public.study_item_solution(%L, %L)', :'pq6', '{"num":"x"}')) = 'error: bad answer',
+  '"לתקן תשובה" on a numeric item: the number, its unit, tolerance 1%, the solution; a member''s; logged with the text before and after; an open item''s field or a word refused');
+select pg_temp.oas(:'pb', format('select public.study_answer_value(%L, 12.6, %L, 4000)::text', :'pq6', 'exam')) as p_v1 \gset
+select pg_temp.oas(:'pb', format('select public.study_answer_value(%L, 13, %L)::text', :'pq6', 'exam')) as p_v2 \gset
+select pg_temp.ook('O2j', (:'p_v1')::jsonb ->> 'correct' = 'true' and (:'p_v2')::jsonb ->> 'correct' = 'false' and (:'p_v1')::jsonb ->> 'solution' = 'CL = k·Vd'
+  and (select string_agg(value::text || ':' || correct || ':' || mode, ' ' order by answered_at, value) from public.study_answers where question_id = :'pq6') = '12.6:true:exam 13:false:exam'
+  and pg_temp.oas(:'pb', format('select public.study_answer_value(%L, 1, %L)', :'pq3c', 'exam')) = 'error: not a numeric question'
+  and pg_temp.oas(:'pb', format('select public.study_answer_value(%L, 1, %L)', :'pq6', 'quiz')) = 'error: bad mode'
+  and pg_temp.oas(:'pz', format('select public.study_answer_value(%L, 1, %L)', :'pq6', 'exam')) = 'error: question not found',
+  'a numeric answer within 1%: right; outside: wrong; both in study_answers with the value (OD7); an open item, a quiz''s mode, a stranger: refused');
+select pg_temp.oas(:'pb', format('select public.study_question_solution(%L)::text', :'pq3c')) as p_qs0 \gset
+select pg_temp.oas(:'pb', format('select public.study_open_show(%L)::text', :'pq3c')) as p_os \gset
+select pg_temp.oas(:'pb', format('select public.study_open_mark(%L, 1)', :'pq3c')) as p_om \gset
+select pg_temp.oas(:'pb', format('select public.study_question_solution(%L)::text', :'pq3c')) as p_qs1 \gset
+select pg_temp.ook('O2k', :'p_qs0' = 'null' and (:'p_os')::jsonb ->> 'model_answer' like 'הפינוי%' and (:'p_os')::jsonb ->> 'solution' = 'שלב 1; שלב 2'
+  and (:'p_qs1')::jsonb ->> 'solution' = 'שלב 1; שלב 2'
+  and (select self_mark from study_private.open_marks where question_id = :'pq3c' and user_id = :'pb') = 1
+  and not exists (select 1 from public.study_answers where question_id = :'pq3c')
+  and pg_temp.oas(:'pa', format('select public.study_open_mark(%L, 2)', :'pq3c')) = 'error: not shown'
+  and pg_temp.oas(:'pb', format('select public.study_open_mark(%L, 3)', :'pq3c')) = 'error: bad mark'
+  and pg_temp.oas(:'pb', format('select public.study_open_show(%L)', :'pq6')) = 'error: not an open question',
+  'an open item: no solution before it is shown; shown: the model answer and the solution; "חלקית" in the member''s own marks, never an answer row (OD8)');
+select pg_temp.oas(:'pb', format('select public.study_sheet_progress(%L)::text', :'ps1')) as p_pr \gset
+select pg_temp.ook('O2k2', (:'p_pr')::jsonb = '{"items": 8, "open": 1, "answered": 1, "right": 0, "shown": 1, "self": {"right": 0, "partly": 1, "wrong": 0}}'::jsonb
+  and pg_temp.oas(:'pa', format('select public.study_sheet_progress(%L)::text', :'ps1'))::jsonb ->> 'answered' = '0',
+  'the caller''s own progress: 8 items, one answered (wrong at last), the open one marked "חלקית"; another member has none');
+select pg_temp.ook('O2k3', pg_temp.oas(:'pb', format('select public.study_exam_item_fix(%L, %L)', :'pq6', '{"form":"open"}')) = 'error: answered'
+  and pg_temp.oas(:'pb', format('select public.study_exam_item_fix(%L, %L)', :'pq3c', '{"form":"numeric"}')) = 'error: answered'
+  and pg_temp.oas(:'pb', format('select public.study_exam_item_fix(%L, %L)::text', :'pq6', '{"question":"חשבו את הפינוי (synthetic, מתוקן)"}'))::jsonb ->> 'form' = 'numeric',
+  'once answered or marked only the text changes');
+
+-- ── Pickers never get an open or a numeric item (design D15) ──
+select pg_temp.ook('O2l', not study_private.boss_askable(:'pq6') and not study_private.boss_askable(:'pq3c')
+  and (select coalesce(sum(mcq + cases), 0) from public.study_quiz_pool(:'pg') where lecture_id = :'pl1')
+      = (select count(*) from public.study_questions where exam_id = :'ps1' and form = 'one' and coalesce(step, 1) = 1 and has_key and retired_at is null),
+  'the boss never asks them; the quiz''s pool counts only the sheet''s one-answer items');
+
+-- ── The budget pause (D23) and its resume ──
+reset role;
+insert into study_private.exam_jobs (group_id, exam_id, kind, range, status, error, attempts) values
+ (:'pg', :'ps1', 'read', jsonb_build_object('pages', jsonb_build_array(7), 'reader', 'sheet', 'reread', true), 'failed', 'budget', 1),
+ (:'pg', :'ps1', 'solve', jsonb_build_object('items', jsonb_build_array(:'pq6'), 'reader', 'sheet'), 'failed', 'reserve', 1);
+select study_private.exam_advance(:'ps1');
+select pg_temp.oas(:'pa', format('select public.study_sheet_review(%L) ->> %L', :'ps1', 'paused')) as p_pz \gset
+select pg_temp.ook('O2m', (select status || ' ' || error from public.study_exams where id = :'ps1') = 'reading budget'
+  and (:'p_pz')::jsonb = '{"key": 0, "read": 1, "solve": 1}'::jsonb
+  and pg_temp.oas(:'pa', format('select public.study_sheet_resume(%L, true, true)', :'ps1')) = 'error: forbidden'
+  and pg_temp.oas(:'pa', format('select public.study_sheet_resume(%L, true, true, %L)::text', :'ps1', :'pkey'))::jsonb = '{"key": 0, "read": 1, "solve": 0, "skipped": 1, "units": 2}'::jsonb,
+  'two units the budget refused: the sheet stays reading, "נעצר: נגמר התקציב החודשי"; the dry run says what goes on, with the key only');
+select pg_temp.oas(:'pa', format('select public.study_sheet_resume(%L, true, false, %L)::text', :'ps1', :'pkey')) as p_rs \gset
+select pg_temp.ook('O2m2', (select string_agg(kind || ':' || status || ':' || coalesce(error, '-'), ' ' order by kind) from study_private.exam_jobs
+                             where exam_id = :'ps1' and created_at > now() - interval '1 second' and (error is distinct from null or status = 'pending')) = 'read:pending:- solve:done:skipped'
+  and (select status || coalesce(error, '-') from public.study_exams where id = :'ps1') = 'reading-'
+  and pg_temp.oas(:'pa', format('select public.study_sheet_resume(%L, false, false, %L)', :'ps1', :'pkey')) = 'error: nothing to resume',
+  '"לסיים בלי תשובות מוצעות": the held read goes on, the held solve is dropped, nothing more to resume');
+delete from study_private.exam_jobs where exam_id = :'ps1' and range ->> 'reread' = 'true';
+select study_private.exam_advance(:'ps1');
+select pg_temp.ook('O2m3', (select status from public.study_exams where id = :'ps1') = 'ready',
+  'with nothing left the sheet is ready again');
+
+-- ── Open-add on a past exam (OD15) ──
+reset role;
+insert into public.study_exam_pages (exam_id, n, path, w, h) select :'pxe', n, :'pg' || '/exams/' || :'pxe' || '/p' || n || '.jpg', 1061, 1500 from generate_series(1, 2) n;
+insert into study_private.exam_queue (exam_id, group_id) values (:'pxe', :'pg');
+insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form, page, has_key, created_by)
+values (:'pg', :'pxe', 1, 'exam', 'mcq', 'שאלה 1 של המבחן (synthetic)', array['א', 'ב'], 'one', 1, true, :'pa');
+insert into public.study_question_keys (question_id, answer, key_origin) select id, 0, 'exam' from public.study_questions where exam_id = :'pxe';
+insert into study_private.exam_jobs (group_id, exam_id, kind, range, status, skipped) values
+ (:'pg', :'pxe', 'read', '{"pages": [1, 2], "next": null}', 'done', 2);
+select study_private.exam_advance(:'pxe');
+select pg_temp.ook('O2n', (select status || ' ' || skipped_open || ' ' || study_private.exam_printed(:'pxe') from public.study_exams where id = :'pxe') = 'ready 2 3'
+  and pg_temp.oas(:'pa', format('select public.study_sheet_open_add(%L, null, null, true, %L)::text', :'pxe', :'pkey'))::jsonb = '{"units": 1, "pages": 2, "skipped": 2}'::jsonb
+  and pg_temp.oas(:'pa', format('select public.study_sheet_open_add(%L, %L, null, false, %L)', :'pxe', '{}', :'pkey')) = 'error: bad urls'
+  and pg_temp.oas(:'pa', format('select public.study_sheet_open_add(%L, null, null, true, %L)', :'ps1', :'pkey')) = 'error: nothing to copy',
+  'a past exam with 2 open questions skipped: open-add would read its one unit''s 2 pages; fresh links needed; a sheet read by the sheet reader has nothing to copy');
+select pg_temp.oas(:'pa', format('select public.study_sheet_open_add(%L, %L, null, false, %L)::text', :'pxe',
+  (select jsonb_object_agg(path, 'https://proj.supabase.co/storage/v1/object/sign/study/' || path || '?token=a.b.c') from public.study_exam_pages where exam_id = :'pxe'), :'pkey')) as p_oa \gset
+select public.study_claim_exam(:'pxe', :'pkey') as pc6 \gset
+select ((:'pc6'::jsonb ->> 'job')::uuid) as pj6, ((:'pc6'::jsonb ->> 'lease')::uuid) as pl_6 \gset
+select pg_temp.ook('O2n2', (:'p_oa')::jsonb ->> 'units' = '1' and (:'pc6')::jsonb ->> 'reader' = 'open' and (:'pc6')::jsonb ->> 'extra' = 'true'
+  and (select status from public.study_exams where id = :'pxe') = 'ready'
+  and pg_temp.oas(:'pa', format('select public.study_sheet_open_add(%L, null, null, true, %L)', :'pxe', :'pkey')) = 'error: already',
+  'open-add queued: its unit is the open reader''s, the exam stays ready; a second is refused');
+\set pitems3 '[{"label":"2","form":"open","question":"הסבירו (synthetic)","options":[],"page":1,"idx":0},{"label":"1","form":"open","question":"כבר יש","options":[],"page":1,"idx":1},{"label":"3","form":"one","question":"בחירה","options":["a","b"],"page":2,"idx":0}]'
+select (r ->> 'saved') || ' ' || (r ->> 'repeats') || ' ' || (r ->> 'skipped') as p_sv4 from public.study_sheet_save_items(:'pj6', :'pl_6', :'pitems3', 0, :'pkey') r \gset
+select public.study_finish_exam_job(:'pj6', :'pl_6', 'done', null, 0.05, :'pkey') is not null as pdone \gset
+select pg_temp.ook('O2n3', :'p_sv4' = '1 1 1'
+  and (select exam_no || ':' || form || ':' || no_label from public.study_questions where exam_id = :'pxe' and form = 'open') = '2:open:2'
+  and (select status || ' ' || skipped_open || ' ' || study_private.exam_printed(:'pxe') from public.study_exams where id = :'pxe') = 'ready 1 3'
+  and (select count(*) || (min(range ->> 'extra')) from study_private.exam_jobs where exam_id = :'pxe' and kind = 'solve') = '1true',
+  'the open question keeps its printed number (1 is the exam''s already; a choice item is not open-add''s); skipped is net, the count of printed questions unchanged; its solving runs beside the ready exam');
+
+-- ── The fixtures go ──
+reset role;
+set request.jwt.claim.sub = '';
+update study_private.features set enabled = false where name = 'sheets';
+update study_private.features set enabled = :'p_exams_was'::boolean where name = 'exams';
+delete from storage.objects where name like :'pg' || '/exams/%';
+delete from public.study_exams where group_id in (:'pg', :'pzg');
+delete from public.study_groups where id in (:'pg', :'pzg');
+delete from auth.users where id in (:'pa', :'pb', :'pz');
+select pg_temp.ook('O2-end', not exists (select 1 from public.study_exams where group_id = :'pg')
+  and not exists (select 1 from study_private.open_marks m where m.user_id in (:'pa', :'pb')),
   'the fixtures are gone');
 -- ════ END SECTION O ════

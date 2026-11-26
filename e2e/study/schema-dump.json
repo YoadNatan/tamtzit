@@ -222,6 +222,17 @@
     "required": 2
    }
   ],
+  "study_answer_value": [
+   {
+    "args": [
+     "p_question",
+     "p_value",
+     "p_mode",
+     "p_ms"
+    ],
+    "required": 2
+   }
+  ],
   "study_answers_mistake_card": [
    {
     "args": [],
@@ -899,6 +910,15 @@
     "required": 2
    }
   ],
+  "study_exam_item_add": [
+   {
+    "args": [
+     "p_exam",
+     "p_item"
+    ],
+    "required": 2
+   }
+  ],
   "study_exam_item_edit": [
    {
     "args": [
@@ -908,6 +928,32 @@
      "p_text"
     ],
     "required": 4
+   }
+  ],
+  "study_exam_item_fix": [
+   {
+    "args": [
+     "p_question",
+     "p_patch"
+    ],
+    "required": 2
+   }
+  ],
+  "study_exam_item_retire": [
+   {
+    "args": [
+     "p_question",
+     "p_note"
+    ],
+    "required": 1
+   }
+  ],
+  "study_exam_item_unretire": [
+   {
+    "args": [
+     "p_question"
+    ],
+    "required": 1
    }
   ],
   "study_exam_items_for_explain": [
@@ -1144,6 +1190,15 @@
      "object_name"
     ],
     "required": 1
+   }
+  ],
+  "study_item_solution": [
+   {
+    "args": [
+     "p_question",
+     "p_patch"
+    ],
+    "required": 2
    }
   ],
   "study_join": [
@@ -1962,10 +2017,27 @@
     "required": 0
    }
   ],
+  "study_open_mark": [
+   {
+    "args": [
+     "p_question",
+     "p_mark"
+    ],
+    "required": 2
+   }
+  ],
   "study_open_mistakes": [
    {
     "args": [
      "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_open_show": [
+   {
+    "args": [
+     "p_question"
     ],
     "required": 1
    }
@@ -2516,6 +2588,14 @@
    {
     "args": [
      "p_ids"
+    ],
+    "required": 1
+   }
+  ],
+  "study_question_solution": [
+   {
+    "args": [
+     "p_question"
     ],
     "required": 1
    }
@@ -3082,12 +3162,97 @@
     "required": 2
    }
   ],
+  "study_sheet_open_add": [
+   {
+    "args": [
+     "p_exam",
+     "p_urls",
+     "p_until",
+     "p_dry",
+     "p_key"
+    ],
+    "required": 2
+   }
+  ],
+  "study_sheet_pages_done": [
+   {
+    "args": [
+     "p_exam",
+     "p_pages",
+     "p_urls",
+     "p_until",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_sheet_progress": [
+   {
+    "args": [
+     "p_exam"
+    ],
+    "required": 1
+   }
+  ],
+  "study_sheet_queue_key": [
+   {
+    "args": [
+     "p_job",
+     "p_lease",
+     "p_from_page",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_sheet_resume": [
+   {
+    "args": [
+     "p_exam",
+     "p_skip_solve",
+     "p_dry",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_sheet_review": [
+   {
+    "args": [
+     "p_exam"
+    ],
+    "required": 1
+   }
+  ],
   "study_sheet_room": [
    {
     "args": [
      "p_group"
     ],
     "required": 1
+   }
+  ],
+  "study_sheet_save_items": [
+   {
+    "args": [
+     "p_job",
+     "p_lease",
+     "p_items",
+     "p_skipped",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_sheet_save_keys": [
+   {
+    "args": [
+     "p_job",
+     "p_lease",
+     "p_rows",
+     "p_key"
+    ],
+    "required": 3
    }
   ],
   "study_slide_flag": [
@@ -3334,7 +3499,8 @@
    "confidence",
    "choices",
    "attempt_id",
-   "set_attempt"
+   "set_attempt",
+   "value"
   ],
   "study_boss_battles": [
    "id",
@@ -3597,7 +3763,9 @@
    "member_id",
    "at",
    "old_seq",
-   "new_seq"
+   "new_seq",
+   "old_text",
+   "new_text"
   ],
   "study_exam_pages": [
    "exam_id",
@@ -4158,7 +4326,15 @@
    "whens",
    "seq",
    "key_origin",
-   "key_conf"
+   "key_conf",
+   "num",
+   "num_tol",
+   "num_unit",
+   "model_answer",
+   "rubric",
+   "solution",
+   "solution_origin",
+   "solution_conf"
   ],
   "study_question_requests": [
    "id",
@@ -4232,7 +4408,11 @@
    "covered",
    "linked_at",
    "repeat_of",
-   "twin_of"
+   "twin_of",
+   "no_label",
+   "no_key",
+   "figures",
+   "exact"
   ],
   "study_quiz_answers": [
    "round_id",
