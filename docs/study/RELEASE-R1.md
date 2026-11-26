@@ -18,6 +18,11 @@ the switch off first) are in [`DECISIONS-2026-11-26.md`](DECISIONS-2026-11-26.md
 - Section R needs the server writing set up (section W: pg_cron, pg_net and
   the Vault secrets `study_worker_key` and `study_site_url`), as it already is
   for the summaries. Without it the inbox works and nothing is pushed.
+- **`study_site_url` must be the exact address members open** (the custom
+  domain, not a `*.vercel.app` address): a push's link is built on the address
+  the minute job posts to. On another origin the service worker opens its own
+  home page instead (and drops the notice's mark), and Safari's Declarative
+  Web Push opens the other address.
 
 ## What is in it
 
@@ -164,7 +169,10 @@ self.addEventListener('activate', (e) => e.waitUntil(self.registration.unregiste
 2. Make a new pair (`node tools/vapid-keys.mjs https://<the app's address>`),
    replace the three Production variables, redeploy.
 3. Turn sending on again.
-4. WhatsApp: "התראות של תמצית: צריך להפעיל מחדש פעם אחת: שלי ← הגדרות
-   התראות ← להפעיל." Devices that open the app subscribe again by themselves
-   (the key's id changed); the others are removed by the push services'
-   403/410 answers.
+4. Nothing to ask of the members. Each device subscribes again by itself
+   the next time the app opens there (within a day: the app asks health for
+   the key at most daily). It compares the key its own subscription was made
+   with to the new one, drops the old subscription and saves a new one. Until
+   then the worker skips the devices saved with the old key's id and reports
+   them gone, so section R deletes them, and the inbox has everything
+   meanwhile. A device that never opens the app again stops getting pushes.

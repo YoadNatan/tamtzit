@@ -234,8 +234,8 @@ are written by `shared/study/notifyCopy.ts`; the screens' words are
 | An empty inbox | אין התראות חדשות. כשמשהו יקרה בקבוצה, הוא יופיע כאן. |
 | The inbox did not load | לא הצלחנו לטעון את ההתראות. · לנסות שוב |
 | More rows | עוד |
-| A live notice that is over | הסתיים; a group quiz: הסתיים · לתוצאות |
-| A row's time | עכשיו · לפני {m} ד׳ · {HH:MM} (today) · {d.m} (earlier) |
+| A live notice that is over | a group quiz: הסתיים · לתוצאות; a meeting: הפגישה התקיימה (cancelled: הפגישה בוטלה); a reading: ההקראה הסתיימה; a study day: מפגש הלמידה התקיים; any other: הסתיים |
+| A row's time | עכשיו · לפני דקה · לפני {m} דק׳ · {HH:MM} (today) · {d.m} (earlier) |
 
 ### New words: notifications' settings, asks and guide (`notify.md`)
 
@@ -248,12 +248,14 @@ menu words come from `installCopy.ts` `OS` (unchecked on a device).
 |---|---|
 | The settings, in שלי and as a title | הגדרות התראות; its state: פועלות ✓ · כבויות · חסומות · לא במכשיר הזה |
 | This device | במכשיר הזה; on: ההתראות פועלות במכשיר הזה ✓ |
-| Turning on | להפעיל התראות במכשיר הזה (while it works: מפעילים…); the toast: ההתראות פועלות: {מבחן קבוצתי, תשובות אליך, ומה שהעלית כשהוא מוכן} |
-| The test push | שליחת התראת ניסיון; ההתראה תגיע בעוד כמה שניות. אפשר לנעול את המסך או לצאת מהאפליקציה. |
-| The two categories | עכשיו בקבוצה (מבחן קבוצתי שנפתח, פגישה שמתחילה, מפגש למידה) · בשבילך (תשובות אליך, תרגול ששיתפו איתך, ומה שהעלית כשהוא מוכן) |
+| Turning on | להפעיל התראות במכשיר הזה (while it works: מפעילים…); the toast: ההתראות פועלות: {מבחן קבוצתי, תשובות בשרשורים שלך ומה שהעלית כשהוא מוכן} (no comma before the last ו) |
+| The test push | שליחת התראת ניסיון; ההתראה תגיע בעוד כמה שניות. אפשר לנעול את המסך או לצאת מהאפליקציה.; while it rests: אפשר לשלוח שוב בעוד כמה שניות. |
+| The two categories | עכשיו בקבוצה (מבחן קבוצתי שנפתח, פגישה שמתחילה, מפגש למידה) · בשבילך (תשובות בשרשורים שלך, תרגול ששיתפו איתך ומה שהעלית כשהוא מוכן); under them: כניסה עם הקוד האישי תמיד שולחת התראה למכשירים שבהם ההתראות פועלות. ("אליך" is avoided: in full spelling it reads masculine) |
 | The reminder | תזכורת יומית: פעם ביום: מה מחכה לחזרה היום; בשעה {HH:MM} |
-| When not | מתי לא לשלוח: לא לשלוח בלילה ({from}–{to}), לשנות שעות; לא לשלוח בשבת (משישי 16:00 עד מוצאי שבת 20:30) |
-| Why not on this device | באייפון, התראות מגיעות רק כשפותחים את תמצית מהאייקון במסך הבית. · ההתראות חסומות במכשיר הזה. · הדפדפן הזה לא תומך בהתראות. · ההרשמה להתראות לא הצליחה. |
+| When not | מתי לא לשלוח: לא לשלוח בלילה (מ-{from} עד {to}: in words, never "{from}–{to}", which a right-to-left line shows reversed), לשנות שעות; לא לשלוח בשבת (משישי 16:00 עד מוצאי שבת 20:30) |
+| Why not on this device | באייפון (באייפד), התראות מגיעות רק כשפותחים את תמצית מהאייקון במסך הבית. · ההתראות חסומות במכשיר הזה. · הדפדפן הזה לא תומך בהתראות. · ההרשמה להתראות לא הצליחה. |
+| Blocked: where to allow them | באייפון / באייפד: הגדרות ← עדכונים ← תמצית ← אפשר עדכונים. · באנדרואיד (the home-screen app): לחיצה ארוכה על האייקון של תמצית ← פרטי האפליקציה ← התראות ← לאפשר. · בכרום: הסמל שליד הכתובת ← הגדרות אתר ← התראות ← לאפשר. · any other browser: בהגדרות האתר בדפדפן ← התראות ← לאפשר. Each ends: אחר כך חוזרים לכאן. |
+| A device's remove button, for a screen reader | להסיר: {device} (המכשיר הזה) |
 | Today's card, the first launch from the icon | תמצית פתוחה מהאייקון ✓ · עכשיו אפשר גם לקבל התראות: כשמבחן קבוצתי נפתח, כשעונים בשרשור שלך וכשהסיכום מוכן. |
 | After an upload | להודיע כשהסיכום מוכן? · אפשר לבחור מה מקבלים בשלי ← הגדרות התראות. |
 | The asks' buttons | להפעיל התראות · לא עכשיו |
@@ -266,7 +268,9 @@ A notice's own titles and bodies (the lock screen and the inbox) are in
 `shared/study/notifyCopy.ts` `KINDS`, one per kind, pinned by
 `notifyCopy.test.ts` with invented titles: for example "מבחן קבוצתי נפתח עכשיו",
 "תשובה חדשה בשרשור שלך", "הסיכום מוכן", "הפגישה מתחילה בעוד 15 דקות",
-"נכנסו עם הקוד האישי היום ב-{HH:MM}".
+"נכנסו עם הקוד האישי היום, בשעה {HH:MM}" (the time never left alone on a line
+after "ב-"). A kind this build does not know reads "משהו חדש בתמצית", with
+nothing under it on the lock screen.
 
 ### Kept, on purpose
 

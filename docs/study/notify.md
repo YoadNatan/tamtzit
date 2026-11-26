@@ -50,8 +50,15 @@ lock-screen alert.
   the how-to "להפעיל התראות".
 
 The lock screen shows lecture and course titles, never a quiz's title, never
-a name, never the text of a comment, question or summary. The inbox, inside
-the app, adds the quiz's title and who opened it.
+a name, never the text of a comment, question or summary, never a study day's
+own title (it is written freely: the lock screen shows only its time), and
+for a kind this build does not know, only "משהו חדש בתמצית". The inbox,
+inside the app, adds the quiz's title and who opened it. A live notice that
+is over says so in its own words ("הפגישה התקיימה", "הפגישה בוטלה", "ההקראה
+הסתיימה", "מפגש הלמידה התקיים"; a quiz: "הסתיים · לתוצאות"), and a meeting's
+or a reading's row still opens its lecture. A deleted lecture's rows leave
+the inbox at once (they go with it when it is purged), and their waiting
+pushes are not sent.
 
 ## What is sent (the events)
 
@@ -63,9 +70,9 @@ on by default (Yoad, 26 Nov 2026); the reminder is off (19:30 when turned on).
 |---|---|---|---|---|
 | `quiz_open` | live | a group quiz opens (lobby) | everyone but the host | after 15 s, unless the host unchecked "להודיע לקבוצה" or it ended |
 | `boss_open` | live | a group challenge opens | everyone but the host | as a quiz |
-| `meeting_soon` | live | 15 minutes before a meeting (the minute job) | members not already in it | once a meeting |
+| `meeting_soon` | live | 15 minutes before a meeting (the minute job) | members not already in it | once a meeting; one meeting or study day a group per 10 minutes, and a creator per 30 |
 | `reading` | live | someone starts reading aloud | members not in the meeting, not the reader | not after `meeting_soon` was pushed; once a meeting |
-| `session_soon` | live | 30 minutes before a study day | those who said in or maybe | yes |
+| `session_soon` | live | 30 minutes before a study day | those who said in or maybe | as a meeting; the lock screen shows only the time |
 | `reply` / `answer` | mine | a reply in a thread | its opener ("יש תשובה לשאלה שלך" for a question) and earlier repliers | yes; one row a thread, counting |
 | `credit_ask` | mine | a credit asked on a memory aid | the member asked | yes |
 | `dispute` | mine | a dispute about a correction | its proposer | yes |
@@ -74,7 +81,7 @@ on by default (Yoad, 26 Nov 2026); the reminder is off (19:30 when turned on).
 | `summary_ready` / `summary_failed` | mine | a summary is ready or stopped | its uploader | after 90 s (not when the uploader watched it finish); a budget stop once a lecture a month |
 | `exam_ready` / `exam_failed` | mine | a past exam is read, or not | its uploader | after 90 s |
 | `digest` | digest | at the member's hour | those who turned it on | only with something to say: cards due, today's meeting, an exam within 14 days |
-| `code_used` | security | someone signed in with the personal code (the minute scan) | that member | always, at most 3 a day, never to the device that signed in |
+| `code_used` | security | someone signed in with the personal code (the minute scan) | that member | always, at most 3 a day, never to the device that signed in; opening the inbox does not stop it, and devices removed within 10 minutes of the sign-in still get it (kept aside 15 minutes) |
 | `test` | security | "שליחת התראת ניסיון" | that member | after 5 s; never in the inbox |
 | `update`, `edit_wait`, `lecture_new`, `meeting_set` | inapp | "עדכון", a correction waiting, a new summary, a meeting set or moved | its member, or the rest of the group | never |
 | `set_shared`, `similar_ready`, `lab_new` | (reserved) | for packages not built yet | | wired by their packages |
@@ -85,7 +92,8 @@ reminder unless turned on.
 
 **Limits** (Israel day): 6 pushes "בשבילך" and the reminder, 12 in all, 3
 security notices; one quiz push a group per 10 minutes and a host per 30; 60
-a minute in all. Over a limit the notice stays in the inbox. **Quiet hours**
+a minute in all; one meeting or study day a group per 10 minutes and a
+creator per 30. Over a limit the notice stays in the inbox. **Quiet hours**
 23:00-07:30 by default (one switch, the hours can change): "בשבילך" waits for
 the morning, live notices stay in the inbox, the security notice goes
 silently. **Shabbat** (off by default): Friday 16:00 to Saturday 20:30.
@@ -133,6 +141,21 @@ owner's screenshots on real devices.
   `lib/notices.ts` (every member RPC of R), `lib/notify.ts` (the device's
   state, turning on, the re-sync on each open, the kill path, the asks'
   memory), `styles/notify.css`.
+- **A device's subscription** follows its member and its key. It is made
+  only from a tap of the member signed in (another member signing in on the
+  same browser is never subscribed by the re-sync, and the earlier member's
+  subscription is dropped there). The re-sync compares the key the
+  subscription was made with (the browser's own `applicationServerKey`, else
+  the key the device last saved with) to health's key, so a new VAPID pair
+  makes every device subscribe again on its next open; meanwhile the worker
+  skips devices saved with another key's id and reports them gone (410).
+  Section R moves an endpoint saved by another member only with the same keys.
+- **Realtime** carries `study_notices` for the bell (inserts and updates,
+  filtered to the member). Supabase sends DELETE events of a published table
+  (the primary key only) without row security, so anyone subscribed sees the
+  ids and timing of deleted notices; the app does not subscribe to deletes,
+  and nothing else leaks. Accepted for now (a broadcast topic per member would
+  close it).
 
 ## Flags and switches
 
@@ -176,6 +199,9 @@ production database and is never the server's writer.
 | iPhone in Safari, Chrome on iOS, Instagram | the install-first card; the in-app card and "פתיחה בספארי" |
 | Android Chrome (tab, then installed), Samsung Internet | turn on in the tab; a push with the app closed; Chrome's settings path matches `OS.chrome*` |
 | Desktop Chrome, Edge (Windows), Firefox, Safari 18.5 on macOS 15.5 | turn on; a click focuses an open tab and routes in it; the computer's line in the test toast |
-| Two devices, one personal code | both receive; signing out on one stops only that one; signing in on a new device sends "נכנסו עם הקוד האישי" to the other, not to the new one |
+| Two devices, one personal code | both receive; signing out on one stops only that one; signing in on a new device sends "נכנסו עם הקוד האישי" to the other, not to the new one, even after "ניתוק המכשירים האחרים" from the new one |
+| iPhone, from the home-screen icon: Today's card | tapping "להפעיל התראות" on the card shows iOS's own permission sheet (the tap's first call is the question) |
+| Android, the home-screen app, blocked | the blocked card's path (לחיצה ארוכה על האייקון ← פרטי האפליקציה ← התראות) matches the phone (screenshot) |
+| One browser, two members | the second member signing in is not subscribed; the first member's pushes stop on that browser; the second turns them on with a tap |
 | Quiet hours, Shabbat, limits | quiet hours over now: a "בשבילך" notice waits; a quiz stays in the inbox |
 | A deploy while in use | the stale-chunk reload still works; `sw.js` updates (no-cache) |

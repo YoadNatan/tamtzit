@@ -355,3 +355,103 @@ member sees, the events and the device checklist in [`notify.md`](notify.md).
 **Owner steps** for all of notifications: [`RELEASE-R1.md`](RELEASE-R1.md)
 (release point 1: part 9 and `VITE_STUDY_NOTIFY`; 2: the VAPID keys and the
 pilot; 3: the switch on and the WhatsApp line).
+
+### Notifications, the reviews' fixes, built on 26 November 2026
+
+Three reviews of the notifications build (correctness, security and privacy,
+UX) found one bug that mattered and a list of smaller ones. Every finding was
+checked against the code; all were real, and all are fixed here except the
+Realtime DELETE note, which is documented and accepted. Section R stays at
+version 2 (it was never released); part 9 is regenerated (115 KB of 170).
+
+- **A new VAPID key now reaches every device** (correctness "should",
+  security "must"). The device decided whether to subscribe again from its
+  memory of the key, which `wiring()` had already overwritten with the new
+  one, so a device kept its old subscription and the leaked-key runbook did
+  not work. Now `subOnKey()` asks the subscription itself
+  (`options.applicationServerKey`), falling back to `subKeyId`, written only
+  after section R saved the device; `enable()` and `resync()` both use it.
+  As a second guard the claim sends each device's `key_id` and the worker
+  reports a device saved with another key's id as 410 without posting, so
+  section R deletes it. Unit tests (rotation in `resync` and `enable`) and an
+  e2e step (a new key from health: one unsubscribe, one new save with the new
+  id, once). `RELEASE-R1.md`'s leak steps no longer ask members to do
+  anything.
+- **The asks ask from the tap itself** (UX "must"). Today's card and the
+  upload offer awaited a dynamic import before `requestPermission`, which
+  Safari on iOS may refuse outside the gesture. `NotifyParts.tsx` now imports
+  `lib/notify` statically (it is a lazy chunk itself) and `enable()` is the
+  tap's first call, before any await; the settings button too. A device check
+  was added to `notify.md`.
+- **"נכנסו עם הקוד האישי" cannot be silenced by the one it warns about**
+  (security "should"). Opening the inbox no longer drops a security notice's
+  push (neither in `study_notices_seen` nor in the claim). Devices the member
+  removes (this one, another, "ניתוק המכשירים האחרים", or the 10-device cap)
+  within 10 minutes of a sign-in with the code are kept aside for 15 minutes
+  in `study_private.push_removed`, and the notice goes to them too (never to
+  the device that signed in). SQL tests R18e-R18k.
+- **No endpoint takeover** (security "should"): an endpoint another member
+  saved moves to the caller only with the same keys (the same browser
+  subscription); other keys are refused `bad endpoint`. R5 now checks both.
+- **Meetings and study days are throttled like quizzes** (security
+  "should"): one meeting or study day a group per 10 minutes, and a creator
+  per 30 (`study_private.notify_live_by`); the rest stay in the inbox as
+  capped. SQL tests R33b-R33c.
+- **Shared browsers** (security nit): `resync()` keeps only the subscription
+  of the member who turned pushes on there (`uid` in the device's memory).
+  Another member signing in is never subscribed without a tap of their own,
+  and the earlier member's subscription is dropped on that browser (its push
+  service then answers 410). The e2e step "another member on this device" now
+  checks this.
+- **Smaller SQL fixes**: `study_notices_seen` with ids marks them in any of
+  the caller's groups (a push about group B tapped in group A); the three
+  removals need only a signed-in caller (a member of no group can still stop
+  their devices); a soft-deleted lecture's notices leave the inbox and the
+  bell, and their waiting pushes become `none`; a cancelled meeting's rows
+  carry `args.off`; two partial indexes for the minute job
+  (`study_notices_live`, `notify_outbox_lease`); the inbox returns
+  `lecture_id`.
+- **The words** (UX "should"s and nits; all pinned):
+  - Night hours read "(מ-23:00 עד 07:30)" on the switch and in help; a range
+    with a dash showed reversed in a right-to-left line.
+  - "תשובות בשרשורים שלך" instead of "תשובות אליך" (full spelling reads
+    masculine), and no comma before the last ו.
+  - "באייפד" on an iPad.
+  - The blocked card's path by device and browser: the iPhone or iPad
+    Settings path; the Android home-screen app's icon path (unchecked on a
+    device); Chrome's; and a generic line for every other browser.
+  - Ended live rows in their own past tense ("הפגישה התקיימה" / "בוטלה",
+    "ההקראה הסתיימה", "מפגש הלמידה התקיים"), a meeting's or reading's still
+    linked to its lecture.
+  - "לפני דקה" / "לפני {m} דק׳".
+  - "נכנסו עם הקוד האישי היום, בשעה 13:26".
+  - The security line says "למכשירים שבהם ההתראות פועלות".
+  - Help's how-to adds "כשההתראות זמינות בקבוצה".
+- **The lock screen** (security nits; OD11's spirit, owner's call recorded
+  here): a kind this build does not know shows only "משהו חדש בתמצית" (its
+  args' title stays in the inbox); a study day's free-text title is not on
+  the lock screen, only its time.
+- **The screens** (UX): the settings keep their rows' own height
+  (`align-content: start`; the iPad's stretched button); "לשנות שעות" looks
+  like a link row and moves the focus to the first time; each device's
+  remove button is named for its device; another app's browser gets the
+  install screen's "פתיחה ב…" and "העתקת הקישור"; switches say
+  `role="switch"`, a little stronger when disabled in dark mode; the test
+  button says why it rests; an ask card that goes moves the focus to the next
+  heading; sign-out shows "יוצאים…" while the device is removed; the bell
+  has the guide's chip; summaries and past exams get a page icon.
+- **One ask a launch**: Today's notifications card waits while the guide's
+  one-time tour offer is unanswered (it showed both for most current
+  members).
+- **Robustness**: every notify part outside the routed screen has its own
+  ErrorBoundary that shows nothing (the bell's chunk failing no longer blanks
+  a tab screen); the settings read with a `select` under the select-own
+  policy instead of an empty write; `/api/study/health` checks the VAPID pair
+  once per instance and keys.
+- **Budget** (correctness nit): a reservation picks the rate card as if the
+  prompt were a fifth longer (`RESERVE_MARGIN` 1.2), so a prompt estimated
+  just under Haiku 5.5's 100k line is reserved at the dearer card.
+- **Documented, not changed**: Supabase Realtime sends DELETE events of
+  `study_notices` (ids only) without row security; the app subscribes to
+  inserts and updates only (`notify.md`). `study_site_url` must be the exact
+  address members open (`RELEASE-R1.md`).
