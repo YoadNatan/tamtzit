@@ -106,6 +106,12 @@ export function askPlan(lectureId: string, options?: Partial<Options>): Promise<
   return action<PlanAnswer>({ action: "plan", lectureId, ...(options ? { options } : {}) });
 }
 
+/** "סט חדש"'s planning inputs with the same answer (`inputs`: the points, the
+ *  bank's coverage, the headroom and the prices; practice sets D13). Free. */
+export function askPlanInputs(lectureId: string, options?: Partial<Options>): Promise<PlanAnswer> {
+  return action<PlanAnswer>({ action: "plan", lectureId, inputs: true, ...(options ? { options } : {}) });
+}
+
 type StreamOpts = { signal?: AbortSignal; open?: () => void };
 
 /** Reads the summary's points to know (only its stale parts, for the whole

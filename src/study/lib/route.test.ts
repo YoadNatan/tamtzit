@@ -73,8 +73,9 @@ const VALID: Record<string, (x: string, v: string) => boolean> = {
   preset: (x) => ["end", "coffee", "stop"].includes(x),
   pf: (x) => /^\d{1,3}$/.test(x) && Number(x) <= 199,
   pt: (x) => /^\d{1,3}$/.test(x) && Number(x) <= 199,
-  x: (x, v) => (v === "wall" ? ["drafts", "post", "moment"].includes(x) : v === "practice" ? ["new", "example", "bank", "round"].includes(x) : v === "notify" ? x === "set" : x === "danger"),
+  x: (x, v) => (v === "wall" ? ["drafts", "post", "moment"].includes(x) : v === "practice" ? ["new", "example", "bank", "round", "review"].includes(x) : v === "notify" ? x === "set" : x === "danger"),
   r: UUID,
+  from: (x) => x === "m",
   lane: (x) => ["group", "mine"].includes(x),
   d: (x, v) => (v === "wall" ? x.length <= 60 : v === "plan" ? /^\d{4}-\d{2}-\d{2}$/.test(x) : UUID(x)),
 };
@@ -82,7 +83,7 @@ const VALID: Record<string, (x: string, v: string) => boolean> = {
 const PARAMS: Record<string, string[]> = {
   today: ["run"],
   lecture: ["l", "at", "slide", "mk", "read", "follow"],
-  practice: ["l", "s", "n", "x", "r"],
+  practice: ["l", "s", "n", "x", "r", "from"],
   exams: ["e", "c", "new"],
   mock: ["c", "e"],
   quiz: ["q", "l", "c", "new", "mk", "m", "preset", "pf", "pt"],
@@ -171,6 +172,9 @@ const ALL_ROUTES: Route[] = [
   { v: "practice", l: ID, x: "new" },
   { v: "practice", l: ID, x: "example" },
   { v: "practice", l: ID, x: "bank", r: ID2 },
+  { v: "practice", l: ID, x: "review", r: ID2 }, // the drafts one by one (practice sets keep it)
+  { v: "practice", x: "new" }, // practice sets: "סט חדש" picks the lecture
+  { v: "practice", l: ID, x: "new", from: "m" }, // and from the mistakes
   { v: "practice", l: ID, x: "round" },
   { v: "practice", l: ID, s: `l.${ID}`, n: "5" },
   { v: "exams", e: ID, c: "פרמקולוגיה", isNew: true },
@@ -250,7 +254,11 @@ test("old forms, bad ids, dates, slides and values are dropped, and land somewhe
   assert.deepEqual(parseRoute(`?v=practice&s=${"x".repeat(201)}`), { v: "practice" }, "s is at most 200 characters");
   assert.deepEqual(parseRoute(`?v=practice&n=15`), { v: "practice" });
   // practice 2.0's steps (x): one of four, only with a lecture and without a session; r only on the bank
-  assert.deepEqual(parseRoute(`?v=practice&x=new`), { v: "practice" }, "a step needs its lecture");
+  assert.deepEqual(parseRoute(`?v=practice&x=bank`), { v: "practice" }, "a step needs its lecture");
+  assert.deepEqual(parseRoute(`?v=practice&x=new`), { v: "practice", x: "new" }, "but practice sets' create screen picks one");
+  assert.deepEqual(parseRoute(`?v=practice&l=${ID}&x=review&r=${ID2}`), { v: "practice", l: ID, x: "review", r: ID2 }, "the drafts one by one");
+  assert.deepEqual(parseRoute(`?v=practice&l=${ID}&x=round&from=m`), { v: "practice", l: ID, x: "round" }, "from is only the create screen's");
+  assert.deepEqual(parseRoute(`?v=practice&l=${ID}&x=new&from=x`), { v: "practice", l: ID, x: "new" }, "from is only m");
   assert.deepEqual(parseRoute(`?v=practice&l=${ID}&x=later`), { v: "practice", l: ID });
   assert.deepEqual(parseRoute(`?v=practice&l=${ID}&x=round&s=l.${ID}`), { v: "practice", l: ID, s: `l.${ID}` }, "a session wins over a step");
   assert.deepEqual(parseRoute(`?v=practice&l=${ID}&x=new&r=${ID2}`), { v: "practice", l: ID, x: "new" }, "r is the bank's request");
@@ -296,6 +304,8 @@ test("tabOf: the spec's four tabs, Today's set, and immersive screens with none"
     [{ v: "practice", s: "m" }, null, null],
     [{ v: "practice", l: ID, x: "new" }, null, null],
     [{ v: "practice", l: ID, x: "bank", r: ID2 }, null, null],
+    [{ v: "practice", l: ID, x: "review", r: ID2 }, null, null],
+    [{ v: "practice", x: "new" }, null, null],
     [{ v: "practice", l: ID, x: "round" }, null, null],
     [{ v: "exams" }, "practice", "today"],
     [{ v: "exams", isNew: true }, null, null],
@@ -417,6 +427,9 @@ const SAMPLES: Array<[Route, (f: Flags) => boolean]> = [
   [{ v: "practice", l: ID, x: "new" }, (f) => f.questions],
   [{ v: "practice", l: ID, x: "example" }, (f) => f.questions],
   [{ v: "practice", l: ID, x: "bank", r: ID2 }, (f) => f.questions],
+  [{ v: "practice", l: ID, x: "review", r: ID2 }, (f) => f.questions],
+  [{ v: "practice", x: "new" }, (f) => f.make],
+  [{ v: "practice", l: ID, x: "new", from: "m" }, (f) => f.make],
   [{ v: "practice", l: ID, x: "round" }, (f) => f.practice],
   [{ v: "exams" }, (f) => f.exams],
   [{ v: "exams", e: ID }, (f) => f.exams],
@@ -786,4 +799,28 @@ test("?v=notify: the inbox and its settings with the flag; without it, the home,
   assert.equal(routeUrl({ v: "notify", x: "set" }), "/?v=notify&x=set");
   assert.equal(BACK_LABEL.notify, "→ להתראות");
   assert.equal(tabOf({ v: "notify" }, on), null, "a screen with a back arrow");
+});
+
+test("VITE_STUDY_MAKE: practice sets' generator, on practice, with no SQL section of its own", () => {
+  const base = { VITE_STUDY_QUESTIONS: "1", VITE_STUDY_PRACTICE: "1", VITE_STUDY_NOTIFY: "1" };
+  const off = flagsFrom(base);
+  const on = flagsFrom({ ...base, VITE_STUDY_MAKE: "1" });
+  assert.equal(off.make, false);
+  assert.equal(on.make, true);
+  assert.deepEqual({ ...on, make: false }, off, "it changes nothing else");
+  assert.deepEqual(requiredSchema(on), requiredSchema(off), "no SQL: practice 2.0's actions");
+  assert.equal(flagsFrom({ VITE_STUDY_MAKE: "1" }).make, false, "it needs practice");
+  assert.equal(flagsFrom({ VITE_STUDY_QUESTIONS: "1", VITE_STUDY_MAKE: "1" }).make, false);
+  // "סט חדש" without a lecture, and from the mistakes: only with the flag.
+  assert.deepEqual(allowed({ v: "practice", x: "new" }, on), { route: { v: "practice", x: "new" } });
+  assert.deepEqual(allowed({ v: "practice", l: ID, x: "new", from: "m" }, on), { route: { v: "practice", l: ID, x: "new", from: "m" } });
+  assert.deepEqual(allowed({ v: "practice", x: "new" }, off), { route: { v: "practice" }, notice: NOTICE.off }, "the hub");
+  assert.deepEqual(allowed({ v: "practice", l: ID, x: "new", from: "m" }, off), { route: { v: "practice", l: ID, x: "new" }, notice: NOTICE.off }, "the old setup");
+  assert.deepEqual(allowed({ v: "practice", l: ID, x: "new" }, off), { route: { v: "practice", l: ID, x: "new" } }, "a lecture's setup is today's");
+  assert.equal(routeUrl({ v: "practice", l: ID, x: "new", from: "m" }), `/?v=practice&l=${ID}&x=new&from=m`);
+  assert.equal(routeUrl({ v: "practice", x: "new" }), "/?v=practice&x=new");
+  // No tab of its own (OD1): the tab bar is the same with the flag.
+  const today = flagsFrom({ ...base, VITE_STUDY_TODAY: "1" });
+  assert.deepEqual(tabLinks(flagsFrom({ ...base, VITE_STUDY_TODAY: "1", VITE_STUDY_MAKE: "1" })), tabLinks(today));
+  assert.equal(tabOf({ v: "practice", x: "new" }, on), null, "an immersive screen");
 });

@@ -29,11 +29,14 @@ export type Route =
   | { v: "upload"; c?: string; many?: true } // c: the course's id (sources.md, phase 1); many: "העלאה של כמה קבצים"
   | { v: "help" } // #howto scrolls to the guide's "איך עושים…?"
   | { v: "lecture"; l: string; at?: At; slide?: number; mk?: string; read?: true; follow?: true }
-  | { v: "practice"; l?: string; s?: string; n?: "5" | "10" | "20" | "all"; x?: PracticeStep; r?: string }
+  | { v: "practice"; l?: string; s?: string; n?: "5" | "10" | "20" | "all"; x?: PracticeStep; r?: string; from?: "m" }
   //   s: l.<lecture> · c.<course> · m (my mistakes) · m.<lecture> · t.<topic key> · e.<exam> · q.<quiz> (a live quiz's questions)
   //      · p.<lecture>.<part>.<anchor> (N: a paragraph's questions) · b.<lecture>.<slide> (E: a blank table) · r.<group> (Q-2: another wording)
   //      · x.<attempt> (a simulation: its clock, its grid, its result) · w.<attempt> (a simulation's mistakes, asked again)
   //   x (practice 2.0, with l): new (מה ליצור) · example (דוגמה ומיקוד) · bank (הבנק נבנה, r: the request) · round (סבב חדש)
+  //      · review (the request's drafts one by one, r: the request; practice sets keep it while bank is "סט בהכנה").
+  //      Practice sets (flags.make): new is "סט חדש", also without l (the screen picks the lecture);
+  //      from=m (with new): the member's mistakes' parts prefilled
   | { v: "exams"; e?: string; c?: string; isNew?: true }
   | { v: "quiz"; q?: string; l?: string; c?: string; isNew?: true; mk?: string; m?: string; preset?: "end" | "coffee" | "stop"; pf?: number; pt?: number } // m, preset, pf, pt: Z/M, from a meeting or a part range
   | { v: "cards"; l?: string; s?: string } // s: today · l.<lecture> · c.<course>
@@ -66,7 +69,7 @@ export const COURSE_SEGS = ["exams", "lectures", "made"] as const;
 export type CourseSeg = (typeof COURSE_SEGS)[number];
 
 /** Practice 2.0's screens of a lecture (docs/study/proposal/practice-2/mockups.html). */
-export const PRACTICE_STEPS = ["new", "example", "bank", "round"] as const;
+export const PRACTICE_STEPS = ["new", "example", "bank", "round", "review"] as const;
 export type PracticeStep = (typeof PRACTICE_STEPS)[number];
 
 const UUID = "[0-9a-f-]{36}";
@@ -158,15 +161,18 @@ export function parseRoute(search: string, _hash?: string): Route {
     case "practice": {
       const n = g("n");
       const l = id(g("l"));
-      // A step names a lecture's screen: without the lecture it is dropped, and a session (s) wins.
-      const x = l && !g("s") ? oneOf(g("x"), PRACTICE_STEPS) : undefined;
+      // A step names a lecture's screen: without the lecture it is dropped (but "new":
+      // practice sets' create screen picks the lecture), and a session (s) wins.
+      const step = g("s") ? undefined : oneOf(g("x"), PRACTICE_STEPS);
+      const x = l ? step : step === "new" ? step : undefined;
       return clean({
         v: "practice",
         l,
         s: sessionKey(g("s")),
         n: n === "5" || n === "10" || n === "20" || n === "all" ? n : undefined,
         x,
-        r: x === "bank" ? id(g("r")) : undefined,
+        r: x === "bank" || x === "review" ? id(g("r")) : undefined,
+        from: x === "new" ? oneOf(g("from"), ["m"] as const) : undefined,
       });
     }
     case "exams":
@@ -290,6 +296,7 @@ export function routeUrl(r: Route): string {
       put("n", r.n);
       put("x", r.x);
       put("r", r.r);
+      put("from", r.from);
       break;
     case "exams":
       put("v", r.v);
@@ -494,6 +501,9 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
       }
       // סבב חדש starts a session: with practice off, the lecture's practice. Creating questions needs only `questions`.
       if (r.x === "round" && !f.practice) return off(practiceOf(r.l));
+      // "סט חדש" without a lecture, or from the mistakes, is practice sets' (flags.make):
+      // without them, the hub, or the lecture's old setup.
+      if (r.x === "new" && !f.make && (!r.l || r.from)) return off(r.l ? { v: "practice", l: r.l, x: "new" } : { v: "practice" });
       if (!r.s) return ok;
       const l = r.l ?? lectureOfKey(r.s);
       if (!f.practice) return off(practiceOf(l));

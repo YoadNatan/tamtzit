@@ -84,6 +84,12 @@ export function flagsFrom(e: Record<string, unknown>) {
     // Section R at 1; sending is decided on the server (the switches
     // `notify` and `notify_hooks`, and the VAPID keys).
     notify: on(e.VITE_STUDY_NOTIFY),
+    // Practice sets, slice A (docs/study/sets.md): one create screen, "סט
+    // חדש", with the price on its button, and the generating screen, "סט
+    // בהכנה". The server's actions are practice 2.0's, so it needs no SQL
+    // section (requiredSchema is unchanged); without it, practice 2.0's
+    // three-screen generator (kept one release, OD22).
+    make: practice && on(e.VITE_STUDY_MAKE),
   } as const;
 }
 
@@ -165,7 +171,8 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     // simulation (phase 2): S at 2, which has S 1 in it.
     ...(f.courses ? { S: 1 } : {}),
     ...(f.exams ? { S: 2 } : {}),
-    // f.guide and f.install need nothing: both keep their memory on the device.
+    // f.guide and f.install need nothing: both keep their memory on the device,
+    // and f.make neither: its screens call practice 2.0's actions (Q 2).
     // Notifications: the inbox, the devices and the settings are section R's.
     ...(f.notify ? { R: 1 } : {}),
   };
