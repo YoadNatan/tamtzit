@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { FSI, PDI } from "./bidiText.js";
-import { BODY_MAX, catOf, cut, FALLBACK_TITLE, KINDS, render, TITLE_MAX, type Surface } from "./notifyCopy.js";
+import { BODY_MAX, catOf, cut, FALLBACK_TITLE, KINDS, overTitle, render, TITLE_MAX, type Surface } from "./notifyCopy.js";
 
 // Invented titles and names only (no course material).
 const NOW = Date.parse("2026-11-26T12:00:00Z"); // 14:00 in Israel
@@ -20,7 +20,8 @@ const PINNED: Array<[string, Record<string, unknown>, number, Surface, string, s
   ["meeting_soon", { lecture: L, at: "2026-11-26T16:00:00Z" }, 1, "lock", "הפגישה מתחילה בעוד 15 דקות", `${L} · 18:00`],
   ["reading", { lecture: L, name: "נועה" }, 1, "lock", "ההקראה התחילה", `${L} · אפשר להצטרף`],
   ["reading", { lecture: L, name: "נועה" }, 1, "inbox", "ההקראה התחילה", `${L} · מקריאים עכשיו: נועה`],
-  ["session_soon", { title: "מפגש בדוי", at: "18:30" }, 1, "lock", "מפגש הלמידה מתחיל בעוד 30 דקות", "מפגש בדוי · 18:30"],
+  ["session_soon", { title: "מפגש בדוי", at: "18:30" }, 1, "lock", "מפגש הלמידה מתחיל בעוד 30 דקות", "18:30"],
+  ["session_soon", { title: "מפגש בדוי", at: "18:30" }, 1, "inbox", "מפגש הלמידה מתחיל בעוד 30 דקות", "מפגש בדוי · 18:30"],
   ["reply", { lecture: L, part: 3 }, 1, "lock", "תשובה חדשה בשרשור שלך", `${L} · חלק 3`],
   ["reply", { lecture: L, part: 3 }, 2, "lock", "2 תשובות חדשות בשרשור שלך", `${L} · חלק 3`],
   ["reply", { lecture: L, part: 3 }, 11, "inbox", "11 תשובות חדשות בשרשור שלך", `${L} · חלק 3`],
@@ -42,9 +43,9 @@ const PINNED: Array<[string, Record<string, unknown>, number, Surface, string, s
   ["digest", { cards: 11, course: "Invented Kinetics", days: 4 }, 1, "lock", "היום בתמצית", `11 כרטיסיות לחזרה · המבחן ב-${FSI}Invented Kinetics${PDI} בעוד 4 ימים`],
   ["digest", { cards: 2, course: "קורס בדוי", days: 0 }, 1, "lock", "היום בתמצית", "2 כרטיסיות לחזרה · המבחן בקורס בדוי היום"],
   ["digest", {}, 1, "lock", "היום בתמצית", ""],
-  ["code_used", { at: "2026-11-26T09:05:00Z" }, 1, "lock", "נכנסו עם הקוד האישי היום ב-11:05", "אם זה המכשיר שלך, אין מה לעשות. אם לא: שלי ← ניתוק המכשירים האחרים"],
-  ["code_used", { at: "2026-11-25T21:30:00Z" }, 1, "lock", "נכנסו עם הקוד האישי אתמול ב-23:30", "אם זה המכשיר שלך, אין מה לעשות. אם לא: שלי ← ניתוק המכשירים האחרים"],
-  ["code_used", { at: "2026-11-20T10:00:00Z" }, 1, "lock", "נכנסו עם הקוד האישי ב-20.11 ב-12:00", "אם זה המכשיר שלך, אין מה לעשות. אם לא: שלי ← ניתוק המכשירים האחרים"],
+  ["code_used", { at: "2026-11-26T09:05:00Z" }, 1, "lock", "נכנסו עם הקוד האישי היום, בשעה 11:05", "אם זה המכשיר שלך, אין מה לעשות. אם לא: שלי ← ניתוק המכשירים האחרים"],
+  ["code_used", { at: "2026-11-25T21:30:00Z" }, 1, "lock", "נכנסו עם הקוד האישי אתמול, בשעה 23:30", "אם זה המכשיר שלך, אין מה לעשות. אם לא: שלי ← ניתוק המכשירים האחרים"],
+  ["code_used", { at: "2026-11-20T10:00:00Z" }, 1, "lock", "נכנסו עם הקוד האישי ב-20.11, בשעה 12:00", "אם זה המכשיר שלך, אין מה לעשות. אם לא: שלי ← ניתוק המכשירים האחרים"],
   ["code_used", {}, 1, "lock", "נכנסו עם הקוד האישי", "אם זה המכשיר שלך, אין מה לעשות. אם לא: שלי ← ניתוק המכשירים האחרים"],
   ["test", {}, 1, "lock", "התראת ניסיון", "ככה ייראו ההתראות מתמצית"],
   ["update", { lecture: L }, 1, "inbox", "תיקון הגיע לשורה שלמדת", L],
@@ -52,6 +53,8 @@ const PINNED: Array<[string, Record<string, unknown>, number, Surface, string, s
   ["lecture_new", { lecture: L }, 1, "inbox", "סיכום חדש בספרייה", L],
   ["meeting_set", { lecture: L, at: "2026-12-01T16:00:00Z" }, 1, "inbox", "נקבעה פגישה", `${L} · יום ג׳ 18:00`],
   ["mystery", { title: "כותרת בדויה" }, 1, "inbox", FALLBACK_TITLE, "כותרת בדויה"],
+  ["mystery", { title: "כותרת בדויה" }, 1, "lock", FALLBACK_TITLE, ""],
+  ["set_shared", { title: "כותרת בדויה" }, 1, "lock", FALLBACK_TITLE, ""],
   ["summary_ready", { lecture: "הרצאה בדויה על Invented Kinetics" }, 1, "lock", "הסיכום מוכן", `הרצאה בדויה על ${FSI}Invented Kinetics${PDI}`],
   ["meeting_soon", { lecture: "Invented Kinetics", at: "2026-07-01T15:00:00Z" }, 1, "lock", "הפגישה מתחילה בעוד 15 דקות", `${FSI}Invented Kinetics${PDI} · 18:00`],
 ];
@@ -73,9 +76,11 @@ test("the lock screen never shows a quiz's title or a name", () => {
     const { title, body } = render(kind, secret, 1, "lock", NOW);
     for (const s of [title, body]) {
       assert.ok(!s.includes("שם סודי"), `${kind}: a name on the lock screen`);
-      if (kind !== "session_soon") assert.ok(!s.includes("כותרת סודית"), `${kind}: a title on the lock screen`);
+      assert.ok(!s.includes("כותרת סודית"), `${kind}: a title on the lock screen`);
     }
   }
+  // A kind this build does not know (a later package's, wired before its words ship): the title, never its args.
+  for (const kind of ["set_shared", "similar_ready", "lab_new", "mystery"]) assert.deepEqual(render(kind, secret, 1, "lock", NOW), { title: FALLBACK_TITLE, body: "" }, kind);
   // The inbox, inside the app, may show them.
   assert.match(render("quiz_open", secret, 1, "inbox", NOW).body, /כותרת סודית · שם סודי ועוד 4 בפנים/);
 });
@@ -98,6 +103,18 @@ test("every kind fits: title within 60, body within 120, on both surfaces, with 
       }
     }
   }
+});
+
+test("a live notice that is over: its own past tense (a cancelled meeting says so); a quiz keeps its title", () => {
+  assert.equal(overTitle("meeting_soon", { lecture: L }), "הפגישה התקיימה");
+  assert.equal(overTitle("meeting_soon", { lecture: L, off: true }), "הפגישה בוטלה");
+  assert.equal(overTitle("reading", {}), "ההקראה הסתיימה");
+  assert.equal(overTitle("session_soon", { title: "x" }), "מפגש הלמידה התקיים");
+  assert.equal(overTitle("quiz_open", {}), null);
+  assert.equal(overTitle("boss_open", {}), null);
+  assert.equal(overTitle("reply", {}), null);
+  assert.equal(overTitle("mystery", null), null);
+  for (const kind of Object.keys(KINDS)) if (KINDS[kind].over) assert.equal(KINDS[kind].cat, "live", kind);
 });
 
 test("a stop for the budget or the day's limit never invites a retry that cannot work", () => {

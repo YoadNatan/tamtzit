@@ -6,6 +6,7 @@
 
 .ph-head .bell {
   position: relative;
+  isolation: isolate;
   flex: none;
   display: inline-grid;
   place-items: center;
@@ -14,6 +15,16 @@
   border-radius: 50%;
   color: var(--ink);
   text-decoration: none;
+}
+/* The same chip as the guide's "?" beside it (kit.css .guide-btn). */
+.ph-head .bell::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--line);
 }
 @media (hover: hover) {
   .ph-head .bell:hover {
@@ -137,10 +148,15 @@ a.inbox-row {
 }
 .notify-set {
   display: grid;
+  align-content: start; /* main is at least a screen tall: the rows keep their own height */
   gap: var(--sp-6);
 }
 .ntf-device {
+  align-content: start;
   justify-items: start;
+}
+.ntf-test-wait {
+  margin: 0;
 }
 .ntf-device .ntf-h {
   margin: 0;
@@ -178,6 +194,11 @@ a.inbox-row {
 .ntf-switch input:disabled {
   opacity: 0.5;
 }
+@media screen and (prefers-color-scheme: dark) {
+  .ntf-switch input:disabled {
+    opacity: 0.7;
+  }
+}
 .ntf-applies {
   margin: 0;
 }
@@ -192,13 +213,22 @@ a.inbox-row {
   gap: var(--sp-4);
 }
 .ntf-change {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
   width: 100%;
   border: 0;
   background: none;
   font: inherit;
-  color: inherit;
+  color: var(--accent);
+  font-weight: 700;
   text-align: start;
   cursor: pointer;
+}
+.ntf-chev {
+  font-size: 1.25rem;
+  line-height: 1;
 }
 .ntf-change:disabled {
   color: var(--muted);

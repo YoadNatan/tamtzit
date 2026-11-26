@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { render } from "../../../shared/study/notifyCopy";
+import { overTitle, render } from "../../../shared/study/notifyCopy";
 import { routeQuery } from "../../../shared/study/notifyRoute";
 import type { ScreenProps } from "../features/types";
 import { flags } from "../lib/flags";
@@ -15,7 +15,9 @@ import "../styles/notify.css";
  * first, 30 days back, 50 a page. Opening it marks every one seen (the bell
  * goes to 0); the dots stay for this visit. A tap goes where the notice
  * points. A live notice that is over says so: a group quiz's links to its
- * results, any other has no link. A notice that comes while the inbox is
+ * results ("הסתיים · לתוצאות"); a meeting, a reading or a study day says it
+ * in its own past tense ("הפגישה התקיימה", or "בוטלה"), a meeting's or a
+ * reading's linked to its lecture. A notice that comes while the inbox is
  * open joins the top of the list, seen at once. A gear opens the settings
  * (x=set, NotifyScreen.tsx) when pushes are offered to this member. */
 
@@ -29,9 +31,17 @@ function targetOf(n: Notice): Route {
 /** A live notice whose time is over (a quiz ended, a meeting done). */
 const isOver = (n: Notice, now: number) => n.cat === "live" && n.ends_at !== null && Date.parse(n.ends_at) < now;
 const QUIZ_KINDS = new Set(["quiz_open", "boss_open"]);
+/** Notices about something written (a summary, a past exam): a page, not a speech bubble. */
+const DOC_KINDS = new Set(["summary_ready", "summary_failed", "exam_ready", "exam_failed", "lecture_new"]);
 
 /** A small icon by the notice's category (decoration: the words say it all). */
-function Icon({ cat }: { cat: Notice["cat"] }) {
+function Icon({ cat, kind }: { cat: Notice["cat"]; kind: string }) {
+  const doc = (
+    <>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6M8 13h8M8 17h5" />
+    </>
+  );
   const path: Record<Notice["cat"], ReactNode> = {
     live: (
       <>
@@ -61,7 +71,7 @@ function Icon({ cat }: { cat: Notice["cat"] }) {
   };
   return (
     <svg className="inbox-ic" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {path[n2cat(cat)]}
+      {DOC_KINDS.has(kind) ? doc : path[n2cat(cat)]}
     </svg>
   );
 }
@@ -71,13 +81,16 @@ function Row({ n, fresh, now, go }: { n: Notice; fresh: boolean; now: number; go
   const over = isOver(n, now);
   const quiz = QUIZ_KINDS.has(n.kind);
   const r = render(n.kind, n.args, n.count, "inbox", now);
-  // An ended quiz: "מבחן קבוצתי נפתח", and its results.
-  const title = over ? r.title.replace(/\s*עכשיו$/, "") : r.title;
-  const sub = over ? (quiz ? `${NT.inbox.ended} · ${NT.inbox.results}` : NT.inbox.ended) : r.body;
+  // Over: a quiz is "מבחן קבוצתי נפתח" with its results; the others say it in their own past tense.
+  const past = over ? overTitle(n.kind, n.args, now) : null;
+  const title = past ?? (over ? r.title.replace(/\s*עכשיו$/, "") : r.title);
+  const sub = over ? (quiz ? `${NT.inbox.ended} · ${NT.inbox.results}` : past ? r.body : NT.inbox.ended) : r.body;
+  // Where an ended row still leads: a quiz to its results, a meeting's or a reading's to its lecture.
+  const to: Route | null = !over || quiz ? targetOf(n) : (n.kind === "meeting_soon" || n.kind === "reading") && n.lecture_id ? { v: "lecture", l: n.lecture_id } : null;
   const body = (
     <>
       {fresh ? <span className="inbox-dot" aria-hidden="true" /> : null}
-      <Icon cat={n.cat} />
+      <Icon cat={n.cat} kind={n.kind} />
       <span className="inbox-main">
         <span className="inbox-t">
           {title}
@@ -91,7 +104,7 @@ function Row({ n, fresh, now, go }: { n: Notice; fresh: boolean; now: number; go
     </>
   );
   const cls = `inbox-row${fresh ? " unseen" : ""}`;
-  return <li>{over && !quiz ? <div className={cls}>{body}</div> : <RouteLink to={targetOf(n)} go={go} className={cls}>{body}</RouteLink>}</li>;
+  return <li>{to ? <RouteLink to={to} go={go} className={cls}>{body}</RouteLink> : <div className={cls}>{body}</div>}</li>;
 }
 
 export default function InboxScreen({ ctx }: ScreenProps<"notify">) {

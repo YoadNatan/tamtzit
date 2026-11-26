@@ -3,9 +3,10 @@ import type { ScreenProps } from "../features/types";
 import { flags } from "../lib/flags";
 import { guideMark } from "../lib/guideMark";
 import { detect, isIos, probe } from "../lib/install";
-import { devices as listDevices, readPrefs, removeDevice, savePrefs, sendTest, type Device, type Prefs } from "../lib/notices";
-import { available, enable, isComputer, readState, registerWorker, removeThisDevice, thisEndpoint, type PushState } from "../lib/notify";
-import { dayMonth, deniedChrome, deniedIos, deviceName, enabledToast, halfHours, inApp, iosOld, NT, quietRow, since } from "../lib/notifyText";
+import { DEFAULT_PREFS, devices as listDevices, readPrefs, removeDevice, savePrefs, sendTest, type Device, type Prefs } from "../lib/notices";
+import { available, deviceOf, enable, isComputer, readState, registerWorker, removeThisDevice, thisEndpoint, type PushState } from "../lib/notify";
+import { dayMonth, deniedWords, deviceName, enabledToast, halfHours, inApp, iosOld, NT, quietRow, since } from "../lib/notifyText";
+import { EscapeButtons } from "./InstallParts";
 import { BackLink, Head, Loading, RouteLink } from "./Shell";
 import "../styles/notify.css";
 
@@ -20,7 +21,6 @@ import "../styles/notify.css";
  * and, with two devices or more, the devices. A switch saves at once and
  * goes back when the save fails. The words: lib/notifyText.ts. */
 
-const DEFAULT_PREFS: Prefs = { live: true, mine: true, digest: false, digest_at: "19:30", quiet: true, quiet_from: "23:00", quiet_to: "07:30", shabbat: false };
 const TEST_REST_MS = 20_000;
 
 /** A save's failure, in words. */
@@ -36,6 +36,7 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
   const [hours, setHours] = useState(false);
   const [testUntil, setTestUntil] = useState(0);
   const status = useRef<HTMLParagraphElement>(null);
+  const fromSel = useRef<HTMLSelectElement>(null);
   // The app's go(), read when needed: the checks below run once per group, not on every new ctx.
   const go = useRef(ctx.go);
   go.current = ctx.go;
@@ -85,8 +86,10 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
       setState("offline");
       return;
     }
+    // The browser's question is the tap's first call (Safari asks only inside the tap).
+    const asked = enable(key.key, key.keyId, ctx.userId);
     setBusy(true);
-    void enable(key.key, key.keyId).then(async (s) => {
+    void asked.then(async (s) => {
       setState(s);
       setBusy(false);
       if (s === "on") {
@@ -103,7 +106,7 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
     try {
       await sendTest();
       const p = probe();
-      ctx.say(isComputer(detect(p), p.ua) ? `${NT.device.testToast} ${NT.device.testDesktop}` : NT.device.testToast);
+      ctx.say(isComputer(detect(p), p.ua, navigator.maxTouchPoints ?? 0) ? `${NT.device.testToast} ${NT.device.testDesktop}` : NT.device.testToast);
     } catch (e) {
       ctx.say(e instanceof Error && e.message === "too many" ? NT.device.testMany : failed());
     }
@@ -146,7 +149,10 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
 
   const working = state === "on" || devs.length > 0;
   const p = prefs ?? DEFAULT_PREFS;
-  const ios = isIos(env) || /iPhone|iPad|iPod/.test(probe().ua);
+  const ua = probe().ua;
+  const dev = deviceOf(ua, typeof navigator !== "undefined" ? navigator.maxTouchPoints ?? 0 : 0);
+  // An iPad's home-screen app says "Macintosh": deviceOf tells it by touch.
+  const ios = isIos(env) || dev.device === "iphone" || dev.device === "ipad";
   let card: ReactNode;
   switch (state) {
     case "on":
@@ -155,9 +161,14 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
           <p className="ntf-status ok" ref={status} tabIndex={-1} role="status">
             {NT.device.on}
           </p>
-          <button type="button" className="a-btn ntf-test" disabled={testUntil > 0} onClick={() => void test()}>
+          <button type="button" className="a-btn ntf-test" disabled={testUntil > 0} aria-describedby={testUntil > 0 ? "ntf-test-wait" : undefined} onClick={() => void test()}>
             {NT.device.test}
           </button>
+          {testUntil > 0 ? (
+            <p id="ntf-test-wait" className="a-small a-muted ntf-test-wait">
+              {NT.device.testWait}
+            </p>
+          ) : null}
         </>
       );
       break;
@@ -165,7 +176,7 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
       card = (
         <>
           <p className="ntf-status" ref={status} tabIndex={-1}>
-            {NT.device.iosInstall}
+            {dev.device === "ipad" ? NT.device.iosInstallIpad : NT.device.iosInstall}
           </p>
           {flags.install ? (
             <RouteLink to={{ v: "install" }} go={ctx.go} className="a-btn primary ntf-install">
@@ -178,9 +189,12 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
       break;
     case "inapp":
       card = (
-        <p className="ntf-status" ref={status} tabIndex={-1}>
-          {inApp(env.kind === "ios-inapp" || env.kind === "android-inapp" ? env.app : "other", ios)}
-        </p>
+        <>
+          <p className="ntf-status" ref={status} tabIndex={-1}>
+            {inApp(env.kind === "ios-inapp" || env.kind === "android-inapp" ? env.app : "other", ios)}
+          </p>
+          <EscapeButtons env={env} />
+        </>
       );
       break;
     case "ios-old":
@@ -203,7 +217,7 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
           <p className="ntf-status warn" ref={status} tabIndex={-1} role="status">
             {NT.device.denied}
           </p>
-          <p className="a-small">{ios ? deniedIos() : deniedChrome()}</p>
+          <p className="a-small">{deniedWords({ device: dev.device, browser: dev.browser, app: env.kind === "standalone" })}</p>
         </>
       );
       break;
@@ -252,11 +266,11 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
         <b>{title}</b>
         <span className="m">{desc}</span>
       </span>
-      <input type="checkbox" name={k} checked={p[k]} disabled={off} onChange={(e) => void save({ [k]: e.target.checked })} />
+      <input type="checkbox" role="switch" name={k} checked={p[k]} disabled={off} onChange={(e) => void save({ [k]: e.target.checked })} />
     </label>
   );
   const select = (k: "digest_at" | "quiet_from" | "quiet_to", label: string, options: string[]) => (
-    <select className="a-input ntf-time" name={k} aria-label={label} value={p[k]} disabled={off} dir="ltr" onChange={(e) => void save({ [k]: e.target.value })}>
+    <select ref={k === "quiet_from" ? fromSel : undefined} className="a-input ntf-time" name={k} aria-label={label} value={p[k]} disabled={off} dir="ltr" onChange={(e) => void save({ [k]: e.target.value })}>
       {options.map((t) => (
         <option key={t} value={t}>
           {t}
@@ -302,8 +316,10 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
         <div className="a-list settings">
           {toggle(
             "quiet",
+            // In words, as the hours below: "(מ-23:00 עד 07:30)", each time isolated.
             <>
-              {NT.quiet.night} (<bdi dir="ltr">{p.quiet_from}</bdi>–<bdi dir="ltr">{p.quiet_to}</bdi>)
+              {NT.quiet.night} ({NT.quiet.from}
+              <bdi dir="ltr">{p.quiet_from}</bdi> {NT.quiet.to} <bdi dir="ltr">{p.quiet_to}</bdi>)
             </>,
             NT.quiet.note,
           )}
@@ -315,8 +331,21 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
               {select("quiet_to", NT.quiet.toAria, halfHours())}
             </div>
           ) : (
-            <button type="button" className="a-li row-link ntf-change" aria-label={`${NT.quiet.change}: ${quietRow(p.quiet_from, p.quiet_to)}`} disabled={off} onClick={() => setHours(true)}>
-              {NT.quiet.change}
+            <button
+              type="button"
+              className="a-li row-link ntf-change"
+              aria-label={`${NT.quiet.change}: ${quietRow(p.quiet_from, p.quiet_to)}`}
+              disabled={off}
+              onClick={() => {
+                setHours(true);
+                // The button goes: the focus moves to the first of the two times.
+                setTimeout(() => fromSel.current?.focus(), 0);
+              }}
+            >
+              <span>{NT.quiet.change}</span>
+              <span className="ntf-chev" aria-hidden="true">
+                ‹
+              </span>
             </button>
           )}
           {toggle("shabbat", NT.quiet.shabbat, NT.quiet.shabbatNote)}
@@ -335,7 +364,7 @@ export default function NotifyScreen({ ctx }: ScreenProps<"notify">) {
                   {deviceName(d.device, d.browser)}
                   {d.this ? ` · ${NT.devices.this}` : ""} · {since(dayMonth(Date.parse(d.created_at)))}
                 </span>
-                <button type="button" className="a-btn small ghost" onClick={() => void remove(d)}>
+                <button type="button" className="a-btn small ghost" aria-label={`${NT.devices.removeAria}${deviceName(d.device, d.browser)}${d.this ? ` (${NT.devices.this})` : ""}`} onClick={() => void remove(d)}>
                   {NT.devices.remove}
                 </button>
               </li>

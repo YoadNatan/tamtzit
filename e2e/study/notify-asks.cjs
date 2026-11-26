@@ -135,6 +135,13 @@ function fakePush(cfg) {
       .catch(() => false);
   const askCard = (page, which) => page.locator(`.ntf-ask[data-ask="${which}"]`);
   const ANDROID_APP = { ua: ANDROID, isMobile: true, hasTouch: true, standalone: true };
+  /** The guide's one-time tour offer already answered (one ask a launch: Today's card waits for it). */
+  const offerAnswered = (who) => ({
+    fn: ([k]) => {
+      if (!localStorage.getItem(k)) localStorage.setItem(k, JSON.stringify({ v: 1, offer: "dismissed", views: 0, did: [], list: [], tips: true }));
+    },
+    arg: [`study-guide:${id(who)}`],
+  });
   async function shot(page, name) {
     a11y.push(...(await snap(page, out, `asks-${name}`)));
   }
@@ -164,8 +171,17 @@ function fakePush(cfg) {
       N.send = true;
 
       /* ── 10a. The first launch from the icon: Today's card, once ── */
+      if (flags.guide) {
+        // The guide's tour offer still unanswered: it alone asks on this launch.
+        const { page, ctx } = await openPush("שוהם", { ...ANDROID_APP, path: "/" });
+        await homeReady(page);
+        const offer = await page.getByText("סיור קצר באפליקציה").first().waitFor({ timeout: 8000 }).then(() => true).catch(() => false);
+        await page.waitForTimeout(2000);
+        check("the tour offer unanswered: no notifications card beside it", offer && (await page.locator(".ntf-ask").count()) === 0, `offer=${offer}`);
+        await ctx.close();
+      }
       {
-        const { page, ctx } = await openPush("איתי", { ...ANDROID_APP, path: "/" });
+        const { page, ctx } = await openPush("איתי", { ...ANDROID_APP, init: offerAnswered("איתי"), path: "/" });
         await homeReady(page);
         const card = askCard(page, "home");
         const shown = await card.waitFor({ timeout: 10000 }).then(() => true).catch(() => false);
@@ -234,14 +250,14 @@ function fakePush(cfg) {
       /* ── 10c. Turning on from Today's card: one question, the toast; the guide hears it ── */
       {
         N.calls.length = 0;
-        const { page, ctx } = await openPush("יעל", { ...ANDROID_APP, path: "/" });
+        const { page, ctx } = await openPush("יעל", { ...ANDROID_APP, init: offerAnswered("יעל"), path: "/" });
         await homeReady(page);
         const card = askCard(page, "home");
         await card.waitFor({ timeout: 10000 });
         await card.getByRole("button", { name: "להפעיל התראות" }).click();
         check("להפעיל התראות: …one study_push_subscribe", await until(() => calls("study_push_subscribe", "יעל").length === 1));
         check("…after exactly one question", (await asked(page)) === 1);
-        check("…the toast says what is on", await toastHas(page, "ההתראות פועלות: מבחן קבוצתי, תשובות אליך, ומה שהעלית כשהוא מוכן."));
+        check("…the toast says what is on", await toastHas(page, "ההתראות פועלות: מבחן קבוצתי, תשובות בשרשורים שלך ומה שהעלית כשהוא מוכן."));
         check("…and the card is gone", await card.waitFor({ state: "detached", timeout: 5000 }).then(() => true).catch(() => false));
         // On, the upload ask and the inbox's line never show.
         await page.goto(`${mock.base}/?v=notify`);

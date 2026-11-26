@@ -21,9 +21,12 @@
 //      shows its title, body, he/rtl and tag; pages and chunks never pass
 //      through it;
 //  12. account paths: signing out → study_push_unsubscribe; "ניתוק המכשירים
-//      האחרים" → study_push_keep_only; another member on this device →
-//      study_push_subscribe again;
-//  13. the kill path: health without a VAPID key → the worker is removed.
+//      האחרים" → study_push_keep_only; another member on this device → the
+//      earlier member's subscription is dropped, and nothing is subscribed
+//      until the new member's own tap;
+//  13. the kill path: health without a VAPID key → the worker is removed;
+//      a new VAPID key → the old subscription is dropped and a new one is
+//      saved with the new key's id, once.
 //
 //   NODE_PATH=$(npm root -g) node e2e/study/notify-push.cjs <dist> <out dir>
 //
@@ -247,7 +250,7 @@ function fakePush(cfg) {
         check("…one study_push_subscribe", await until(() => calls("study_push_subscribe", "שוהם").length === 1));
         const sub = calls("study_push_subscribe", "שוהם")[0]?.body ?? {};
         check("…with the device's keys, the key's id and the device", /^https:\/\/fcm\.googleapis\.com\//.test(sub.p_endpoint) && sub.p_p256dh?.length === 87 && sub.p_auth?.length === 22 && /^[\w-]{12}$/.test(sub.p_key_id) && sub.p_device === "linux" && sub.p_browser === "Chrome", JSON.stringify(sub));
-        check("the toast says what is on", await toastHas(page, "ההתראות פועלות: מבחן קבוצתי, תשובות אליך, ומה שהעלית כשהוא מוכן."));
+        check("the toast says what is on", await toastHas(page, "ההתראות פועלות: מבחן קבוצתי, תשובות בשרשורים שלך ומה שהעלית כשהוא מוכן."));
         check("focus moves to the device's status", await page.evaluate(() => document.activeElement?.classList.contains("ntf-status")));
         check("the switches work now, for every device", (await page.locator(".ntf-switch input:disabled").count()) === 0 && (await page.getByText("ההגדרות חלות על כל המכשירים שלך.").count()) === 1);
         await shot(page, "2-on");
@@ -315,8 +318,9 @@ function fakePush(cfg) {
         await page.waitForTimeout(500);
         check("…a message for another site is ignored", new URL(page.url()).searchParams.get("l") === L);
 
-        /* ── 12. Another member on this device: subscribed again ── */
+        /* ── 12. Another member on this device: never subscribed without a tap of their own ── */
         const n0 = calls("study_push_subscribe").length;
+        const u0 = (await pushStore(page, "unsubscribes")) ?? 0;
         const other = mock.people["נועה"];
         await page.evaluate(
           (auth) => localStorage.setItem("study-auth", auth),
@@ -324,7 +328,19 @@ function fakePush(cfg) {
         );
         await page.goto(mock.base + "/");
         await homeReady(page);
-        check("another member on this device: study_push_subscribe as that member", await until(() => calls("study_push_subscribe", "נועה").length >= 1 && calls("study_push_subscribe").length > n0, 8000));
+        let dropped = false;
+        for (let i = 0; i < 40 && !dropped; i++) {
+          dropped = ((await pushStore(page, "unsubscribes")) ?? 0) > u0;
+          if (!dropped) await page.waitForTimeout(200);
+        }
+        check("another member on this device: the earlier member's subscription is dropped", dropped);
+        await page.waitForTimeout(1000);
+        check("…and the new member is not subscribed without a tap", calls("study_push_subscribe", "נועה").length === 0 && calls("study_push_subscribe").length === n0);
+        // נועה turns them on with her own tap.
+        await page.goto(mock.base + "/?v=notify&x=set");
+        await settings(page);
+        await page.getByRole("button", { name: "להפעיל התראות במכשיר הזה" }).click();
+        check("…her own tap: study_push_subscribe as her", await until(() => calls("study_push_subscribe", "נועה").length === 1, 8000));
         // Sign-out on this device: study_push_unsubscribe first.
         await page.goto(mock.base + "/?v=me");
         await page.locator("main.me-screen").waitFor({ timeout: 15000 });
@@ -333,7 +349,7 @@ function fakePush(cfg) {
         check("signing out: study_push_unsubscribe for this device", await until(() => calls("study_push_unsubscribe", "נועה").length === 1, 8000));
         await page.waitForLoadState("load").catch(() => undefined);
         await page.waitForTimeout(500);
-        check("…and the browser's subscription is dropped", (await pushStore(page, "unsubscribes").catch(() => null)) === 1 && (await pushStore(page, "sub").catch(() => "x")) === null);
+        check("…and the browser's subscription is dropped", (await pushStore(page, "unsubscribes").catch(() => null)) === u0 + 2 && (await pushStore(page, "sub").catch(() => "x")) === null);
         await ctx.close();
       }
 
@@ -414,6 +430,36 @@ function fakePush(cfg) {
         await homeReady(page);
         await page.waitForTimeout(3000);
         check("a failed health keeps the worker", (await regs()) === 1);
+        await ctx.close();
+      }
+
+      /* ── 13b. A new VAPID key on the server (a leaked key replaced): the device subscribes again ── */
+      {
+        wired();
+        N.calls.length = 0;
+        const { page, ctx } = await openPush("איתי", { path: "/?v=notify&x=set" });
+        await settings(page);
+        await page.getByRole("button", { name: "להפעיל התראות במכשיר הזה" }).click();
+        await page.getByText("ההתראות פועלות במכשיר הזה ✓").waitFor({ timeout: 15000 });
+        await until(() => calls("study_push_subscribe", "איתי").length === 1, 8000);
+        const first = calls("study_push_subscribe", "איתי")[0]?.body ?? {};
+        // The owner replaces the keys; a day later health gives the new one.
+        N.health = { notify: true, vapid: "B" + "Q".repeat(86) };
+        await page.evaluate(() => {
+          const m = JSON.parse(localStorage.getItem("study-notify") || "{}");
+          localStorage.setItem("study-notify", JSON.stringify({ ...m, keyAt: 1 }));
+        });
+        await page.goto(mock.base + "/");
+        await homeReady(page);
+        const again = await until(() => calls("study_push_subscribe", "איתי").length >= 2, 10000);
+        const second = calls("study_push_subscribe", "איתי")[1]?.body ?? {};
+        check("a new key: the old subscription dropped, a new one made", again && ((await pushStore(page, "unsubscribes")) ?? 0) >= 1 && ((await pushStore(page, "subscribes")) ?? 0) === 2);
+        check("…and section R gets it with the new key's id", /^[\w-]{12}$/.test(second.p_key_id ?? "") && second.p_key_id !== first.p_key_id && second.p_endpoint !== first.p_endpoint, JSON.stringify([first.p_key_id, second.p_key_id]));
+        const n2 = calls("study_push_subscribe", "איתי").length;
+        await page.goto(mock.base + "/");
+        await homeReady(page);
+        await page.waitForTimeout(2500);
+        check("…once: the next open keeps it", ((await pushStore(page, "subscribes")) ?? 0) === 2 && calls("study_push_subscribe", "איתי").length <= n2 + 1);
         await ctx.close();
       }
 

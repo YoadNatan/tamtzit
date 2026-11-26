@@ -27,7 +27,14 @@ export const FALLBACK_TITLE = "משהו חדש בתמצית";
 
 type Args = Record<string, unknown>;
 type Ctx = { a: Args; n: number; surface: Surface; now: number };
-type Kind = { cat: Cat; title: (c: Ctx) => string; body: (c: Ctx) => string };
+type Kind = {
+  cat: Cat;
+  title: (c: Ctx) => string;
+  body: (c: Ctx) => string;
+  /** A live notice that is over, in the inbox: its title in the past tense
+   *  (none: the title stays, with "הסתיים" under it, as a quiz's). */
+  over?: (c: Ctx) => string;
+};
 
 /* ── Reading args (they come from the database: anything may be missing) ── */
 
@@ -119,16 +126,29 @@ export const KINDS: Record<string, Kind> = {
     },
   },
   boss_open: { cat: "live", title: () => "אתגר קבוצתי נפתח עכשיו", body: ({ a }) => join(str(a, "course"), "להצטרף") },
-  meeting_soon: { cat: "live", title: () => "הפגישה מתחילה בעוד 15 דקות", body: ({ a }) => join(str(a, "lecture"), clock(a, "at")) },
+  meeting_soon: {
+    cat: "live",
+    title: () => "הפגישה מתחילה בעוד 15 דקות",
+    body: ({ a }) => join(str(a, "lecture"), clock(a, "at")),
+    // off: the minute job saw it cancelled.
+    over: ({ a }) => (a.off === true ? "הפגישה בוטלה" : "הפגישה התקיימה"),
+  },
   reading: {
     cat: "live",
     title: () => "ההקראה התחילה",
+    over: () => "ההקראה הסתיימה",
     body: ({ a, surface }) => {
       const name = str(a, "name");
       return surface === "inbox" && name ? join(str(a, "lecture"), `מקריאים עכשיו: ${name}`) : join(str(a, "lecture"), "אפשר להצטרף");
     },
   },
-  session_soon: { cat: "live", title: () => "מפגש הלמידה מתחיל בעוד 30 דקות", body: ({ a }) => join(str(a, "title"), clock(a, "at")) },
+  // The study day's title is written freely (it can hold a name): the lock screen shows only its time.
+  session_soon: {
+    cat: "live",
+    title: () => "מפגש הלמידה מתחיל בעוד 30 דקות",
+    body: ({ a, surface }) => (surface === "lock" ? clock(a, "at") : join(str(a, "title"), clock(a, "at"))),
+    over: () => "מפגש הלמידה התקיים",
+  },
 
   /* ── R: for this member ("בשבילך") ── */
   reply: {
@@ -191,7 +211,7 @@ export const KINDS: Record<string, Kind> = {
     cat: "security",
     title: ({ a, now }) => {
       const d = when(a, "at");
-      return d ? `נכנסו עם הקוד האישי ${dayWord(d, now)} ב-${CLOCK.format(d)}` : "נכנסו עם הקוד האישי";
+      return d ? `נכנסו עם הקוד האישי ${dayWord(d, now)}, בשעה ${CLOCK.format(d)}` : "נכנסו עם הקוד האישי";
     },
     body: () => "אם זה המכשיר שלך, אין מה לעשות. אם לא: שלי ← ניתוק המכשירים האחרים",
   },
@@ -226,15 +246,27 @@ export function cut(text: string, max: number): string {
 }
 
 /** A notice's title and body, for the lock screen or the inbox. An unknown
- *  kind (another package's, newer than this build) reads "משהו חדש בתמצית". */
+ *  kind (another package's, newer than this build) reads "משהו חדש בתמצית",
+ *  with its args' title in the inbox only (never on the lock screen: it may
+ *  be a slide's section title). */
 export function render(kind: string, args: unknown, count = 1, surface: Surface = "inbox", now = Date.now()): Rendered {
   const a: Args = typeof args === "object" && args !== null && !Array.isArray(args) ? (args as Args) : {};
   const n = Number.isSafeInteger(count) && count > 0 ? count : 1;
   const k = Object.prototype.hasOwnProperty.call(KINDS, kind) ? KINDS[kind] : null;
   const c: Ctx = { a, n, surface, now };
   const title = k ? k.title(c) : FALLBACK_TITLE;
-  const body = k ? k.body(c) : str(a, "title");
+  const body = k ? k.body(c) : surface === "lock" ? "" : str(a, "title");
   return { title: cut(title, TITLE_MAX), body: cut(body, BODY_MAX) };
+}
+
+/** A live notice that is over, in the inbox: its past-tense title ("הפגישה
+ *  התקיימה"), or null when the kind keeps its title (a quiz: "מבחן קבוצתי
+ *  נפתח", with "הסתיים · לתוצאות" under it). */
+export function overTitle(kind: string, args: unknown, now = Date.now()): string | null {
+  const k = Object.prototype.hasOwnProperty.call(KINDS, kind) ? KINDS[kind] : null;
+  if (!k?.over) return null;
+  const a: Args = typeof args === "object" && args !== null && !Array.isArray(args) ? (args as Args) : {};
+  return cut(k.over({ a, n: 1, surface: "inbox", now }), TITLE_MAX);
 }
 
 /** A kind's category, as study_private.notice_kinds has it (unknown: inbox only). */

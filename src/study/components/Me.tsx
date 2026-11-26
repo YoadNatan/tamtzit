@@ -27,6 +27,7 @@ import { PulseSettingRow } from "../features/pulse";
 import { NeedsMeSetting } from "../features/today";
 import type { ScreenProps } from "../features/types";
 import { Head, readSize, RouteLink, saveSize, shareInvite, SIZES } from "./Shell";
+import ErrorBoundary from "./ErrorBoundary";
 
 // Notifications (VITE_STUDY_NOTIFY): "הגדרות התראות", loaded only with the flag.
 const NotifyRow = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyMeRow })));
@@ -95,6 +96,8 @@ function Confirm({ text, act, busy, onAct, onCancel }: { text: string; act: stri
 /** "יציאה מהמכשיר הזה": what coming back needs, said first. */
 function SignOutConfirm({ hasCode, canMake, onCancel, onMake, onOut }: { hasCode: boolean; canMake: boolean; onCancel: () => void; onMake: () => void; onOut: () => void }) {
   const box = useRef<HTMLDivElement>(null);
+  // Signing out first stops this device's notifications (up to 3 s): the button says it is on it.
+  const [out, setOut] = useState(false);
   useEffect(() => {
     box.current?.scrollIntoView({ block: "nearest" });
     box.current?.querySelector<HTMLButtonElement>(".confirm-cancel")?.focus({ preventScroll: true });
@@ -112,10 +115,17 @@ function SignOutConfirm({ hasCode, canMake, onCancel, onMake, onOut }: { hasCode
             יצירת קוד
           </button>
         ) : null}
-        <button className="a-btn danger" onClick={onOut}>
-          {hasCode ? "יציאה" : "יציאה בכל זאת"}
+        <button
+          className="a-btn danger"
+          disabled={out}
+          onClick={() => {
+            setOut(true);
+            onOut();
+          }}
+        >
+          {out ? "יוצאים…" : hasCode ? "יציאה" : "יציאה בכל זאת"}
         </button>
-        <button className="a-btn ghost confirm-cancel" onClick={onCancel}>
+        <button className="a-btn ghost confirm-cancel" disabled={out} onClick={onCancel}>
           ביטול
         </button>
       </div>
@@ -206,9 +216,11 @@ export default function Me({ ctx }: ScreenProps<"me">) {
       {/* Adding the app to the home screen (VITE_STUDY_INSTALL), high on the screen as the owner asked. */}
       <InstallMeRow ctx={ctx} />
       {flags.notify ? (
-        <Suspense fallback={null}>
-          <NotifyRow ctx={ctx} />
-        </Suspense>
+        <ErrorBoundary reset="notify" fallback="none">
+          <Suspense fallback={null}>
+            <NotifyRow ctx={ctx} />
+          </Suspense>
+        </ErrorBoundary>
       ) : null}
       {/* The guide's own section, high on the screen so it is found (the owner's request). */}
       <GuideMeRows ctx={ctx} />

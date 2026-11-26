@@ -26,6 +26,7 @@ export const NT = {
     testToast: "ההתראה תגיע בעוד כמה שניות. אפשר לנעול את המסך או לצאת מהאפליקציה.",
     testDesktop: "לא הגיעה? כדאי לבדוק שההתראות של הדפדפן מותרות בהגדרות המחשב.",
     iosInstall: "באייפון, התראות מגיעות רק כשפותחים את תמצית מהאייקון במסך הבית.",
+    iosInstallIpad: "באייפד, התראות מגיעות רק כשפותחים את תמצית מהאייקון במסך הבית.",
     iosInstallBtn: "להוספה למסך הבית",
     iosInstallHas: "כבר יש אייקון? פותחים ממנו ומפעילים כאן.",
     unsupported: "הדפדפן הזה לא תומך בהתראות. הכל מופיע ברשימת ההתראות.",
@@ -34,14 +35,15 @@ export const NT = {
     retry: "לנסות שוב",
     offline: "אין חיבור. אפשר לנסות שוב כשהחיבור חוזר.",
     testMany: "אפשר לשלוח עד 3 התראות ניסיון בשעה. אפשר לנסות שוב מאוחר יותר.",
+    testWait: "אפשר לשלוח שוב בעוד כמה שניות.",
   },
   cats: {
     h: "מה שולחים",
     live: { title: "עכשיו בקבוצה", desc: "מבחן קבוצתי שנפתח, פגישה שמתחילה, מפגש למידה" },
-    mine: { title: "בשבילך", desc: "תשובות אליך, תרגול ששיתפו איתך, ומה שהעלית כשהוא מוכן" },
+    mine: { title: "בשבילך", desc: "תשובות בשרשורים שלך, תרגול ששיתפו איתך ומה שהעלית כשהוא מוכן" },
     digest: { title: "תזכורת יומית", desc: "פעם ביום: מה מחכה לחזרה היום" },
     digestAt: "בשעה",
-    security: "כניסה עם הקוד האישי תמיד שולחת התראה.",
+    security: "כניסה עם הקוד האישי תמיד שולחת התראה למכשירים שבהם ההתראות פועלות.",
     disabled: "יחולו כשההתראות יופעלו באחד המכשירים.",
     all: "ההגדרות חלות על כל המכשירים שלך.",
   },
@@ -57,7 +59,7 @@ export const NT = {
     shabbat: "לא לשלוח בשבת",
     shabbatNote: "משישי 16:00 עד מוצאי שבת 20:30",
   },
-  devices: { h: "המכשירים שמקבלים התראות", this: "המכשיר הזה", remove: "להסיר" },
+  devices: { h: "המכשירים שמקבלים התראות", this: "המכשיר הזה", remove: "להסיר", removeAria: "להסיר: " },
   inbox: {
     title: "התראות",
     gearAria: "הגדרות התראות",
@@ -84,7 +86,7 @@ export const NT = {
   },
   quiz: { notify: "להודיע לקבוצה", desc: "התראה לחברי הקבוצה כשהמבחן נפתח" },
   guideS10: "לקבל התראות",
-  help: { row: "התראות", text: "מה שולחים, איך מפעילים, ולמה באייפון רק מהאייקון", howto: "להפעיל התראות" },
+  help: { row: "התראות", text: "מה שולחים, איך מפעילים ולמה באייפון רק מהאייקון", howto: "להפעיל התראות" },
   errSave: "לא הצלחנו לשמור. אפשר לנסות שוב.",
 } as const;
 
@@ -99,19 +101,34 @@ export function inApp(app: "facebook" | "instagram" | "other", ios: boolean): st
   return `בדפדפן של ${name} אין התראות. פותחים את תמצית ב${ios ? OS.safari : OS.chrome}.`;
 }
 
-/** Blocked: where to allow them again, on an iPhone and in Chrome. */
-export function deniedIos(): string {
-  return `באייפון: ${OS.iosSettings} ← ${OS.iosNotifications} ← תמצית ← ${OS.iosAllow}. אחר כך חוזרים לכאן.`;
+/** Blocked: where to allow them again, on an iPhone or iPad, in the Android
+ *  home-screen app, in Chrome, and in any other browser. */
+export function deniedIos(ipad = false): string {
+  return `${ipad ? "באייפד" : "באייפון"}: ${OS.iosSettings} ← ${OS.iosNotifications} ← תמצית ← ${OS.iosAllow}. אחר כך חוזרים לכאן.`;
 }
 export function deniedChrome(): string {
   return `ב${OS.chrome}: הסמל שליד הכתובת ← ${OS.chromeSiteSettings} ← ${OS.chromeNotifications} ← לאפשר. אחר כך חוזרים לכאן.`;
 }
+/** The Android home-screen app has no address bar: the icon's own app info (the words unchecked on a device). */
+export function deniedAndroidApp(): string {
+  return "באנדרואיד: לחיצה ארוכה על האייקון של תמצית ← פרטי האפליקציה ← התראות ← לאפשר. אחר כך חוזרים לכאן.";
+}
+export function deniedOther(): string {
+  return "בהגדרות האתר בדפדפן ← התראות ← לאפשר. אחר כך חוזרים לכאן.";
+}
+/** The blocked line for this device and browser (deviceOf's names; `app`: opened from the home-screen icon). */
+export function deniedWords(o: { device: string; browser: string; app: boolean }): string {
+  if (o.device === "iphone" || o.device === "ipad") return deniedIos(o.device === "ipad");
+  if (o.app && o.device === "android") return deniedAndroidApp();
+  if (!o.app && o.browser === "Chrome") return deniedChrome();
+  return deniedOther();
+}
 
 /** The toast after turning pushes on: what this device will get, from the switches. */
 export function enabledToast(p: { live: boolean; mine: boolean; digest: boolean }): string {
-  const parts = [p.live && "מבחן קבוצתי", p.mine && "תשובות אליך", p.mine && "מה שהעלית כשהוא מוכן", p.digest && "תזכורת יומית"].filter(Boolean) as string[];
+  const parts = [p.live && "מבחן קבוצתי", p.mine && "תשובות בשרשורים שלך", p.mine && "מה שהעלית כשהוא מוכן", p.digest && "תזכורת יומית"].filter(Boolean) as string[];
   if (!parts.length) return "ההתראות פועלות במכשיר הזה. כל הסוגים כבויים כרגע.";
-  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")}, ו${parts[parts.length - 1]}`;
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} ו${parts[parts.length - 1]}`;
   return `${NT.device.enabledToast}${list}.`;
 }
 
@@ -151,9 +168,10 @@ export function bellCount(n: number): string {
   return n <= 0 ? "" : n > 9 ? "9+" : String(n);
 }
 
-/** "לא לשלוח בלילה (23:00–07:30)": the times are left to right in the screen (bdi). */
+/** "לא לשלוח בלילה (מ-23:00 עד 07:30)": in words, so a right-to-left line
+ *  never shows the range reversed (the screen isolates each time with bdi). */
 export function quietRow(from: string, to: string): string {
-  return `${NT.quiet.night} (${from}–${to})`;
+  return `${NT.quiet.night} (${NT.quiet.from}${from} ${NT.quiet.to} ${to})`;
 }
 
 /** "מאז 26.11" (a device's first day). */
@@ -170,12 +188,13 @@ export function israelDate(ms: number): string {
   return DATE.format(new Date(ms));
 }
 
-/** A row's time: "עכשיו" in the first minute, "לפני {m} ד׳" within the hour,
- *  "HH:MM" earlier today, "d.m" before today (Israel time). */
+/** A row's time: "עכשיו" in the first minute, "לפני דקה", "לפני {m} דק׳"
+ *  within the hour, "HH:MM" earlier today, "d.m" before today (Israel time). */
 export function rowTime(ms: number, now: number): string {
   const ago = now - ms;
   if (ago < 60_000) return NT.inbox.now;
-  if (ago < 3_600_000) return `לפני ${Math.floor(ago / 60_000)} ד׳`;
+  if (ago < 120_000) return "לפני דקה";
+  if (ago < 3_600_000) return `לפני ${Math.floor(ago / 60_000)} דק׳`;
   if (israelDate(ms) === israelDate(now)) return CLOCK.format(new Date(ms));
   const [, m, d] = israelDate(ms).split("-").map(Number);
   return `${d}.${m}`;
