@@ -9502,7 +9502,7 @@ select pg_temp.rok('R1c',
   and (select count(*) from cron.job where jobname = 'study-notify' and schedule = '* * * * *') = 1
   and (select count(*) from cron.job where jobname = 'study-notify-clean' and schedule = '41 3 * * *') = 1
   and (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'study_notices') = 1
-  and (select count(*) from study_private.notice_kinds) = 25
+  and (select count(*) from study_private.notice_kinds where kind <> 'set_solved') = 25   -- section L registers set_solved
   and (select count(*) from study_private.notify_kick) = 1,
   'loaded twice: one policy each, twelve hooks, two jobs, published once, 25 kinds, one kick row');
 select pg_temp.rok('R1d', (select count(*) from pg_publication_tables where pubname = 'supabase_realtime'
@@ -10702,13 +10702,9 @@ select pg_temp.rok('LS7b', pg_temp.las(:'lb', format('select (public.study_qset_
   and pg_temp.las(:'lb', format('select paused::text from public.study_qsets_shelf(%L) where id = %L', :'lg', :'s1')) = 'true',
   'nothing moved for 6 minutes: paused (§7.4), on the shelf too');
 reset role;
--- R's set_shared hook, stood in for here (WP17 adds the real one): every call is counted.
-create table if not exists pg_temp.l_shared (set_id uuid, args jsonb);
-select to_regprocedure('study_private.notice_set_shared(uuid,uuid,uuid[],uuid,jsonb)') is null as l_stub \gset
-\if :l_stub
-create function study_private.notice_set_shared(p_group uuid, p_set uuid, p_to uuid[], p_actor uuid, p_args jsonb)
-returns int language sql security definer as $$ insert into pg_temp.l_shared values (p_set, p_args) returning 1 $$;
-\endif
+-- set_shared (WP17): a device for ברק, so his row queues one push.
+insert into public.study_push_subs (user_id, endpoint, p256dh, auth, key_id)
+values (:'lb', 'https://fcm.googleapis.com/fcm/send/l-01b', 'B' || repeat('p', 86), repeat('a', 22), 'kid12345');
 update public.study_question_batches set status = 'ready', made = 2, updated_at = now() where request_id = :'rq1';
 set role authenticated;
 select pg_temp.rok('LS7c', pg_temp.las(:'lb', format('select (public.study_qset_progress(%L) - ''want'' - ''paused'')::text', :'s1'))
@@ -10716,13 +10712,45 @@ select pg_temp.rok('LS7c', pg_temp.las(:'lb', format('select (public.study_qset_
   'no batch left: ready; one question did not come out (3 wanted, 2 made)');
 select pg_temp.las(:'lc', format('select public.study_qset_progress(%L)::text', :'s1')) as dummy \gset
 reset role;
-select pg_temp.rok('LS7d', (select count(*) from pg_temp.l_shared where set_id = :'s1') = 1
-  and (select args from pg_temp.l_shared where set_id = :'s1') = '{"k": 4, "name": "אביב", "lecture": "משתנים (בדוי)"}'::jsonb
-  and (select notified_at is not null from public.study_qsets where id = :'s1'),
-  'set_shared once (notified_at), with the lecture, the count and the author''s name for R to word');
-\if :l_stub
-drop function study_private.notice_set_shared(uuid, uuid, uuid[], uuid, jsonb);
-\endif
+select 'qsets:' || :'lg' || ':' || to_char((now() at time zone 'Asia/Jerusalem')::date, 'YYYY-MM-DD') as ldd \gset
+select pg_temp.rok('LS7d', (select string_agg(m.name, ',' order by m.name) from public.study_notices n
+                             join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+                            where n.kind = 'set_shared' and n.group_id = :'lg') = 'ברק,גפן,דניאל,הלל'
+  and (select bool_and(n.args = '{"k": 4, "name": "אביב", "lecture": "משתנים (בדוי)"}'::jsonb
+                       and n.route = jsonb_build_object('v', 'sets', 'k', :'s1') and n.obj = 'qsets' and n.cat = 'mine'
+                       and n.dedupe = :'ldd' and n.count = 1 and n.lecture_id = :'ll1')
+         from public.study_notices n where n.kind = 'set_shared' and n.group_id = :'lg')
+  and (select notified_at is not null from public.study_qsets where id = :'s1')
+  and (select string_agg(o.state, ',') from study_private.notify_outbox o where o.kind = 'set_shared' and o.group_id = :'lg') = 'due'
+  and (select o.user_id from study_private.notify_outbox o where o.kind = 'set_shared' and o.group_id = :'lg') = :'lb',
+  'set_shared once the set is ready: the group but its author, the lecture, the size and the name for R''s words, one row a day each, a push queued only where there is a device');
+select pg_temp.las(:'lb', format('select public.study_qset_progress(%L)::text', :'s1')) as dummy \gset
+select pg_temp.rok('LS7e', (select count(*) from public.study_notices where kind = 'set_shared' and group_id = :'lg') = 4
+  and (select sum(count) from public.study_notices where kind = 'set_shared' and group_id = :'lg') = 4,
+  'announced once: progress again adds nothing (notified_at)');
+-- ברק's push went out this morning; two more sets the same day.
+update study_private.notify_outbox set state = 'sent', pushed_at = now() where kind = 'set_shared' and user_id = :'lb';
+select study_private.notice_set_shared(:'lg', :'s1', null, :'lc', '{"lecture": "אנטיביוטיקה (בדוי)", "k": 5, "name": "גפן", "x": "nope"}') as sh2 \gset
+select pg_temp.rok('LS7f', :'sh2' = '4'
+  and (select string_agg(m.name || ':' || n.count, ',' order by m.name) from public.study_notices n
+         join public.study_members m on m.user_id = n.user_id and m.group_id = n.group_id
+        where n.kind = 'set_shared' and n.group_id = :'lg') = 'אביב:1,ברק:2,גפן:1,דניאל:2,הלל:2'
+  and (select bool_and(n.args = '{}'::jsonb and n.route = '{"v": "sets"}'::jsonb) from public.study_notices n
+        where n.kind = 'set_shared' and n.group_id = :'lg' and n.count = 2)
+  and (select args from public.study_notices where kind = 'set_shared' and user_id = :'la') = '{"k": 5, "name": "גפן", "lecture": "אנטיביוטיקה (בדוי)"}'::jsonb
+  and (select string_agg(o.state, ',') from study_private.notify_outbox o where o.kind = 'set_shared' and o.user_id = :'lb') = 'sent',
+  'a second set the same day: an unseen row counts it ("2 סטים חדשים", the shelf, no lecture left in it); the actor gets none; ברק''s row, pushed this morning, is not pushed again');
+update public.study_notices set seen_at = now() where kind = 'set_shared' and user_id = :'lb';
+select study_private.notice_set_shared(:'lg', :'s1', array[:'lb', :'ld']::uuid[], :'la', '{"lecture": "משתנים (בדוי)", "k": 3, "name": "אביב"}') as sh3 \gset
+select pg_temp.rok('LS7g', :'sh3' = '2'
+  and (select count(*) from public.study_notices where kind = 'set_shared' and user_id = :'lb') = 2
+  and (select string_agg(o.state || ':' || (o.pushed_at is not null), ',' order by o.notice_id) from study_private.notify_outbox o
+        where o.kind = 'set_shared' and o.user_id = :'lb') = 'sent:true,capped:false'
+  and (select count from public.study_notices where kind = 'set_shared' and user_id = :'ld') = 3
+  and (select count from public.study_notices where kind = 'set_shared' and user_id = :'lc') = 1,
+  'seen, then a third set: a new row for ברק, still no second push that day (OD10); p_to reaches only the members named');
+delete from public.study_notices where kind = 'set_shared' and group_id = :'lg';
+delete from public.study_push_subs where user_id = :'lb';
 
 -- ── The shelf, marks, rename and delete ──
 set role authenticated;
@@ -10840,26 +10868,22 @@ select pg_temp.rok('LS10e', pg_temp.las(:'la', format('select solvers::text || '
   'the shelf: "פותרים: 4" and my own score, no average');
 reset role;
 
--- ── set_solved: only once R registers the kind; the first finish of someone other than the author ──
-select pg_temp.rok('LS11', (select count(*) from public.study_notices where kind = 'set_solved') = 0,
-  'the kind set_solved is not registered yet (WP17): no notice');
-select (select count(*) from study_private.notice_kinds where kind = 'set_solved') = 0 as l_kind \gset
-\if :l_kind
-insert into study_private.notice_kinds (kind, cat, ttl, delay, push) values ('set_solved', 'inapp', '7 days', '0', false);
-\endif
+-- ── set_solved (WP17): the first finish of someone other than the author, in the author's inbox ──
+select pg_temp.rok('LS11', (select cat || ' · ' || ttl || ' · ' || push from study_private.notice_kinds where kind = 'set_solved') = 'inapp · 30 days · false'
+  and (select string_agg(user_id::text || ' · ' || (args ->> 'k') || ' · ' || count, ',') from public.study_notices
+        where kind = 'set_solved' and dedupe = 'qset_solved:' || :'s1') = :'la' || ' · 3 · 3',
+  'L registers set_solved in R''s registry (inbox only, 30 days): ברק, גפן and דניאל''s first finishes are one row for אביב, counting');
 set role authenticated;
 select pg_temp.lsolve(:'le', array[0, 0, 0, 0]) as dummy \gset
 select pg_temp.lsolve(:'le', array[0, 0, 0, 0]) as dummy \gset
 select pg_temp.lsolve(:'la', array[0, 0, 0, 0]) as dummy \gset
 reset role;
-select pg_temp.rok('LS11b', (select string_agg(user_id::text || ' · ' || (route ->> 'v') || ' · ' || (args ->> 'k') || ' · ' || count, ',')
+select pg_temp.rok('LS11b', (select string_agg(user_id::text || ' · ' || (route ->> 'v') || ' · ' || (args ->> 'k') || ' · ' || count || ' · ' || obj, ',')
                               from public.study_notices where kind = 'set_solved' and dedupe = 'qset_solved:' || :'s1')
-                           = :'la' || ' · sets · 4 · 1',
-  'registered: Hillel''s first finish tells Aviv once (4 others solved); a second finish and the author''s own add nothing');
+                           = :'la' || ' · sets · 4 · 4 · qset:' || :'s1'
+  and not exists (select 1 from study_private.notify_outbox where kind = 'set_solved'),
+  'Hillel''s first finish adds one (4 others solved), never pushed; a second finish and the author''s own add nothing');
 delete from public.study_notices where kind = 'set_solved';
-\if :l_kind
-delete from study_private.notice_kinds where kind = 'set_solved';
-\endif
 
 -- ── Auto-keep (OD15): off by default; on, only what the solver passed ──
 \set ss1 '1b300000-0000-4000-8000-000000000001'

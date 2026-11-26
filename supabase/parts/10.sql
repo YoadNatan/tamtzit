@@ -17,7 +17,9 @@
 --  wrappers, the group's numbers, the names choice, the sets line's and the
 --  day's figures), the op's RPCs (begin, attach, abandon, style, autokeep),
 --  the trigger that fills a set from the bank, the hooks for the exams
---  design's sheet sets and for R, the switches, kind_on and the nightly job.
+--  design's sheet sets, the notices through R (set_shared to the group,
+--  coalesced, at most one push a member a day; set_solved to the author's
+--  inbox), the switches, kind_on and the nightly job.
 --
 --  Group numbers follow the floor of 3 (study_private.pulse_floor(), OD5):
 --  "פותרים: k" and the member's own score always; the average and the
@@ -40,9 +42,10 @@
 --  Order: after I and R in this file. Part 10 of supabase/parts starts with
 --  this section (with it, part 9 would pass 170 KB); the wave's later
 --  sections (Y, O) follow it there. L uses Q, X, S, T and R directly,
---  because the file always runs in order; the calls into R (the set_shared
---  hook, set_solved) and into O (later) are still guarded with
---  to_regprocedure, so a database without them loads L and works.
+--  because the file always runs in order; the calls into R (notice_add,
+--  its kind registry and outbox) and into O (later) are still guarded with
+--  to_regprocedure and to_regclass, so a database without them loads L and
+--  works.
 --  Re-runnable throughout.
 
 -- ── Sets ──
@@ -248,9 +251,10 @@ end;
 $$;
 
 -- Tells the group about a set once, when it is ready with at least one
--- question (R's set_shared hook, when there is one: R owns the dedupe, the
--- coalescing and the words). notified_at is stamped either way, so a hook
--- installed later never announces old sets.
+-- question (notice_set_shared below, through R's notice_add: the dedupe, the
+-- coalescing and the one push a day; R's notifyCopy.ts has the words).
+-- notified_at is stamped either way, so R installed later never announces
+-- old sets.
 create or replace function study_private.qset_announce(p_set uuid)
 returns boolean language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -942,8 +946,9 @@ create trigger study_qset_items_from_bank after insert on public.study_questions
 
 -- ── Hooks for the other sections (guarded on their side) ──
 
--- The set of a request, or null (R's questions_ready skips a set's request,
--- so an author never gets two notices for one set).
+-- The set of a request, or null (a seam: R sends nothing for questions being
+-- written, notify's OD21; a later "questions ready" notice skips a set's
+-- request with it, so an author never gets two notices for one set).
 create or replace function study_private.qset_of_request(p_request uuid)
 returns uuid language sql stable security definer set search_path = public as $$
   select r.set_id from public.study_qset_requests r join public.study_qsets s on s.id = r.set_id
@@ -992,6 +997,88 @@ begin
 end;
 $$;
 
+-- ── The notices (WP17), through section R ──
+-- R's kind registry already reserves set_shared ('mine', 7 days, pushed);
+-- L registers set_solved (the author's inbox only). Both go through R's
+-- notice_add, so R's switches, quiet hours, its daily caps and the inbox's
+-- "seen" apply unchanged; R's SQL is not touched (R stays at 2). R has no
+-- notice for questions being written (notify's OD21), so a set's request
+-- never sends its author a second notice. The words are R's
+-- (shared/study/notifyCopy.ts): the lock screen never shows the lecture or
+-- the author's name.
+do $$
+begin
+  if to_regclass('study_private.notice_kinds') is null then
+    raise notice 'section R is not installed: practice sets work, and the group hears about new sets once R is (run its part, then this one again)';
+  else
+    insert into study_private.notice_kinds (kind, cat, ttl, delay, push) values
+      ('set_solved', 'inapp', '30 days', '0', false)
+    on conflict (kind) do update set cat = excluded.cat, ttl = excluded.ttl, delay = excluded.delay, push = excluded.push;
+  end if;
+end $$;
+
+-- set_shared: the group, but the author (p_to: only these members), hears
+-- about a set once it is ready (qset_announce). One row a member a day,
+-- Israel time (dedupe 'qsets:<group>:<date>'): a second set that day adds
+-- to its count while it is unseen ("3 סטים חדשים בקבוצה", the route then the
+-- shelf, the args emptied so no lecture lingers), and at most one push a
+-- member a day (OD10): once a set_shared push went out today, a new or
+-- coalesced row stays in the inbox. obj 'qsets': opening the shelf sees it.
+-- Never raises; answers how many members got the row.
+create or replace function study_private.notice_set_shared(p_group uuid, p_set uuid, p_to uuid[], p_actor uuid, p_args jsonb)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  v_day    date := (now() at time zone 'Asia/Jerusalem')::date;
+  v_since  timestamptz := v_day::timestamp at time zone 'Asia/Jerusalem';
+  v_dedupe text;
+  v_lec    uuid;
+  v_args   jsonb;
+  v_open   boolean;
+  v_pushed boolean;
+  v_id     bigint;
+  u        uuid;
+  n        int := 0;
+begin
+  if p_group is null or p_set is null
+     or to_regprocedure('study_private.notice_add(uuid,uuid,text,jsonb,jsonb,text,text,uuid,timestamptz)') is null
+     or to_regclass('study_private.notify_outbox') is null then
+    return 0;
+  end if;
+  v_dedupe := 'qsets:' || p_group::text || ':' || to_char(v_day, 'YYYY-MM-DD');
+  select s.lecture_id into v_lec from public.study_qsets s where s.id = p_set;
+  -- Only what R's words read: the lecture's title, the size, the author's name (no other key gets through).
+  v_args := jsonb_strip_nulls(jsonb_build_object(
+    'lecture', left(nullif(btrim(coalesce(p_args ->> 'lecture', '')), ''), 120),
+    'k', case when coalesce(p_args ->> 'k', '') ~ '^[0-9]{1,3}$' then (p_args ->> 'k')::int end,
+    'name', left(nullif(btrim(coalesce(p_args ->> 'name', '')), ''), 60)));
+  for u in select m.user_id from public.study_members m
+            where m.group_id = p_group and m.user_id is distinct from p_actor
+              and (p_to is null or m.user_id = any (p_to))
+            order by m.user_id loop
+    select exists (select 1 from public.study_notices x where x.user_id = u and x.dedupe = v_dedupe and x.seen_at is null),
+           exists (select 1 from study_private.notify_outbox o where o.user_id = u and o.kind = 'set_shared' and o.pushed_at >= v_since)
+      into v_open, v_pushed;
+    v_id := study_private.notice_add(u, p_group, 'set_shared',
+              case when v_open then '{}'::jsonb else v_args end,
+              case when v_open then jsonb_build_object('v', 'sets') else jsonb_build_object('v', 'sets', 'k', p_set) end,
+              'qsets', v_dedupe, v_lec, null);
+    continue when v_id is null;
+    n := n + 1;
+    if v_pushed then
+      -- Already pushed today: this one waits in the inbox (a row being sent keeps its lease, without a second send).
+      update study_private.notify_outbox o
+         set again = false,
+             state = case when o.state = 'due' then case when o.pushed_at is not null then 'sent' else 'capped' end else o.state end
+       where o.notice_id = v_id and (o.state = 'due' or o.again);
+    end if;
+  end loop;
+  return n;
+exception when others then
+  raise warning 'notice_set_shared %', sqlstate;
+  return n;
+end;
+$$;
+
 -- ── The nightly clean-up (its own job: section F's is one fixed command) ──
 create or replace function study_private.qsets_cleanup()
 returns void language plpgsql volatile security definer set search_path = public as $$
@@ -1019,7 +1106,8 @@ revoke all on function study_private.qset_get(uuid), study_private.qset_facts(uu
   study_private.qset_announce(uuid), study_private.qset_refresh(uuid), study_private.qset_rows(uuid, uuid, uuid, int),
   study_private.qset_attempt_open(uuid, uuid), study_private.qset_item_from_bank(), study_private.qset_of_request(uuid),
   study_private.qset_for_similar(uuid, uuid, uuid, uuid, text, int), study_private.qset_add_items(uuid, uuid[]),
-  study_private.qset_similar_done(uuid), study_private.qsets_cleanup() from public;
+  study_private.qset_similar_done(uuid), study_private.qsets_cleanup(),
+  study_private.notice_set_shared(uuid, uuid, uuid[], uuid, jsonb) from public;
 revoke all on function public.study_qset_begin(uuid, jsonb, text, boolean, int, numeric, text),
   public.study_qset_attach(uuid, jsonb, jsonb, text), public.study_qset_abandon(uuid), public.study_qset_style(uuid, text, text),
   public.study_qset_autokeep(uuid[], text), public.study_qset_progress(uuid), public.study_qset_rename(uuid, text),

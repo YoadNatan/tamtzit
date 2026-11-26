@@ -49,6 +49,9 @@ const ROUTES: Route[] = [
   { v: "install" },
   { v: "notify" },
   { v: "notify", x: "set" },
+  { v: "sets" },
+  { v: "sets", k: Q },
+  { v: "sets", l: L },
 ];
 
 test("routeQuery writes exactly what routeUrl writes, for every kind of screen", () => {
@@ -77,15 +80,19 @@ test("the routes section R's hooks write (Today included)", () => {
 
 test("the hooks' routes in study-schema.sql are all kinds routeQuery knows", () => {
   const sql = readFileSync(join(process.cwd(), "supabase", "study-schema.sql"), "utf8");
-  // Section R's own hooks. Section L's set_solved (route {v:"sets",k}) writes
-  // nothing until R registers that kind (WP17), which adds "sets" here.
-  const r = sql.slice(sql.indexOf("-- ════ BEGIN SECTION R "), sql.indexOf("-- ════ END SECTION R ════"));
+  // Section R's own hooks, and section L's (set_shared and set_solved: {v:"sets"[,k]}).
+  const r =
+    sql.slice(sql.indexOf("-- ════ BEGIN SECTION R "), sql.indexOf("-- ════ END SECTION R ════")) +
+    sql.slice(sql.indexOf("-- ════ BEGIN SECTION L "), sql.indexOf("-- ════ END SECTION L ════"));
   const kinds = new Set([...r.matchAll(/jsonb_build_object\('v', '([a-z]+)'/g)].map((m) => m[1]));
   assert.ok(kinds.size >= 3, [...kinds].join(","));
   for (const v of kinds) assert.notEqual(parseRoute(new URL(routeQuery({ v, l: L, q: Q }), "https://x.test").search).v, undefined, v);
   for (const v of kinds) assert.ok(ROUTES.some((x) => x.v === v), `${v}: add it to ROUTES above`);
   // R 2's hooks link to these screens too (a meeting, a study day, the wall, a dispute, a past exam, Today).
-  for (const v of ["meeting", "marathon", "wall", "dispute", "exams", "today"]) assert.ok(kinds.has(v), v);
+  for (const v of ["meeting", "marathon", "wall", "dispute", "exams", "today", "sets"]) assert.ok(kinds.has(v), v);
+  // Practice sets: a set's page, or the group's shelf for a coalesced row.
+  assert.equal(routeQuery({ v: "sets", k: Q }), `/?v=sets&k=${Q}`);
+  assert.equal(routeQuery({ v: "sets" }), "/?v=sets");
 });
 
 test("a stored route is data: unknown keys, bad values and non-routes write nothing more", () => {
@@ -100,6 +107,7 @@ test("a stored route is data: unknown keys, bad values and non-routes write noth
   assert.equal(routeQuery({}), "/");
   // A screen this build does not know yet writes only its v: the app's allowed() sends it home.
   assert.equal(routeQuery({ v: "sets", x: "y" }), "/?v=sets");
+  assert.equal(routeQuery({ v: "shelves", k: Q }), "/?v=shelves");
   assert.equal(routeQuery({ v: "lecture", l: "a&b=c" }), "/?l=a%26b%3Dc");
 });
 
@@ -111,6 +119,10 @@ test("objOf: what each screen sees", () => {
   assert.equal(objOf({ v: "dispute", d: D }), `disp:${D}`);
   assert.equal(objOf({ v: "wall", l: L }), `wall:${L}`);
   assert.equal(objOf({ v: "wall", l: L, x: "drafts" }), null, "the wall's drafts are not the wall");
+  assert.equal(objOf({ v: "sets", k: Q }), `qset:${Q}`);
+  assert.equal(objOf({ v: "sets" }), "qsets", "the group's shelf sees set_shared");
+  assert.equal(objOf({ v: "sets", l: L }), null, "a lecture's sets are not the whole shelf");
+  assert.equal(objOf({ v: "sets", k: "x" }), null);
   for (const r of [{ v: "today" }, { v: "me" }, { v: "library" }, { v: "quiz" }, { v: "quiz", isNew: true }, { v: "exams" }, { v: "lecture", l: "x" }, null, "lec"])
     assert.equal(objOf(r), null, JSON.stringify(r));
 });
@@ -122,4 +134,8 @@ test("objOf agrees with the obj section R's hooks store", () => {
   assert.match(r, /jsonb_build_object\('v', 'lecture', 'l', new\.id\), 'lec:' \|\| new\.id/);
   assert.equal(objOf({ v: "quiz", q: Q }), `quiz:${Q}`);
   assert.equal(objOf({ v: "lecture", l: L }), `lec:${L}`);
+  // Section L: set_solved sees a set's page, set_shared the shelf.
+  const l = sql.slice(sql.indexOf("-- ════ BEGIN SECTION L "));
+  assert.match(l, /jsonb_build_object\('v', 'sets', 'k', s\.id\), 'qset:' \|\| s\.id::text/);
+  assert.match(l, /'set_shared',[\s\S]{0,300}'qsets', v_dedupe/);
 });

@@ -41,6 +41,7 @@ const KEYS: Record<string, readonly string[]> = {
   trap: ["l", "at", "d"],
   try: ["s"],
   notify: ["x"],
+  sets: ["k", "l"],
 };
 
 type Json = Record<string, unknown>;
@@ -77,7 +78,8 @@ export function routeQuery(route: unknown): string {
 }
 
 /** The object a screen shows, as section R's obj: 'lec:<id>', 'quiz:<id>',
- *  'exam:<id>', 'meet:<id>', 'disp:<id>', 'wall:<lecture>'; null for any other screen. */
+ *  'exam:<id>', 'meet:<id>', 'disp:<id>', 'wall:<lecture>', a set's 'qset:<id>'
+ *  and the group's shelf 'qsets' (section L); null for any other screen. */
 export function objOf(route: unknown): string | null {
   if (!isObj(route)) return null;
   const id = (k: string) => (typeof route[k] === "string" && /^[0-9a-f-]{36}$/.test(route[k] as string) ? (route[k] as string) : null);
@@ -94,6 +96,9 @@ export function objOf(route: unknown): string | null {
       return id("d") ? `disp:${id("d")}` : null;
     case "wall":
       return id("l") && route.x === undefined ? `wall:${id("l")}` : null;
+    case "sets":
+      // A set's page sees its set_solved; the group's shelf sees set_shared.
+      return id("k") ? `qset:${id("k")}` : route.l === undefined && route.k === undefined ? "qsets" : null;
     default:
       return null;
   }

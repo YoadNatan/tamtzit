@@ -110,6 +110,9 @@ function stopped(why: string): "budget" | "daily" | null {
 const AGAIN_BUDGET = "אפשר להמשיך כשהתקציב מתחדש";
 const AGAIN_TOMORROW = "אפשר להמשיך מחר";
 
+/** A practice set's shelf, as the lock screen and a coalesced row say it. */
+const SETS_SHELF = "אפשר לפתור מ״סטים של הקבוצה״";
+
 /** "{course} {year} {moed}" of a past exam. */
 const examName = (a: Args) => [str(a, "course"), num(a, "year") || str(a, "year"), str(a, "moed")].filter(Boolean).join(" ");
 
@@ -216,6 +219,34 @@ export const KINDS: Record<string, Kind> = {
     body: () => "אם זה המכשיר שלך, אין מה לעשות. אם לא: שלי ← ניתוק המכשירים האחרים",
   },
   test: { cat: "security", title: () => "התראת ניסיון", body: () => "ככה ייראו ההתראות מתמצית" },
+
+  /* ── L: practice sets (docs/study/sets.md; registered by section L) ──
+   * set_shared: one row a member a day, coalesced ("3 סטים חדשים בקבוצה"),
+   * at most one push a day. The lock screen names neither the lecture nor
+   * the author; the inbox, inside the app, says the lecture, the size and
+   * "מאת {name}" for one set, and the shelf for several. set_solved: the
+   * author's inbox only ("הסט … נפתר פעם אחת", k: the others who solved it). */
+  set_shared: {
+    cat: "mine",
+    title: ({ n }) => (n === 1 ? "סט תרגול חדש בקבוצה" : `${n} סטים חדשים בקבוצה`),
+    body: ({ a, n, surface }) => {
+      if (surface === "lock" || n > 1) return SETS_SHELF;
+      const k = num(a, "k");
+      const name = str(a, "name");
+      return join(str(a, "lecture"), k === 1 ? "שאלה אחת" : k > 1 && `${k} שאלות`, name && `מאת ${name}`) || SETS_SHELF;
+    },
+  },
+  set_solved: {
+    cat: "inapp",
+    title: ({ a, n, surface }) => {
+      const k = num(a, "k") || n;
+      // Inbox only (never pushed); a lock screen would still not show the set's title.
+      const t = surface === "inbox" ? str(a, "title") : "";
+      const set = t ? `הסט ״${t}״` : "הסט";
+      return k === 1 ? `${set} נפתר פעם אחת` : `${set} נפתר ${k} פעמים`;
+    },
+    body: () => "אפשר לראות את המספרים של הקבוצה",
+  },
 
   /* ── R: inbox only ── */
   update: { cat: "inapp", title: () => "תיקון הגיע לשורה שלמדת", body: ({ a }) => str(a, "lecture") },
