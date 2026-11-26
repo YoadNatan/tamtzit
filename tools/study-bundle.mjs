@@ -4,7 +4,9 @@
 // index.html, split as it is in production), with every VITE_STUDY_* flag
 // on, in memory, and reads the study entry chunk:
 //
-//   - it must stay under 400 kB (Vite's kB, 1,000 bytes);
+//   - it must stay under 410 kB (Vite's kB, 1,000 bytes; raised from 400 for
+//     the wave of notifications, practice sets, sheets and models, owner's
+//     decision OD2 of 26 Nov 2026, docs/study/DECISIONS-2026-11-26.md);
 //   - no package screen may be in it: src/study/components/*Screen.tsx, and
 //     Catchup.tsx, Museum.tsx, Pulse.tsx, Wall.tsx and Boss.tsx (each slot
 //     module loads its screens lazily; a static import would carry the screen
@@ -13,7 +15,9 @@
 //     תשובה נכונה ומהירה" (decision 2's names: F-15);
 //
 // and lists each package's static share of the entry chunk (budget: 8 kB a
-// package; F's shell and the libraries have none).
+// package; F's shell and the libraries have none). A package of the wave has
+// a hard cap of its own (notifications, R: 1,200 B) and only its slot module
+// in the entry: every other module of it must load lazily.
 //
 //   npm run test:bundle
 //   node tools/study-bundle.mjs --flags off      the same with every flag off
@@ -30,14 +34,19 @@ const FLAGS = [
   "QUESTIONS", "PRACTICE", "QUIZ", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "ASK", "RECORDINGS", "PDF", "ACCOUNT",
   "PROGRESS", "MARATHONS", "EXAMS", "MEETING", "ANCHOR", "VAR", "WALL", "TODAY", "GUESS", "NEEDS_ME", "PULSE",
   "MUSEUM", "BOSS", "GROUP_PLAN", "TRAPS", "BLANK_TABLE", "QUIZ_ROUNDS", "EVE", "GUIDE", "QTYPES", "COURSES", "INSTALL",
+  "NOTIFY",
 ];
 for (const f of FLAGS) {
   if (flagsOff) delete process.env[`VITE_STUDY_${f}`];
   else process.env[`VITE_STUDY_${f}`] = "1";
 }
 
-const LIMIT = 400_000;
+const LIMIT = 410_000;
 const PACKAGE_BUDGET = 8_000;
+/** A package's hard cap on its static share, where it has one (failing the check). */
+const PACKAGE_CAP = { R: 1_200 };
+/** Packages whose only module in the entry may be their slot (features/<slot>.tsx). */
+const SLOT_ONLY = ["R"];
 const FORBIDDEN = ["מבחן חי", "תחרותי", "נקודות על תשובה נכונה ומהירה"];
 /** A package's screen: never in the entry chunk. */
 const SCREEN = /^src\/study\/components\/(?:\w+Screen|Catchup|Museum|Pulse|Wall|Boss)\.tsx$/;
@@ -49,6 +58,7 @@ const SLOT = {
   guide: "D", // the guide (docs/study/guide.md)
   courses: "S", // courses and past exams (docs/study/sources.md)
   install: "L", // adding the app to the home screen (docs/study/install.md)
+  notify: "R", // notifications: the bell, the inbox, pushes (section R)
 };
 const COMPONENT = {
   Q: ["PracticeHome", "LecturePractice", "PracticeSession", "PracticeQuestion", "PracticeCreate", "PracticeBank", "PracticeRound", "FlagSheet", "FixSheet", "Exams"],
@@ -69,6 +79,7 @@ const COMPONENT = {
   D: ["GuideLayer", "GuideSteps", "HowTo", "GuideMe", "TryScreen"],
   S: ["CourseScreen", "UploadMany", "CourseAsk"],
   L: ["InstallScreen", "InstallParts"],
+  R: ["NotifyScreen", "InboxScreen", "NotifyParts"],
 };
 const LIB = {
   W: ["generate", "writing", "transcript", "transcribe", "transcribe.worker", "pdf-export"],
@@ -81,8 +92,12 @@ const LIB = {
   D: ["guide", "guideMark", "guideFacts"],
   S: ["courses", "batch"],
   L: ["install", "installPrompt", "installCopy", "installLazy"],
+  R: ["notify", "notices", "notifyText"],
 };
-const SHARED = { C: ["cloze", "fsrs"], K: ["edits"], T: ["today"], G: ["lane"], E: ["blankTable", "extras"], A: ["estimates", "plan", "agenda"], U: ["pulse"], S: ["batch"] };
+const SHARED = {
+  C: ["cloze", "fsrs"], K: ["edits"], T: ["today"], G: ["lane"], E: ["blankTable", "extras"], A: ["estimates", "plan", "agenda"], U: ["pulse"], S: ["batch"],
+  R: ["notifyCopy", "notifyRoute", "notifyQuiet", "b64url", "bidiText"],
+};
 const byName = (table) => Object.fromEntries(Object.entries(table).flatMap(([pkg, names]) => names.map((n) => [n, pkg])));
 const COMPONENT_OF = byName(COMPONENT);
 const LIB_OF = byName(LIB);
@@ -144,14 +159,23 @@ const share = {};
 for (const [id, m] of Object.entries(entry.modules)) {
   const who = ownerOf(id);
   share[who] = (share[who] ?? 0) + m.renderedLength;
+  if (SLOT_ONLY.includes(who)) {
+    const rel = relative(root, id.split("?")[0]).split(sep).join("/");
+    if (!/^src\/study\/features\/\w+\.tsx?$/.test(rel)) problems.push(`${rel} is in the study entry chunk: package ${who} keeps only its slot module there (load it lazily)`);
+  }
 }
-const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "S", "L", "libraries", "other"];
+for (const [who, cap] of Object.entries(PACKAGE_CAP)) {
+  if (!flagsOff && (share[who] ?? 0) > cap) problems.push(`package ${who}'s share of the study entry chunk is ${share[who]} B (its cap: ${cap.toLocaleString("en")} B)`);
+}
+const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "S", "L", "R", "libraries", "other"];
 const lines = [...ORDER, ...Object.keys(share).filter((k) => !ORDER.includes(k))]
   .filter((k) => k in share)
   .map((k) => {
     const n = share[k];
     const budgeted = k.length === 1 && k !== "F";
-    return `  ${k.padEnd(10)} ${String(n).padStart(8)} B${budgeted ? (n > PACKAGE_BUDGET ? "  over the 8 kB budget" : "") : "  (no budget)"}`;
+    const cap = PACKAGE_CAP[k];
+    const note = cap ? `  (cap ${cap.toLocaleString("en")} B)` : budgeted ? (n > PACKAGE_BUDGET ? "  over the 8 kB budget" : "") : "  (no budget)";
+    return `  ${k.padEnd(10)} ${String(n).padStart(8)} B${note}`;
   });
 
 console.log(`study entry chunk: ${entry.fileName}, ${bytes.toLocaleString("en")} bytes (limit ${LIMIT.toLocaleString("en")}), every flag ${flagsOff ? "off" : "on"}`);
@@ -162,4 +186,4 @@ if (problems.length) {
   console.error(`\nThe bundle check failed:\n${problems.map((p) => `  ${p}`).join("\n")}`);
   process.exit(1);
 }
-console.log("ok: under the limit, no package screen in the entry chunk, none of the replaced quiz names");
+console.log("ok: under the limit, each capped package within its cap, no package screen in the entry chunk, none of the replaced quiz names");
