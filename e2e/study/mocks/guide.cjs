@@ -101,6 +101,13 @@ const READS = new Set([
   "study_exam_status",
   "study_exam_review",
   "study_mock_get",
+  // Notifications (VITE_STUDY_NOTIFY): the bell's count, the inbox's rows, and
+  // the settings' reads. Marking a notice seen writes the member's own row only,
+  // and stays a write here: no guided step has an unseen notice to see.
+  "study_notices_unseen",
+  "study_notices_mine",
+  "study_notify_state",
+  "study_push_devices",
 ]);
 
 /** Whether a request writes to the group's data. */
