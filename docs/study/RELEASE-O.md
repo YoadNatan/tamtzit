@@ -19,9 +19,14 @@ its own. Release points not built yet are marked so.
   the SQL: the app would report the schema as missing (`"schemaOk": false`).
 - **Before:** sections R and L are installed (part 9, then part 10:
   [`RELEASE-R1.md`](RELEASE-R1.md), [`RELEASE-L1.md`](RELEASE-L1.md)). If
-  they are not, run part 9 and then part 10 now: part 10 holds L and O, and
-  running both is exactly what the tests ran on a copy of production's
-  current schema.
+  they are not, they come with this release's run: parts 2 to 11, in order
+  (part 9 holds I and R, part 10 L, part 11 O). That is exactly what the
+  tests ran on a copy of production's current schema (`eed179e`).
+- **Since O5 (26 Nov 2026) section O starts part 11** and its version 2 (the
+  sheet reader's SQL, dark until release A1's flag) edits sections Q, Z, M, H
+  and T in place (parts 2, 3, 5 and 7): every SQL step below runs **parts 2 to
+  11 in order**, each to the end. Part 11 alone stops at once with "section O
+  2 needs parts 2 to 9 run first" (nothing is half done: run parts 2 to 11).
 - **Money:** release point 1 spends nothing. Reading a sheet spends the
   group's budget like a past exam (about $0.05 a page), within the sheets line
   ($6 a month) from release point 2.
@@ -32,8 +37,8 @@ Release A0 is release points 1 and 2 below in one go: uploading a past exam
 or an exercise sheet, its questions copied by the exam reader, the course
 page by kind, the wide review, keying by hand. It was tested on `dev` (O4):
 `e2e/study/sheets.cjs` and `devices.cjs` / `wide.cjs` on the mock, and the
-SQL on a copy of production's schema (`eed179e`) with parts 9 and 10 run
-twice ([`sheets.md`](sheets.md), "The A0 e2e"). Nothing here spends money
+SQL on a copy of production's schema (`eed179e`) with parts 2 to 11 run
+twice (O5; [`sheets.md`](sheets.md), "The A0 e2e"). Nothing here spends money
 until step 8. Do them in order; each says what to see.
 
 1. **The two read-only checks** below ("Before anything"): is `exams` on
@@ -43,29 +48,30 @@ until step 8. Do them in order; each says what to see.
 2. **Merge `dev` into `main`** and let Vercel deploy Production. Every new
    flag is off, so the app does not change. Check
    `https://<the app's address>/api/study/health` says `"schemaOk": true`.
-3. **Which parts to run.** In Supabase → SQL Editor, read only:
+3. **The SQL: parts 2 to 11.** In Supabase → SQL Editor, first read only:
    ```sql
    select public.study_schema() ->> 'I' as i, public.study_schema() ->> 'R' as r,
           public.study_schema() ->> 'L' as l, public.study_schema() ->> 'O' as o;
    ```
-   - `i`, `r` or `l` empty (production at `eed179e` has none of them): run
-     **`supabase/parts/9.sql`** to the end, then **`supabase/parts/10.sql`**
-     to the end. This is the order the tests ran; parts 1 to 8 need no
-     re-run for O (their only changes are the parts' headers and comments,
-     and `kind_on`'s text, which part 10 sets too).
-   - `i` 1, `r` 2 and `l` 1 already: run **`supabase/parts/10.sql`** only
-     (section O 1 is in it, after L).
-   NOTICEs are harmless. Then, read only:
+   Whatever it says (production at `eed179e` has none of I, R, L, O): run
+   **`supabase/parts/2.sql`, `3.sql`, … `11.sql` in order**, each to the end.
+   Parts 2, 3, 5 and 7 carry O 2's edits of the pickers (the quiz, the
+   meeting's quiz, the boss and Today draw only choice questions), part 9 I
+   and R, part 10 L, part 11 O (O 1 and O 2). Part 1 needs no re-run (only its
+   header changed). This is the order the tests ran, twice over, on a copy of
+   production's schema. NOTICEs are harmless. Then, read only:
    ```sql
-   select public.study_schema() ->> 'O' as o, public.study_schema() ->> 'L' as l;   -- 1, 1
+   select public.study_schema() ->> 'O' as o, public.study_schema() ->> 'L' as l;   -- 2, 1
    select to_regprocedure('public.study_sheet_create(uuid,jsonb)') is not null as sheet_create,
-          to_regprocedure('public.study_sheet_room(uuid)') is not null as room;      -- true, true
+          to_regprocedure('public.study_sheet_room(uuid)') is not null as room,
+          to_regprocedure('study_private.q_plain(text,text)') is not null as pickers;  -- true, true, true
    select kind, count(*) from public.study_exams group by kind;                        -- every existing upload: exam
    select name, enabled from study_private.features where name in ('exams', 'sheets') order by name;  -- exams as before; sheets false
    ```
-   If part 9 ran in this step, also follow [`RELEASE-R1.md`](RELEASE-R1.md)
-   and [`RELEASE-L1.md`](RELEASE-L1.md) for their own flags later; none of
-   them is needed for sheets.
+   If I, R or L were missing before this step, also follow
+   [`RELEASE-R1.md`](RELEASE-R1.md) and [`RELEASE-L1.md`](RELEASE-L1.md) for
+   their own flags later; none of them is needed for sheets. O 2 is in, but
+   nothing of it shows or spends until release A1's flag (below).
 4. **Vercel → Settings → Environment Variables → Production only:**
    `STUDY_SHEETS_MONTHLY_USD` = `6` (unset is 6) and `STUDY_MONTHLY_USD` =
    `33` (if step 1 found it unset). Never on Preview: Preview shares the
@@ -107,7 +113,7 @@ until step 8. Do them in order; each says what to see.
 
 **Rolling back release A0:** the switch `sheets` off stops new sheets at
 once; hiding every sheet and unsetting the flag are below ("Rolling back").
-Part 10's columns and functions stay: they are harmless to the old code.
+Part 11's columns and functions (and the pickers' `q_plain` in parts 2 to 7) stay: they are harmless to the old code.
 
 ## Before anything: two checks (read only)
 
@@ -144,13 +150,15 @@ $15; if it is above, tell Claude and the two lines go down.
 from the ledger: the query in [`sheets.md`](sheets.md) ("How long a unit
 takes"). Send Claude the rows.
 
-## Release point 1: the SQL (section O 1; no change in the app yet)
+## Release point 1: the SQL (sections O 1 and O 2; no change in the app yet)
 
-1. **Supabase → SQL Editor: run `supabase/parts/10.sql`** to the end (sections
-   L and O; safe to run again). Nothing else changed in parts 1 to 9 for O 1.
-   Then check, read only:
+1. **Supabase → SQL Editor: run `supabase/parts/2.sql` to `11.sql` in order**,
+   each to the end (safe to run again). Part 11 is section O (O 1, and O 2:
+   the sheet reader's SQL, dark until release A1); parts 2, 3, 5 and 7 carry
+   O 2's in-place edits of the pickers; parts 9 and 10 are I, R and L, which
+   O follows. Then check, read only:
    ```sql
-   select public.study_schema() -> 'O' as o, public.study_schema() -> 'L' as l;   -- 1, 1
+   select public.study_schema() -> 'O' as o, public.study_schema() -> 'L' as l;   -- 2, 1
    select name, enabled from study_private.features where name in ('exams', 'sheets') order by name;  -- exams as before; sheets false
    select column_name, column_default from information_schema.columns
     where table_schema = 'public' and table_name = 'study_exams' and column_name in ('kind', 'lecture_id') order by 1;
@@ -162,9 +170,16 @@ takes"). Send Claude the rows.
    says `"schemaOk": true`.
 
 **Rolling back release point 1:** nothing to undo for the app (the new
-columns default to a past exam, and the switch `sheets` is off). O 1's three
+columns default to a past exam, and the switch `sheets` is off). O 1's
 redefinitions of section S's functions only filter by the new kind, which is
-`exam` for every existing upload.
+`exam` for every existing upload. O 2's redefinitions (the exam queue's claim,
+advance, printed count and "no key") keep a past exam's units exactly as
+before (reader `exam`, solve units of 20); its widened checks only allow
+more, and the pickers' `q_plain` is true for every existing question.
+Two things change for any upload once O 2 is in: a unit the budget refused
+on a **sheet** keeps the sheet "reading" (error `budget`) instead of
+finishing it without answers, and a sheet's units stop at once when the
+switch `sheets` goes off.
 
 ## Release point 2: sheets in the app (release A0)
 
@@ -173,12 +188,10 @@ start to finish" above). Spends only when a
 member uploads: a sheet is read like a past exam (about $0.05 a page), and
 never past the sheets line ($6 a month) or the room under the 80% line.
 
-1. **Part 10 again** if release point 1 ran before this was merged: part 10
-   gained `study_sheet_room` (the sheets line's figures) inside O 1. Run
-   `supabase/parts/10.sql` to the end (safe to run again; parts 1 to 9 are
-   unchanged by O 1). Check, read only:
+1. **Parts 2 to 11 again** if release point 1 ran from an older `dev` (part
+   10 then held O 1, without `study_sheet_room`). Check, read only:
    ```sql
-   select public.study_schema() -> 'O' as o;                                        -- 1
+   select public.study_schema() -> 'O' as o;                                        -- 2
    select to_regprocedure('public.study_sheet_room(uuid)') is not null as room;     -- true
    ```
 2. **Vercel → Settings → Environment Variables (Production):** `STUDY_SHEETS_MONTHLY_USD`
@@ -201,12 +214,48 @@ sheets at once; unset `VITE_STUDY_SHEETS` and redeploy to hide the screens.
 A build without the flag never lists a sheet, and a simulation never takes
 one, whatever the flag.
 
-## Release points 3 and 4 (releases A1 and B) — not built yet
+## Release point 3 (release A1: open and numeric questions) — the SQL and the server are built, the client is not
 
-A1 (open and numeric questions, `VITE_STUDY_SHEETS_FORMS`, SQL O 2) and B
-(similar questions, `VITE_STUDY_SIMILAR`, SQL O 3, after L) will list exactly
-which parts to run: their SQL edits sections outside O (Q, Z, H, M, T, E, F)
-in place, so those releases run more than part 10.
+Built on `dev` (O5, O6): SQL section O 2 (part 11, with the pickers' edits in
+parts 2, 3, 5 and 7) and the server's sheet reader ([`sheets.md`](sheets.md),
+"SQL section O 2" and "The sheet reader on the server"). It runs only for a
+client that sends `forms: true`, which comes with `VITE_STUDY_SHEETS_FORMS`
+(O7, not built yet); until then nothing of it shows or spends. When the
+client is built, this point will be:
+
+1. Parts 2 to 11 in order, if release point 1 ran before O 2 was merged
+   (`select public.study_schema() ->> 'O';` says `1`). Then, read only:
+   ```sql
+   select public.study_schema() ->> 'O' as o;                                                   -- 2
+   select conname, pg_get_constraintdef(oid) like '%numeric%' as widened from pg_constraint
+    where conname = 'study_questions_form_x' and conrelid = 'public.study_questions'::regclass;  -- true
+   select count(*) as rows_not_plain from public.study_questions
+    where not study_private.q_plain(source, form);                                              -- 0 before any sheet is read by the sheet reader
+   ```
+2. Vercel (Production only): `VITE_STUDY_SHEETS_FORMS` = `1`, with
+   `STUDY_SHEETS_MONTHLY_USD` = `6` and `STUDY_MONTHLY_USD` = `33` as for A0.
+   Redeploy. `/api/study/health`: `"schemaOk": true`, `"schema"` has `"O": 2`.
+3. The first sheet read by the sheet reader (spends; read only afterwards):
+   ```sql
+   select q.form, count(*), round(avg(q.exact)::numeric, 2) as exact, count(*) filter (where q.parse_conf = 1) as to_check
+     from public.study_questions q join public.study_exams e on e.id = q.exam_id
+    where e.kind = 'sheet' and e.created_at > now() - interval '1 day' group by 1;
+   select j.kind, j.range ->> 'reader' as reader, j.status, j.error, round(j.cost_usd, 3) as usd
+     from study_private.exam_jobs j join public.study_exams e on e.id = j.exam_id
+    where e.kind = 'sheet' and e.created_at > now() - interval '1 day' order by j.created_at;
+   ```
+   Send Claude the rows (the exactness line, 0.55, and the unit sizes are
+   set from them).
+
+**Stopping A1's spend:** the switch `sheets` off stops a sheet's units at once
+(the claim refuses them; a unit already running finishes, at most 200 s). A
+unit the budget refuses holds its sheet ("נעצר: נגמר התקציב החודשי") until a
+member resumes it within the lines.
+
+## Release point 4 (release B: similar questions) — not built yet
+
+B (`VITE_STUDY_SIMILAR`, SQL O 3, after L) will list exactly which parts to
+run: its SQL edits sections E and F in place, so it runs more than part 11.
 
 ## Rolling back (switches, seconds, no redeploy)
 

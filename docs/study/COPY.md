@@ -333,6 +333,22 @@ exams' in `failText`.
 | Keying a true/false or match item by hand | בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד. | לסמן תשובה / לסמן תשובה אחרת · לכל משפט: נכון או לא נכון. התשובה תשתנה לכל הקבוצה: (match: לכל שורה, התשובה המתאימה…) · לשמור · ביטול · התשובה סומנה. |
 | Who keyed it (O4) | a one-answer item only: סומנה ע״י נועה: ג׳ | a true/false or match item too: סומנה ע״י נועה · לבטל (no letter: the statements are on the card) |
 
+Release A1's server (O5, O6) adds only refusals, in `failText` (the
+client's own words for the forms, the edit sheet and the pause come with
+O7):
+
+| Where | Now |
+|---|---|
+| A fix that would change the shape of an answered item | כבר ענו על השאלה: אפשר לתקן רק טקסט. |
+| A label another item has | יש כבר שאלה עם המספור הזה. |
+| A fix or an added item that does not fit | משהו בשאלה לא תקין. כדאי לבדוק את הטקסט והאפשרויות. |
+| "להמשיך" with nothing held | אין מה להמשיך: ההעתקה כבר ממשיכה. |
+| "להעתיק גם N שאלות פתוחות" with none | אין שאלות פתוחות להעתיק. |
+
+The sheet solver writes its worked solutions in Hebrew, impersonally (no
+"you", no gendered forms), English terms and units as printed
+(`SHEET_SOLVE_SYSTEM`).
+
 `e2e/study/sheets.cjs` (O4) asserts these words as they are on screen
 (help's two lines, the tiles and the Word line, the cover, the answers
 file's question, the exactness line, the landing card, the refusals), so a

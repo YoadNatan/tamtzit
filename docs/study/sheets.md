@@ -24,10 +24,11 @@ path, queue, lease, worker, review screen and ledger kind `exam` as past exams
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
 | O0 | The synthetic fixture, the time measurement on it, Yoad's read-only checks | none | none | Built |
-| A0 (O1) | The kind and one lecture of an upload, the switch `sheets`, "a new sheet", keying true/false and match items by hand, simulations of past exams only, the sheets line's figures (`study_sheet_room`) | `VITE_STUDY_SHEETS` | O 1 | Built (part 10, after L) |
+| A0 (O1) | The kind and one lecture of an upload, the switch `sheets`, "a new sheet", keying true/false and match items by hand, simulations of past exams only, the sheets line's figures (`study_sheet_room`) | `VITE_STUDY_SHEETS` | O 1 | Built (part 11 since O 2; it was part 10, after L) |
 | A0 (O2, O3) | The upload (two kinds, desktop drop and paste, camera checks, the cover page), a sheet's bounds on the server (40 pages, the $6 line, the headroom, the $3 confirmation), the course page by kind, the wide review with its page and the keyboard, hand keying in the review, the exactness flags, printed order after answering, the landing card | `VITE_STUDY_SHEETS` | O 1 | Built |
 | A0 (O4) | The A0 e2e script (`e2e/study/sheets.cjs`, flag set `o`) at 320/390/820/1440, a ready sheet in the mock (`mocks/sheets.cjs`), `devices.cjs` and `wide.cjs` with the new screens, the fixes they found, the copy list, Yoad's release steps | — | — | Built |
-| A1 (O5-O8) | The sheet reader: open, numeric and multi-part questions, tables, up to 10 options, answers files, worked solutions, edits | `VITE_STUDY_SHEETS_FORMS` | O 2 | Not built yet |
+| A1 (O5, O6) | The SQL (O 2: forms open and numeric, exact items by label, answers files and worked solutions, edits, open-add, the budget pause; the pickers' in-place edits) and the server (the sheet reader, its answers file, solving with worked solutions, open-add, resume) | `VITE_STUDY_SHEETS_FORMS` (the client's, O7) | O 2 | Built (part 11; parts 2 to 9 changed in place) |
+| A1 (O7, O8) | The client: the forms in practice, the edit sheet, add and retire, solutions, the paused state, the lecture page's row; its e2e | `VITE_STUDY_SHEETS_FORMS` | O 2 | Not built yet |
 | B (O9-O12) | Similar questions after a wrong answer and for the whole sheet, in the sheet's set on L's shelf | `VITE_STUDY_SIMILAR` | O 3 | Not built yet |
 
 ## The fixture (O0)
@@ -127,8 +128,8 @@ reads):
 
 ```sql
 select name, enabled, changed_at from study_private.features
- where name in ('courses', 'exams', 'sheets') order by name;     -- courses true; exams ?; sheets: no row until part 10
-select public.study_schema() ->> 'S' as s, public.study_schema() ->> 'O' as o;   -- 2, and null until part 10
+ where name in ('courses', 'exams', 'sheets') order by name;     -- courses true; exams ?; sheets: no row until part 11
+select public.study_schema() ->> 'S' as s, public.study_schema() ->> 'O' as o;   -- 2, and null until part 11
 ```
 
 If `exams` is false, the members have no past exams yet; release A0 turns it
@@ -158,10 +159,10 @@ If the total without sheets is above that, tell Claude: the two lines go down
 ## SQL section O 1 (release A0)
 
 In `supabase/study-schema.sql` after section L (the order is now … S, I, R,
-L, O), in **part 10** with L: part 10 is 91 KB with O 1 (of 170 KB). If a
-later version of O would take part 10 past 170 KB, O starts part 11
-(`tools/sql-parts.mjs`'s `STARTS` gains `"O"`, and the tests and the README
-say 11 parts). Its tests are section O of `supabase/tests/study.sql`.
+L, O). O 1 was in part 10 with L (91 KB); O 2 would take part 10 to 188 KB,
+so **O starts part 11** (`tools/sql-parts.mjs`'s `STARTS` gains `"O"`; part 10
+is L alone, 71 KB; part 11 is O, 118 KB; the tests, the parts' headers and
+the README say 11 parts). Its tests are section O of `supabase/tests/study.sql`.
 
 - **`study_exams.kind`** (`'exam' | 'sheet'`, default `'exam'`, check
   `study_exams_kind_x`) and **`study_exams.lecture_id`** (one optional
@@ -213,6 +214,152 @@ Also seen while building O 1:
 - Section S's `study_exam_pages_done` is unchanged: in release A0 the op
   `exam_read` keeps a sheet to 40 pages and checks the sheets line and the
   headroom before it calls it (O2).
+
+## SQL section O 2 (release A1; O5)
+
+After O 1 in section O, in **part 11**. It needs parts 2 to 9 run before it:
+the pickers of sections Q, Z, M, H and T are edited in place (below), and a
+check at O 2's start stops part 11 with "section O 2 needs parts 2 to 9 run
+first" when they were not. Registry `('O', 2)`; the client's
+`VITE_STUDY_SHEETS_FORMS` (O7) will ask for it, and the server's sheet
+reader asks for it (`VARIANT_SCHEMA.sheet_forms`: Q 2, S 2, O 2).
+
+**Columns.** `study_questions`: `no_label` (as printed: "3א", "2.1"),
+`no_key` (its normal form, `study_private.label_key`: one item per label of
+an upload, unique index `study_questions_exam_label`), `figures` (up to 4
+boxes `pg:<page>:x,y,w,h`; `figure` stays `figures[1]`), `exact` (how much of
+the copy is in its page's PDF text, 0-1; null without a text layer).
+`study_question_keys`: `num`, `num_tol` (percent, 0-50; 1 when not said),
+`num_unit`, `model_answer`, `rubric` (up to 6 points), `solution`,
+`solution_origin` (exam | sheet | solved | member), `solution_conf`.
+`study_answers.value` (a numeric answer; `correct` stays not null).
+`study_exam_key_log.old_text`, `new_text` (a solution's or a number's change,
+as JSON text). Private tables (no grants): `study_private.open_marks` (an
+open item shown, then self-marked 0-2; read by no aggregate, OD8) and
+`study_private.sheet_label_keys` (an answers file's lines by label, kept
+until their items are read).
+
+**The widened checks** (each found by name or by its definition, dropped and
+added again under a name; a later run of an earlier part keeps them, since
+section Q adds its own only when missing). Tested on a database at
+`4b9b832` with rows only O 2 allows, then parts 2 to 11 run twice: the rows
+stay, the checks stay widened, and an ai question over 600 characters and 7
+statements on a true/false item are still refused.
+
+| Check | Before | O 2 |
+|---|---|---|
+| `study_questions_text_x` (the inline question and case checks) | question 5-600, case text ≤ 2,500 | an uploaded item (source exam, and O 3's twin): question 2-4,000, case text ≤ 8,000; the rest as before |
+| `study_questions_options_x` (the inline 2-6) | 2-6 | open and numeric: none; one-answer of an upload: 2-10; the rest 2-6 |
+| `study_questions_form_x` (Q 3's) | one, tap, tf, match, order | + open, numeric (the drafts' check is not changed) |
+| `study_questions_step_x` (Q 3's) | step 1-3 | step 1-12 (a question's parts) |
+| `study_questions_exam_no_x` (the inline 1-500) | 1-500 | 1-12,100 (a sheet's item is page·100 + its place) |
+| `study_questions_label_x`, `_figures_x` | — | label ≤ 20, its key ≤ 40, exact 0-1; at most 4 boxes (`study_private.figures_ok`) |
+| `study_question_keys_sheet_x` | — | the new key columns' bounds |
+| `study_exam_item_log_field_x` | question, vignette, option, prompt | + label, form, options, prompts, figures, added, retired, unretired |
+| unchanged on purpose | `study_question_keys_seq_x`, `study_answers_choices_x`, `exam_sheet_keys` (2-6 values, 0-5) | true/false and match stay at 6 statements (design D7) |
+
+**The sheet reader's units** (the worker's key; the phone's fallback with
+the member's token too):
+
+- `study_sheet_pages_done(p_exam, p_pages, p_urls, p_until, p_key)`: section
+  S's checks of the pages, copied; a sheet only (`not a sheet`); at most 40
+  pages and an answers file of 10; read units of **3 pages** with the next as
+  context (`range.reader 'sheet'`), one key unit for an answers file. The op
+  calls it only for a client that draws the forms (`forms: true`); a release
+  A0 client's sheet goes through S's `study_exam_pages_done` as before.
+- `study_sheet_queue_key(p_job, p_lease, p_from_page, p_key)`: the sheet
+  prints its own answers from that page on: those pages (at most 10) become
+  its answers file, one key unit (`printed`), and pending read units of only
+  those pages are not read. Once a sheet.
+- `study_sheet_save_items(p_job, p_lease, p_items, p_skipped, p_key)`: by
+  label (an upsert). A sheet's item is numbered page·100 + its place on the
+  page (a taken number moves on); an open-add item of a past exam keeps its
+  printed number (a taken one is a repeat). The same label on a page further
+  away is another item (an exercise whose numbers restart: its key gets
+  `@<page>`); from the next page, the longer copy stays. A question's parts
+  (main, part 1-12) share a series. An item a member fixed, or anyone answered
+  or marked, keeps its text. Marks only when the uploader said so; the
+  answers file's line by label wins and may come first. The sheet's lecture is
+  each item's `ref_lecture`.
+- `study_sheet_save_keys(p_job, p_lease, p_rows, p_key)`: a key unit's lines
+  by label (kept in `sheet_label_keys`, written onto the items of that label,
+  origin `sheet`), or a solve unit's answers by item id (only the unit's
+  items, only where an item has none, origin `solved`; an unsure reading caps
+  the confidence at 2). Trust (design D11): member > answers file > marks >
+  the model; a worked solution follows the same order
+  (`study_private.sheet_key_apply`, `origin_rank`).
+
+**Section S's functions O 2 redefines** (with O 1's four, eight in all; each is
+S's text with the change):
+
+| Function | Change |
+|---|---|
+| `study_claim_exam` | The unit's `reader` (`range.reader`; a unit queued without one is the exam reader's, unless its sheet was queued for the sheet reader: a page read again), `extra` (open-add), `printed` (a key unit of the sheet's own answers), the upload's `kind`, `lecture_id` and `course`, the labels saved already (`seen_labels`), the next page's lines (a sheet unit's exactness check), and for a solve unit each item's label, series, step, boxes, page and that page's link. **A sheet's unit is not taken while the switch `sheets` is off** (design D22) |
+| `study_private.exam_advance` | Solve units by reader: a past exam's choice items 20 a unit (reader `exam`); the items of a sheet read by the sheet reader, and any open or numeric item, `study_private.sheet_solve_items()` a unit (**4**, until Yoad's speed query says more fit: "How long a unit takes"), reader `sheet`. A ready upload stays ready while only open-add units and their solving run. `skipped_open` is net: the read units' skips less what open-add units copied, never below 0. A sheet whose unit the budget refused (**D23**: failed for `budget` or `reserve`, no retry time) stays `reading` with error `budget` when nothing else runs |
+| `study_private.exam_printed` | An open-add unit's repeats are not the exam's (the net `skipped_open` keeps the count right) |
+| `study_private.exam_unkeyed` | A numeric item with its number, or an open item with its model answer, is keyed |
+
+**The member's RPCs** (each `exam not found` / `question not found` for a
+stranger, a deleted upload or with `exams` off; a sheet's also with `sheets`
+off):
+
+- `study_sheet_review(p_exam)`: S's `study_exam_review` and the upload's
+  kind, lecture, reader, `paused` (the held units by kind), open-add's
+  progress, and per item what S's review has no place for (label, boxes,
+  exactness, series and step, number with unit and tolerance, model answer
+  and rubric, worked solution with its origin, who took it out). A key a live
+  quiz holds is not shown.
+- `study_exam_item_fix(p_question, p_patch)`: label, form, case text,
+  question, options, prompts, boxes. Once anyone answered or marked the item,
+  only its text (`answered`); a label another item has (`label taken`). Each
+  changed field is logged; a key that no longer fits is cleared unless a
+  member keyed it.
+- `study_exam_item_add(p_exam, p_item)` ("+ להוסיף שאלה שלא הועתקה"; after its
+  page's last item, logged `added`), `study_exam_item_retire(p_question,
+  p_note)` and `study_exam_item_unretire(p_question)` (by whoever took it
+  out, or by anyone within 24 hours: `not yours` after).
+- `study_item_solution(p_question, p_patch)` ("לתקן תשובה" beyond a choice:
+  a number, its unit and tolerance, a model answer and rubric, a worked
+  solution), origin `member`, logged with the text before and after (practice
+  sets §13.2's name; the design's `study_set_solution`).
+- `study_answer_value(p_question, p_value, p_mode, p_ms)`: a numeric answer
+  checked at $0 within its tolerance (an answer of 0 only by 0), written to
+  `study_answers` with its value (OD7); a suggested key under confidence 3
+  writes no row (S's trigger, decision 2).
+- `study_open_show(p_question)` (the model answer, rubric and solution; a row
+  in the caller's own open marks) and `study_open_mark(p_question, p_mark)`
+  (0 טעיתי, 1 חלקית, 2 צדקתי, on the latest showing). Never an answer row (OD8).
+- `study_question_solution(p_question)`: the worked solution and answer once
+  the caller answered the item (or saw an open one's solution); null before.
+- `study_sheet_progress(p_exam)`: the caller's own counts (items, answered,
+  right, open items shown and self-marked).
+- `study_sheet_resume(p_exam, p_skip_solve, p_dry, p_key)` (through the op):
+  "להמשיך" puts the held units back; "לסיים בלי תשובות מוצעות"
+  (`p_skip_solve`) drops the held solve units (the items stay without a
+  suggested answer); `p_dry` only says what would go on.
+- `study_sheet_open_add(p_exam, p_urls, p_until, p_dry, p_key)` (through the
+  op; OD15): a ready past exam, or a sheet read by the exam reader, whose
+  read units skipped open questions has those units' pages read again for
+  them (`range.reader 'open'`, `range.extra`); fresh links; once (`already`).
+
+### The pickers: which readers of `study_questions` may meet an open or numeric item (the design's audit)
+
+Open and numeric items (and O 3's similar questions, source `twin`) are a
+sheet's, with `lecture_id` null and `ref_lecture` the sheet's lecture. Every
+last definition in the file that reads `study_questions` was classified:
+
+| Kind | Functions | What O 2 does |
+|---|---|---|
+| **Draws questions, group-wide or by `coalesce(lecture_id, ref_lecture)`** | `study_quiz__pick` (Z), `study_quiz__pick_preset` and `study_meeting_quiz` (M), `study_private.boss_askable` (H: so `boss_heads`, `study_boss_open` and the boss's rounds), `study_today`'s danger card (T) | `and study_private.q_plain(q.source, q.form)` in place (Q's new helper: the five choice forms, never a twin). Each already took form `one` only, so today's rows are unchanged |
+| Draws, runs as the caller | `study_quiz_pool` (Z) | the same rule inline (`source is distinct from 'twin'`; it already takes `one`), since `study_private` is not the caller's |
+| Lecture-scoped (`q.lecture_id = …`; a sheet's items have none) | `study_session_counts`, `study_question_round`, `study_paragraph_practice` (N), `question_spots`, `study_needs_me`, `study_my_rewordings` | nothing |
+| Counts questions or answers (OD7: numeric answers count like any practice answer) | `study_my_lectures` (a lecture's questions, its sheets' items with them), `study_my_topic_stats`, `study_practice_overview`, `study_my_latest`, `study_my_daily`, `study_my_weak_points`, `study_my_days`, `study_my_readiness`, `study_my_aspects`, `study_my_calibration`, `pulse_answers`, `study_my_pulse`, `study_my_flame`, `study_my_loot`, `study_my_quiz_returns` | nothing; open answers are never rows (OD8) |
+| Needs a choice or a bet | `study_my_danger_list` (a wrong "על בטוח" answer: a numeric answer has no bet), `pulse_night__traps` (`choice is not null`), `study_my_confusions` (`choice is not null`) | nothing |
+| Personal scopes that render every form in practice | `study_open_mistakes` (a wrong numeric answer is a mistake to practise) | the client draws the forms (O7) |
+| The upload's own | S's and O's `study_exam_*`, `study_sheet_*`, `study_course_style_items` (sheets are `hide_from_profile`), the simulation (O 1: choice forms of past exams only) | as above |
+
+The client's group-wide loaders (`lib/practice.ts`'s `listGroupQuestions`,
+`questionColumns.ts`) filter the same way with the client slice (O7).
 
 ## Release A0 in the app (O2, O3; `VITE_STUDY_SHEETS`)
 
@@ -413,6 +560,77 @@ stuck 16 px from the top, under the sticky top bar on a computer (now under
 it); a figure's box had 1.05:1 contrast in dark (it sits on white paper in
 both schemes); a true/false or match item keyed by hand did not say who
 keyed it (now "סומנה ע״י נועה").
+
+## The sheet reader on the server (O6)
+
+`server/study/sheets.ts`, `prompts/sheets.ts`, `calc.ts`; `exams.ts` and
+`ops/exams.ts` changed. Nothing of it runs until a client sends `forms:
+true` (O7, `VITE_STUDY_SHEETS_FORMS`) or asks for open-add or a resume, and
+section O 2 is installed: a release A0 client's sheet is read by the exam
+reader exactly as before.
+
+**Who reads a unit.** `runExamUnit` takes the claim's `reader`: none (a
+database before O 2) or `exam` is the past exams' reader, unchanged
+(`EXAM_READ_SYSTEM` byte for byte, its length pin holds); `sheet` and `open`
+are the sheet reader's. Both share the reservation, the stream, the lease and
+the finish. The sheet reader's units reserve under kind `exam` with refs
+`sheet_read`, `sheet_key` and `sheet_solve` (the ledger tells sheets from
+exams; the models package, Y, routes the keys `sheet_read` and, with O 3,
+`similar`). The model is the current default (`SHEET_MODEL = MODEL`, OD17);
+no provider is refused (OD5).
+
+| Unit | Request | Saved through |
+|---|---|---|
+| read (`sheet`) | `SHEET_READ_SYSTEM` (cached): 3 pages as pictures with their PDF lines as a hint, the page before and after as context; the labels saved already; the uploader's answers mode | `study_sheet_save_items`, after `study_sheet_queue_key` when the reader says the sheet's own answers start on one of its pages |
+| read (`open`) | the same system, told to copy only open and numeric questions under their printed numbers | the same; a question's parts folded into one open item |
+| key | `SHEET_KEY_SYSTEM`: the answers file (or the sheet's own printed answers) by label | `study_sheet_save_keys` (a file with several versions keys nothing: `versions`) |
+| solve | `SHEET_SOLVE_SYSTEM`: up to 4 items (`sheet_solve_items()`), by ref, each figure page attached once when its link is still good; a suggested answer, a worked solution, a numeric answer's working (named inputs and a formula), an open item's model answer and rubric | `study_sheet_save_keys` |
+
+**Pure checks before any write** (`sheets.test.ts`): the text kept as printed
+(lines, pipe tables, at most two blank lines; over its limit cut with a
+visible "[…]" and marked to check), a label of 1-20 characters, forms one
+(2-10 options), true/false and match (2-6), open and numeric (none), up to 4
+boxes on pages the unit saw, marks only when the uploader said so, an item
+that starts on the next page left to the next unit, and the exactness against
+the page's PDF text (the synthetic sheet's 11 items all pass 0.55; a misread
+copy falls under it). A numeric answer is recomputed from its working
+(`calc.ts`: numbers, the inputs' names, + − × ÷ ^, parentheses, ln, log10,
+exp, sqrt, abs, min, max, at most 200 tokens; never evaluated as code): when
+the working does not give the number (within the tolerance, at least 0.5%),
+the answer is kept at confidence 1, so it counts in no score.
+
+**Op `exam_read`** (`ops/exams.ts`):
+
+- `forms: true` on a sheet: its price is the sheet reader's
+  (`sheetReaderPriceUsd`: about $0.066 a page to copy, $0.024 an item
+  solved; 6 pages with an answers file about $0.5), its worst case
+  (`sheetReaderWorstUsd`: every unit at all of its max_tokens, 8 items a page
+  solved without answers, 2 with them: 6 pages without answers $3.65, with
+  answers $1.40-1.57; under a fresh $6 line at most 9 pages without answers
+  and 24 with them, against release A0's 24 and 40) must fit the sheets line
+  and the room under the 80% line, as release A0's; then
+  `study_sheet_pages_done`. 503 schema without O 2.
+- `action: "open_add"` (OD15): `dry: true` gives `{units, pages, skipped,
+  priceUsd}` for the button "להעתיק גם N שאלות פתוחות · כ-$…"; otherwise
+  with fresh links the worst case (`openAddWorstUsd`) must fit the room (a
+  sheet's: the sheets line too), a start is reserved (ref `read`, 3 a day)
+  and settled at $0, and `study_sheet_open_add` queues the units.
+- `action: "resume"` (D23): the held units' worst case (`heldWorstUsd`)
+  must fit the sheets line and the room again; then `study_sheet_resume`
+  (`skipSolve: true` for "לסיים בלי תשובות מוצעות"). Nothing is reserved:
+  each unit reserves itself.
+
+**Unit sizes.** Read units are 3 pages (they fit the 120 s budget at any
+likely speed, "How long a unit takes"). Read units write at most 12,000 tokens
+(the fixture writes about 3,000 with thinking). Solve units are 4 items with
+`max_tokens` 1,500 + 2,000 an item (9,500 for 4), until Yoad's speed query
+says more fit: then `study_private.sheet_solve_items()` (one number in part
+11) and `SHEET_SOLVE_PER_UNIT` (`shared/study/sheetPrice.ts`; a unit test
+pins the two together) change.
+
+**Not in O6:** the client (O7: the forms in practice, the edit sheet, the
+paused state, the lecture page's row, the button for open-add, sending
+`forms: true`); the A1 e2e (O8); similar questions (O9-O12).
 
 ## Stopping and rolling back (release A0)
 

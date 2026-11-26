@@ -841,3 +841,82 @@ Also decided for this build:
   part 10, the $6 and $33 lines, the switches `exams` and `sheets`, the flag
   on Production only, checks that spend nothing, and one real sheet with a
   read-only query of what it cost.
+
+### Uploaded sheets, O5 and O6 (release A1's SQL and server), built on 26 November 2026
+
+- **Section O starts part 11.** O 2 is 96 KB; with it part 10 would be 188 KB
+  (over the SQL Editor's 170 KB), so `tools/sql-parts.mjs`'s `STARTS` gains
+  `"O"` (Yoad's rule for this build): part 10 is L alone (71 KB), part 11 is O
+  (118 KB). The tests, the parts' headers, the README and the docs say 11 parts.
+- **The SQL now runs as parts 2 to 11, also for release A0.** O 2 edits the
+  pickers of sections Q, Z, M, H and T in place (parts 2, 3, 5, 7), so a run
+  of part 11 alone could leave a picker able to draw an open or numeric item.
+  A check at O 2's start stops part 11 with "section O 2 needs parts 2 to 9
+  run first" when the edits are missing (tested). The sections' own versions
+  are not raised for these edits: nothing the client asks for depends on them,
+  and O's version (2) says they are in. Tested: a fresh database (the whole
+  file and the parts, each twice), an upgrade from `4b9b832`, the live path
+  (`eed179e`'s schema, then parts 2 to 11 twice), and rows only O 2 allows
+  surviving parts 2 to 11 run twice.
+- **The reader of a unit queued without one is the exam reader's**, unless its
+  sheet was queued for the sheet reader (then a page read again stays the
+  sheet reader's). The design's D4 said "sheet for any sheet"; that would have
+  switched a release A0 sheet's pending units to the sheet reader halfway.
+- **The sheet reader runs only for a client that draws its forms**: op
+  `exam_read` reads a sheet with it when the body says `forms: true` (the A1
+  client) and section O 2 is in (503 otherwise). An A0 client's sheet is read
+  by the exam reader exactly as before, so a server deployed before the client
+  never puts open or numeric items in front of an A0 screen.
+- **A sheet's items are numbered page·100 + their place on the page**; the
+  same label on a page more than one away is another item (its key gets
+  `@<page>`: an exercise whose numbers restart). A past exam's open-add item
+  keeps its printed integer; a question's parts are folded into one open item
+  there, so an exam's numbering stays one row a number.
+- **Solve units of the sheet reader are 4 items** (`study_private.sheet_solve_items()`,
+  `SHEET_SOLVE_PER_UNIT`) with `max_tokens` 1,500 + 2,000 an item, and read
+  units of 3 pages with `max_tokens` 12,000 (the design's 16,000 is not
+  needed: the fixture writes about 3,000 with thinking). O0's measurement put a
+  unit of 8 at over 120 s below 115 tokens a second; Yoad's speed query
+  (`sheets.md`) decides when the 4 goes up (one number in part 11, one in
+  `sheetPrice.ts`, pinned together by a unit test).
+- **The worst case with these sizes** admits, under a fresh $6 line, a sheet
+  of up to 9 pages without answers and 24 with them (release A0's exam
+  reader: 24 and 40). Longer sheets are refused with "התקציב לדפי תרגילים
+  נגמר החודש" until the line is raised; typical prices are far lower (6 pages
+  with an answers file about $0.47, without answers $0.69).
+- **A solved answer's confidence is capped at 2 only for an unsure reading**
+  (parse_conf under 3): the sheet solver sees the figures' pages, unlike S's
+  solver, which also capped every item with a figure.
+- **Numeric answers:** tolerance 1% unless the file or the solver says
+  otherwise (at most 50%; the solver's at most 5%); an answer of 0 only by 0.
+  The solver's number is kept at confidence 1 (counting in no score) when its
+  working does not recompute to it within the tolerance, at least 0.5%
+  (`calc.ts`, never evaluated as code).
+- **The budget pause (D23)** is a sheet unit failed for `budget` or `reserve`
+  with no retry time (`study_private.exam_job_paused`): the sheet stays
+  `reading` with error `budget`. "להמשיך" and "לסיים בלי תשובות מוצעות" go
+  through the op (`study_sheet_resume`, the worker's key with the member's
+  token), which checks the held units' worst case against the sheets line and
+  the headroom first. Known gap: S's "לנסות שוב" (`study_exam_retry`) also puts
+  failed units back without that check; each unit still reserves within the
+  80% line.
+- **Open-add (OD15)** is `study_sheet_open_add` through the op (dry for the
+  price): once an upload, on the pages of the read units that skipped open
+  questions; `skipped_open` is net of what it copied (`range.copied`), so the
+  count of printed questions does not change.
+- **Names:** `study_item_solution` (practice sets §13.2), `study_sheet_open_add`
+  and `study_sheet_resume` (the design's `open_add` and `resume` actions),
+  `study_private.exam_job_paused` (S has `exam_job_held(job, lease)` already).
+- **OD5 as changed:** no refusal of other providers is built; the sheet reader
+  uses `SHEET_MODEL = MODEL` (the current default, OD17), and the route keys
+  `sheet_read` (refs `sheet_read`, `sheet_key`, `sheet_solve` under kind
+  `exam`) and `similar` are left for the models package.
+- **Words:** five error codes a member can meet in A1 have Hebrew in
+  `failText.ts` ("כבר ענו על השאלה: אפשר לתקן רק טקסט.", "יש כבר שאלה עם
+  המספור הזה.", "משהו בשאלה לא תקין…", "אין מה להמשיך: ההעתקה כבר ממשיכה.",
+  "אין שאלות פתוחות להעתיק."); the rest are internal. They are 528 B of the
+  entry chunk (counted under F): O's real share is 686 + 528 = 1,214 B of its
+  1,500; the chunk is 404,843 B of 410,000.
+- **Left for the client slices:** the flag `sheetForms` (`VITE_STUDY_SHEETS_FORMS`,
+  requiredSchema O 2) and the e2e flag set `os` (O7/O11; `o` gains the forms
+  flag then), as the mock's comment says.
