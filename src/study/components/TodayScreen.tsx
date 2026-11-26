@@ -90,7 +90,8 @@ function useTodaySets(ctx: Ctx): TodaySets | null {
         if (!alive) return;
         setT({
           fresh: e.fresh.length ? C.todayRow(e.fresh.length) : null,
-          solve: e.solve ? { id: e.solve.id, label: C.SETS.today.solveNew } : null,
+          // Which set the primary starts, by its lecture and size ("לפתור: משתנים · 10 שאלות").
+          solve: e.solve ? { id: e.solve.id, label: C.todaySolve(e.solve.lecture_title || e.solve.title, e.solve.size) } : null,
           resume: e.resume.map((r) => ({ id: r.id, label: C.genResumeMine(r.lecture_title || r.title) })),
         });
       })
@@ -145,7 +146,7 @@ function PracticeCard({ ctx, queue, sets }: { ctx: Ctx; queue: boolean; sets: To
           <p className="a-small a-muted">שאלות חדשות על הרצאה, נבדקות לפני הבנק</p>
           <div className="a-row t-practice-go">
             <RouteLink to={{ v: "practice", x: "new" }} go={ctx.go} className="a-btn t-make">
-              סט חדש
+              <span aria-hidden="true">+ </span>סט חדש
             </RouteLink>
             {sets?.solve ? (
               <RouteLink to={{ v: "practice" }} go={ctx.go} className="a-link t-free">

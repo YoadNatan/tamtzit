@@ -5,7 +5,6 @@ import { studyDay } from "../../../shared/study/day";
 import type { ScreenProps } from "../features/types";
 import { paragraphPractice, practiceable } from "../lib/anchorTab";
 import { getLecture, getSections, lectureTitles, listLectures, partTitles, type Lecture } from "../lib/api";
-import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { courseKey } from "../../../shared/study/courseKey";
 import { guideMark } from "../lib/guideMark";
@@ -36,8 +35,8 @@ import type { Route } from "../lib/route";
 import { groupExams, keyOrigins, listExamQuestions, listQuestionsAll, mockGet, notCounted, type KeyOrigin } from "../lib/exams";
 import { PageCrop } from "./ExamParts";
 import { keepAll, usd } from "../lib/practice2";
-import { attemptFinish, attemptStart, mostLecture, myNamesPref, openSet, setNamesPref, setProgress, setRequests, setStats, shareSet, type Finish, type Stats } from "../lib/sets";
-import { genAddReady, genAdded, mistakesNew, SETS } from "../lib/setsCopy";
+import { attemptFinish, attemptStart, mostLecture, myNamesPref, openSet, setLink, setNamesPref, setProgress, setRequests, setStats, shareSet, type Finish, type Stats } from "../lib/sets";
+import { genAddReady, genAdded, mistakesNew, setFail, SETS } from "../lib/setsCopy";
 import { DEFAULT_SIZE } from "../lib/make";
 import { expectedQuestionUsd } from "../../../shared/study/practice2";
 import SetStats from "./SetStats";
@@ -378,7 +377,8 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     if (!setId) return 0;
     const d = await openSet(setId);
     const cur = sRef.current;
-    if (!cur) return 0;
+    // A round that is over stays over: its attempt is finished, so added questions would count nowhere.
+    if (!cur || S.isOver(cur)) return 0;
     const fresh = d.items.map((i) => i.question_id).filter((id) => !cur.ids.includes(id));
     if (!fresh.length) return 0;
     const qs = await listQuestionsByIds(fresh);
@@ -392,7 +392,8 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     return next.ids.length - now.ids.length;
   }, [setId, save]);
   useEffect(() => {
-    if (!setId || !making || phase !== "ready") return;
+    // Only while the round goes on: once it is over the attempt is finished (the end screen stays).
+    if (!setId || !making || phase !== "ready" || over) return;
     let alive = true;
     const tick = async () => {
       if (document.visibilityState === "hidden" || navigator.onLine === false) return;
@@ -412,7 +413,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
               .then((r) => Promise.all(r.map((id) => keepAll(id))))
               .then(() => appendNew())
               .then((n) => n > 0 && ctx.say(genAdded(n)))
-              .catch((e) => ctx.say(failText(codeOf(e), "practice")));
+              .catch((e) => ctx.say(setFail(codeOf(e))));
           },
         });
       }
@@ -424,7 +425,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
       alive = false;
       clearInterval(t);
     };
-  }, [setId, making, phase, appendNew, ctx]);
+  }, [setId, making, phase, appendNew, ctx, over]);
 
   // The round's end in a set: the attempt is finished once (scored on the
   // first answer per question), then the group's numbers; the first finished
@@ -500,7 +501,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
       } catch (e) {
         const code = codeOf(e);
         if (["retired", "in quiz", "question not found", "no key", "hidden"].includes(code)) {
-          ctx.say(failText(code, "practice"));
+          ctx.say(setFail(code));
           const now = sRef.current ?? cur;
           if (S.currentId(now) === qid) save(S.next(now, Date.now()));
         } else ctx.say("התשובה לא נשמרה. כדאי לבדוק את החיבור ולנסות שוב.");
@@ -964,12 +965,24 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
                 <button
                   type="button"
                   className="a-link"
-                  onClick={() => void shareSet(setId, setInfo?.size ?? total).then((r) => r === "copied" && ctx.say(SETS.set.linkCopied))}
+                  onClick={() =>
+                    void shareSet(setId, setInfo?.size ?? total).then((r) =>
+                      r === "copied" ? ctx.say(SETS.set.linkCopied) : r === "failed" ? ctx.say(`${SETS.set.linkSheet}: ${setLink(setId)}`) : undefined,
+                    )
+                  }
                 >
                   {SETS.set.link} ‹
                 </button>
               </p>
             </div>
+          ) : null}
+          {!setId && scope?.kind === "mistakes" && mistakesLecture ? (
+            // The paid secondary right under the score (design §5.10), as at a set's end.
+            <p className="pq-set-links">
+              <button type="button" className="a-link pq-mistakes-new" onClick={() => ctx.go({ v: "practice", l: mistakesLecture, x: "new", from: "m" })}>
+                {mistakesNew(mistakesUsd)} ‹
+              </button>
+            </p>
           ) : null}
           {wrong.length ? (
             <>
@@ -996,13 +1009,6 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
                   );
                 })}
             </div>
-          ) : null}
-          {!setId && scope?.kind === "mistakes" && mistakesLecture ? (
-            <p className="pq-set-links">
-              <button type="button" className="a-link pq-mistakes-new" onClick={() => ctx.go({ v: "practice", l: mistakesLecture, x: "new", from: "m" })}>
-                {mistakesNew(mistakesUsd)} ‹
-              </button>
-            </p>
           ) : null}
           {left > 0 ? <p className="a-muted">{left === 1 ? "נשארה שאלה אחת שעוד לא תורגלה." : `נשארו ${left} שאלות שעוד לא תורגלו.`}</p> : null}
           <button type="button" className="a-btn ghost pq-back" onClick={close}>

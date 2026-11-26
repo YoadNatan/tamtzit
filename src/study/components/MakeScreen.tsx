@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { DIFFICULTIES, FOCUS_MAX, STYLES, type Difficulty, type Options, type PlanAnswer, type Style } from "../../../shared/study/practice2";
 import type { ScreenProps } from "../features/types";
 import { listLectures, readMarks } from "../lib/api";
-import { failCode, failText } from "../lib/failText";
+import { failCode } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { hueOf } from "../lib/hue";
 import { shrinkImage, toBase64 } from "../lib/images";
@@ -18,6 +18,7 @@ import {
   keyAction,
   notesOf,
   offeredStyles,
+  partIdxsOf,
   partsOf,
   previewOf,
   readSticky,
@@ -31,7 +32,8 @@ import {
 } from "../lib/make";
 import { listQuestionsByIds, myMistakes, practiceOverview } from "../lib/practice";
 import { askPlanInputs, createRequest, markMade, openOnLecture, writeRequest, type OpenOnLecture } from "../lib/practice2";
-import { makeGo, makeOpen, previewDaily, previewFree, SETS } from "../lib/setsCopy";
+import { setWhen } from "../lib/sets";
+import { makeGo, makeOpen, makeRecent, previewDaily, previewFree, setFail, SETS } from "../lib/setsCopy";
 import "../styles/sets.css";
 import FailCode from "./FailCode";
 import { Icon } from "./Icon";
@@ -105,6 +107,8 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
   const [creating, setCreating] = useState(false);
   /** Slice B (D6, OD20): the set someone is making on this lecture, from a 409 "already making". */
   const [openSet, setOpenSet] = useState<OpenOnLecture | null>(null);
+  /** The open set plan's inputs showed on load was set aside ("ליצור סט נוסף בכל זאת"): the next create passes it. */
+  const [forced, setForced] = useState<string | null>(null);
   const [createError, setCreateError] = useState<{ text: string; code: string; block: Block | null } | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [more, setMore] = useState(() => {
@@ -202,7 +206,7 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
     setChoices(f);
   };
 
-  const parts = answer && inputs ? partsOf(inputs, choices.parts) : null;
+  const parts = answer && inputs ? partsOf(inputs, choices.parts, partIdxsOf(answer)) : null;
   const facts = answer && parts ? factsFor(answer, parts.chosen) : null;
   const offered = offeredStyles(flags.qtypes, facts);
   const styles = answer ? stylesOf(choices, answer, offered) : { styles: [] as Style[], from: "default" as const };
@@ -223,7 +227,11 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
 
   const create = async (confirmed = false, force = false) => {
     if (!ready || !preview || !answer) return;
-    if (!confirmed && isBig(preview.usd.total)) return setSheet("big");
+    if (!confirmed && isBig(preview.usd.total)) {
+      if (force) setForced(lectureId);
+      return setSheet("big");
+    }
+    force = force || forced === lectureId;
     writeSticky(ctx.userId, { size: choices.size, ...(choices.styles?.length ? { styles: choices.styles } : {}) });
     const read = answer.points.stale.length > 0;
     if (read || hasExample) {
@@ -259,7 +267,7 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
       }
       const code = codeOf(e);
       const b = blockOfCode(code);
-      setCreateError({ text: b ? "" : failText(code, "practice"), code: b ? "" : failCode(e, "practice"), block: b });
+      setCreateError({ text: b ? "" : setFail(code), code: b ? "" : failCode(e, "practice"), block: b });
       setCreating(false);
       if (code === "points stale") void ask();
     }
@@ -291,7 +299,7 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
       const small = await shrinkImage(new Uint8Array(await f.arrayBuffer()), f.type || "image/jpeg");
       setImage({ mediaType: "image/jpeg", data: await toBase64(small.blob) });
     } catch {
-      setCreateError({ text: failText("bad example", "practice"), code: "", block: null });
+      setCreateError({ text: setFail("bad example"), code: "", block: null });
     }
   };
   const toggleMore = (open: boolean) => {
@@ -410,6 +418,9 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
     );
 
   const partRows = answer?.parts.filter((p) => p.points > 0 || answer.points.stale.includes(p.part_idx)) ?? [];
+  // D6 and the recent row on open (slice B): from plan's inputs, before anything is tapped.
+  const making = flags.sets ? (inputs?.making?.[0] ?? null) : null;
+  const recent = flags.sets && !making ? (inputs?.recent?.find((r) => r.state === "ready" && r.size > 0) ?? null) : null;
 
   return (
     <main className="make-screen">
@@ -441,10 +452,35 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
             </p>
           </div>
 
+        </div>
+
+        <div className="mk-end">
+          <PreviewCard title={title} preview={preview} loading={!preview && !note} note={note} lines={lines} action={goButton("card")} />
+        </div>
+
+        <div className="mk-rest">
           {shownBlock ? (
             <div className="a-callout warn mk-block" role="status">
               {BLOCK_TEXT[shownBlock]}
             </div>
+          ) : null}
+          {!openSet && making && forced !== lectureId ? (
+            // D6 on open (design §5.3): someone is making a set on this lecture now.
+            <div className="a-callout warn mk-open" role="status">
+              <b>{makeOpen(making.author_name ?? "", making.made, making.want)}</b>
+              <div className="a-row">
+                <RouteLink to={{ v: "sets", k: making.set_id }} go={ctx.go} className="a-btn small">
+                  {SETS.make.openGo}
+                </RouteLink>
+                <button type="button" className="a-link" onClick={() => setForced(lectureId)}>
+                  {SETS.make.openForce}
+                </button>
+              </div>
+            </div>
+          ) : !openSet && recent ? (
+            <RouteLink to={{ v: "sets", k: recent.id }} go={ctx.go} className="a-small a-link mk-recent">
+              {makeRecent(setWhen(recent.created_at), recent.size, recent.author_name ?? "")} ‹
+            </RouteLink>
           ) : null}
           {openSet ? (
             <div className="a-callout warn mk-open" role="status">
@@ -554,7 +590,8 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
                     </button>
                   </div>
                 ) : null}
-                <input ref={file} type="file" accept="image/jpeg,image/png,image/webp,image/gif" capture="environment" hidden onChange={(e) => void pickImage(e.target.files?.[0])} />
+                {/* No capture attribute: the phone offers the camera and the photo library (an example is often a screenshot). */}
+                <input ref={file} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={(e) => void pickImage(e.target.files?.[0])} />
               </div>
 
               <label className="a-field mk-field">
@@ -591,10 +628,6 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
             </div>
           </details>
         </div>
-
-        <div className="mk-end">
-          <PreviewCard title={title} preview={preview} loading={!preview && !note} note={note} lines={lines} action={goButton("card")} />
-        </div>
       </div>
 
       <StickyActions>{goButton("foot")}</StickyActions>
@@ -615,7 +648,7 @@ export default function MakeScreen({ route, ctx }: ScreenProps<"practice">) {
           }}
         />
       ) : null}
-      {sheet === "big" && preview ? <BigSetSheet dollars={preview.usd.total} onClose={() => setSheet(null)} onGo={() => void create(true)} /> : null}
+      {sheet === "big" && preview ? <BigSetSheet dollars={preview.usd.total} onClose={() => setSheet(null)} onGo={() => void create(true, forced === lectureId)} /> : null}
     </main>
   );
 }

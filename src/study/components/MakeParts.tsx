@@ -184,7 +184,21 @@ export function LectureSheet({
           </label>
           <input id="mk-search" className="a-input mk-search" type="search" dir="rtl" placeholder={SETS.make.lectureSearch} value={q} onChange={(e) => setQ(e.target.value)} />
           {!lectures.length ? <p className="a-muted">{SETS.make.lectureEmpty}</p> : !groups.length ? <p className="a-muted">{SETS.make.lectureNotFound}</p> : null}
-          <div className="mk-sheet-list" role="radiogroup" aria-label={SETS.make.lectureSheet}>
+          <div
+            className="mk-sheet-list"
+            role="radiogroup"
+            aria-label={SETS.make.lectureSheet}
+            onKeyDown={(e) => {
+              // Radio keys: the arrows move between the lectures, Home and End to the ends.
+              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+              const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+              if (!items.length) return;
+              const i = items.indexOf(document.activeElement as HTMLButtonElement);
+              const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : Math.max(0, Math.min(items.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+              items[next].focus();
+              e.preventDefault();
+            }}
+          >
             {groups.map((g) => (
               <section key={g.course || "-"} className="mk-course">
                 {g.course ? (

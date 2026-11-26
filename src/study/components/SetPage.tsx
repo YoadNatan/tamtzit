@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ScreenProps } from "../features/types";
 import { groupCreator } from "../lib/api";
-import { failText } from "../lib/failText";
 import { hueOf } from "../lib/hue";
 import { listQuestionsByIds, type PublicQuestion } from "../lib/practice";
 import { requestStart } from "../lib/practiceSession";
-import { deleteSet, hideSet, markSeen, openSet, renameSet, setRequests, setStats, setWhen, shareSet, watchSets, type OpenSet, type Stats } from "../lib/sets";
-import { questionsWord, setBy, SETS, setReview, setUnchecked } from "../lib/setsCopy";
+import { deleteSet, hideSet, markSeen, openSet, renamed, renameSet, setLink, setRequests, setStats, setWhen, shareSet, watchSets, type OpenSet, type Stats } from "../lib/sets";
+import { questionsWord, setBy, setFail, SETS, setReview, setUnchecked } from "../lib/setsCopy";
 import "../styles/sets.css";
 import MakeProgress from "./MakeProgress";
 import { HowChoice } from "./PracticeRound";
@@ -51,7 +50,7 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
   const [request, setRequest] = useState<string | null>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "none" | "error">("loading");
   const [creator, setCreator] = useState<string | null>(null);
-  const [menu, setMenu] = useState<null | "menu" | "rename" | "delete">(null);
+  const [menu, setMenu] = useState<null | "menu" | "rename" | "delete" | "link">(null);
   const [title, setTitle] = useState("");
   const [timed, setTimed] = useState(() => loadHow(ctx.userId));
   const [stems, setStems] = useState<PublicQuestion[] | null>(null);
@@ -88,6 +87,11 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
   }, [setId, load, ctx.group.id]);
 
   const back = <BackLink go={ctx.go} fallback={{ v: "sets" }} />;
+  const act = (run: () => Promise<unknown>, after: () => void) => {
+    run()
+      .then(after)
+      .catch((e) => ctx.say(setFail(codeOf(e))));
+  };
   if (phase === "loading") return <Loading />;
   if (phase === "none" || phase === "error" || !data) {
     return (
@@ -111,10 +115,12 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
 
   const s = data.set;
   const by = s.author_name ? setBy(s.author_name, setWhen(s.created_at)) : setWhen(s.created_at);
-  // Being made, or checked questions still waiting for "להתחיל לפתור" (auto-keep
-  // ships off, OD15): the generating screen, for the set. Its page takes over once
-  // the set is ready and nothing waits to be kept.
-  if ((s.state !== "ready" || s.made > s.size) && s.lecture_id) {
+  const mayDelete = s.is_mine || (creator !== null && creator === ctx.userId);
+  // Being made, or checked questions still waiting to be kept (auto-keep ships
+  // off, OD15; the author's device keeps them when writing ends): the
+  // generating screen, for the set. Its page takes over once the set is ready
+  // and nothing but the drafts the check could not run on waits.
+  if ((s.state !== "ready" || s.made - data.unchecked.length > s.size) && s.lecture_id) {
     if (request || s.state === "ready") {
       if (!request) return <Loading />;
       return (
@@ -126,6 +132,9 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
         />
       );
     }
+    // Begun but not written yet (its request never came, or the lecture is still
+    // read): the text, and once it is stuck, a way out for the author or the
+    // group's creator (it is removed; it has no questions).
     return (
       <main className="qs-page">
         <Head back={back} title={SETS.gen.title} />
@@ -133,12 +142,24 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
         <p className="a-muted" role="status">
           {s.paused ? SETS.gen.paused : SETS.gen.reading}
         </p>
+        {s.paused && mayDelete ? (
+          <div className="a-stack qs-stuck">
+            <p className="a-small">{SETS.set.abandonNote}</p>
+            <div className="a-row">
+              <button type="button" className="a-btn danger" onClick={() => act(() => deleteSet(s.id), () => ctx.go({ v: "sets" }, { replace: true }))}>
+                {SETS.set.menu.delete}
+              </button>
+              <RouteLink to={{ v: "practice", l: s.lecture_id, x: "new" }} go={ctx.go} className="a-btn ghost">
+                {SETS.entry}
+              </RouteLink>
+            </div>
+          </div>
+        ) : null}
       </main>
     );
   }
 
   const mine = s.is_mine;
-  const mayDelete = mine || (creator !== null && creator === ctx.userId);
   const solve = () => {
     const r = { v: "practice" as const, s: `k.${s.id}` };
     saveHow(ctx.userId, timed);
@@ -148,11 +169,8 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
   const share = async () => {
     const got = await shareSet(s.id, s.size);
     if (got === "copied") ctx.say(SETS.set.linkCopied);
-  };
-  const act = (run: () => Promise<unknown>, after: () => void) => {
-    run()
-      .then(after)
-      .catch((e) => ctx.say(failText(codeOf(e), "practice")));
+    // Neither the share sheet nor the clipboard: the link itself, to copy.
+    if (got === "failed") setMenu("link");
   };
   const openStems = () => {
     if (stems || !data.items.length) return;
@@ -166,7 +184,8 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
 
   return (
     <main className="qs-page">
-      <Head back={back} title={SETS.shelf.title}>
+      {/* No title in the bar: the back label names the shelf, the card's heading the set. */}
+      <Head back={back}>
         <button type="button" className="a-btn ghost icon qs-menu" aria-label={SETS.set.menuLabel} aria-haspopup="dialog" onClick={() => setMenu("menu")}>
           ⋯
         </button>
@@ -185,7 +204,8 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
             {s.author_id && s.author_name ? <Avatar id={s.author_id} name={s.author_name} /> : null}
             <span className="a-small">{by}</span>
           </p>
-          <p className="a-small a-muted">{[s.lecture_title, questionsWord(s.size)].filter(Boolean).join(" · ")}</p>
+          {/* The default title already says the lecture and the size. */}
+          {renamed(s) ? <p className="a-small a-muted">{[s.lecture_title, questionsWord(s.size)].filter(Boolean).join(" · ")}</p> : null}
         </section>
         <SetStats stats={stats} size={s.size} />
       </div>
@@ -214,7 +234,7 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
       </section>
       <StickyActions>
         <button type="button" className="a-btn primary wide qs-go" disabled={s.size < 1} onClick={solve}>
-          {SETS.set.solve}
+          {s.my_score !== null ? SETS.set.solveAgain : SETS.set.solve}
         </button>
         <button type="button" className="a-btn ghost qs-share" onClick={() => void share()}>
           {SETS.set.link}
@@ -258,6 +278,16 @@ export default function SetPage({ route, ctx }: ScreenProps<"sets">) {
                 </li>
               ) : null}
             </ul>
+          )}
+        </Sheet>
+      ) : null}
+      {menu === "link" ? (
+        <Sheet label={SETS.set.linkSheet} onClose={() => setMenu(null)} head={<h2>{SETS.set.linkSheet}</h2>}>
+          {() => (
+            <div className="a-stack">
+              <p className="a-small a-muted">{SETS.set.linkHint}</p>
+              <input className="a-input qs-link" dir="ltr" readOnly value={setLink(s.id)} aria-label={SETS.set.linkSheet} onFocus={(e) => e.currentTarget.select()} autoFocus />
+            </div>
           )}
         </Sheet>
       ) : null}

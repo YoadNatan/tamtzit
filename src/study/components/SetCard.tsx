@@ -1,7 +1,7 @@
 import type { Go } from "../features/types";
 import { hueOf } from "../lib/hue";
 import { requestStart } from "../lib/practiceSession";
-import { setWhen, solvable, type ShelfRow } from "../lib/sets";
+import { renamed, setWhen, solvable, type ShelfRow } from "../lib/sets";
 import { questionsWord, setBy, SETS, shelfMaking, statsMine, statsSolvers } from "../lib/setsCopy";
 import { RouteLink } from "./Shell";
 
@@ -11,10 +11,18 @@ import { RouteLink } from "./Shell";
  * and when, then the group's count and the member's own ("פותרים: 3 · שלי:
  * עוד לא"), or "בהכנה 6/10" while it is being made. The title is the card's
  * link to the set's page; "לפתור" starts the set from the first question it
- * has (a set still being made can be solved from one question on). */
+ * has (a set still being made can be solved from one question on). The
+ * heading is the set's own title when it was renamed; else the lecture's,
+ * or, under a lecture's heading on the shelf (inLecture), the size. A set
+ * written but not kept yet (its author left before the keep) reads "מוכן
+ * לפתרון" with "לפתור" to its page, never "0 שאלות". */
 
-export default function SetCard({ row, go, userId, compact = false }: { row: ShelfRow; go: Go; userId: string; compact?: boolean }) {
+export default function SetCard({ row, go, userId, compact = false, inLecture = false }: { row: ShelfRow; go: Go; userId: string; compact?: boolean; inLecture?: boolean }) {
   const making = row.state !== "ready";
+  const waiting = !making && row.size === 0 && row.made > 0;
+  const size = questionsWord(making ? row.want : waiting ? row.made : row.size);
+  const own = renamed(row);
+  const heading = own ? row.title : inLecture ? size : row.lecture_title || row.title;
   const mine = row.my_score !== null && row.my_total ? statsMine(row.my_score, row.my_total) : SETS.stats.mineNotYet;
   const when = setWhen(row.created_at);
   const by = row.author_name ? setBy(row.author_name, when) : when;
@@ -27,18 +35,20 @@ export default function SetCard({ row, go, userId, compact = false }: { row: She
     <article className="a-card qs-card" data-hue={row.lecture_id ? hueOf(row.lecture_id) : undefined} data-new={row.is_new ? "" : undefined}>
       <div className="qs-card-top">
         <RouteLink to={{ v: "sets", k: row.id }} go={go} className="qs-card-link">
-          <b dir="auto">{row.lecture_title || row.title}</b>
+          <b dir="auto">{heading}</b>
         </RouteLink>
         {row.is_new ? <span className="a-chip qs-new">{SETS.shelf.newBadge}</span> : null}
       </div>
       <p className="a-small a-muted qs-card-meta">
-        {[questionsWord(making ? row.want : row.size), by].filter(Boolean).join(" · ")}
+        {[heading === size ? null : size, by].filter(Boolean).join(" · ")}
       </p>
       {compact ? null : (
         <div className="qs-card-foot">
           <p className="a-small qs-card-nums">
             {making ? (
               <span className="a-chip busy">{row.paused ? SETS.gen.paused : shelfMaking(row.made, row.want)}</span>
+            ) : waiting ? (
+              <span className="a-chip">{SETS.shelf.ready}</span>
             ) : (
               `${statsSolvers(row.solvers)} · ${mine}`
             )}
@@ -47,6 +57,10 @@ export default function SetCard({ row, go, userId, compact = false }: { row: She
             <button type="button" className="a-btn small qs-solve" onClick={solve}>
               {SETS.set.solve}
             </button>
+          ) : waiting ? (
+            <RouteLink to={{ v: "sets", k: row.id }} go={go} className="a-btn small qs-solve">
+              {SETS.set.solve}
+            </RouteLink>
           ) : null}
         </div>
       )}

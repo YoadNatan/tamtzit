@@ -90,7 +90,7 @@ export default function PracticeHome({ ctx }: ScreenProps<"practice">) {
           </h2>
           <p className="a-small a-muted">שאלות חדשות על הרצאה, נבדקות לפני הבנק</p>
           <RouteLink to={{ v: "practice", x: "new" }} go={ctx.go} className="a-btn primary practice-make-go">
-            סט חדש
+            <span aria-hidden="true">+ </span>ליצור סט
           </RouteLink>
         </section>
       ) : null}

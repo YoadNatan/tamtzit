@@ -11,7 +11,8 @@
   min-width: 0;
 }
 .mk-start,
-.mk-end {
+.mk-end,
+.mk-rest {
   display: grid;
   gap: var(--sp-6);
   align-content: start;
@@ -121,6 +122,10 @@
 }
 .mk-legend {
   margin: 0;
+  /* Items wrap between each other, never inside (each is nowrap below). */
+  display: flex;
+  flex-wrap: wrap;
+  white-space: pre;
 }
 .mk-check,
 .mk-bank,
@@ -290,12 +295,24 @@
   main.make-progress {
     max-width: var(--measure-wide);
   }
+  /* Below L the preview follows the size (DOM order: start, preview, the
+     rest); here it moves to the end column beside both. */
   .mk-grid {
     grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "start end" "rest end";
     align-items: start;
-    gap: var(--sp-12);
+    column-gap: var(--sp-12);
+    row-gap: var(--sp-6);
+  }
+  .mk-start {
+    grid-area: start;
+  }
+  .mk-rest {
+    grid-area: rest;
   }
   .mk-end {
+    grid-area: end;
     position: sticky;
     top: calc(var(--study-banner-h, 0px) + 72px);
   }
@@ -409,6 +426,11 @@
   gap: var(--sp-8);
   margin: 0;
 }
+/* A legend item never breaks inside its own words; the line wraps between items. */
+.mk-qlegend > span,
+.mk-legend > span {
+  white-space: nowrap;
+}
 /* The two disclosures ("עוד אפשרויות", "פרטים"): a chevron that turns when open. */
 .mk-more > summary,
 .mk-details > summary {
@@ -492,6 +514,7 @@
   display: grid;
   gap: var(--sp-3);
   padding: 0;
+  margin: 0;
   list-style: none;
 }
 .qs-group {
@@ -544,6 +567,43 @@
   min-height: 44px;
   display: flex;
   align-items: center;
+  /* display:flex drops the disclosure marker: the same chevron as "עוד אפשרויות". */
+  list-style: none;
+  gap: var(--sp-4);
+}
+.qs-hidden > summary::-webkit-details-marker,
+.qs-review > summary::-webkit-details-marker,
+.qs-perq > summary::-webkit-details-marker {
+  display: none;
+}
+.qs-hidden > summary::before,
+.qs-review > summary::before,
+.qs-perq > summary::before {
+  content: "‹";
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  color: var(--accent);
+  font-weight: 800;
+  transition: transform 0.15s ease;
+}
+.qs-hidden[open] > summary::before,
+.qs-review[open] > summary::before,
+.qs-perq[open] > summary::before {
+  transform: rotate(-90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .qs-hidden > summary::before,
+  .qs-review > summary::before,
+  .qs-perq > summary::before {
+    transition: none;
+  }
+}
+/* Wide buttons at most 480 px from M (§5.9): the set page's "לפתור". */
+@media (min-width: 600px) {
+  .qs-page .ph-foot .qs-go {
+    max-width: 480px;
+  }
 }
 .qs-hidden-row {
   display: grid;

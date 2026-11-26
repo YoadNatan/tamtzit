@@ -67,9 +67,9 @@ export default function SetsShelf({ route, ctx }: ScreenProps<"sets">) {
       .then(load)
       .catch(() => ctx.say(SETS.make.loadFail));
   };
-  const card = (r: ShelfRow) => (
+  const card = (r: ShelfRow, inLecture = false) => (
     <li key={r.id}>
-      <SetCard row={r} go={ctx.go} userId={ctx.userId} />
+      <SetCard row={r} go={ctx.go} userId={ctx.userId} inLecture={inLecture} />
     </li>
   );
   return (
@@ -100,7 +100,7 @@ export default function SetsShelf({ route, ctx }: ScreenProps<"sets">) {
           <div className="a-sec">
             <h2 id="qs-new-h">{SETS.shelf.newHead}</h2>
           </div>
-          <ul className="a-list qs-grid">{g.fresh.map(card)}</ul>
+          <ul className="qs-grid">{g.fresh.map((r) => card(r))}</ul>
         </section>
       ) : null}
       {g.lectures.map((l, i) => (
@@ -110,13 +110,13 @@ export default function SetsShelf({ route, ctx }: ScreenProps<"sets">) {
               {[l.course, l.title].filter(Boolean).join(" · ")}
             </h2>
           </div>
-          <ul className="a-list qs-grid">{l.rows.map(card)}</ul>
+          <ul className="qs-grid">{l.rows.map((r) => card(r, true))}</ul>
         </section>
       ))}
       {g.hidden.length ? (
         <details className="qs-hidden">
           <summary>{shelfHidden(g.hidden.length)}</summary>
-          <ul className="a-list qs-grid">
+          <ul className="qs-grid">
             {g.hidden.map((r) => (
               <li key={r.id} className="qs-hidden-row">
                 <SetCard row={r} go={ctx.go} userId={ctx.userId} compact />

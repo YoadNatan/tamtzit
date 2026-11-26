@@ -1,12 +1,14 @@
 import type { CSSProperties } from "react";
 import { avgOutOf, bandKey, type Stats } from "../lib/sets";
-import { SETS, statsAvg, statsMine, statsNames, statsQuestion, statsSolvers } from "../lib/setsCopy";
+import { SETS, statsAvg, statsCounted, statsMine, statsNames, statsQuestion, statsSolvers } from "../lib/setsCopy";
 
 /* ── The group's numbers on a set (practice sets, design §5.7, OD5) ──
  * "פותרים: k" always and the member's own score ("שלי"); the group's average
  * and how each question went for the group only once at least 3 OTHER
- * members finished (the server sends neither before, study_qset_stats), each
- * question as one of three bands computed without the viewer; no best
+ * members whom Pulse counts finished (the server sends neither before,
+ * study_qset_stats), both over the first 3 (6, …) of them to finish and
+ * without the viewer, the average rounded ("הממוצע והתוצאות: 3 הפותרים
+ * הראשונים, בעיגול"), each question as one of three bands; no best
  * score. Names only of members who chose to show theirs, never with a score.
  * Each member counts with their first finished attempt, scored on the first
  * answer per question. `compact`: the round's end (the bands stay on the
@@ -50,6 +52,7 @@ export default function SetStats({ stats, size, compact = false }: { stats: Stat
           </ul>
         </details>
       ) : null}
+      {enough && stats.counted > 0 && avg !== null ? <p className="a-small a-muted qs-counted">{statsCounted(stats.counted)}</p> : null}
       {stats.names.length ? <p className="a-small qs-names">{statsNames(stats.names)}</p> : null}
       <p className="a-small a-muted qs-privacy">{SETS.stats.privacy}</p>
     </section>

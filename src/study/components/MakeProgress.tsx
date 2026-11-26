@@ -3,7 +3,7 @@ import { STYLE_HE, type Options, type Style } from "../../../shared/study/practi
 import type { Ctx, ScreenProps } from "../features/types";
 import { lectureTitles } from "../lib/api";
 import { flags } from "../lib/flags";
-import { failCode, failText } from "../lib/failText";
+import { failCode } from "../lib/failText";
 import { BUDGET_CODES, blockOfCode, progressStep, readyDraft, roundSize, tilesOf, type Block, type TileState } from "../lib/make";
 import {
   askPlan,
@@ -27,7 +27,7 @@ import {
 } from "../lib/practice2";
 import { requestStart } from "../lib/practiceSession";
 import { useRound } from "../lib/rounds";
-import { genBudgetStop, genCount, genFailed, genProgressSaid, genStart, genTileLabel, genTitle, SETS, slideWord } from "../lib/setsCopy";
+import { genBudgetStop, genCount, genDoneTitle, genFailed, genProgressSaid, genStart, genTileLabel, genTitle, setFail, SETS, slideWord } from "../lib/setsCopy";
 import "../styles/sets.css";
 import FailCode from "./FailCode";
 import { BackLink, Head, Loading, RouteLink, StickyActions } from "./Shell";
@@ -124,7 +124,7 @@ export function MakeJob({ ctx, job, onBack }: { ctx: Ctx; job: Job; onBack: () =
     const fail = (code: string, raw?: unknown) => {
       if (!alive.current) return;
       const b = blockOfCode(code);
-      setError({ text: b && BLOCK_TEXT[b] ? BLOCK_TEXT[b]! : code === "points stale" ? SETS.gen.readFail : code === "already making" ? SETS.err.alreadyMaking : failText(code, "practice"), code: b ? "" : failCode(raw ?? code, "practice") });
+      setError({ text: b && BLOCK_TEXT[b] ? BLOCK_TEXT[b]! : code === "points stale" ? SETS.gen.readFail : code === "already making" ? SETS.err.alreadyMaking : setFail(code), code: b ? "" : failCode(raw ?? code, "practice") });
       setStep("failed");
     };
     const run = async () => {
@@ -348,6 +348,11 @@ export default function MakeProgress({ route, ctx, set }: ScreenProps<"practice"
   const paused = !running && t.coming > 0 && canWrite && !failedBatches.length;
   const mine = request?.created_by === ctx.userId;
   const done = total > 0 && t.coming === 0;
+  // Nothing is being written and some questions are not: never "בדרך" then.
+  const stopped = paused || Boolean(budgetCode);
+  // A set's checked questions still to keep: the author's device keeps them once writing ends.
+  const toKeep = drafts.some((d) => d.status === "pending" && readyDraft(d));
+  const autoKeep = Boolean(set && mine && request && done && !running);
 
   // The live region: the first ready question, each quarter, the end.
   const lastStep = useRef<number | null>(null);
@@ -389,21 +394,39 @@ export default function MakeProgress({ route, ctx, set }: ScreenProps<"practice"
       requestStart(ctx.userId, r, false, { sources: ["new"], parts: request.parts });
       ctx.go(r);
     } catch (e) {
-      setStartError(failText(codeOf(e), "practice"));
+      setStartError(setFail(codeOf(e)));
       setStarting(false);
     }
   };
 
-  // A set's page takes over once nothing is being written any more.
+  // Auto-keep ships off (OD15): when writing ends, the author's device keeps the
+  // checked questions itself (the keep all of "להתחיל לפתור"), so the set fills,
+  // the group hears about it (set_shared) and the shelf never shows it empty.
+  // Once, and again only after a failure.
+  const keeping = useRef(false);
+  useEffect(() => {
+    if (!autoKeep || !toKeep || keeping.current || !request) return;
+    keeping.current = true;
+    keepAll(request.id)
+      .then(() => load())
+      .then(() => set?.onDone?.())
+      .catch(() => {
+        keeping.current = false;
+      });
+  }, [autoKeep, toKeep, request?.id]);
+
+  // A set's page takes over once nothing is being written any more (and, on the
+  // author's device, once the checked questions are kept).
   const doneOnce = useRef(false);
   useEffect(() => {
     if (!set?.onDone || !done || running || doneOnce.current) return;
+    if (autoKeep && toKeep) return;
     doneOnce.current = true;
     set.onDone();
-  }, [done, running, set]);
+  }, [done, running, set, autoKeep, toKeep]);
   const head = (
     <>
-      <Head back={<BackLink go={ctx.go} fallback={set ? { v: "sets" } : { v: "practice", l: lectureId }} />} title={genTitle(title)} />
+      <Head back={<BackLink go={ctx.go} fallback={set ? { v: "sets" } : { v: "practice", l: lectureId }} />} title={done && !t.failed ? genDoneTitle(title) : genTitle(title)} />
       {set?.by && !mine ? <p className="a-small a-muted mk-by">{set.by}</p> : null}
     </>
   );
@@ -443,8 +466,8 @@ export default function MakeProgress({ route, ctx, set }: ScreenProps<"practice"
           <section className="mk-hero">
             <Ring ready={t.ready} total={total} />
             <div className="mk-hero-t">
-              <h2 className="a-h2 mk-count">{genCount(t.ready, t.coming)}</h2>
-              {done && !t.failed ? <p className="a-small a-muted">{SETS.gen.done}</p> : null}
+              <h2 className="a-h2 mk-count">{genCount(t.ready, t.coming, stopped)}</h2>
+              {stopped && t.ready > 0 ? <p className="a-small a-muted">{SETS.gen.stoppedNote}</p> : null}
             </div>
           </section>
           <p className="sr-only" role="status" aria-live="polite">
@@ -521,9 +544,11 @@ export default function MakeProgress({ route, ctx, set }: ScreenProps<"practice"
           ) : (
             <p className="a-small a-muted">{SETS.gen.readyNone}</p>
           )}
-          <RouteLink to={{ v: "practice", l: lectureId, x: "review", r: requestId }} go={ctx.go} className="a-small a-link mk-review">
-            {SETS.gen.review} ‹
-          </RouteLink>
+          {t.ready > 0 || readyList.length ? (
+            <RouteLink to={{ v: "practice", l: lectureId, x: "review", r: requestId }} go={ctx.go} className="a-small a-link mk-review">
+              {SETS.gen.review} ‹
+            </RouteLink>
+          ) : null}
         </section>
       </div>
 
@@ -532,14 +557,16 @@ export default function MakeProgress({ route, ctx, set }: ScreenProps<"practice"
           {startError}
         </p>
       ) : null}
-      <StickyActions>
-        <div className="mk-start-wrap">
-          <button type="button" className="a-btn primary wide mk-start-btn" disabled={t.ready < 1 || starting} onClick={() => void start()}>
-            {genStart(t.ready)}
-          </button>
-          <p className="a-small a-muted mk-start-note">{SETS.gen.startNote}</p>
-        </div>
-      </StickyActions>
+      {t.ready > 0 ? (
+        <StickyActions>
+          <div className="mk-start-wrap">
+            <button type="button" className="a-btn primary wide mk-start-btn" disabled={starting} onClick={() => void start()}>
+              {genStart(t.ready)}
+            </button>
+            <p className="a-small a-muted mk-start-note">{SETS.gen.startNote}</p>
+          </div>
+        </StickyActions>
+      ) : null}
     </main>
   );
 }
