@@ -48,6 +48,8 @@ const LINES = [
   C.statsMine(7, 10),
   C.statsNames(["נועה", "עומר"]),
   C.todayRow(2),
+  C.lectureSets(3),
+  C.mistakesNew("$0.40"),
 ];
 
 test("no second person, no gendered verb, no model's name, never 'נקודות'", () => {
@@ -99,4 +101,11 @@ test("the design's strings, pinned", () => {
   assert.equal(C.slideWord(12), "שקף 12");
   assert.equal(C.setLinkText(10, "U"), "סט תרגול בתמצית · 10 שאלות U", "no title, no lecture");
   assert.equal(C.statsSolvers(1), "פותרים: 1");
+  // The entry points (WP14).
+  assert.equal(C.todayRow(2), "סטים חדשים בקבוצה (2)");
+  assert.equal(C.SETS.today.solveNew, "לפתור סט חדש");
+  assert.equal(C.genResumeMine("משתנים"), "הסט משתנים נעצר באמצע · להמשיך ליצור");
+  assert.equal(C.lectureSets(3), "סטים על ההרצאה (3)");
+  assert.equal(C.mistakesNew("$0.40"), "שאלות חדשות על הטעויות · כ-$0.40");
+  assert.equal(C.SETS.me.names, C.SETS.stats.optin, "the same words in שלי as at the round's end");
 });

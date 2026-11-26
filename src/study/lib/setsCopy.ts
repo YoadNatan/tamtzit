@@ -154,7 +154,9 @@ export const SETS = {
   },
 
   hub: { sets: "סטים של הקבוצה", all: "לכל הסטים" },
-  today: { card: "תרגול", solveNew: "לפתור סט חדש" },
+  today: { card: "תרגול", solveNew: "לפתור סט חדש", bank: "תרגול מהבנק" },
+  /** "שלי" (OD7): the names choice, asked once at the first finished set, then only here. */
+  me: { names: "להציג את השם שלי ברשימת מי פתרו", namesNote: "בסטים של הקבוצה: רק השם, בלי ציון" },
   err: { alreadyMaking: "יש כבר סט בהכנה על ההרצאה הזאת" },
   help: { row: "איך יוצרים סט ופותרים עם הקבוצה?" },
 } as const;
@@ -233,3 +235,7 @@ export const shelfMaking = (k: number, n: number): string => `בהכנה ${k}/${
 export const shelfHidden = (n: number): string => `הוסתרו (${n})`;
 /** "סטים חדשים בקבוצה (2)". */
 export const todayRow = (n: number): string => `סטים חדשים בקבוצה (${n})`;
+/** The lecture page's row: "סטים על ההרצאה (3)". */
+export const lectureSets = (n: number): string => `סטים על ההרצאה (${n})`;
+/** The mistakes' paid secondary, its price in the label: "שאלות חדשות על הטעויות · כ-$0.40". */
+export const mistakesNew = (usd: string): string => `${SETS.entryMistakesNew} · ${about(usd)}`;

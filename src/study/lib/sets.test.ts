@@ -13,8 +13,10 @@ let PAUSE_MS: number;
 let setWhen: typeof import("./sets").setWhen;
 let shelfGroups: typeof import("./sets").shelfGroups;
 let toRow: typeof import("./sets").toRow;
+let entriesOf: typeof import("./sets").entriesOf;
+let mostLecture: typeof import("./sets").mostLecture;
 before(async () => {
-  ({ avgOutOf, bandKey, isPaused, PAUSE_MS, setWhen, shelfGroups, toRow } = await import("./sets"));
+  ({ avgOutOf, bandKey, entriesOf, isPaused, mostLecture, PAUSE_MS, setWhen, shelfGroups, toRow } = await import("./sets"));
 });
 
 /* Practice sets, slice B (docs/study/sets.md): the pure rules of the set
@@ -117,3 +119,30 @@ test("the shared link's text carries no title and no lecture; a set's date in wo
   assert.equal(setWhen("2026-11-12T08:05:00Z", now), "12.11");
   assert.equal(setWhen("nope", now), "");
 });
+
+test("the entry points: fresh sets of others, the newest unsolved ready one, the member's own paused ones (WP14)", () => {
+  const rows = [
+    row("a", { created_at: "2026-11-20T10:00:00Z", is_new: true }),
+    row("b", { created_at: "2026-11-21T10:00:00Z", is_new: true, is_hidden: true }),
+    row("c", { created_at: "2026-11-22T10:00:00Z", is_new: true, state: "making", size: 3 }),
+    row("d", { created_at: "2026-11-23T10:00:00Z", is_mine: true, state: "making", paused: true, size: 2 }),
+    row("e", { created_at: "2026-11-24T10:00:00Z", is_mine: true }),
+    row("f", { created_at: "2026-11-19T10:00:00Z", my_score: "7", my_total: "10" }),
+    row("g", { created_at: "2026-11-18T10:00:00Z", size: 0 }),
+  ];
+  const e = entriesOf(rows);
+  assert.deepEqual(e.fresh.map((r) => r.id), ["c", "a"], "not the hidden one, newest first");
+  assert.equal(e.solve?.id, "a", "ready, someone else's, not solved, not hidden; a set still made waits");
+  assert.deepEqual(e.resume.map((r) => r.id), ["d"]);
+  assert.equal(entriesOf([row("x", { is_mine: true })]).solve, null, "never the member's own");
+  assert.equal(entriesOf([row("y", { my_score: "3", my_total: "10" })]).solve, null, "never one already solved");
+  assert.deepEqual(entriesOf([]), { fresh: [], solve: null, resume: [] });
+});
+
+test("the mistakes' lecture: the one holding most of the round, the first on a tie", () => {
+  assert.equal(mostLecture([L1, L2, L2, null, L1, L2]), L2);
+  assert.equal(mostLecture([L1, L2]), L1);
+  assert.equal(mostLecture([null, undefined]), null);
+  assert.equal(mostLecture([]), null);
+});
+

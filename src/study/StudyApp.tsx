@@ -211,7 +211,9 @@ export default function StudyApp() {
       markRestored(r.userId); // the guide: a member who knows the app, not a new one (no tour offer)
       setPendingLink(null);
       welcomeNext();
-      location.replace(APP_PATH);
+      // A set's link opened signed out (practice sets, §5.6): the sign-in lands on that set.
+      const here = parseRoute(location.search);
+      location.replace(flags.sets && here.v === "sets" && here.k ? routeUrl(here) : APP_PATH);
       await new Promise<never>(() => undefined);
     },
     [say],

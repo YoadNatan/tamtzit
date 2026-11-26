@@ -31,6 +31,8 @@ import ErrorBoundary from "./ErrorBoundary";
 
 // Notifications (VITE_STUDY_NOTIFY): "הגדרות התראות", loaded only with the flag.
 const NotifyRow = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyMeRow })));
+// Practice sets (VITE_STUDY_SETS): showing one's name among who solved a set (OD7), loaded only with the flag.
+const SetsNamesRow = lazy(() => import("./SetsEntries").then((m) => ({ default: m.MeNamesRow })));
 /** Signing out: this device stops getting pushes first (best effort, at most 3 s). */
 const dropPushes = () => (flags.notify ? import("../lib/notify").then((m) => m.dropThisDevice()).catch(() => undefined) : Promise.resolve());
 
@@ -38,7 +40,8 @@ const dropPushes = () => (flags.notify ? import("../lib/notify").then((m) => m.d
  * 1 the account (A1); 2 "ההתקדמות שלי" with the danger list (A2), "הטעויות
  * שלי" (Q's screen, F's link) and one's own lane of the group's plan (G);
  * 3 settings: where cards are reviewed and how many new a day (C), out of
- * the pulse (U), "הקבוצה צריכה אותך" (T), the text size (the whole app's)
+ * the pulse (U), "הקבוצה צריכה אותך" (T), showing one's name among who
+ * solved a practice set (L, OD7), the text size (the whole app's)
  * and, with recordings, their boxes (W); 4 the month's spend; 5 the group:
  * its members, the invite, and for the group's creator a new invite code
  * and removing a member (review M4), and with the personal code a new code
@@ -233,6 +236,13 @@ export default function Me({ ctx }: ScreenProps<"me">) {
           <ReviewHomeSetting ctx={ctx} />
           <PulseSettingRow ctx={ctx} />
           <NeedsMeSetting ctx={ctx} />
+          {flags.sets ? (
+            <ErrorBoundary reset="sets-names" fallback="none">
+              <Suspense fallback={null}>
+                <SetsNamesRow />
+              </Suspense>
+            </ErrorBoundary>
+          ) : null}
           <div className="a-li setting-row">
             <span>גודל הטקסט</span>
             <span className="size-ctl">

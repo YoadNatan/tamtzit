@@ -169,6 +169,21 @@ export async function setStats(setId: string): Promise<Stats> {
   };
 }
 
+/** D6: the sets being made on a lecture now (the lecture page's line). */
+export type Making = { set_id: string; author_name: string | null; made: number; want: number; state: SetState; is_mine: boolean };
+export async function lectureMaking(lectureId: string): Promise<Making[]> {
+  const { data, error } = await client().rpc("study_lecture_making", { p_lecture: lectureId });
+  if (error) fail(error);
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    set_id: String(r.set_id),
+    author_name: (r.author_name as string | null) ?? null,
+    made: num(r.made),
+    want: num(r.want),
+    state: (r.state as SetState) ?? "making",
+    is_mine: r.is_mine === true,
+  }));
+}
+
 /** The requests that fill a set (one for a lecture set). */
 export async function setRequests(setId: string): Promise<string[]> {
   const { data, error } = await client().from("study_qset_requests").select("request_id").eq("set_id", setId);
@@ -277,6 +292,39 @@ export function shelfGroups(rows: readonly ShelfRow[]): ShelfGroups {
     .sort((a, b) => (a.last < b.last ? 1 : a.last > b.last ? -1 : a.title.localeCompare(b.title, "he")))
     .map(({ last: _last, ...g }) => ({ ...g, rows: g.rows.sort(newest) }));
   return { fresh, lectures, hidden: rows.filter((r) => r.is_hidden).sort(newest) };
+}
+
+/** What the entry points show of the group's sets (design §5.1, WP14),
+ *  from one short shelf read (Today asks for the 6 newest):
+ *  - fresh: sets someone else made that the member has not opened and did
+ *    not hide (Today's one row "סטים חדשים בקבוצה (n)");
+ *  - solve: the newest ready set someone else made that the member has not
+ *    solved, with a question at least (Today's free primary "לפתור סט חדש"
+ *    on an empty queue);
+ *  - resume: the member's own sets paused in the middle ("הסט … נעצר
+ *    באמצע · להמשיך ליצור"), newest first. */
+export function entriesOf(rows: readonly ShelfRow[]): { fresh: ShelfRow[]; solve: ShelfRow | null; resume: ShelfRow[] } {
+  const newest = (a: ShelfRow, b: ShelfRow) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : a.id < b.id ? -1 : 1);
+  const shown = rows.filter((r) => !r.is_hidden).sort(newest);
+  return {
+    fresh: shown.filter((r) => r.is_new && !r.is_mine),
+    solve: shown.find((r) => !r.is_mine && r.state === "ready" && r.size > 0 && r.my_score === null) ?? null,
+    resume: shown.filter((r) => r.is_mine && r.paused && r.state !== "ready"),
+  };
+}
+
+/** The lecture that holds most of a round's questions (the first one met on
+ *  a tie), for "שאלות חדשות על הטעויות" (design §5.1): null without any. */
+export function mostLecture(lectureIds: ReadonlyArray<string | null | undefined>): string | null {
+  const n = new Map<string, number>();
+  let best: string | null = null;
+  for (const id of lectureIds) {
+    if (!id) continue;
+    const c = (n.get(id) ?? 0) + 1;
+    n.set(id, c);
+    if (best === null || c > (n.get(best) ?? 0)) best = id;
+  }
+  return best;
 }
 
 /** The group's average as "x/n" (one decimal), from the share right; null without one. */

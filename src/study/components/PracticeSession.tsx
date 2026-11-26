@@ -35,9 +35,11 @@ import { myDangerDue, myRewordings } from "../lib/progress";
 import type { Route } from "../lib/route";
 import { groupExams, keyOrigins, listExamQuestions, listQuestionsAll, mockGet, notCounted, type KeyOrigin } from "../lib/exams";
 import { PageCrop } from "./ExamParts";
-import { keepAll } from "../lib/practice2";
-import { attemptFinish, attemptStart, myNamesPref, openSet, setNamesPref, setProgress, setRequests, setStats, shareSet, type Finish, type Stats } from "../lib/sets";
-import { genAddReady, genAdded, SETS } from "../lib/setsCopy";
+import { keepAll, usd } from "../lib/practice2";
+import { attemptFinish, attemptStart, mostLecture, myNamesPref, openSet, setNamesPref, setProgress, setRequests, setStats, shareSet, type Finish, type Stats } from "../lib/sets";
+import { genAddReady, genAdded, mistakesNew, SETS } from "../lib/setsCopy";
+import { DEFAULT_SIZE } from "../lib/make";
+import { expectedQuestionUsd } from "../../../shared/study/practice2";
 import SetStats from "./SetStats";
 import FlagSheet from "./FlagSheet";
 import PracticeQuestion from "./PracticeQuestion";
@@ -854,6 +856,19 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
       save(S.startSession({ key, timed: s.timed, queue: wrongAgain.map((r) => data.byId[r.id]), now: Date.now(), pick: s.pick }));
       window.scrollTo({ top: 0 });
     };
+    // The paid way on from the mistakes (design §5.1, §5.10; flags.sets): a new
+    // set on the lecture that holds most of them, its price in the label (a
+    // set of the default size at the planning rate). The free redo stays the
+    // primary. The set is an ordinary shared one: only the lecture's parts
+    // that hold the mistakes are prefilled (from=m), never the member's points.
+    const mistakesUsd = usd(DEFAULT_SIZE * expectedQuestionUsd());
+    const mistakesLecture = !flags.sets
+      ? null
+      : setId
+        ? (setInfo?.lecture ?? null)
+        : scope?.kind === "mistakes"
+          ? (scope.lecture ?? mostLecture(s.ids.map((id) => (data.byId[id] ? lectureOfQ(data.byId[id]) : null))))
+          : null;
     const readLink = (qq: PublicQuestion) =>
       lectureOfQ(qq) ? (
         <button type="button" className="a-btn small pq-read" onClick={() => void toParagraph(qq)}>
@@ -941,9 +956,9 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
                 </div>
               ) : null}
               <p className="pq-set-links">
-                {wrong.length && setInfo?.lecture ? (
-                  <button type="button" className="a-link" onClick={() => ctx.go({ v: "practice", l: setInfo.lecture!, x: "new", from: "m" })}>
-                    {SETS.entryMistakesNew} ‹
+                {wrong.length && mistakesLecture ? (
+                  <button type="button" className="a-link pq-mistakes-new" onClick={() => ctx.go({ v: "practice", l: mistakesLecture, x: "new", from: "m" })}>
+                    {mistakesNew(mistakesUsd)} ‹
                   </button>
                 ) : null}
                 <button
@@ -982,6 +997,13 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
                 })}
             </div>
           ) : null}
+          {!setId && scope?.kind === "mistakes" && mistakesLecture ? (
+            <p className="pq-set-links">
+              <button type="button" className="a-link pq-mistakes-new" onClick={() => ctx.go({ v: "practice", l: mistakesLecture, x: "new", from: "m" })}>
+                {mistakesNew(mistakesUsd)} ‹
+              </button>
+            </p>
+          ) : null}
           {left > 0 ? <p className="a-muted">{left === 1 ? "נשארה שאלה אחת שעוד לא תורגלה." : `נשארו ${left} שאלות שעוד לא תורגלו.`}</p> : null}
           <button type="button" className="a-btn ghost pq-back" onClick={close}>
             חזרה לתרגול
@@ -1000,9 +1022,11 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         ) : (
           <StickyActions>
             <button type="button" className="a-btn primary wide" onClick={() => void again()}>
-              סבב נוסף
+              {/* "הטעויות שלי" again is going over the mistakes (the free primary, §5.1). */}
+              {flags.sets && scope?.kind === "mistakes" ? SETS.gen.again : "סבב נוסף"}
             </button>
-            {wrongAgain.length ? (
+            {/* "הטעויות שלי" again is these mistakes: one button says it (with practice sets). */}
+            {wrongAgain.length && !(flags.sets && scope?.kind === "mistakes") ? (
               <button type="button" className="a-btn" onClick={onlyWrong}>
                 רק הטעויות מהסבב
               </button>

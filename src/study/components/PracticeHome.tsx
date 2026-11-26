@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { CardsHubCard } from "../features/cards";
 import type { ScreenProps } from "../features/types";
 import { listLectures, type LectureRow } from "../lib/api";
 import { flags } from "../lib/flags";
 import { courseKey } from "../../../shared/study/courseKey";
 import { openBatches, practiceOverview, watchPractice, type Overview } from "../lib/practice";
+import ErrorBoundary from "./ErrorBoundary";
 import { Icon } from "./Icon";
 import { Head, Loading, RouteLink } from "./Shell";
+
+/** Practice sets (VITE_STUDY_SETS): "סטים של הקבוצה", the 3 newest (lazy, its own boundary). */
+const HubSets = lazy(() => import("./SetsEntries").then((m) => ({ default: m.HubSets })));
 
 /* ── The practice hub (P1; package Q, design-questions §1.3) ──
  *
@@ -16,8 +20,9 @@ import { Head, Loading, RouteLink } from "./Shell";
  * where there are none yet, "נכתבות שאלות…" while a round is written, and
  * "לתרגל את כל הקורס". "הטעויות שלי" and past exams come with Q-2 (release 8
  * and 12). With practice sets (flags.make, docs/study/sets.md §5.2): the
- * "סט חדש" card first, the lectures under "תרגול מהבנק" with "סט חדש" where
- * a lecture has none, and the group quiz last. */
+ * "סט חדש" card first, then (flags.sets) "סטים של הקבוצה": the 3 newest
+ * sets in a vertical list with "לכל הסטים ‹", the lectures under "תרגול
+ * מהבנק" with "סט חדש" where a lecture has none, and the group quiz last. */
 
 const SIX_MINUTES = 6 * 60_000;
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`);
@@ -88,6 +93,14 @@ export default function PracticeHome({ ctx }: ScreenProps<"practice">) {
             סט חדש
           </RouteLink>
         </section>
+      ) : null}
+
+      {flags.sets ? (
+        <ErrorBoundary reset="hub-sets" fallback="none">
+          <Suspense fallback={null}>
+            <HubSets ctx={ctx} />
+          </Suspense>
+        </ErrorBoundary>
       ) : null}
 
       <CardsHubCard ctx={ctx} />

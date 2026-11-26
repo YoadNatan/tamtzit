@@ -70,12 +70,61 @@ function Example({ kind, text, slides, k }: { kind: string; text?: string; slide
   );
 }
 
+/** Practice sets on Today (flags.sets, design §5.1, WP14), from one short
+ *  read of the group's shelf (its 6 newest), loaded lazily with its words so
+ *  this screen's chunk holds none of the sets' code: the one row "סטים
+ *  חדשים בקבוצה (n)" while someone else's sets are unopened, the free
+ *  primary "לפתור סט חדש" on an empty queue (the newest ready set the member
+ *  has not solved), and a row for each of the member's own sets paused in
+ *  the middle ("הסט … נעצר באמצע · להמשיך ליצור"). Nothing offline. */
+type TodaySets = { fresh: string | null; solve: { id: string; label: string } | null; resume: Array<{ id: string; label: string }> };
+function useTodaySets(ctx: Ctx): TodaySets | null {
+  const [t, setT] = useState<TodaySets | null>(null);
+  const groupId = ctx.group.id;
+  useEffect(() => {
+    if (!flags.sets) return;
+    let alive = true;
+    Promise.all([import("../lib/sets"), import("../lib/setsCopy")])
+      .then(async ([S, C]) => {
+        const e = S.entriesOf(await S.shelf(groupId, undefined, 6));
+        if (!alive) return;
+        setT({
+          fresh: e.fresh.length ? C.todayRow(e.fresh.length) : null,
+          solve: e.solve ? { id: e.solve.id, label: C.SETS.today.solveNew } : null,
+          resume: e.resume.map((r) => ({ id: r.id, label: C.genResumeMine(r.lecture_title || r.title) })),
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [groupId]);
+  return t;
+}
+
+/** "לפתור סט חדש": the set's session straight away, as a set's card starts it. */
+function solveSet(ctx: Ctx, setId: string) {
+  const r = { v: "practice" as const, s: `k.${setId}` };
+  void import("../lib/practiceSession")
+    .then((m) => m.requestStart(ctx.userId, r, false))
+    .catch(() => undefined)
+    .finally(() => ctx.go(r));
+}
+
 /** Practice sets (flags.make, design §5.1): the card "תרגול" in place of the
  *  ghost "תרגול חופשי". With an empty queue the free primary is the bar's
- *  "תרגול מהבנק" (the hub's lectures) and the card holds "סט חדש"; with a
- *  queue the card is two quiet links, so the queue keeps the screen's one
- *  primary. "סט חדש" opens on the last lecture read (x=new without a lecture). */
-function PracticeCard({ ctx, queue }: { ctx: Ctx; queue: boolean }) {
+ *  "תרגול מהבנק" (the hub's lectures), or "לפתור סט חדש" when a new set
+ *  waits (flags.sets; the bank is then a link here), and the card holds
+ *  "סט חדש"; with a queue the card is quiet links, so the queue keeps the
+ *  screen's one primary. "סט חדש" opens on the last lecture read (x=new
+ *  without a lecture). With flags.sets the card also has "סטים חדשים בקבוצה
+ *  (n) ‹" while someone else's sets are unopened. */
+function PracticeCard({ ctx, queue, sets }: { ctx: Ctx; queue: boolean; sets: TodaySets | null }) {
+  const fresh = sets?.fresh ? (
+    <RouteLink to={{ v: "sets" }} go={ctx.go} className="a-link t-sets-new">
+      {sets.fresh} ‹
+    </RouteLink>
+  ) : null;
   return (
     <section className="a-card flat t-practice" aria-labelledby="t-practice-h">
       <h2 id="t-practice-h" className="a-h2">
@@ -89,13 +138,22 @@ function PracticeCard({ ctx, queue }: { ctx: Ctx; queue: boolean }) {
           <RouteLink to={{ v: "practice" }} go={ctx.go} className="a-link t-free">
             תרגול מהבנק ‹
           </RouteLink>
+          {fresh}
         </div>
       ) : (
         <>
           <p className="a-small a-muted">שאלות חדשות על הרצאה, נבדקות לפני הבנק</p>
-          <RouteLink to={{ v: "practice", x: "new" }} go={ctx.go} className="a-btn t-make">
-            סט חדש
-          </RouteLink>
+          <div className="a-row t-practice-go">
+            <RouteLink to={{ v: "practice", x: "new" }} go={ctx.go} className="a-btn t-make">
+              סט חדש
+            </RouteLink>
+            {sets?.solve ? (
+              <RouteLink to={{ v: "practice" }} go={ctx.go} className="a-link t-free">
+                תרגול מהבנק ‹
+              </RouteLink>
+            ) : null}
+          </div>
+          {fresh ? <div className="a-row t-practice-go">{fresh}</div> : null}
         </>
       )}
     </section>
@@ -137,6 +195,7 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
     ctx.go({ v: "today", run: true });
   }, [ctx, minutes, cut.items]);
 
+  const sets = useTodaySets(ctx);
   const q = groupQuestion(data?.open_question, data?.needs_me, flags.needsMe);
   const flame = data?.flame;
   return (
@@ -219,6 +278,10 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
           <button type="button" className="a-btn primary wide" onClick={start}>
             להתחיל · {minutesOf(cut.seconds)} דק׳
           </button>
+        ) : ready && sets?.solve ? (
+          <button type="button" className="a-btn primary wide t-solve-set" onClick={() => solveSet(ctx, sets.solve!.id)}>
+            {sets.solve.label}
+          </button>
         ) : ready && flags.questions ? (
           <RouteLink to={{ v: "practice" }} go={ctx.go} className="a-btn primary wide t-free">
             {flags.make ? "תרגול מהבנק" : "תרגול חופשי"}
@@ -242,7 +305,13 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
           {flameLine(flame.days)}
         </p>
       ) : null}
-      {ready && !cut.items.length && flags.make ? <PracticeCard ctx={ctx} queue={false} /> : null}
+      {/* The member's own sets paused in the middle (flags.sets): back to them in one tap. */}
+      {sets?.resume.map((r) => (
+        <RouteLink key={r.id} to={{ v: "sets", k: r.id }} go={ctx.go} className="a-card flat t-resume">
+          {r.label} ‹
+        </RouteLink>
+      ))}
+      {ready && !cut.items.length && flags.make ? <PracticeCard ctx={ctx} queue={false} sets={sets} /> : null}
       {flags.guide && offerBelow ? <GuideHome ctx={ctx} home="today" queue={ready ? cut.items.length : null} /> : null}
 
       {q ? (
@@ -268,7 +337,7 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
       <EveCard ctx={ctx} />
 
       {cut.items.length && flags.make ? (
-        <PracticeCard ctx={ctx} queue />
+        <PracticeCard ctx={ctx} queue sets={sets} />
       ) : cut.items.length && flags.questions ? (
         <RouteLink to={{ v: "practice" }} go={ctx.go} className="a-btn ghost t-free">
           תרגול חופשי
