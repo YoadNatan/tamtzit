@@ -20,6 +20,10 @@ import { flagsFrom, requiredSchema } from "../../shared/study/flags.js";
  */
 
 export const MODEL = "claude-opus-5-5";
+/** The sheet reader's model (section O 2; OD17: the current default, not
+ *  pinned to a provider, OD5). The models package (Y, not built) will route
+ *  the keys "sheet_read" and "similar" here. */
+export const SHEET_MODEL = MODEL;
 
 /** geo: the picture's label geometry, when the upload (or the backfill) found labels (question types);
  *  crop: a PPTX picture's visible frame (its srcRect), 0..1 of the stored, uncropped picture. */
@@ -200,6 +204,10 @@ export const VARIANT_SCHEMA: Readonly<Record<string, Readonly<Record<string, num
   // Uploaded sheets, release A0 (docs/study/sheets.md): op "exam_read"'s
   // start of a sheet reads its kind and the sheets line (section O 1).
   sheets: { Q: 2, S: 2, O: 1 },
+  // Uploaded sheets, release A1 (docs/study/sheets.md): the sheet reader's
+  // start (study_sheet_pages_done), "copy the open questions too"
+  // (study_sheet_open_add) and the budget pause's resume (section O 2).
+  sheet_forms: { Q: 2, S: 2, O: 2 },
   // Notifications (section R, docs/study/DECISIONS-2026-11-26.md): work.ts's
   // {notify} branch claims pushes and reports them through R 1.
   notify: { R: 1 },

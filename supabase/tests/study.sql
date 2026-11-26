@@ -11445,6 +11445,11 @@ select pg_temp.ook('O2e3', :'p_qk2' = '3'
   and (select count(*) from public.study_exam_pages where exam_id = :'ps2' and is_key) = 3,
   'solutions printed from page 3: pages 3-5 become the answers file, one key unit, the unit of pages 4-5 is not read');
 
+select public.study_claim_exam(:'ps2', :'pkey') as pc7 \gset
+select pg_temp.ook('O2e4', (:'pc7')::jsonb ->> 'kind' = 'key' and (:'pc7')::jsonb ->> 'printed' = 'true' and (:'pc7')::jsonb ->> 'reader' = 'sheet'
+  and (select string_agg(p ->> 'n', ',') from jsonb_array_elements((:'pc7')::jsonb -> 'pages') p) = '3,4,5',
+  'the moved pages are claimed as the sheet''s own printed answers');
+
 -- ── Solving: units of sheet_solve_items() for the sheet reader ──
 select public.study_claim_exam(:'ps1', :'pkey') as pc3 \gset
 select ((:'pc3'::jsonb ->> 'job')::uuid) as pj3, ((:'pc3'::jsonb ->> 'lease')::uuid) as pl_3 \gset

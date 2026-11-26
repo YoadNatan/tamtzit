@@ -13,7 +13,8 @@ import {
   examReadRequest,
   examSolveRequest,
 } from "./prompts/questions.js";
-import { ExamItem, ExamItems, ExamKey, ExamKeys, ExamSolved, ExamSolvedItem } from "./questions.js";
+import { ExamItem, ExamItems, ExamKey, ExamKeys, ExamSolved, ExamSolvedItem, SheetItem, SheetKey, SheetSolvedItem } from "./questions.js";
+import { sheetCall, toSheetItems, toSheetKeyRows, toSolvedRows, type SheetSolveItem } from "./sheets.js";
 import { anthropic, errorText, HttpError, keyed, MODEL } from "./study.js";
 import { figureOk } from "./writer.js";
 
@@ -61,17 +62,29 @@ export type ExamClaim = {
   kind: "read" | "key" | "solve";
   /** A page read again ("לקרוא שוב את עמוד 7"): its numbers are saved already, and it replaces them. */
   reread?: boolean;
+  /** Section O 2: who reads the unit. "exam" (or absent: a database before
+   *  O 2) is this module's reader; "sheet" and "open" are the sheet
+   *  reader's (sheets.ts). */
+  reader?: "exam" | "sheet" | "open";
+  /** An open-add unit (OD15): the upload stays ready. */
+  extra?: boolean;
+  /** A key unit that reads the sheet's own printed solutions. */
+  printed?: boolean;
   lease: string;
   attempt: number;
   last_error: string | null;
-  exam: { id: string; group_id: string; title: string; key_source: string };
+  exam: { id: string; group_id: string; title: string; key_source: string; kind?: string; lecture_id?: string | null; course?: string };
   pages: ExamPage[];
   next: ExamPage | null;
   /** The page before the unit's first (a read unit), context for a shared case. */
   prev?: ExamPage | null;
   seen: number[];
-  items: SolveInput[] | null;
+  /** The labels saved already (the sheet reader's read units). */
+  seen_labels?: Array<{ label: string; page: number | null }> | null;
+  items: Array<SolveInput & Partial<SheetSolveItem>> | null;
 };
+/** The reader of a claimed unit: the sheet reader for "sheet" and "open". */
+export const isSheetUnit = (c: Pick<ExamClaim, "reader">) => c.reader === "sheet" || c.reader === "open";
 /** One item as study_exam_save_items takes it. */
 export type SaveItem = {
   no: number;
@@ -325,6 +338,59 @@ async function finishUnit(sb: SupabaseClient, c: ExamClaim, status: "done" | "fa
   return data === true;
 }
 
+/** A sheet unit's save (section O 2, sheets.ts): a read unit's items by
+ *  label (after moving the sheet's own printed solutions to a key unit), an
+ *  answers file's lines by label, or a solve unit's answers and worked
+ *  solutions by item. Throws the RPC's error (409 lease lost). */
+async function saveSheetUnit(
+  sb: SupabaseClient,
+  c: ExamClaim,
+  doc: Record<string, unknown> | null,
+  list: (name: string) => unknown[],
+): Promise<{ saved: number; error: string | null }> {
+  const rpc = async (name: string, args: Record<string, unknown>) => {
+    const { data, error: e } = await sb.rpc(name, keyed({ p_job: c.job, p_lease: c.lease, ...args }));
+    if (e) throw new HttpError(e.message === "lease lost" ? 409 : 500, e.message);
+    return data;
+  };
+  if (c.kind === "read") {
+    const raw = list("questions").flatMap((x) => {
+      const r = SheetItem.safeParse(x);
+      return r.success ? [r.data] : [];
+    });
+    let solutionsFrom = 0;
+    const from = doc ? Number(doc.solutions_from_page) || 0 : 0;
+    const known = new Set([...c.pages.map((p) => p.n), ...(c.next ? [c.next.n] : [])]);
+    if (c.reader === "sheet" && from > 0 && known.has(from)) {
+      // The sheet's own answers start on a page of this unit or the next: they become its answers file.
+      const moved = Number(await rpc("study_sheet_queue_key", { p_from_page: from })) || 0;
+      if (moved > 0) solutionsFrom = from;
+    }
+    const lines: Record<number, readonly string[]> = {};
+    for (const p of [...c.pages, ...(c.next ? [c.next] : [])]) lines[p.n] = p.lines ?? [];
+    const { items } = toSheetItems(raw, {
+      pages: c.pages.map((p) => p.n),
+      next: c.next?.n ?? null,
+      prev: c.prev?.n ?? null,
+      keySource: c.exam.key_source,
+      mode: c.reader === "open" ? "open" : "sheet",
+      lines,
+      solutionsFrom,
+    });
+    const skipped = doc ? clampInt(Number(doc.skipped) || 0, 0, 500) : 0;
+    if (!items.length && !doc) return { saved: 0, error: null };
+    const r = (await rpc("study_sheet_save_items", { p_items: items, p_skipped: skipped })) as { saved?: number; updated?: number } | null;
+    return { saved: (r?.saved ?? 0) + (r?.updated ?? 0), error: null };
+  }
+  if (c.kind === "key" && doc && Array.isArray(doc.versions) && doc.versions.length > 1) return { saved: 0, error: "versions" };
+  const rows =
+    c.kind === "key"
+      ? toSheetKeyRows(list("keys").flatMap((x) => (SheetKey.safeParse(x).success ? [SheetKey.parse(x)] : [])))
+      : toSolvedRows((c.items ?? []) as SheetSolveItem[], list("answers").flatMap((x) => (SheetSolvedItem.safeParse(x).success ? [SheetSolvedItem.parse(x)] : [])));
+  if (!rows.length) return { saved: 0, error: null };
+  return { saved: Number(await rpc("study_sheet_save_keys", { p_rows: rows })) || 0, error: null };
+}
+
 /** The refusals of study_reserve: the unit ends with the code, no model call. */
 const isRefusal = (e: unknown): e is HttpError => e instanceof HttpError && e.status !== 500;
 
@@ -332,7 +398,9 @@ const isRefusal = (e: unknown): e is HttpError => e instanceof HttpError && e.st
  *  model, the save under the lease, the finish. Never throws: an RPC that
  *  fails leaves the unit to its lease (330 s), and the next claim counts it. */
 export async function runExamUnit(sb: SupabaseClient, c: ExamClaim, opts: { stopAt: number }): Promise<UnitResult> {
-  const call = unitCall(c);
+  const sheet = isSheetUnit(c);
+  const call: (Call & { ref?: string }) | null = sheet ? sheetCall(c) : unitCall(c);
+  const ref = sheet && call?.ref ? call.ref : "unit";
   try {
     if (!call) {
       await finishUnit(sb, c, "failed", "pages_expired", 0);
@@ -349,7 +417,7 @@ export async function runExamUnit(sb: SupabaseClient, c: ExamClaim, opts: { stop
 
   let reservation: number;
   try {
-    reservation = await reserve(sb, { groupId: c.exam.group_id, kind: "exam", ref: "unit", estimateUsd: unitEstimate(call), daily: false });
+    reservation = await reserve(sb, { groupId: c.exam.group_id, kind: "exam", ref, estimateUsd: unitEstimate(call), daily: false });
   } catch (e) {
     if (!isRefusal(e)) {
       log(c, "left to its lease", e);
@@ -374,7 +442,7 @@ export async function runExamUnit(sb: SupabaseClient, c: ExamClaim, opts: { stop
     res = await run({
       client: anthropic(),
       kind: "exam",
-      ref: "unit",
+      ref,
       system: [{ type: "text", text: call.system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: call.content }],
       effort: call.effort,
@@ -413,7 +481,11 @@ export async function runExamUnit(sb: SupabaseClient, c: ExamClaim, opts: { stop
 
   let saved = 0;
   try {
-    if (c.kind === "read") {
+    if (sheet) {
+      const r = await saveSheetUnit(sb, c, doc, list);
+      saved = r.saved;
+      if (r.error && !error) error = r.error;
+    } else if (c.kind === "read") {
       const items = list("questions")
         .map((x) => ExamItem.safeParse(x))
         .filter((r) => r.success)

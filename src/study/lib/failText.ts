@@ -228,6 +228,12 @@ const TEXT: Record<string, string> = {
   "exam:attempt not found": "הסימולציה הזו לא נמצאה. כדאי לרענן.",
   "exam:mock not found": "הסימולציה הזו לא נמצאה. כדאי לרענן.",
   "exam:bad choices": "צריך לענות על כל החלקים של השאלה.",
+  // Uploaded sheets, release A1 (section O 2): fixing, adding and resuming.
+  "exam:answered": "כבר ענו על השאלה: אפשר לתקן רק טקסט.",
+  "exam:label taken": "יש כבר שאלה עם המספור הזה.",
+  "exam:bad item": "משהו בשאלה לא תקין. כדאי לבדוק את הטקסט והאפשרויות.",
+  "exam:nothing to resume": "אין מה להמשיך: ההעתקה כבר ממשיכה.",
+  "exam:nothing to copy": "אין שאלות פתוחות להעתיק.",
 
   // practice 2.0 (docs/study/practice-2-api.md): the points to know, a request's
   // options, the example read back, the drafts reviewed before the bank
@@ -433,6 +439,14 @@ const OTHER_FALLBACK = "לא הצלחנו. אפשר לנסות שוב.";
  *  has words elsewhere). failText() gives them the area's fallback all the
  *  same. */
 export const INTERNAL_CODES: readonly string[] = [
+  // uploaded sheets (section O 2): the worker's and the op's own checks, and answers the screens never send
+  "not a sheet",
+  "bad page",
+  "not retired",
+  "not a numeric question",
+  "not an open question",
+  "bad mark",
+  "not shown",
   // a writer's item of a question type the server's checks already passed (server key only)
   "bad form",
   "confirm name",

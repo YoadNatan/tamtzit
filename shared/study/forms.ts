@@ -17,6 +17,18 @@ export const SET_FORMS = ["tf", "match", "order"] as const;
 export type SetForm = (typeof SET_FORMS)[number];
 export const isSetForm = (f: string | null | undefined): f is SetForm => f === "tf" || f === "match" || f === "order";
 
+/** An uploaded sheet's forms (section O 2, docs/study/sheets.md): the choice
+ *  forms above, an open question ("open": a model answer and a rubric,
+ *  self-marked and personal) and a calculation ("numeric": a number, a unit
+ *  and a tolerance, checked at $0). FORMS stays what the op "questions"
+ *  writes; screens outside practice draw FORMS only (study_private.q_plain). */
+export const SHEET_FORMS = [...FORMS, "open", "numeric"] as const;
+export type SheetForm = (typeof SHEET_FORMS)[number];
+/** Answered by choosing (study_answer_question or study_answer_set). */
+export const isChoiceForm = (f: string | null | undefined): f is Form => !!f && (FORMS as readonly string[]).includes(f);
+/** Answered in the member's own words and marked by the member: never a row of study_answers (OD8). */
+export const isPersonalForm = (f: string | null | undefined): f is "open" => f === "open";
+
 /** The seven multiple-choice styles of practice 2.0. */
 export const MCQ_STYLES = ["case", "mechanism", "drug_choice", "adverse_contra", "compare", "not_true", "blank_table"] as const;
 /** The six question types added after them. */

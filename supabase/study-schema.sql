@@ -21665,9 +21665,11 @@ revoke all on function study_private.exam_unkeyed(uuid), study_private.exam_prin
 -- S's text, with (design D4, D22): the unit's reader (range.reader; a unit
 -- queued without one is the exam reader's, unless its sheet was queued for
 -- the sheet reader: a page read again), the upload's kind and lecture, the
--- labels saved already (the sheet reader's "seen"), and for a solve unit
--- each item's label, series, step, figures, page and that page's link. A
--- sheet's unit is not taken while the switch 'sheets' is off.
+-- labels saved already (the sheet reader's "seen"), whether a key unit
+-- reads the sheet's own printed solutions, the next page's lines (the
+-- exactness check), and for a solve unit each item's label, series, step,
+-- figures, page and that page's link. A sheet's unit is not taken while the
+-- switch 'sheets' is off.
 create or replace function public.study_claim_exam(p_exam uuid, p_key text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -21710,6 +21712,7 @@ begin
     'job', j.id, 'kind', j.kind, 'lease', v_lease, 'attempt', j.attempts + 1, 'last_error', j.error,
     'reread', coalesce((j.range ->> 'reread')::boolean, false),
     'reader', v_reader, 'extra', coalesce((j.range ->> 'extra')::boolean, false),
+    'printed', coalesce((j.range ->> 'printed')::boolean, false),
     'exam', jsonb_build_object('id', e.id, 'group_id', e.group_id, 'title', e.title, 'key_source', e.key_source, 'kind', e.kind,
                                'lecture_id', e.lecture_id, 'course', e.course),
     'pages', coalesce((select jsonb_agg(jsonb_build_object('n', p.n, 'path', p.path, 'w', p.w, 'h', p.h, 'lines', to_jsonb(p.lines),
@@ -21717,7 +21720,8 @@ begin
                          from public.study_exam_pages p
                         where p.exam_id = e.id and p.n in (select v::int from jsonb_array_elements_text(coalesce(j.range -> 'pages', '[]'::jsonb)) v)),
                       '[]'::jsonb),
-    'next', (select jsonb_build_object('n', p.n, 'path', p.path, 'w', p.w, 'h', p.h, 'url', q.urls ->> p.path)
+    'next', (select jsonb_build_object('n', p.n, 'path', p.path, 'w', p.w, 'h', p.h, 'url', q.urls ->> p.path,
+                                       'lines', case when v_reader <> 'exam' then to_jsonb(p.lines) end)
                from public.study_exam_pages p where p.exam_id = e.id and p.n = (j.range ->> 'next')::int),
     -- The page before the unit's first, as context too: a case printed there
     -- may belong to questions on the unit's pages ("המקרה הבא מתייחס לשאלות 12–14").

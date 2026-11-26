@@ -668,6 +668,77 @@ export const ExamSolvedItem = z.object({
 export const ExamSolved = z.object({ answers: z.array(ExamSolvedItem) });
 export type ExamSolvedItem = z.infer<typeof ExamSolvedItem>;
 
+/* ── Uploaded sheets (section O 2, prompts/sheets.ts; docs/study/sheets.md) ── */
+export const SheetBox = ExamFigure;
+/** One question or part as the sheet reader copies it (read unit). */
+export const SheetItem = z.object({
+  label: z.string().describe('The question\'s label exactly as printed ("3", "3א", "2.1")'),
+  parent: z.string().describe('A part of a question with parts: the main label ("3"); otherwise ""'),
+  part: z.number().int().describe("A part's place among its question's parts (1, 2, 3...); 0 for a question without parts"),
+  form: z.string().describe('"one", "tf", "match", "numeric" or "open"'),
+  stem: z.string().describe("The shared stem or case text (on the first part only), keeping its line breaks; or an empty string"),
+  question: z.string().describe("The question (or the part) as printed, keeping its line breaks; tables as Markdown pipe rows"),
+  options: z.array(z.string()).describe("Forms one, tf, match: every option or statement in order, without its letter; otherwise empty"),
+  prompts: z.array(z.string()).describe('Form "match": the items to match, in order; otherwise empty'),
+  answer: z.number().int().describe('Form "one", answers marked on the sheet: the 0-based index of the marked option; otherwise -1'),
+  seq: z.array(z.number().int()).describe('Forms "tf" and "match", answers marked: the values in order; otherwise empty'),
+  has_num: z.boolean().describe('Form "numeric", answers marked: true when the sheet prints its number'),
+  num: z.number().describe("That number, or 0"),
+  unit_hint: z.string().describe('Form "numeric": the unit the answer is asked in, as printed, or ""'),
+  marked_by: z.string().describe('"printed", "handwritten" (a student\'s own marks) or "none"'),
+  figures: z.array(SheetBox).describe("Up to 4 boxes of pictures, graphs or tables-as-pictures the question needs"),
+  parse_conf: z.number().int().describe("3: every word clear; 2: a few words unsure; 1: the question may be wrong or incomplete"),
+  page: z.number().int().describe("The page the question starts on"),
+  idx: z.number().int().describe("Its place among the questions that start on that page, from 0"),
+  cut: z.boolean().describe("true only when the text was too long to copy whole"),
+});
+export const SheetItems = z.object({
+  questions: z.array(SheetItem),
+  skipped: z.number().int().describe("How many questions that start on these pages could not be copied at all"),
+  solutions_from_page: z.number().int().describe("The first page of the sheet's own printed answers or solutions, or 0"),
+});
+export type SheetItem = z.infer<typeof SheetItem>;
+
+/** An answers file's line, by label (key unit). */
+export const SheetKey = z.object({
+  label: z.string().describe("The question's label as the answers print it"),
+  answer: z.number().int().describe("A choice question: the 0-based index of the option given, or -1"),
+  seq: z.array(z.number().int()).describe("Statement by statement or prompt by prompt: the values in order; otherwise empty"),
+  has_num: z.boolean().describe("A calculation: true when the answers give its number"),
+  num: z.number().describe("That number, or 0"),
+  unit: z.string().describe('Its unit as printed, or ""'),
+  tol: z.number().describe("A tolerance in percent only when the answers state one; otherwise 0"),
+  answer_text: z.string().describe('An answer in words, as printed, or ""'),
+  solution: z.string().describe('The worked solution or explanation as printed, keeping its line breaks, or ""'),
+  state: z.string().describe('"cancelled", "several" (more than one answer accepted; answer is the first) or ""'),
+});
+export const SheetKeys = z.object({
+  versions: z.array(z.string()).describe("The versions the answers give separate columns for, or empty"),
+  keys: z.array(SheetKey),
+});
+export type SheetKey = z.infer<typeof SheetKey>;
+
+/** A suggested answer and worked solution (solve unit). */
+export const SheetCalcInput = z.object({ name: z.string(), value: z.number() });
+export const SheetSolvedItem = z.object({
+  ref: z.number().int().describe("The ref given"),
+  answer: z.number().int().describe('Form "one": the 0-based index of the answer; otherwise -1'),
+  seq: z.array(z.number().int()).describe('Forms "tf" and "match": the values in order; otherwise empty'),
+  has_num: z.boolean().describe('Form "numeric": true'),
+  num: z.number().describe('Form "numeric": the final number; otherwise 0'),
+  unit: z.string().describe('Form "numeric": its unit; otherwise ""'),
+  tol: z.number().describe('Form "numeric": the tolerance in percent (1-5); otherwise 0'),
+  calc: z
+    .object({ inputs: z.array(SheetCalcInput), formula: z.string() })
+    .describe('Form "numeric": named inputs and a formula over them that gives num; otherwise no inputs and ""'),
+  model_answer: z.string().describe('Form "open": a model answer of at most 120 words; otherwise ""'),
+  rubric: z.array(z.string()).describe('Form "open": 2-6 points a full answer makes; otherwise empty'),
+  solution: z.string().describe("A short worked solution in Hebrew"),
+  conf: z.number().int().describe("3: settled beyond doubt; 2: likely; 1: unsure"),
+});
+export const SheetSolved = z.object({ answers: z.array(SheetSolvedItem) });
+export type SheetSolvedItem = z.infer<typeof SheetSolvedItem>;
+
 export const Explained = z.object({
   no: z.number().int().describe("The question number given"),
   covered: z.boolean().describe("false when the slides do not deal with the question's subject at all"),
