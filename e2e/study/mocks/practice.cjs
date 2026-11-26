@@ -510,6 +510,30 @@ function planOf(db, P, lectureId, o) {
   };
 }
 
+/** Action "plan" with inputs (practice sets, shared/study/practice2.ts PlanInputs): the
+ *  lecture's current points, the bank's coverage, its size, what the member has not
+ *  answered, the headroom to the 80% line and the 40% share; P.inputs overrides any of it. */
+function inputsOf(db, P, lectureId, me, stale) {
+  const points = P.points.filter((x) => x.lecture_id === lectureId).map((x) => ({ id: x.id, part_idx: x.part_idx, n: x.n, kind: x.kind, red_flag: !!x.red_flag, weight: x.weight }));
+  const active = P.questions.filter((q) => q.lecture_id === lectureId && !q.retired_at);
+  const answered = new Set(P.answers.filter((a) => a.user_id === me).map((a) => a.question_id));
+  const cap = db.budgetUsd;
+  return {
+    points,
+    covered: [],
+    active: active.length,
+    free: active.filter((q) => !answered.has(q.id)).length,
+    making: null,
+    recent: null,
+    headroom: { group80: Math.max(0, round2(cap * 0.8 - db.spent)), member40: Math.max(0, round2(cap * 0.4 - db.mySpent)), line: null },
+    dailyLeft: null,
+    perQuestionUsd: 0.04,
+    readUsd: stale.length ? 0.14 : 0,
+    styleUsd: 0.01,
+    ...(P.inputs ?? {}),
+  };
+}
+
 /** Question types: each part's facts and the defaults for the chosen parts (shared/study/forms.ts's rule). */
 function factsOf(db, P, lectureId, chosen) {
   const lecture = db.lectures.find((l) => l.id === lectureId);
@@ -1229,7 +1253,9 @@ async function p2Action({ res, db, P, body, me, lectureId, send, notify }) {
     case "plan": {
       const r = readOptions(body.options);
       if (r.code) return send({ error: r.code }, 400);
-      return send(planOf(db, P, lectureId, r.options).answer);
+      const plan = planOf(db, P, lectureId, r.options);
+      // "סט חדש"'s planning inputs (practice sets, PlanInputs), steered through P.inputs.
+      return send(body.inputs === true ? { ...plan.answer, inputs: inputsOf(db, P, lectureId, me, plan.stale) } : plan.answer);
     }
     case "points": {
       // As server/study/points.ts reads them: the stale parts claimed at once (one updated_at), each
@@ -1310,6 +1336,8 @@ async function p2Action({ res, db, P, body, me, lectureId, send, notify }) {
       return true;
     }
     case "style": {
+      // A refused read (P.styleFail: its code), which "סט בהכנה" only reports.
+      if (P.styleFail) return send({ error: P.styleFail }, 429);
       const text = typeof body.text === "string" ? body.text.trim() : "";
       const image = body.image && typeof body.image.data === "string" && /^image\/(jpeg|png|webp|gif)$/.test(body.image.mediaType) ? body.image : null;
       if ((!text && !image) || text.length > 3000) return send({ error: "bad example" }, 400);
