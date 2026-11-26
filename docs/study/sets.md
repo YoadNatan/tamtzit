@@ -17,7 +17,7 @@ a view over bank questions.
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
 | A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | Built (WP0-WP8): docs, bundle owner, shared planning and price, the server's `plan`, the flag and routes, the create and generating screens, the entry points and the fixes of the practice screens, and slice A's e2e (§14 steps 1-4, 12-13) |
-| B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | not built yet |
+| B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | SQL section L 1 (WP9, part 10) and the server's `create` with a set (WP10) built; the client (WP11-WP15) not yet |
 | C | The notices `set_shared` and `set_solved` (WP17), with section R | (R's) | L 1, R | not built yet |
 
 Not in this build: auto-keep turned on (WP16: it ships off, OD15), sheet sets
@@ -188,14 +188,14 @@ Action `plan` of op `questions` (`server/study/practice2.ts`) now:
   Without `inputs` the answer is what it was (plus `styles` and the fresh
   `covers`), so the old screens pay for no extra reads.
 
-`making`, `recent`, `headroom.line` and `dailyLeft` are `null` until section
-L 1 is installed: they need its RPCs (`study_lecture_making`,
-`study_qsets_shelf`, and a member RPC for the sets line's month and the day's
-sets, since a member cannot read the ledger). The package that adds L reads
-them in `planInputs` behind `schemaHas({ L: 1 })`. The server's numbers for
-them are ready: `setsMonthlyCap()` (`STUDY_SETS_MONTHLY_USD`, default 12),
-`SETS_LINE_KINDS` and `SETS_DAILY` (5) in `server/study/budget.ts`. The
-fields are in `practice-2-api.md` (`plan` → `inputs`).
+`making`, `recent`, `headroom.line` and `dailyLeft` come from section L 1
+(WP10 reads them in `planInputs` behind `schemaHas({ L: 1 })`):
+`study_lecture_making`, `study_qsets_shelf` (the last 7 days, not hidden)
+and `study_qset_room` (the sets line's spend this month and the sets the
+member began today, since a member cannot read the ledger), with
+`setsMonthlyCap()` (`STUDY_SETS_MONTHLY_USD`, default 12) and `SETS_DAILY`
+(5) from `server/study/budget.ts`. Without L, or when a read fails, they are
+`null`. The fields are in `practice-2-api.md` (`plan` → `inputs`).
 
 ## The flag, the routes and the words (WP4)
 
@@ -381,9 +381,123 @@ needs no plugin of its own (`mocks/sets.cjs` comes with slice B's RPCs). The moc
 The build for it: every s2 flag with `VITE_STUDY_INSTALL`, `VITE_STUDY_NOTIFY`,
 `VITE_STUDY_MAKE` and `VITE_STUDY_SETS`.
 
+## SQL section L 1 (WP9)
+
+`supabase/study-schema.sql`, after section R; **part 10** of
+`supabase/parts` (62 KB; with I and R, part 9 would have been 177 KB, over
+the SQL editor's 170 KB, so `tools/sql-parts.mjs` now cuts 10 parts and L
+starts the last one; Y and O will follow L there). Registry `L: 1`.
+
+**Tables.** `study_qsets` (kind `lecture`, and the seams `course` and
+`sheet`; title, lecture, `want`, `options` with only level, difficulty,
+types and parts, never a focus or points; state `reading`, `making` or
+`ready`; `notified_at`; author; a soft delete), `study_qset_requests`,
+`study_qset_items` (`pos` 1-200, `auto_kept_at`), `study_qset_attempts` (a
+score per solve), `study_qset_marks` (seen, hidden for oneself),
+`study_qset_prefs` (OD7's names choice, L's own) and one column on Q's
+`study_answers`: `set_attempt`. Members read their group's live sets and
+their items; attempts, marks and prefs are each member's own; nobody
+writes a table directly. Realtime carries `study_qsets` and
+`study_qset_items` only.
+
+**The op's RPCs** (the server key and the member's token):
+`study_qset_begin` (the switches `qsets` and `questions_paid` → `off`; the
+member's sets today, Israel time, deleted ones included → `daily_limit`;
+the group's practice, solver, reword and style spend this month →
+`sets_line`; under the lecture's round lock, an open set on the lecture
+answered as `{open: {set_id, author_name, made, want, state, mine}}`
+unless forced; "open" is a set read in the last 10 minutes, written in the
+last 30, or begun in the last 2 and not yet attached), `study_qset_attach`
+(Q's `study_request_create` under the same lock, the author only, once),
+`study_qset_abandon` (a set with no request and no questions goes),
+`study_qset_style` (the example's signature while the set reads) and
+`study_qset_autokeep` (nothing while `qsets_auto_keep` is off; else the
+round lock before each draft row, as keep, only drafts the solver passed,
+a staged case only when every step passed, never past 150).
+
+**The member's RPCs:** `study_qsets_shelf`, `study_qset_open`,
+`study_qset_progress` (state, made, size, failed, unchecked, paused),
+`study_lecture_making`, `study_qset_room`, `study_qset_rename` (the author),
+`study_qset_delete` (the author or the group's creator, soft),
+`study_qset_hide`, `study_qset_seen`, `study_qset_attempt_start` (the
+open attempt of the last 12 hours, or a new one), `study_qset_answer` and
+`study_qset_answer_seq` (Q's and X's answer, then the attempt stamped on
+the row that call added), `study_qset_attempt_finish` (the first answer per
+question; an attempt with no answer is dropped), `study_qset_stats` and
+`study_qset_names_pref`.
+
+**Group numbers** (`study_qset_stats`, OD5): `solvers` and the caller's
+`mine` always; `avg` (the share right over every finisher's first attempt)
+and `per_q` (bands 1-3 over the others only, a band only where 3 others
+answered) only when at least `pulse_floor()` (3) other members finished;
+`names` only of those who chose it, never with a score; no best score.
+
+**The trigger** `study_qset_items_from_bank` (after insert on
+`study_questions` with a request): a kept question of a set's request
+joins the set at the next place, whichever path kept it. It locks only the
+set row, after the keep's round lock and draft row, and its body never
+fails the keep (a warning, and the set misses that question; rollback in
+the snippets below).
+
+**Paused** (computed): a set being written whose newest pending or writing
+batch has not moved for 6 minutes, or a set reading its lecture for 6
+minutes. **Ready**: a set whose request has no batch pending or writing
+(refreshed by progress, the set page and the shelf); the first time it is
+ready with a question, `set_shared` goes out once through R's hook
+`study_private.notice_set_shared` when there is one (WP17 adds it), and
+`notified_at` is stamped either way, so a hook installed later never
+announces old sets. A non-author's first finished attempt adds
+`set_solved` for the author, once R registers that kind (WP17).
+
+**Switches and `kind_on`:** `qsets` (on), `qsets_auto_keep` (off),
+`questions_paid` (on): `kind_on` maps practice, solver, reword, style,
+points and bank to it, with the same text in section F (a unit test
+compares them). **Nightly** `study-qsets-clean` (03:29): sets left reading
+for a day, unfinished attempts after a year, marks of deleted sets, sets
+deleted 30 days ago that nobody solved.
+
+**Seams:** `study_private.qset_of_request` (R's `questions_ready` skips a
+set's request, WP17), `qset_for_similar`, `qset_add_items` and
+`qset_similar_done` (the exams design's sheet sets, O 2). Nothing of the
+exams or models designs is built.
+
+**Tests:** `supabase/tests/study.sql` block L (70 checks, `LS1`-`LS15`),
+fresh, in parts and over the schema of `baed964`;
+`supabase/tests/qsets-concurrency.sh` (keep all against auto-keep on one
+request, 50 rounds, no deadlock and no double keep; two begins on one
+lecture at once, 10 rounds, one set); `server/study/sqlParts.test.ts` (10
+parts, each at most 170 KB, F's and L's `kind_on` the same);
+`e2e/study/schema-dump.json` regenerated by `npm run test:contract`.
+
+## The server's "create" with a set (WP10)
+
+`server/study/practice2.ts`, action `create` of op `questions`, documented
+in [`practice-2-api.md`](practice-2-api.md) ("A practice set"):
+
+- **Without `set`**, exactly the old path: no RPC of section L (D12; a test
+  checks it with L installed).
+- **With `set`** (503 `schema` before L 1): each line a set may not cross,
+  402 in the create screen's order (`reserve`, `member_share`, `sets_line`,
+  `daily_limit`, `too_big` under the expected cost plus $1.00), then
+  `study_qset_begin` with `p_daily` 5 (`SETS_DAILY`) and `p_line`
+  `setsMonthlyCap()`; 409 `already making` with the open set unless
+  `force`; 402 `off`.
+- **A phase:** stale points (instead of 409 `points stale`) or `set.phase:
+  "style"` answer `{ set: { id, state: "reading" }, phase }`; the phone reads
+  them, then calls again with `set.id`, which plans and attaches. Action
+  `style` with `setId` keeps the signature on the set; a second call with
+  another style is 400 `bad style`.
+- **The request:** `study_qset_attach`; a refusal there abandons the set and
+  keeps Q's code. The answer adds `set: { id, state: "making" }`.
+- **The title:** the member's, or "{lecture} · {n} שאלות" cut to 80
+  characters.
+- `POLICY` is unchanged: the daily limit stays `SETS_DAILY` outside it (WP3:
+  `POLICY` holds ledger kinds, and nothing reserves a call as "qsets").
+
 ## The owner's snippets (from section L 1)
 
-To be run in the Supabase SQL editor once Release B is installed:
+To be run in the Supabase SQL editor once part 10 (section L) is installed
+(each was run on a local copy of the schema; none on production):
 
 ```sql
 -- Stop all question spending now (no redeploy):
@@ -395,6 +509,12 @@ update study_private.features set enabled = true, changed_at = now() where name 
 -- What the month spent by kind (read before changing the sets line):
 select kind, round(sum(cost_usd), 2) from public.study_usage
  where created_at >= date_trunc('month', now()) group by 1 order by 2 desc;
+-- Retire auto-kept questions of one set, or since a date:
+update public.study_questions q set retired_at = now()
+ where q.retired_at is null and q.id in (select i.question_id from public.study_qset_items i
+       where i.auto_kept_at is not null and (i.set_id = '<set>' or i.auto_kept_at >= '<date>'));
+-- Full rollback of L's trigger (sets stop filling; nothing else changes):
+alter table public.study_questions disable trigger study_qset_items_from_bank;
 ```
 
 **Weekly check** (read-only): sets made and their writing cost per week. The
@@ -428,6 +548,9 @@ select date_trunc('week', s.created_at) as wk, count(distinct s.id) as sets,
    is untouched).
 3. Unset `VITE_STUDY_SETS` and/or `VITE_STUDY_MAKE` and redeploy: the old
    generator is still there (OD22).
+4. Disable the items trigger (the snippet above) only if it fails writes,
+   which its wrapper should prevent. `study_answers.set_attempt` and L's
+   tables can stay: they are unused without the flag.
 
 ## Privacy
 

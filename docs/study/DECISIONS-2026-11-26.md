@@ -556,3 +556,44 @@ Also decided for this build:
   חדש ‹", so the hub stays one tap from Today.
 - **The fixes of §5.11** are behind the same flag (flags off is the app as
   it was, and `practice.cjs` keeps checking the old words).
+
+### Practice sets, slice B's SQL and server (WP9-WP10), built on 26 November 2026
+
+- **Section L 1 is part 10** of `supabase/parts`: with sections I and R,
+  part 9 would have been 177 KB (over 170 KB), so `tools/sql-parts.mjs`
+  cuts 10 parts and L starts the last (62 KB); Y and O will follow L there.
+  Part 9's SQL is unchanged (only its header says "of 10"), so R stays at 2
+  and its client need is unchanged. The README says "10 parts".
+- **`kind_on`**: L's text, also in section F (a unit test compares them).
+- **The day's sets count deleted ones** (the design said non-deleted): a
+  set deleted after it was written was still paid for, so deleting cannot
+  reopen the day's 5. A set abandoned before its request (Q refused, or the
+  author left the reading phase) is removed and does not count.
+- **"Open" (D6) includes a set begun in the last 2 minutes that has no
+  request yet**: `begin` and `attach` are two calls, and without it two
+  members could both pass in between (the concurrency test shows one set).
+- **A member RPC `study_qset_room`** gives the create screen the sets line's
+  spend this month and the member's sets begun today (a member cannot read
+  the ledger); the server reads the same before `begin` so a member at a
+  line hears that line, in the create screen's order, before `too_big`.
+- **The answer wrappers stamp exactly the row their call added** (the
+  caller's rows for that question before the call are left alone), not "the
+  newest by time": two answers in one transaction share a time.
+- **An attempt finished with no answer is dropped**: it never counts as
+  solving the set. The group's average is the share right over every
+  finisher's first attempt; a per-question band needs 3 other members who
+  answered that question (not only finished the set).
+- **Notices:** `set_shared` is called through R's hook
+  `notice_set_shared` only when it exists (WP17 adds it), and `notified_at`
+  is stamped either way so a hook installed later never announces old
+  sets; `set_solved` is added only once R's kind registry has the kind
+  (WP17). `notifyRoute.test.ts` checks section R's own routes until then.
+- **Auto-keep** keeps only drafts the solver passed (`ok`, never
+  `unchecked`), as the design says; it ships off.
+- **`POLICY.qsets`** stays `SETS_DAILY` (5) outside `POLICY`, as WP3 chose:
+  `POLICY` holds ledger kinds, and nothing should reserve a call as "qsets".
+- **The set path of `create`** answers every budget line as 402 (the
+  create screen's words), 409 `already making` with the open set, and a
+  phase instead of 409 `points stale` when the set reads first. Course sets
+  (a set with `planId`) are refused (WP20).
+
