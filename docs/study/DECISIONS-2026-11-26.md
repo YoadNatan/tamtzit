@@ -97,3 +97,44 @@ order.
   before (a test compares 2,000 call shapes bit for bit).
 - `STUDY_MONTHLY_USD` defaults to **33** when it is not set (was 40).
 - Nothing routes yet: no request, screen or SQL changed.
+
+### Notifications, section R 1 and the shared modules, built on 26 November 2026
+
+Slice 1's database and the modules the server and the app share. No screen
+reads them yet (the inbox client comes next), and nothing is pushed.
+
+- **Where:** section R follows section I in `supabase/study-schema.sql`;
+  part 9 now holds sections I and R (80 KB of 170). Re-running part 9 is
+  safe. The switch `notify` is inserted **off** (only users in
+  `study_private.notify_pilot` get pushes), `notify_hooks` on.
+- **Kinds registered:** `quiz_open` (live, held 15 s), `reply` and
+  `answer` (for you), `summary_ready` and `summary_failed` (for you, held
+  90 s), `code_used` and `test` (security). **Reserved, not wired:**
+  `set_shared` (for you, push), `similar_ready` (for you, push, held 90 s),
+  `lab_new` (inbox only). Each package's later section updates its own rows.
+- **Choices the design left open, taken here:**
+  - A reply goes to the thread's opener and to everyone who replied
+    before; the opener of a question gets "יש תשובה לשאלה שלך", the others
+    "תשובה חדשה בשרשור שלך". One inbox row a thread, counting until seen.
+  - The quiz's lock-screen line is its first lecture's title; the inbox
+    row adds the quiz's title and the host's name.
+  - A notice queues a push only when the person has a device.
+  - The kick to `/api/study/work` also comes for a push due within 20
+    seconds, and the claim says how long to wait (`wait_ms`): a quiz held
+    15 s reaches phones in about 20 s instead of at the next minute. The
+    worker (slice 2) waits that long; the design had 5 s.
+  - The sign-in scan's first run notes where the log ends: sign-ins from
+    before section R are never announced.
+  - A test push counts toward no daily cap; 3 an hour a person, 30 in all.
+  - Leaving a group deletes that group's notices even with `notify_hooks`
+    off (deleting is always safe).
+  - Section R's error codes (`bad endpoint`, `bad prefs`, `too many`,
+    `bad results`) are internal in `failText.ts`: the notification screens
+    word their own failures.
+  - An English title alone (a course called "Invented Kinetics") is
+    isolated whole on the lock screen, so the title stays first.
+- **Checks:** `supabase/tests/study.sql` block R (fresh, loaded twice, and
+  as an upgrade from the previous schema) and
+  `supabase/tests/notify-concurrency.sh` (a hook gives up on a lock after
+  200 ms; the reply is saved). Unit tests for `notifyCopy`, `notifyRoute`,
+  `notifyQuiet`, `bidiText` and `b64url`; `VITE_STUDY_NOTIFY` asks for R 1.
