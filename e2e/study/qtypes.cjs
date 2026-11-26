@@ -386,6 +386,13 @@ const norm = (s) => String(s).replace(/[‎‏⁦-⁩]/g, "").replace(/\s+/g, " 
       /* ── 9. a set question asked again among "הטעויות שלי" ── */
       await page.goto(`${mock.base}/?v=practice&s=m.${L}&n=all`);
       await page.locator(".pq").first().waitFor({ timeout: 15000 });
+      // The round's order is the session's own: skip another mistake ("לא יודעים") until the tf one is on screen.
+      for (let i = 0; i < 6 && !(await page.locator(".qt-tf").count()) && (await page.locator(".pq-dont-know").count()); i++) {
+        await page.locator(".pq-dont-know").first().click();
+        await page.locator(".pq-next").waitFor({ timeout: 10000 });
+        await page.locator(".pq-next").click();
+        await until(async () => (await page.locator(".pq-end").count()) > 0 || (await page.locator(".pq-dont-know").count()) > 0, 10000, "the next mistake");
+      }
       const again = await page.locator(".qt-tf").count();
       check("9 the tf mistake comes back in \"הטעויות שלי\" as itself, answerable", again === 1, String(again));
 

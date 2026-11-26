@@ -108,6 +108,14 @@ const READS = new Set([
   "study_notices_mine",
   "study_notify_state",
   "study_push_devices",
+  // Practice sets (section L 1): the shelf (it brings a set's state up to date, and writes no member's data),
+  // a lecture's open sets, a set's page, its numbers and progress, and the create screen's room.
+  "study_qsets_shelf",
+  "study_lecture_making",
+  "study_qset_open",
+  "study_qset_stats",
+  "study_qset_progress",
+  "study_qset_room",
 ]);
 
 /** Whether a request writes to the group's data. */

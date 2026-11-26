@@ -46,6 +46,11 @@ if (!dist || !out) {
 }
 fs.mkdirSync(out, { recursive: true });
 const flags = flagSetOf();
+// Practice sets (pm, ps: VITE_STUDY_MAKE, design-practice §5.11): a list's slide reads "שקף 8",
+// "שאלה משלי" says where the question goes instead of "רק לך", and a lecture without a table has no
+// "טבלה ריקה" card.
+const make = Boolean(flags.make);
+const SL = make ? "שקף" : "ש׳";
 const MEMBERS = ["שוהם", "נועה", "איתי"];
 const norm = (s) => s.replace(/\s+/g, " ").trim();
 
@@ -118,10 +123,11 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
       expect(norm(await blank.locator(".blank-meter").innerText()) === "3 טבלאות בשקפים של ההרצאה", "the meter: 3 tables on the lecture's slides");
       const rows = (await blank.locator(".blank-row").allInnerTexts()).map(norm);
       steps.tables = rows;
-      expect(rows.length === 3 && /ש׳ 8 · 2 שורות/.test(rows[0]) && /ש׳ 19/.test(rows[1]) && /ש׳ 20/.test(rows[2]), "the tables of slides 8, 19 and 20, with their rows");
+      expect(rows.length === 3 && new RegExp(`${SL} 8 · 2 שורות`).test(rows[0]) && new RegExp(`${SL} 19`).test(rows[1]) && new RegExp(`${SL} 20`).test(rows[2]), "the tables of slides 8, 19 and 20, with their rows");
       const traps = s.locator(".extras-traps");
       await traps.locator(".trap-next").waitFor({ timeout: 15000 });
-      expect(/רק לך/.test(await traps.innerText()), "\"שאלה משלי\" is marked \"רק לך\"");
+      if (make) expect(/נכנסת לבנק של הקבוצה בלי שם/.test(await traps.innerText()), "\"שאלה משלי\" says it goes to the group's bank without a name (practice sets §5.11)");
+      else expect(/רק לך/.test(await traps.innerText()), "\"שאלה משלי\" is marked \"רק לך\"");
       expect(norm(await traps.locator(".trap-next").innerText()) === "שאלה שעוברת את הבדיקה נכנסת לבנק של כולם, בלי שם.", "the trap meter with nothing yet: what a trap does, not a lock");
       await blank.scrollIntoViewIfNeeded();
       await shot(s, "e-01-lecture-extras");
@@ -190,6 +196,13 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
       db.lectures.push({ ...db.lectures.find((l) => l.id === L), id: L2, title: "Antifungals", slides: Array.from({ length: 6 }, (_, i) => ({ n: i + 1, title: `שקף ${i + 1}`, lines: ["x"], tables: [], notes: "", figures: [] })), created_at: t0, updated_at: t0 });
       await go(s, `/?v=practice&l=${L2}`);
       const empty = s.locator(".extras-blank");
+      if (make) {
+        // Practice sets §5.11: no "טבלה ריקה" card on a lecture without a table (and nothing read for it).
+        await s.locator(".extras-traps, .lp-head, main").first().waitFor({ timeout: 15000 });
+        await s.waitForTimeout(800);
+        expect((await empty.count()) === 0, "practice sets: a lecture without a table has no 'טבלה ריקה' card");
+        await go(s, `/?v=practice&l=${L}`);
+      } else {
       await empty.locator(".blank-next").waitFor({ timeout: 15000 });
       const emptyText = norm(await empty.innerText());
       steps.empty = emptyText;
@@ -200,6 +213,7 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
       await empty.getByRole("link", { name: "לתרגול של הרצאה עם טבלה" }).click();
       await s.waitForURL((u) => u.searchParams.get("l") === L && !u.searchParams.get("s"), { timeout: 15000 });
       expect(true, "never a dead end: the way to a lecture with tables");
+      }
       await go(s, `/?v=practice&s=b.${L}.5`);
       await s.locator(".blank-empty").waitFor({ timeout: 15000 });
       expect(/בשקף 5 אין טבלה למילוי/.test(await s.locator(".blank-empty").innerText()), "a slide without a table says so");

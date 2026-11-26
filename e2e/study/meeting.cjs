@@ -196,6 +196,8 @@ const israel = (ms) => {
       /* ── 1. planning, and the band on "יחד" ── */
       const shoham = await open("שוהם", "/?v=group");
       await shoham.locator(".m-card").waitFor({ timeout: 15000 });
+      // The card can paint before its line does (a build with more of the app loading at once): wait for the words.
+      await shoham.getByText("אין פגישה מתוכננת.").first().waitFor({ timeout: 10000 }).catch(() => undefined);
       check("1 before planning: אין פגישה מתוכננת. with לקבוע את הפגישה הבאה", (await shoham.getByText("אין פגישה מתוכננת.").count()) === 1);
       await shoham.locator(".m-card").getByRole("link", { name: "לקבוע את הפגישה הבאה" }).click();
       const plan = shoham.getByRole("dialog", { name: "הפגישה הבאה" });
