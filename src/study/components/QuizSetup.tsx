@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ScreenProps } from "../features/types";
 import { getLecture, groupSpent, health, listLectures, type LectureRow } from "../lib/api";
 import { failText } from "../lib/failText";
@@ -8,6 +8,10 @@ import { isolateLatin } from "../lib/rich";
 import type { Route } from "../lib/route";
 import { Icon } from "./Icon";
 import { BackLink, Head, Loading, RouteLink, StickyActions } from "./Shell";
+import { flags } from "../lib/flags";
+
+/** "להודיע לקבוצה" (notifications, section R; lazy, nothing without VITE_STUDY_NOTIFY). */
+const NotifyQuizBox = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyQuizBox })));
 
 /* ── "מבחן קבוצתי חדש" (package Z; design-quiz §1.3 S, the approved lobby's
  * modes, spec §5.5 and §12.3.Z) ──
@@ -72,6 +76,8 @@ export default function QuizSetup({ route, ctx }: ScreenProps<"quiz">) {
   const [choice, setChoice] = useState<Choice>(loadChoice);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  /** "להודיע לקבוצה": on by default (notifications, OD14). */
+  const [tell, setTell] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
   // The one lecture chosen without enough questions: its round's size and the month's spend.
   const [gen, setGen] = useState<{ lecture: string; count: number; spent: number | null; budget: number | null } | null>(null);
@@ -160,6 +166,8 @@ export default function QuizSetup({ route, ctx }: ScreenProps<"quiz">) {
     try {
       const lectureIds = chosen.map((l) => l.id);
       const id = await createQuiz({ groupId, mode: choice.mode, lectures: lectureIds, count, seconds: choice.seconds, kinds: choice.kinds });
+      // "להודיע לקבוצה" unchecked: the quiz's push (held 15 s) is dropped; the inbox keeps it.
+      if (flags.notify && !tell) void import("../lib/notices").then((m) => m.quizQuiet(id)).catch(() => undefined);
       if (write && thin) {
         // Q's round, from this phone's app-level store: it goes on in the lobby (review UX-5, UX-6).
         void generateRound(thin.id).catch((e) => ctx.say(failText(codeOf(e), "practice")));
@@ -298,6 +306,12 @@ export default function QuizSetup({ route, ctx }: ScreenProps<"quiz">) {
           ))}
         </div>
       </section>
+
+      {flags.notify ? (
+        <Suspense fallback={null}>
+          <NotifyQuizBox checked={tell} onChange={setTell} />
+        </Suspense>
+      ) : null}
 
       <section className="a-card flat quiz-summary" aria-label="סיכום">
         <div className="a-row">

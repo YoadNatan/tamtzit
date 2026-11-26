@@ -35,6 +35,7 @@ import { afterReading, lectureChips, shareUrl, type At, type Route } from "../li
 import { useMedia, WIDE_L } from "../lib/useMedia";
 import { useLectureN } from "../features/anchor";
 import { ReaderGuideChip } from "../features/guide";
+import { NotifyOffer } from "../features/notify";
 import { ParagraphSheet, useLectureK } from "../features/collab";
 import { useLectureM } from "../features/meeting";
 import { useLectureA } from "../features/progress";
@@ -904,9 +905,13 @@ function Reader({ route, ctx, lecture, sections, refresh, patchSection, together
         {sections.length === 0 ? (
           <div className="a-card dashed part-wait">
             {writing.running || lecture.status === "outlining" ? (
-              <p className="writing-note">
-                <span className="dot" /> מתכננים את מבנה הסיכום לפי נושאי ההרצאה…{lecture.queued_at ? " (בשרת)" : ""}
-              </p>
+              <>
+                <p className="writing-note">
+                  <span className="dot" /> מתכננים את מבנה הסיכום לפי נושאי ההרצאה…{lecture.queued_at ? " (בשרת)" : ""}
+                </p>
+                {/* Notifications: the uploader may ask to hear when it is ready (once on a device). */}
+                {lecture.created_by === ctx.userId ? <NotifyOffer ctx={ctx} /> : null}
+              </>
             ) : (
               <p className="a-muted">הסיכום עוד לא התחיל.</p>
             )}

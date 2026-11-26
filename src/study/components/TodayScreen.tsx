@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { studyDay } from "../../../shared/study/day";
 import {
   cutQueue,
@@ -28,6 +28,9 @@ import { rowOn, useTodayQueue } from "../lib/useToday";
 import { Icon } from "./Icon";
 import { Avatar, Head, Loading, RouteLink } from "./Shell";
 import { timeAgo } from "./Together";
+
+/** Notifications' first-launch card (section R; lazy, nothing without VITE_STUDY_NOTIFY). */
+const NotifyHome = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyHomeCard })));
 import TodaySession from "./TodaySession";
 import "../styles/today.css";
 
@@ -125,6 +128,12 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
       <AccountBanners ctx={ctx} />
       {/* Adding the app to the home screen (VITE_STUDY_INSTALL): once, while the guide's card is not here. */}
       <InstallHomeCard ctx={ctx} />
+      {/* Notifications: opened from the icon for the first time, once (the guide's card says it itself when it holds the home). */}
+      {flags.notify ? (
+        <Suspense fallback={null}>
+          <NotifyHome ctx={ctx} />
+        </Suspense>
+      ) : null}
 
       <div className="a-sec t-sec">
         <span className="a-row">

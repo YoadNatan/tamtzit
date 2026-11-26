@@ -6,6 +6,7 @@ import { flags } from "../lib/flags";
 import { markAllSeen, markSeen, noticesMine, useNotices, type Notice } from "../lib/notices";
 import { israelDate, NT, rowTime } from "../lib/notifyText";
 import { parseRoute, type Route } from "../lib/route";
+import { NotifyOffBar } from "./NotifyParts";
 import { BackLink, Head, Loading, RouteLink } from "./Shell";
 import "../styles/notify.css";
 
@@ -196,6 +197,8 @@ export default function InboxScreen({ ctx }: ScreenProps<"notify">) {
           </RouteLink>
         ) : null}
       </Head>
+      {/* Once ever, and only where this device can turn notifications on. */}
+      {gear ? <NotifyOffBar ctx={ctx} /> : null}
       {failed ? (
         <div className="a-card inbox-fail" role="alert">
           <p>{NT.inbox.fail}</p>

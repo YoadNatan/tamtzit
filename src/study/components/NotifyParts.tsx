@@ -1,8 +1,11 @@
-import { lazy, Suspense, useEffect, useState, type MouseEvent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type MouseEvent } from "react";
 import type { Ctx, ScreenProps } from "../features/types";
 import { flags } from "../lib/flags";
-import { markSeen, seenFor, setShell, useNotices, watchNotices } from "../lib/notices";
-import { bellCount, bellLabel, NT } from "../lib/notifyText";
+import { guideMark } from "../lib/guideMark";
+import { detect, probe } from "../lib/install";
+import { markSeen, readPrefs, seenFor, setShell, useNotices, watchNotices } from "../lib/notices";
+import type { Ask } from "../lib/notify";
+import { bellCount, bellLabel, enabledToast, NT } from "../lib/notifyText";
 import { parseRoute, routeUrl, tabOf, type Route } from "../lib/route";
 import { Loading, RouteLink } from "./Shell";
 import "../styles/notify.css";
@@ -17,7 +20,16 @@ import "../styles/notify.css";
  * the permission given; health at most daily; the worker removed when the
  * keys are). Bell: the link to the inbox at the end of a tab screen's top
  * bar, with the count. NotifyMeRow: "הגדרות התראות" in "שלי", when pushes
- * are offered to this member. */
+ * are offered to this member.
+ *
+ * The asks (slice 3; the design's §5.6), only where this device can turn
+ * pushes on ("ask") and never on load: NotifyHomeCard (Today, the first
+ * launch from the icon, unless the guide's card holds the home: it shows
+ * "לקבל התראות" as its step instead), NotifyOffer (after an upload, for the
+ * member who uploaded), and the inbox's one line (InboxScreen). Each shows
+ * once on a device; "לא עכשיו" hides them all for 14 days. "להפעיל
+ * התראות" asks the browser straight from the tap. NotifyQuizBox: the quiz
+ * setup's "להודיע לקבוצה". */
 
 /** A push's link carries the notice's id as nt=<id>: seen, and the address
  *  loses it (the route itself never had it). */
@@ -134,6 +146,152 @@ export function NotifyMeRow({ ctx }: { ctx: Ctx }) {
         </div>
         <span className={chip}>{NT.me.state[word]}</span>
       </RouteLink>
+    </div>
+  );
+}
+
+/* ── The asks ── */
+
+type Key = { key: string; keyId: string };
+
+/** The VAPID key when this ask may show now: pushes offered to this member,
+ *  this device can be asked, and this ask was not shown (or snoozed). */
+async function askable(which: Ask): Promise<Key | null> {
+  const m = await import("../lib/notify");
+  if (!m.askAllowed(which)) return null;
+  const a = await m.available(false);
+  if (!a.ok || !a.key || !a.keyId) return null;
+  if ((await m.readState(true)) !== "ask") return null;
+  return { key: a.key, keyId: a.keyId };
+}
+
+/** "להפעיל התראות" from an ask: the browser's question first, then the toast. */
+async function turnOn(ctx: Ctx, k: Key): Promise<boolean> {
+  const m = await import("../lib/notify");
+  const s = await m.enable(k.key, k.keyId);
+  if (s === "on") {
+    guideMark("notify");
+    const p = await readPrefs().catch(() => ({ live: true, mine: true, digest: false }));
+    ctx.say(enabledToast(p));
+    return true;
+  }
+  // The browser's question closed without an answer: the ask stays.
+  if (s === "ask") return false;
+  ctx.say(s === "denied" ? NT.device.denied : s === "offline" ? NT.device.offline : NT.device.broken);
+  return true;
+}
+
+function AskCard({ ctx, which, k, head, line, more, onGone }: { ctx: Ctx; which: Ask; k: Key; head?: string; line: string; more?: string; onGone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const shown = useRef(false);
+  useEffect(() => {
+    if (shown.current) return;
+    shown.current = true;
+    void import("../lib/notify").then((m) => m.markAsked(which));
+  }, [which]);
+  const yes = () => {
+    setBusy(true);
+    void turnOn(ctx, k).then((done) => (done ? onGone() : setBusy(false)));
+  };
+  const no = () => {
+    void import("../lib/notify").then((m) => m.snoozeAsks());
+    onGone();
+  };
+  return (
+    <section className="a-card ntf-ask" data-ask={which} aria-label={head ?? line}>
+      {head ? <h2 className="a-h2">{head}</h2> : null}
+      <p className={head ? "a-small" : "ntf-ask-q"}>{line}</p>
+      <div className="a-row">
+        <button type="button" className="a-btn primary small" disabled={busy} onClick={yes}>
+          {busy ? NT.device.enabling : NT.ask.yes}
+        </button>
+        <button type="button" className="a-btn ghost small" disabled={busy} onClick={no}>
+          {NT.ask.no}
+        </button>
+      </div>
+      {more ? <p className="a-small a-muted">{more}</p> : null}
+    </section>
+  );
+}
+
+/** The guide's card holds the home and still takes steps (it shows "לקבל התראות" itself). */
+async function guideHolds(userId: string): Promise<boolean> {
+  if (!flags.guide) return false;
+  const g = await import("../lib/guide");
+  return g.cardTakesSteps(g.readMemory(userId), Date.now());
+}
+
+/** Today, the first launch from the home-screen icon: once. */
+export function NotifyHomeCard({ ctx }: { ctx: Ctx }) {
+  const [k, setK] = useState<Key | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (detect(probe()).kind !== "standalone") return;
+    void (async () => {
+      if (await guideHolds(ctx.userId)) return;
+      const got = await askable("home");
+      if (alive) setK(got);
+    })().catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [ctx.userId]);
+  return k ? <AskCard ctx={ctx} which="home" k={k} head={NT.ask.homeH} line={NT.ask.home} onGone={() => setK(null)} /> : null;
+}
+
+/** After an upload ("להודיע כשהסיכום מוכן?"): once. */
+export function NotifyOffer({ ctx }: { ctx: Ctx }) {
+  const [k, setK] = useState<Key | null>(null);
+  useEffect(() => {
+    let alive = true;
+    askable("upload")
+      .then((got) => alive && setK(got))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return k ? <AskCard ctx={ctx} which="upload" k={k} line={NT.ask.upload} more={NT.ask.uploadMore} onGone={() => setK(null)} /> : null;
+}
+
+/** The inbox's line, once ever, only where this device can be asked: it opens the settings. */
+export function NotifyOffBar({ ctx }: { ctx: Ctx }) {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    askable("bar")
+      .then((got) => {
+        if (!alive || !got) return;
+        setOn(true);
+        void import("../lib/notify").then((m) => m.markAsked("bar"));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!on) return null;
+  return (
+    <p className="a-callout ntf-offbar" role="status">
+      <span>{NT.inbox.offBar}</span>
+      <RouteLink to={{ v: "notify", x: "set" }} go={ctx.go} className="a-btn small">
+        {NT.inbox.offBarBtn}
+      </RouteLink>
+    </p>
+  );
+}
+
+/** The quiz setup's "להודיע לקבוצה" (on by default): unchecked, the quiz's push is dropped. */
+export function NotifyQuizBox({ checked, onChange }: { checked: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <div className="a-list ntf-quiz">
+      <label className="a-li setting-row setting-check ntf-quiz-box">
+        <span>
+          <b>{NT.quiz.notify}</b>
+          <span className="m">{NT.quiz.desc}</span>
+        </span>
+        <input type="checkbox" name="notify-group" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      </label>
     </div>
   );
 }

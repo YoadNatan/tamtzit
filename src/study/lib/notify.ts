@@ -124,6 +124,31 @@ export function writeMemory(patch: Partial<Omit<NotifyMemory, "v">>): NotifyMemo
   return next;
 }
 
+/* ── The asks (the design's §5.6): three places, never on load ──
+ * The first launch from the icon (Today, once), after an upload (once), and
+ * the inbox's line (once ever, state "ask" only). "לא עכשיו" hides every ask
+ * for 14 days. The שלי row is always there while pushes are offered. */
+
+export type Ask = "home" | "upload" | "bar";
+export const SNOOZE_MS = 14 * DAY;
+
+/** May this ask show now (not shown before, no "לא עכשיו" in the last 14 days)? */
+export function askAllowed(which: Ask, m: NotifyMemory = readMemory(), now = Date.now()): boolean {
+  if (m.snooze && now < m.snooze) return false;
+  return !m.asked?.[which];
+}
+
+/** The ask was shown: it never shows again on this device. */
+export function markAsked(which: Ask, now = Date.now()): NotifyMemory {
+  const m = readMemory();
+  return writeMemory({ asked: { ...m.asked, [which]: m.asked?.[which] ?? now } });
+}
+
+/** "לא עכשיו": no ask anywhere for 14 days. */
+export function snoozeAsks(now = Date.now()): NotifyMemory {
+  return writeMemory({ snooze: now + SNOOZE_MS });
+}
+
 /** The VAPID public key's short id, as the server's keyId(): sha256, base64url, 12 characters. */
 export async function keyIdOf(key: string): Promise<string> {
   const raw = b64urlDecode(key);

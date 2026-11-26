@@ -173,3 +173,26 @@ test("the key's id is the server's: sha256 of the raw key, base64url, 12 charact
   const want = Buffer.from(await crypto.subtle.digest("SHA-256", Buffer.from(key, "base64url"))).toString("base64url").slice(0, 12);
   assert.equal(await N.keyIdOf(key), want);
 });
+
+test("the asks: each once on a device; \"לא עכשיו\" hides them all for 14 days", () => {
+  const store = new Map<string, string>();
+  const g = globalThis as Record<string, unknown>;
+  const saved = g.localStorage;
+  g.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+  try {
+    const t0 = 1_800_000_000_000;
+    assert.ok(N.askAllowed("home") && N.askAllowed("upload") && N.askAllowed("bar"), "nothing shown yet");
+    N.markAsked("home", t0);
+    assert.ok(!N.askAllowed("home") && N.askAllowed("upload"), "home shown: only home is gone");
+    N.markAsked("home", t0 + 5);
+    assert.equal(N.readMemory().asked?.home, t0, "the first time is kept");
+    N.snoozeAsks(t0);
+    assert.ok(!N.askAllowed("upload", N.readMemory(), t0 + 13 * 86_400_000), "within 14 days: none");
+    assert.ok(N.askAllowed("upload", N.readMemory(), t0 + N.SNOOZE_MS + 1), "after 14 days: the ones not shown");
+    assert.ok(!N.askAllowed("home", N.readMemory(), t0 + N.SNOOZE_MS + 1), "never the one shown");
+    N.markAsked("bar", t0);
+    assert.deepEqual(Object.keys(N.readMemory().asked ?? {}).sort(), ["bar", "home"]);
+  } finally {
+    g.localStorage = saved;
+  }
+});

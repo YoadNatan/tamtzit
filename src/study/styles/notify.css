@@ -217,3 +217,33 @@ a.inbox-row {
   justify-content: space-between;
   gap: var(--sp-4);
 }
+
+/* ── The asks (slice 3): Today's first-launch card, the upload's offer, the
+   inbox's one line. Kit cards and buttons; tokens only. ── */
+.ntf-ask {
+  display: grid;
+  gap: var(--sp-3);
+}
+.ntf-ask .a-h2 {
+  margin: 0;
+}
+.ntf-ask p {
+  margin: 0;
+}
+.ntf-ask .ntf-ask-q {
+  font-weight: 700;
+}
+.ntf-ask .a-row {
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.ntf-offbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.ntf-quiz {
+  padding-block: 0;
+}

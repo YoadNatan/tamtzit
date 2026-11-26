@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { batchCost, cardUsd, type DeckSize } from "../../../shared/study/batch";
 import { createLecture, getLecture, groupSpent, health, listLectures } from "../lib/api";
 import {
@@ -21,10 +21,14 @@ import { guideMark } from "../lib/guideMark";
 import { addLater } from "../lib/later";
 import { baseName, deckSize, figuresOf, fileProblem, readDeck } from "../lib/readDeck";
 import { afterUpload, writingHelp } from "../features/writing";
+import { flags } from "../lib/flags";
 import type { Ctx } from "../features/types";
 import { softBreaks } from "../lib/rich";
 import { BackLink, Head, RouteLink, StickyActions } from "./Shell";
 import "../styles/courses.css";
+
+/** "להודיע כשהסיכום מוכן?" (notifications, section R; lazy, nothing without VITE_STUDY_NOTIFY). */
+const NotifyOffer = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyOffer })));
 
 /* ── "העלאה של כמה קבצים" (sources.md, phase 1; mockups batch.html, batch-progress.html) ──
  *
@@ -421,6 +425,11 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
             <p className="a-small a-muted">
               {later === 1 ? "הסיכום של הרצאה אחת יחכה לחודש הבא." : `הסיכומים של ${later} הרצאות יחכו לחודש הבא.`} הם יתחילו כשפותחים את הספרייה בטלפון הזה בחודש הבא.
             </p>
+          ) : null}
+          {flags.notify && done > 0 ? (
+            <Suspense fallback={null}>
+              <NotifyOffer ctx={ctx} />
+            </Suspense>
           ) : null}
           <div className="a-row">
             {failed.length ? (
