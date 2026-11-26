@@ -54,6 +54,12 @@ design's static share of it is capped at **2,000 B**: bundle owner `QS` in
 check fails when its share passes 2,000 B. The tool also turns on
 `VITE_STUDY_MAKE` and `VITE_STUDY_SETS` with every other flag.
 
+Measured on 26 Nov 2026 with WP9-WP10 (section L and the server; no
+client screen): the entry chunk is **402,380 B** with every flag on (7,620 B
+left; +718 B: `failText`'s words for the set codes a member can meet, which
+are F's and load with every screen), QS's share still **742 B**, and
+401,615 B with every flag off.
+
 Measured on 26 Nov 2026 with WP7 (the entry points and the fixes): the
 entry chunk is **401,662 B** with every flag on (8,338 B left; +482 B: the
 slot's lecture row wrapper, the library's "+ סט" chip in Q's slot and the
