@@ -764,3 +764,41 @@ Also decided for this build:
 - **R's `exam_ready` and `exam_failed` notices carry `args.kind`** once
   `study_exams.kind` exists (R's hook already read it); R's test R38 now
   checks it. The notice's words for a sheet come with the client slice.
+
+### Uploaded sheets, O2 and O3 (release A0 in the app), built on 26 November 2026
+
+- **One upload screen for both kinds** (`SheetUpload`) replaces past exams'
+  own while `VITE_STUDY_SHEETS` is on; without the flag the past exams'
+  upload is unchanged. A file's name becomes a sheet's title
+  (`tirgul_3.pdf` → "tirgul 3"); an emptied name is "דף תרגילים {day.month}".
+- **The camera's checks** warn and never block: blurred under a Laplacian
+  variance of 80, dark under a mean light of 70, on a 640 px copy (the
+  synthetic photos: sharp 1,040-2,210, blurred 12). Measured on the phone,
+  $0.
+- **A sheet's worst case** (the op's check against the sheets line and the
+  headroom) counts every unit at all of its max_tokens, 4,000 characters of
+  PDF text a page, and solving 8 items a page when there are no answers (2
+  a page with marks or an answers file, for the items they missed). So a
+  40-page sheet without answers (worst $9.75) cannot start under the $6
+  line, as the design's §11.2 expected; marked, it can ($5.12). An answers
+  file is at most 10 pages. With the 40-page cap no A0 sheet's usual price
+  passes $3, so the second confirmation is built and tested on the server
+  but not reached in A0.
+- **The sheets line's figures** come from `study_sheet_room` (added to O 1;
+  part 10 is re-run at release point 2): this month's `exam_jobs.cost_usd`
+  of the group's sheets and the month's spend.
+- **The providers line (OD5)** is in help's "מבחנים ותרגילים" row, not on
+  the upload screen, which keeps decision 1 (nothing there says where the
+  pages go). The upload's "מה אפשר להעלות?" says the material line (OD6).
+- **The landing card (OD14)** is for an upload's link (`?v=exams&e=`); a
+  set's link keeps practice sets' own line (L), so the two never stack.
+- **The wide review** outlines a figure's box only: release A0's reader
+  draws boxes for figures, not for every item, so the page's items are also
+  chips under the page. Boxes are drawn by hand from A1.
+- **The exact text component** (`SheetText`: kept lines, tables) waits for
+  the sheet reader (A1): the exam reader's copies have no line breaks.
+- **Printed order** after the answer is kept for every uploaded item (past
+  exams' too) while the flag is on.
+- **Entry chunk:** O's slot is 686 B of its 1,500 B; the chunk is 404,315 B
+  of 410,000 with every flag on (5,685 B left, at least 1,500 of them for
+  the models package).

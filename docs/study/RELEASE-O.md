@@ -83,11 +83,39 @@ columns default to a past exam, and the switch `sheets` is off). O 1's three
 redefinitions of section S's functions only filter by the new kind, which is
 `exam` for every existing upload.
 
-## Release point 2: sheets in the app (release A0) — not built yet
+## Release point 2: sheets in the app (release A0)
 
-The upload, the course page by kind, the wide review and hand keying come in
-the next packages (O2-O4). This section will then say: turn on `exams` and
-`sheets`, set `VITE_STUDY_SHEETS=1` on Production only, redeploy, and check.
+Built on `dev` (O2, O3); its e2e script (O4) comes next. Spends only when a
+member uploads: a sheet is read like a past exam (about $0.05 a page), and
+never past the sheets line ($6 a month) or the room under the 80% line.
+
+1. **Part 10 again** if release point 1 ran before this was merged: part 10
+   gained `study_sheet_room` (the sheets line's figures) inside O 1. Run
+   `supabase/parts/10.sql` to the end (safe to run again; parts 1 to 9 are
+   unchanged by O 1). Check, read only:
+   ```sql
+   select public.study_schema() -> 'O' as o;                                        -- 1
+   select to_regprocedure('public.study_sheet_room(uuid)') is not null as room;     -- true
+   ```
+2. **Vercel → Settings → Environment Variables (Production):** `STUDY_SHEETS_MONTHLY_USD`
+   = `6` (unset is 6; the line in dollars), and `STUDY_MONTHLY_USD` = `33` if
+   check 2 above found it unset.
+3. **The switches** (SQL Editor; `exams` too if check 1 found it off):
+   ```sql
+   update study_private.features set enabled = true, changed_at = now() where name in ('exams', 'sheets');
+   ```
+4. **Vercel:** `VITE_STUDY_SHEETS=1` on **Production only** (with
+   `VITE_STUDY_EXAMS`, `VITE_STUDY_COURSES` and `VITE_STUDY_PRACTICE`, which
+   it needs), then redeploy.
+5. **Check:** `https://<the app's address>/api/study/health` says
+   `"schemaOk": true`. In the app, a course's page has the segment "מבחנים
+   ותרגילים" and "העלאת מבחן או דף תרגילים"; uploading a short PDF of the
+   group's own shows the price on the button before anything is sent.
+
+**Rolling back release point 2:** the switch `sheets` off (below) stops new
+sheets at once; unset `VITE_STUDY_SHEETS` and redeploy to hide the screens.
+A build without the flag never lists a sheet, and a simulation never takes
+one, whatever the flag.
 
 ## Release points 3 and 4 (releases A1 and B) — not built yet
 

@@ -24,8 +24,9 @@ path, queue, lease, worker, review screen and ledger kind `exam` as past exams
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
 | O0 | The synthetic fixture, the time measurement on it, Yoad's read-only checks | none | none | Built |
-| A0 (O1) | The kind and one lecture of an upload, the switch `sheets`, "a new sheet", keying true/false and match items by hand, simulations of past exams only | none yet | O 1 | SQL built (part 10, after L); the app does not use it yet |
-| A0 (O2-O4) | The upload (two kinds, desktop drop and paste, camera checks), the course page by kind, the wide review, hand keying in the review, the exactness flags, printed order after answering, the landing card | `VITE_STUDY_SHEETS` | O 1 | Not built yet |
+| A0 (O1) | The kind and one lecture of an upload, the switch `sheets`, "a new sheet", keying true/false and match items by hand, simulations of past exams only, the sheets line's figures (`study_sheet_room`) | `VITE_STUDY_SHEETS` | O 1 | Built (part 10, after L) |
+| A0 (O2, O3) | The upload (two kinds, desktop drop and paste, camera checks, the cover page), a sheet's bounds on the server (40 pages, the $6 line, the headroom, the $3 confirmation), the course page by kind, the wide review with its page and the keyboard, hand keying in the review, the exactness flags, printed order after answering, the landing card | `VITE_STUDY_SHEETS` | O 1 | Built |
+| A0 (O4) | The A0 e2e script (`e2e/study/sheets.cjs`) at 390/820/1440, `devices.cjs` and `wide.cjs` with the new screens, the copy list | — | — | Not built yet |
 | A1 (O5-O8) | The sheet reader: open, numeric and multi-part questions, tables, up to 10 options, answers files, worked solutions, edits | `VITE_STUDY_SHEETS_FORMS` | O 2 | Not built yet |
 | B (O9-O12) | Similar questions after a wrong answer and for the whole sheet, in the sheet's set on L's shelf | `VITE_STUDY_SIMILAR` | O 3 | Not built yet |
 
@@ -213,11 +214,109 @@ Also seen while building O 1:
   `exam_read` keeps a sheet to 40 pages and checks the sheets line and the
   headroom before it calls it (O2).
 
+## Release A0 in the app (O2, O3; `VITE_STUDY_SHEETS`)
+
+The flag needs past exams' (`VITE_STUDY_EXAMS`, with `VITE_STUDY_COURSES`
+and `VITE_STUDY_PRACTICE`) and section O 1 (`requiredSchema`: `O: 1`).
+Without it nothing below shows, and a build without it never lists a sheet:
+the course page and the simulation's setup leave `kind = 'sheet'` out
+whatever the flag (OD9).
+
+**The upload** (`SheetUpload.tsx`, lazy; `?v=exams&new=1&c=` for a past
+exam, `&new=sheet[&l=<lecture>]` for a sheet, as a lecture's page will open
+it). Step 1 is two tiles, "קובץ PDF" and "לצלם דפים", inside a drop zone: a
+computer drops or pastes (Ctrl+V / ⌘V) PDFs and pictures there, and several
+files become one upload's pages in order. A Word file is refused with "קובץ
+Word? צריך קודם לשמור אותו כ-PDF." (OD16). After the first page:
+
+- the pages as tiles in order (moved, turned, removed); from 760 px the
+  pages and the details are two columns (the details on the right);
+- "מה זה?": "מבחן קודם" (year, מועד, minutes, as before) or "דף תרגילים"
+  (a name from the file's, "דף תרגילים 26.11" when emptied, and one
+  lecture of the course, not needed); a sheet by default from a lecture's
+  link;
+- "איפה התשובות?": marked on the page, a separate file ("להוסיף קובץ"; a
+  second file dropped while it is chosen asks "זה קובץ התשובות?"), or none;
+- the camera's checks: each photo is drawn at 640 px and measured (the
+  variance of a Laplacian over its grey pixels, and its mean light); under
+  80 it is "עמוד N נראה מטושטש", under 70 light "עמוד N חשוך מדי", with
+  "לצלם שוב" (the new photo takes its place). On the synthetic sheet's
+  photos the sharp pages measure 1,040-2,210 and the blurred one 12; a
+  photo the browser cannot decode (HEIC on a computer) is not checked;
+- a PDF whose page 1 has a name or an ID to fill in within its first lines
+  ("שם:", ת.ז, תעודת זהות, מספר סטודנט) offers "להוריד אותו" (the page is
+  not drawn or uploaded) or "להשאיר";
+- the button "להעלות ולהעתיק · כ-$0.35" (the usual price, the exam
+  reader's) and the line "8 עמודים · לרוב 6–12 דקות. …"; a sheet above a
+  usual $3 asks "הדף ארוך (N עמודים) · כ-$… · להמשיך?" first (with the
+  40-page cap an A0 sheet stays under it; the path is tested on the
+  server);
+- "מה אפשר להעלות?": only course-staff material and the group's own (OD6),
+  a WhatsApp file, the Word line. Nothing on the screen says where the
+  pages go (decision 1); the providers line is in help (OD5).
+
+**A sheet's bounds on the server** (op `exam_read`, `sheetGate`): at most 40
+pages and an answers file of at most 10 (400 `too many pages`); the switch
+`sheets` (403 `off`); a usual price above $3 needs `confirmBig` (409
+`confirm`); the worst case (`shared/study/sheetPrice.ts` `sheetWorstUsd`:
+every unit at all of its max_tokens, pages as full as a page gets, 8 items
+a page solved with no answers, 2 a page with them) must fit the sheets line
+less what sheets cost this month (`STUDY_SHEETS_MONTHLY_USD`, 6; 402
+`sheets_cap`) and the room under the 80% line (402 `budget`). Then the start
+is a past exam's (ref `read`, 3 a day, group work, OD13). Worst cases: a
+6-page sheet $1.01 marked, $1.13 with an answers file, $1.77 with no
+answers; 40 pages marked $5.12, with no answers $9.75 (so a 40-page sheet
+with no answers never passes the $6 line, as the design's §11.2 says).
+`study_sheet_room(p_group)` (O 1) gives the op what a member cannot read:
+the switch, what this month's units of the group's sheets cost
+(`exam_jobs.cost_usd`, sheets deleted since included), and the month's
+spend. Known gap, as the design accepted: two sheets started minutes apart
+can both pass, since a unit's cost is known when it finishes.
+
+**The course page** (`CourseScreen.tsx`): one segment "מבחנים ותרגילים",
+"העלאת מבחן או דף תרגילים" first, then "מבחנים קודמים" and "דפי תרגילים"
+(a sheet's lecture under its title); the head counts both. "סימולציה" and
+"לתרגל מבחן קודם" take past exams only.
+
+**The review** (`ExamView.tsx`, with `PageView.tsx`): a sheet says "לתרגל
+כמו בדף", has no "סימולציה מהמבחן" and no "לא לכלול בחישוב הנושאים". From
+760 px it is two columns: the text and the items on the right, the page on
+the left (sticky): "עמוד 2 מתוך 6", the pages before and after, − + and ⤢,
+each figure box a button that opens its item (an A0 item has a box only
+when it has a figure, so the page's items are chips under it too). Keys,
+matched on `event.code`: ↑ ↓ the item before or after, E "לתקן טקסט"; no
+key confirms. A true/false item is keyed statement by statement and a match
+item row by row ("לסמן תשובה", `study_exam_key_set`), and "לבטל" brings the
+statements back. Exactness ($0, design D9): an item whose copy (case,
+question, options, prompts) has under 0.55 of its trigrams in its page's
+PDF text and the next page's is "לבדיקה", with "ההעתקה שונה מהטקסט בקובץ ·
+כדאי לבדוק מול העמוד" (a page with no text, a scan or a photo, flags
+nothing). The synthetic sheet's exam-reader copies all pass.
+
+**Practice:** an uploaded item (a past exam's or a sheet's) keeps its printed
+order after the answer (`keepPrinted`, design D10), the chosen and the right
+option marked in place.
+
+**A link opened without a member** (`DeepLinkCard.tsx`, OD14): on the join
+screen, for `?v=exams&e=…`: "הקישור נפתח בדפדפן, לא באפליקציה.", how to
+open it from the icon (two lines), "להמשיך כאן: כניסה עם הקוד האישי" (the
+sign-in then opens the upload), and "אין קוד אישי? הקישור הוא לחברי
+הקבוצה." A set's link keeps practice sets' own line.
+
+**Not in A0 (later slices):** the exact text component (`SheetText`: lines,
+tables) waits for the sheet reader (A1), since the exam reader's copies
+have no line breaks; drawing a box on the page, the edit sheet, adding and
+retiring items; the lecture page's row ("דפי תרגילים של ההרצאה"); a DOCX.
+
+**Bundle:** the slot `features/sheets.tsx` is the only module of O in the
+entry chunk (owner `O`, capped at 1,500 B): 686 B; the entry chunk is
+404,315 B of 410,000 with every flag on.
+
 ## Stopping and rolling back (release A0)
 
 | Switch off (`update study_private.features set enabled = false, changed_at = now() where name = '…'`) | Stops at once |
 |---|---|
-| `sheets` | new sheets (`study_sheet_create` is `off`); the op `exam_read`'s sheet starts (O2) |
+| `sheets` | new sheets (`study_sheet_create` is `off`); the op `exam_read`'s sheet starts (403 `off`) |
 | `exams` | everything of past exams and sheets |
 
 Rolling back, in order: the switch `sheets` off; hide the sheets

@@ -299,6 +299,34 @@ The set screens' own lines (slice B):
 | Back to the group's sets | → סטים של הקבוצה |
 | A set's own score | שלי: 7/10 · רק אצלי |
 
+### New words: uploaded sheets (`sheets.md`, release A0)
+
+Design-exams §6's vocabulary, as built in O2 and O3. **תשובה** is the final
+answer of any kind; **פתרון** is kept for worked steps (release A1); every
+model answer is "תשובה מוצעת · לא נבדקה". Impersonal or infinitive forms
+only. The upload's and review's own words live in their components and
+`src/study/lib/sheets.ts`; a sheet's refusals in `sheetFail` (lazy), past
+exams' in `failText`.
+
+| Where | Was | Now |
+|---|---|---|
+| The course page's segment | מבחנים קודמים | מבחנים ותרגילים (headings: מבחנים קודמים · דפי תרגילים) |
+| Its primary | העלאת מבחן קודם | העלאת מבחן או דף תרגילים |
+| Empty segment | עוד אין מבחנים קודמים בקורס… | עוד אין כאן מבחנים או דפי תרגילים. מעלים PDF או צילום, ואז אפשר לתרגל אותם כמו בדף. |
+| The upload's tiles | קובץ PDF · לצלם דפים (a toggle) | קובץ PDF · לצלם דפים (tiles); "קובץ Word? צריך קודם לשמור אותו כ-PDF." |
+| What it is | — | מה זה? · מבחן קודם · דף תרגילים |
+| A sheet's fields | — | שם · הרצאה (לא חובה) |
+| Where the answers are | התשובות: מסומנות במבחן · בקובץ נפרד · אין תשובות | איפה התשובות? · מסומנות על הדף · בקובץ נפרד · אין תשובות |
+| The camera | — | עמוד {n} נראה מטושטש · כדאי לצלם שוב / עמוד {n} חשוך מדי · כדאי לצלם שוב · לצלם שוב |
+| A cover page | — | עמוד 1 נראה כמו דף שער, עם שם או ת״ז. · להוריד אותו · להשאיר |
+| The button | להעלות ולהעתיק את השאלות · כ-$… | להעלות ולהעתיק · כ-$… (under it: "{n} עמודים · לרוב {a}–{b} דקות") |
+| A long sheet | — | הדף ארוך ({n} עמודים) · כ-$… · להמשיך? |
+| Refusals | — | אפשר עד 40 עמודים בדף תרגילים… · התקציב לדפי תרגילים נגמר החודש. מתחדש ב-1 בחודש. · העלאת דפי תרגילים עוד לא פתוחה בקבוצה. |
+| Practising an upload | לתרגל את המבחן | a sheet: לתרגל כמו בדף (a past exam keeps its own) |
+| Exactness | — | ההעתקה שונה מהטקסט בקובץ · כדאי לבדוק מול העמוד. (row chip: לבדוק מול הדף) |
+| The wide review's keys | — | מקשים: חצים למעלה ולמטה, השאלה הקודמת או הבאה · E: לתקן טקסט. |
+| A link without a member | — | הקישור נפתח בדפדפן, לא באפליקציה. · לפתוח את תמצית מהאייקון במסך הבית · להמשיך כאן: כניסה עם הקוד האישי · אין קוד אישי? הקישור הוא לחברי הקבוצה. |
+
 ### Kept, on purpose
 
 - **״על בטוח״, ״נראה לי״, ״ניחוש״** (how sure an answer is): plain Hebrew, and Yoad's own
