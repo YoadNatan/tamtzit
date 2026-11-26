@@ -26,6 +26,89 @@ its own. Release points not built yet are marked so.
   group's budget like a past exam (about $0.05 a page), within the sheets line
   ($6 a month) from release point 2.
 
+## Release A0, start to finish (the exact steps)
+
+Release A0 is release points 1 and 2 below in one go: uploading a past exam
+or an exercise sheet, its questions copied by the exam reader, the course
+page by kind, the wide review, keying by hand. It was tested on `dev` (O4):
+`e2e/study/sheets.cjs` and `devices.cjs` / `wide.cjs` on the mock, and the
+SQL on a copy of production's schema (`eed179e`) with parts 9 and 10 run
+twice ([`sheets.md`](sheets.md), "The A0 e2e"). Nothing here spends money
+until step 8. Do them in order; each says what to see.
+
+1. **The two read-only checks** below ("Before anything"): is `exams` on
+   (OD1), and the month's spend by kind (OD2). Send Claude the rows. If the
+   spend without sheets is above about $15 a month, stop here: the sheets
+   line goes down first.
+2. **Merge `dev` into `main`** and let Vercel deploy Production. Every new
+   flag is off, so the app does not change. Check
+   `https://<the app's address>/api/study/health` says `"schemaOk": true`.
+3. **Which parts to run.** In Supabase → SQL Editor, read only:
+   ```sql
+   select public.study_schema() ->> 'I' as i, public.study_schema() ->> 'R' as r,
+          public.study_schema() ->> 'L' as l, public.study_schema() ->> 'O' as o;
+   ```
+   - `i`, `r` or `l` empty (production at `eed179e` has none of them): run
+     **`supabase/parts/9.sql`** to the end, then **`supabase/parts/10.sql`**
+     to the end. This is the order the tests ran; parts 1 to 8 need no
+     re-run for O (their only changes are the parts' headers and comments,
+     and `kind_on`'s text, which part 10 sets too).
+   - `i` 1, `r` 2 and `l` 1 already: run **`supabase/parts/10.sql`** only
+     (section O 1 is in it, after L).
+   NOTICEs are harmless. Then, read only:
+   ```sql
+   select public.study_schema() ->> 'O' as o, public.study_schema() ->> 'L' as l;   -- 1, 1
+   select to_regprocedure('public.study_sheet_create(uuid,jsonb)') is not null as sheet_create,
+          to_regprocedure('public.study_sheet_room(uuid)') is not null as room;      -- true, true
+   select kind, count(*) from public.study_exams group by kind;                        -- every existing upload: exam
+   select name, enabled from study_private.features where name in ('exams', 'sheets') order by name;  -- exams as before; sheets false
+   ```
+   If part 9 ran in this step, also follow [`RELEASE-R1.md`](RELEASE-R1.md)
+   and [`RELEASE-L1.md`](RELEASE-L1.md) for their own flags later; none of
+   them is needed for sheets.
+4. **Vercel → Settings → Environment Variables → Production only:**
+   `STUDY_SHEETS_MONTHLY_USD` = `6` (unset is 6) and `STUDY_MONTHLY_USD` =
+   `33` (if step 1 found it unset). Never on Preview: Preview shares the
+   production database.
+5. **The switches** (SQL Editor):
+   ```sql
+   update study_private.features set enabled = true, changed_at = now() where name in ('exams', 'sheets');
+   ```
+6. **Vercel → Production only:** `VITE_STUDY_SHEETS` = `1`. It needs
+   `VITE_STUDY_COURSES`, `VITE_STUDY_EXAMS` and `VITE_STUDY_PRACTICE` = `1`
+   (check they are there; if `VITE_STUDY_EXAMS` was not, the members get past
+   exams with this release too). Redeploy Production (Deployments → the
+   latest → Redeploy).
+7. **Check, without spending:**
+   - `/api/study/health`: `"schemaOk": true` (it now asks for `O: 1`),
+     `"schema"` has `"O": 1`, `"features"` has `"sheets": true`.
+   - In the app, a course's page: the segment "מבחנים ותרגילים" and
+     "העלאת מבחן או דף תרגילים"; Help → "מבחנים ותרגילים" has the two lines
+     (only course-staff or the group's own material; the pages are read by
+     the AI services the app uses).
+   - Open the upload, choose a short PDF of the group's own: "מה זה?" and the
+     price on the button show **before** anything is sent. Leave with "→
+     לקורס" (nothing is uploaded or spent).
+   - On a computer or an iPad, an existing past exam's review is two
+     columns (the text on the right, the page on the left).
+8. **The first real sheet (spends about $0.05 a page, from the sheets line):**
+   one member uploads one short exercise sheet of the course staff's (a few
+   pages, answers marked or in a file). Within about 10 minutes it is in
+   "דפי תרגילים" with its questions; open questions and calculations are
+   counted, not copied (release A1 copies them). Then, read only:
+   ```sql
+   select e.kind, e.status, e.n_questions, e.skipped_open, round(sum(j.cost_usd), 2) as usd
+     from public.study_exams e join study_private.exam_jobs j on j.exam_id = e.id
+    where e.kind = 'sheet' group by e.id order by e.created_at desc limit 3;
+   ```
+   Send Claude the row and, if any copy reads wrong, its item numbers.
+9. **WhatsApp to the group (optional):**
+   > חדש בתמצית: בעמוד הקורס, ״מבחנים ותרגילים״ ← ״העלאת מבחן או דף תרגילים״. מעלים דף תרגילים של הקורס (PDF או צילום), השאלות מועתקות כמו בדף, ותרגול ב״לתרגל כמו בדף״. רק חומר של צוות הקורס או של הקבוצה.
+
+**Rolling back release A0:** the switch `sheets` off stops new sheets at
+once; hiding every sheet and unsetting the flag are below ("Rolling back").
+Part 10's columns and functions stay: they are harmless to the old code.
+
 ## Before anything: two checks (read only)
 
 In Supabase → SQL Editor. Each query only reads; send Claude the results.
@@ -85,7 +168,8 @@ redefinitions of section S's functions only filter by the new kind, which is
 
 ## Release point 2: sheets in the app (release A0)
 
-Built on `dev` (O2, O3); its e2e script (O4) comes next. Spends only when a
+Built and tested on `dev` (O2-O4; the steps in one go are "Release A0,
+start to finish" above). Spends only when a
 member uploads: a sheet is read like a past exam (about $0.05 a page), and
 never past the sheets line ($6 a month) or the room under the 80% line.
 

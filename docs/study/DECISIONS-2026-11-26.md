@@ -802,3 +802,42 @@ Also decided for this build:
 - **Entry chunk:** O's slot is 686 B of its 1,500 B; the chunk is 404,315 B
   of 410,000 with every flag on (5,685 B left, at least 1,500 of them for
   the models package).
+
+### Uploaded sheets, O4 (the A0 e2e, its fixes, the release steps), built on 26 November 2026
+
+- **The A0 e2e runs on the shared mock with the synthetic sheet only**
+  (`e2e/study/sheets.cjs`, flag set `o`; `ps` and `s2` check that nothing of
+  it shows). The design's list for A0 is covered: the phone upload from a
+  lecture's link, the desktop drop and paste, the reading, the wide review
+  at 820 and 1440 with the box, ArrowDown and E and no confirmation on
+  Enter, a true/false item keyed by hand, the printed order after answering,
+  simulations without sheets, and the landing card; plus help's two lines,
+  the exactness flag on a misread copy, the cover left out (its ID line
+  never sent), a question bank, and the refusals in a sheet's words.
+- **The phone flow uses the answers file**, as the fixture has it (its
+  answers are a file of their own, not marks on the page), so the review
+  shows 4 keyed items and the true/false and match ones to key by hand, the
+  gap O 1's hand keying closes.
+- **Not driven through the screen, tested elsewhere:** more than 40 pages
+  and the $3 confirmation (with the 40-page cap no A0 sheet's usual price
+  reaches $3) are the op's unit tests; the headroom and `study_sheet_room`
+  are the SQL tests' and the op's. The design's "each at 390, 820 and
+  1440, light and dark" is met as: every screen at 320, 390, 820 and
+  1440 in light and dark for sideways scroll and screenshots, the a11y check
+  on each, and `devices.cjs` on its eight devices.
+- **A ready sheet for screen-only scripts** (`mocks/sheets.cjs`,
+  `db.sheetsMock.seed`) runs the exams mock's own worker on the fixture, so
+  `devices.cjs` and `wide.cjs` show the same review the upload makes, with
+  clean page pictures (`make-sheet.cjs` `pageShots`).
+- **Fixed, as the scripts found them** (no change of behaviour beyond
+  these): the upload's "מה אפשר להעלות?" to a 44 px hit area; a PDF tile's
+  name to 14 px; the wide review's page column and the upload's details
+  column stick under the top bar (they went under it on a computer); a
+  figure's box keeps the paper's ink in dark; a true/false or match item
+  keyed by hand says who keyed it ("סומנה ע״י {name}", no letter).
+- **Yoad's release steps** for A0 are one section of `RELEASE-O.md`
+  ("Release A0, start to finish"): the read-only checks first, then part 9
+  (only while I, R or L are missing, as on production at `eed179e`) and
+  part 10, the $6 and $33 lines, the switches `exams` and `sheets`, the flag
+  on Production only, checks that spend nothing, and one real sheet with a
+  read-only query of what it cost.

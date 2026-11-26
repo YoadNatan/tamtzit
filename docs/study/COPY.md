@@ -326,6 +326,17 @@ exams' in `failText`.
 | Exactness | — | ההעתקה שונה מהטקסט בקובץ · כדאי לבדוק מול העמוד. (row chip: לבדוק מול הדף) |
 | The wide review's keys | — | מקשים: חצים למעלה ולמטה, השאלה הקודמת או הבאה · E: לתקן טקסט. |
 | A link without a member | — | הקישור נפתח בדפדפן, לא באפליקציה. · לפתוח את תמצית מהאייקון במסך הבית · להמשיך כאן: כניסה עם הקוד האישי · אין קוד אישי? הקישור הוא לחברי הקבוצה. |
+| A second file dropped with "בקובץ נפרד" | — | זה קובץ התשובות? · כן · לא, עוד עמודים |
+| The cover left out | — | דף השער לא יעלה. · להחזיר אותו |
+| What may be uploaded (the upload's disclosure) | — | מה אפשר להעלות? · מעלים רק חומר מצוות הקורס או חומר של הקבוצה. · קובץ מוואטסאפ: לשמור אותו בקבצים, ואז ״קובץ PDF״ כאן. · the Word line |
+| Help's row (OD5, OD6) | מבחנים קודמים | מבחנים ותרגילים: …מעלים רק חומר מצוות הקורס או חומר של הקבוצה. הדפים שמעלים נקראים בשירותי הבינה המלאכותית שהאפליקציה משתמשת בהם. (a line of information, never on the upload screen: decision 1) |
+| Keying a true/false or match item by hand | בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד. | לסמן תשובה / לסמן תשובה אחרת · לכל משפט: נכון או לא נכון. התשובה תשתנה לכל הקבוצה: (match: לכל שורה, התשובה המתאימה…) · לשמור · ביטול · התשובה סומנה. |
+| Who keyed it (O4) | a one-answer item only: סומנה ע״י נועה: ג׳ | a true/false or match item too: סומנה ע״י נועה · לבטל (no letter: the statements are on the card) |
+
+`e2e/study/sheets.cjs` (O4) asserts these words as they are on screen
+(help's two lines, the tiles and the Word line, the cover, the answers
+file's question, the exactness line, the landing card, the refusals), so a
+change to one of them changes the script too.
 
 ### Kept, on purpose
 

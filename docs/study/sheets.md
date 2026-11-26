@@ -26,7 +26,7 @@ path, queue, lease, worker, review screen and ledger kind `exam` as past exams
 | O0 | The synthetic fixture, the time measurement on it, Yoad's read-only checks | none | none | Built |
 | A0 (O1) | The kind and one lecture of an upload, the switch `sheets`, "a new sheet", keying true/false and match items by hand, simulations of past exams only, the sheets line's figures (`study_sheet_room`) | `VITE_STUDY_SHEETS` | O 1 | Built (part 10, after L) |
 | A0 (O2, O3) | The upload (two kinds, desktop drop and paste, camera checks, the cover page), a sheet's bounds on the server (40 pages, the $6 line, the headroom, the $3 confirmation), the course page by kind, the wide review with its page and the keyboard, hand keying in the review, the exactness flags, printed order after answering, the landing card | `VITE_STUDY_SHEETS` | O 1 | Built |
-| A0 (O4) | The A0 e2e script (`e2e/study/sheets.cjs`) at 390/820/1440, `devices.cjs` and `wide.cjs` with the new screens, the copy list | — | — | Not built yet |
+| A0 (O4) | The A0 e2e script (`e2e/study/sheets.cjs`, flag set `o`) at 320/390/820/1440, a ready sheet in the mock (`mocks/sheets.cjs`), `devices.cjs` and `wide.cjs` with the new screens, the fixes they found, the copy list, Yoad's release steps | — | — | Built |
 | A1 (O5-O8) | The sheet reader: open, numeric and multi-part questions, tables, up to 10 options, answers files, worked solutions, edits | `VITE_STUDY_SHEETS_FORMS` | O 2 | Not built yet |
 | B (O9-O12) | Similar questions after a wrong answer and for the whole sheet, in the sheet's set on L's shelf | `VITE_STUDY_SIMILAR` | O 3 | Not built yet |
 
@@ -311,6 +311,108 @@ retiring items; the lecture page's row ("דפי תרגילים של ההרצאה
 **Bundle:** the slot `features/sheets.tsx` is the only module of O in the
 entry chunk (owner `O`, capped at 1,500 B): 686 B; the entry chunk is
 404,315 B of 410,000 with every flag on.
+
+## The A0 e2e (O4)
+
+On the shared mock (`e2e/study/mock.cjs`), with the synthetic sheet only: no
+real host, no paid call, no course material. Build the mock dists as the
+other packages do (every s2 flag with `VITE_STUDY_INSTALL`, `VITE_STUDY_NOTIFY`,
+`VITE_STUDY_MAKE`, `VITE_STUDY_SETS` and `VITE_STUDY_SHEETS` for set `o`; the
+same without `VITE_STUDY_SHEETS` for `ps`), then, one at a time
+(`NODE_PATH=$(npm root -g)`):
+
+```
+E2E_FLAGS=o  node e2e/study/sheets.cjs  <dist-o>  <out>   # release A0, every step below
+E2E_FLAGS=ps node e2e/study/sheets.cjs  <dist-ps> <out>   # without the flag: nothing of it shows
+E2E_FLAGS=o  node e2e/study/devices.cjs <dist-o>  <out>   # + the screens sheet-upload and sheet-review
+E2E_FLAGS=o  node e2e/study/wide.cjs    <dist-o>  <out>   # + a sheet's review and upload, phone / 760+ / keys
+E2E_FLAGS=s2 node e2e/study/exams.cjs   <dist-s2> <out>   # past exams, unchanged
+```
+
+**`e2e/study/sheets.cjs`** (set `o`), in order:
+
+1. Help's "מבחנים ותרגילים" row has the material line (OD6) and the
+   providers line (OD5).
+2. The course page: one segment "מבחנים ותרגילים", the upload first, the
+   empty line.
+3. The phone upload from a lecture's link (`new=sheet&l=`): the two tiles and
+   the Word line, nothing on the screen about where the pages go (decision 1,
+   checked before and after a file); a Word file dropped is refused with its
+   line; the PDF: "דף תרגילים" chosen, the name "sheet 3" from `sheet-3.pdf`,
+   the lecture chosen, the cover offered and left out (5 pages; the ID line
+   is never sent), the answers file, the price on the button and the pages
+   and minutes under it; `study_sheet_create`'s row (kind sheet, its lecture,
+   `hide_from_profile`), 7 pages uploaded and handed over (the answers file's
+   2 last).
+4. The reading, then the phone review: 6 choice items (the 8-option one
+   refused by the exam reader's save path), 4 keyed by the answers file, the
+   true/false and match items to key; "4 שאלות פתוחות דולגו."; "לתרגל כמו
+   בדף"; no "סימולציה מהמבחן" and no "לא לכלול בחישוב הנושאים". The exam
+   reader's copies are all in their pages' text; a misread copy (question and
+   options not on the page) is "לבדוק מול הדף" with "ההעתקה שונה מהטקסט
+   בקובץ".
+5. The wide review at 820 and 1440: two columns (the text right of the page),
+   the page's picture, the figure's box (item 6, page 4 once the cover is
+   gone) opens its item; ArrowDown opens the next, ArrowUp the one before,
+   E "לתקן טקסט"; Enter (on the item's heading and on the page) changes no
+   key; back under 760 the phone's list.
+6. A computer at 1440: the upload's details beside its pages; a PDF dropped
+   (`new=1` starts as a past exam, switched to a sheet, the name follows),
+   the cover kept (6 pages), no lecture (a question bank), "בקובץ נפרד" and
+   the answers file dropped ("זה קובץ התשובות?" → "כן"), 8 pages handed
+   over; 6 photos pasted (Ctrl+V) with only the blurred one flagged.
+7. Another member keys the true/false item statement by statement
+   (`study_exam_key_set` with `p_seq`), "סומנה ע״י נועה", and "לבטל" brings
+   the statements back.
+8. "לתרגל כמו בדף": a wrong pick, and after the answer the options stay in
+   the printed order with the right one and the pick marked in place (D10);
+   the answer is recorded with mode `exam`.
+9. The simulation's setup lists the past exam only, even with the sheet's
+   id in the address (OD9).
+10. The course page with both kinds: the two headings, a sheet's lecture
+    under its title, the head's counts ("מבחן קודם אחד · 2 דפי תרגילים").
+11. The landing card (OD14): absent on a plain join link; on an upload's
+    link with no member, its lines and the two-line how-to; the personal
+    code signs in and lands on the same sheet.
+12. The refusals in a sheet's words: the switch off ("העלאת דפי תרגילים עוד
+    לא פתוחה בקבוצה.") and the sheets line spent (402 `sheets_cap`: "התקציב
+    לדפי תרגילים נגמר החודש.").
+13. No sideways scroll at 320, 390, 820 and 1440 px, light and dark, on the
+    upload, the review, the course page and the landing card; the a11y check
+    (contrast, 44 px hit areas, titles) on every screen. `problems: []`,
+    `a11y: []`.
+
+Without the flag (set `ps`, or `s2`): a sheet in the data is never listed or
+counted on the course page, `new=sheet` opens past exams' own upload, the
+simulation lists past exams only, an upload's link signed out has no card,
+and `study_sheet_create` is never called.
+
+**`mocks/sheets.cjs`** adds `db.sheetsMock.seed({ course, title, lecture,
+images, keySource })`: a ready sheet as the reading leaves it (its 5 pages
+without the cover, their lines, the exam reader's replies, the answers file
+read by number) through the exams mock's own worker. `devices.cjs` and
+`wide.cjs` use it with `make-sheet.cjs`'s `pageShots` (clean page JPEGs).
+**`devices.cjs`** (set `o`) adds the screens `sheet-upload` (the PDF chosen)
+and `sheet-review` (an item open) on its eight devices, with its usual checks
+(sideways scroll, text under 14 px, contrast, hit areas, the Tab walk under
+the bars) and that the two columns start at 760. **`wide.cjs`** (set `o`)
+checks a sheet's review and upload as one column on a phone and two from
+760, and the keys with a mouse.
+
+What the e2e does not reach, and where it is tested instead: more than 40
+pages and the $3 confirmation (an A0 sheet's usual price stays under $3 with
+the 40-page cap) are the op's, in `server/study/exams.test.ts`; the headroom
+check and `study_sheet_room` are in the SQL tests (section O) and the op's
+tests. Real material and real reading speed are Yoad's checks after the
+release (below and `RELEASE-O.md`).
+
+**Fixed on the way** (the scripts found them; commit "the fixes the A0 e2e
+found"): "מה אפשר להעלות?" was 21 px tall (now 44); a PDF tile's file name
+was 13 px (now 14); the wide review's page column and the upload's details
+stuck 16 px from the top, under the sticky top bar on a computer (now under
+it); a figure's box had 1.05:1 contrast in dark (it sits on white paper in
+both schemes); a true/false or match item keyed by hand did not say who
+keyed it (now "סומנה ע״י נועה").
 
 ## Stopping and rolling back (release A0)
 
