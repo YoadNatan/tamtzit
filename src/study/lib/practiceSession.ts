@@ -416,6 +416,14 @@ export function autopsyOrder(count: number, chosen: number | null | undefined, a
   return [...first, ...Array.from({ length: count }, (_, i) => i).filter((i) => !first.includes(i))];
 }
 
+/** An uploaded item (a past exam's or a sheet's) keeps its printed order
+ *  after the answer (uploaded sheets, design D10, with VITE_STUDY_SHEETS): "א+ב
+ *  נכונות" and the letters the member saw on paper stay where they were, and
+ *  the verdict marks the chosen and the right option in place. */
+export const keepPrinted = (q: { source?: string | null }, on: boolean): boolean => on && q.source === "exam";
+/** The options in their printed order. */
+export const printedOrder = (count: number): number[] => Array.from({ length: Math.max(0, count) }, (_, i) => i);
+
 /* ── "מצב מבחן" ── */
 
 /** The clock of one question in "מצב מבחן": study_quiz__seconds's rule, about

@@ -6,6 +6,8 @@ import {
   answerArgs,
   answered,
   autopsyOrder,
+  keepPrinted,
+  printedOrder,
   betLabel,
   inPick,
   styleOf,
@@ -639,4 +641,13 @@ test("a set's attempt rides with its session, and questions ready later join its
   assert.equal(t2.shownAt, 50);
   assert.ok(t2.seconds[1] >= 60, "a clock in מצב מבחן");
   assert.equal(t2.attempt, "att-2");
+});
+
+test("an uploaded item keeps its printed order after the answer (uploaded sheets, D10), with the flag only", () => {
+  assert.equal(keepPrinted({ source: "exam" }, true), true);
+  assert.equal(keepPrinted({ source: "exam" }, false), false, "without VITE_STUDY_SHEETS: the autopsy order, as before");
+  assert.equal(keepPrinted({ source: "ai" }, true), false, "a lecture's question: the chosen and the right option first");
+  assert.equal(keepPrinted({ source: "member" }, true), false);
+  assert.deepEqual(printedOrder(5), [0, 1, 2, 3, 4]);
+  assert.deepEqual(printedOrder(0), []);
 });

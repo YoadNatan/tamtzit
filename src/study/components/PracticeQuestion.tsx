@@ -3,7 +3,7 @@ import { isSetForm, type Layout } from "../../../shared/study/forms";
 import { STYLE_HE, type Style } from "../../../shared/study/practice2";
 import { flags as buildFlags } from "../lib/flags";
 import type { Feedback, Flag, PublicQuestion } from "../lib/practice";
-import { autopsyOrder, betLabel, BETS, type Bet } from "../lib/practiceSession";
+import { autopsyOrder, betLabel, BETS, keepPrinted, printedOrder, type Bet } from "../lib/practiceSession";
 import { reveal } from "../lib/reveal";
 import { richText, slideTag } from "../lib/rich";
 import { flagLine, LETTERS, pinNames } from "../lib/questionText";
@@ -39,6 +39,8 @@ export type PracticeQuestionProps = {
     step?: number | null;
     group_id?: string;
     lecture_id?: string | null;
+    /** An uploaded item ("exam") keeps its printed order after the answer (VITE_STUDY_SHEETS). */
+    source?: string | null;
   };
   position?: { index: number; total: number };
   /** Before the answer: the option picked (shown place), and the bet. */
@@ -348,7 +350,8 @@ export default function PracticeQuestion(p: PracticeQuestionProps) {
     );
   }
   const one = typeof chosen === "number" ? chosen : null;
-  const order = autopsyOrder(q.options.length, one, fb.answer);
+  // An uploaded item keeps the printed order (VITE_STUDY_SHEETS, design D10); others put the chosen and the right option first.
+  const order = keepPrinted(q, buildFlags.sheets) ? printedOrder(q.options.length) : autopsyOrder(q.options.length, one, fb.answer);
   const why = fb.explanations ?? [];
   const whens = fb.whens ?? [];
   // An uncovered past-exam item repeats one sentence in every why: shown once (review UX-22).

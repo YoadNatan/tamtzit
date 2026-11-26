@@ -445,6 +445,7 @@ export const STOP_SELECTORS = [
   ".exam-new .ph-foot .a-btn.primary", // the exam's upload (its price on the button)
   ".r-acts .a-btn.primary", // "לאשר" a suggested answer (for the whole group)
   ".r-optbtn", // marking an answer (for the whole group)
+  ".r-seq + .a-row .a-btn.primary", // a true/false or match item keyed by hand (uploaded sheets; for the whole group)
   ".r-acts .r-reread", // "לקרוא שוב את עמוד N" (the budget)
   ".x-units .x-retry", // a unit's "לנסות שוב" (the budget)
   ".c-sheet button[type=submit]", // the course sheet's "לשמור", "לשנות שם", "לאחד" (for the whole group)
@@ -1050,6 +1051,9 @@ export function screenGuide(r: Route, f: Flags): MiniGuide | null {
           m(T.examSuggested, "״תשובה מוצעת״: האפליקציה פתרה, ועוד לא בדקו. פותחים שאלה, ו״לאשר״ אם התשובה נכונה."),
           m(T.examNokey, "״בלי תשובה״: אין תשובה, גם לא מוצעת, אז השאלה לא בתרגול. מסמנים לה תשובה ב״לסמן תשובה״."),
           m(T.examActs, "סימון או אישור של תשובה משנה אותה לכל הקבוצה, עם השם שלך. אפשר לבטל."),
+          ...(f.sheets
+            ? [m(T.sheetSplit, "העמוד עצמו, ליד ההעתקה. נוגעים באיור כדי לפתוח את השאלה שלו. חצים למעלה ולמטה עוברים בין השאלות, ו-E פותח ״לתקן טקסט״.")]
+            : []),
         ],
       };
     case "mock":

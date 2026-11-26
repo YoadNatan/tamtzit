@@ -281,3 +281,137 @@
 .sx-keys .sx-pages {
   grid-template-columns: repeat(auto-fill, minmax(88px, 112px));
 }
+
+/* ── the wide review (from 760 px): the text right, the page left (§5.7) ── */
+.rw {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-8);
+  align-items: start;
+}
+.rw-text {
+  display: grid;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+.rw-page {
+  position: sticky;
+  top: var(--sp-8);
+  min-width: 0;
+}
+/* The page column shows the page: the card's own small crop goes. */
+.rw .r-split {
+  grid-template-columns: minmax(0, 1fr);
+}
+.rw .r-crop {
+  display: none;
+}
+.rw-keys {
+  margin: 0;
+}
+.rw-here {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: var(--sp-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.rw-here .a-chip[aria-current="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+@media (min-width: 1024px) {
+  main.exam-review.is-wide {
+    max-width: var(--measure-wide);
+  }
+  .rw {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  }
+}
+.pv {
+  display: grid;
+  gap: var(--sp-4);
+}
+.pv-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.pv-tools {
+  display: flex;
+  gap: var(--sp-1);
+}
+.pv-tools .a-btn {
+  min-width: var(--hit);
+  min-height: var(--hit);
+  padding: 0;
+}
+.pv-scroll {
+  max-height: calc(100vh - 220px);
+  max-height: calc(100dvh - 220px);
+  overflow: auto;
+  border-radius: var(--r-sm);
+  background: #fbfaf6;
+  box-shadow: inset 0 0 0 1px rgba(28, 24, 56, 0.14);
+}
+.pv-sheet {
+  position: relative;
+  direction: ltr;
+}
+.pv-sheet img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.pv-wait {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1 / 1.414;
+}
+.pv-box {
+  position: absolute;
+  padding: 0;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+.pv-box span {
+  position: absolute;
+  inset-block-start: -2px;
+  inset-inline-start: -2px;
+  padding: 0 6px;
+  border-radius: 4px 0 4px 0;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 700 var(--text-tag) / 1.5 var(--font-body);
+}
+.pv-box.on {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-width: 3px;
+}
+.pv-box:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+.r-exact {
+  margin: 0;
+}
+.r-seq {
+  display: grid;
+  gap: var(--sp-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.r-seq li {
+  display: grid;
+  gap: var(--sp-3);
+}
+.r-seq .a-seg {
+  max-width: 260px;
+}

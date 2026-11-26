@@ -75,6 +75,14 @@ export async function sheetReadStart(
   };
 }
 
+/** An upload's kind and lecture (section O 1; members read study_exams). */
+export async function uploadMeta(examId: string): Promise<{ kind: UploadKind; lecture_id: string | null }> {
+  const { data, error } = await client().from("study_exams").select("kind, lecture_id").eq("id", examId).maybeSingle();
+  if (error) throw new Error(error.message || "unknown");
+  const row = (data ?? {}) as { kind?: string; lecture_id?: string | null };
+  return { kind: row.kind === "sheet" ? "sheet" : "exam", lecture_id: row.lecture_id ?? null };
+}
+
 /** The PDF text of an upload's pages (members read study_exam_pages): the exactness check's ground. */
 export async function pageLines(examId: string): Promise<Map<number, string[]>> {
   const { data, error } = await client().from("study_exam_pages").select("n, lines").eq("exam_id", examId);

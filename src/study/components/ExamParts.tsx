@@ -8,7 +8,8 @@ import { cropStyle, pageUrls, parsePageBox } from "../lib/exams";
  * kept for the visit. */
 
 const signed = new Map<string, Promise<string | null>>();
-function pageUrl(path: string): Promise<string | null> {
+/** A page's picture, signed once per visit (the review's PageView shares it). */
+export function pageUrl(path: string): Promise<string | null> {
   let p = signed.get(path);
   if (!p) {
     p = pageUrls([path])

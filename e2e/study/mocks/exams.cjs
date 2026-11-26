@@ -101,13 +101,15 @@ module.exports = {
     const save = (e, it, n) => {
       const Q = P();
       let q = Q.questions.find((x) => x.exam_id === e.id && x.exam_no === it.no);
-      const fig = e.kind === "sheet" ? (it.figure?.page ? `pg:${it.figure.page}:${it.figure.x},${it.figure.y},${it.figure.w},${it.figure.h}` : "") : it.no === 3 ? "pg:3:40,80,920,520" : "";
+      // A sheet uploaded without its cover page: the fixture's pages are one later than the uploaded ones.
+      const shift = e.kind === "sheet" ? Math.max(0, SHEET.pages.length - (e.pages || SHEET.pages.length)) : 0;
+      const fig = e.kind === "sheet" ? (it.figure?.page ? `pg:${it.figure.page - shift}:${it.figure.x},${it.figure.y},${it.figure.w},${it.figure.h}` : "") : it.no === 3 ? "pg:3:40,80,920,520" : "";
       const row = {
         group_id: e.group_id, lecture_id: null, batch_id: null, exam_id: e.id, exam_no: it.no, ref_lecture: null, source: "exam", part_idx: null,
         kind: it.kind, difficulty: 2, vignette: it.vignette || "", question: it.question, options: it.options, slides: [], topic: "", aspect: "other",
         model: "mock", created_by: e.created_by, retired_at: null, retired_by: null, retire_note: "", anchor: null, quote: "", part_gen: null, teaser: "",
         figure: fig, option_tags: [], hidden_at: null, stale_at: null, fixed_at: null, style: null, form: it.form, layout: it.form === "match" ? { kind: "match", prompts: it.prompts } : null,
-        series: null, step: null, parse_conf: e.kind !== "sheet" && it.no === 10 ? 1 : (it.parse_conf ?? 2), page: it.page ?? null,
+        series: null, step: null, parse_conf: e.kind !== "sheet" && it.no === 10 ? 1 : (it.parse_conf ?? 2), page: it.page ? it.page - shift : null,
       };
       if (!q) {
         q = { id: hex("e1e00000", ++M.seq), created_at: iso(M.now() + n), has_key: false, ...row };
@@ -232,7 +234,21 @@ module.exports = {
       let rows = M.exams.filter((e) => e.group_id === db.group.id);
       const g = query.get("group_id");
       if (g) rows = rows.filter((e) => `eq.${e.group_id}` === g);
+      const id = query.get("id");
+      if (id) rows = rows.filter((e) => `eq.${e.id}` === id);
       return json(rows.map((e) => Object.fromEntries(cols.map((c) => [c, e[c] ?? null]))));
+    }
+
+    if (p === "/rest/v1/study_exam_pages" && method === "GET") {
+      // Members read an upload's pages (section S's policy): the review's exactness check reads their lines.
+      if (!member) return json([]);
+      const cols = (query.get("select") || "*").split(",").map((c) => c.trim());
+      check.cols("study_exam_pages", cols, `${method} ${p}`);
+      const id = String(query.get("exam_id") ?? "").replace(/^eq\./, "");
+      const e = M.exams.find((x) => x.id === id && x.group_id === db.group.id);
+      // The lines the phone sent with each page (a PDF's text layer; none for a photo).
+      const rows = (e?.pageRows ?? []).map((x) => ({ exam_id: id, n: x.n, path: x.path, w: x.w, h: x.h, lines: Array.isArray(x.lines) ? x.lines : [], is_key: Boolean(x.key) }));
+      return json(rows.map((r) => Object.fromEntries(cols.map((c) => [c, r[c] ?? null]))));
     }
 
     const m = /^\/rest\/v1\/rpc\/(study_exam_[a-z_]+|study_set_exam_key|study_mock_[a-z_]+|study_sheet_create)$/.exec(p);

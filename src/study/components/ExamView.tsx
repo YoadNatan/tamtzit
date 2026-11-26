@@ -32,11 +32,16 @@ import {
   type ReviewItem,
 } from "../lib/exams";
 import { failText } from "../lib/failText";
+import { flags } from "../lib/flags";
 import { richText } from "../lib/rich";
+import { examKeySet, inexact, pageLines, seqComplete, step, uploadMeta, type UploadKind } from "../lib/sheets";
+import { parsePageBox } from "../lib/exams";
 import type { ScreenProps } from "../features/types";
 import { drives, holdScreen, PageCrop, setDrive } from "./ExamParts";
+import PageView from "./PageView";
 import { BackLink, Head, Loading, RouteLink } from "./Shell";
 import "../styles/exams.css";
+import "../styles/sheets.css";
 
 /* ── One past exam: its reading, then its review (sources.md B6.2, B7;
  *    mockups exam-reading.html and exam-review.html) ──
@@ -51,7 +56,17 @@ import "../styles/exams.css";
  * answer ("לאשר"), mark another ("לסמן תשובה אחרת"), undo a member's mark
  * ("סומנה ע״י נועה: ג׳ · לבטל"), fix a badly read item ("לא נקראה טוב ·
  * לתקן טקסט"), read its page again, and every change of its answer in a
- * list under it. "לא לכלול בחישוב הנושאים" at the end. */
+ * list under it. "לא לכלול בחישוב הנושאים" at the end.
+ *
+ * Uploaded sheets (VITE_STUDY_SHEETS, release A0; docs/study/sheets.md): the
+ * screen knows an upload's kind (a sheet: "לתרגל כמו בדף", no simulation and
+ * no "לא לכלול"); a true/false or match item is keyed by hand
+ * (study_exam_key_set); an item whose copy is not in its page's PDF text is
+ * "לבדיקה" ("ההעתקה שונה מהטקסט בקובץ", $0, lib/sheets.ts inexact); and from
+ * 760 px the review is two columns, the text on the right and the page on
+ * the left (PageView), with the keyboard: ↑ ↓ the item before or after, E
+ * "לתקן טקסט". No key confirms: "לאשר" changes the answer for the whole
+ * group, so it needs its button. */
 
 const POLL_MS = 4_000;
 /** What reading pages again costs ("לקרוא שוב את עמוד N", a unit's "לנסות שוב"). */
@@ -86,6 +101,19 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
   const [busy, setBusy] = useState(false);
   const driving = useRef(false);
   const groupId = ctx.group.id;
+  // Section O 1's kind (with the flag only: a build without it never asks for the column).
+  const [kind, setKind] = useState<UploadKind>("exam");
+  useEffect(() => {
+    if (!flags.sheets) return;
+    let alive = true;
+    uploadMeta(examId)
+      .then((m) => alive && setKind(m.kind))
+      .catch(() => undefined); // the words stay a past exam's
+    return () => {
+      alive = false;
+    };
+  }, [examId]);
+  const sheet = kind === "sheet";
 
   const load = useCallback(async () => {
     try {
@@ -143,7 +171,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
   if (error && !status)
     return (
       <main className="exam-review">
-        <Head back={back} title="מבחן קודם" />
+        <Head back={back} title={sheet ? "דף תרגילים" : "מבחן קודם"} />
         <p className="a-error" role="alert">
           {error}
         </p>
@@ -195,10 +223,10 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
     return (
       <main className="exam-review">
         {head}
-        <p className="a-para a-muted x-stalled">המבחן הזה לא עלה עד הסוף. אפשר להעלות אותו שוב מהקורס.</p>
+        <p className="a-para a-muted x-stalled">{sheet ? "הדף הזה לא עלה עד הסוף. אפשר להעלות אותו שוב מהקורס." : "המבחן הזה לא עלה עד הסוף. אפשר להעלות אותו שוב מהקורס."}</p>
         {courseId ? (
-          <RouteLink to={{ v: "exams", isNew: true, c: courseId }} go={ctx.go} className="a-btn">
-            העלאת מבחן קודם
+          <RouteLink to={{ v: "exams", isNew: sheet ? "sheet" : true, c: courseId }} go={ctx.go} className="a-btn">
+            {flags.sheets ? "העלאת מבחן או דף תרגילים" : "העלאת מבחן קודם"}
           </RouteLink>
         ) : null}
       </main>
@@ -263,11 +291,11 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
         {!reading && status.status === "failed" ? (
           <>
             <p className="a-error" role="alert">
-              {failText(status.error ?? "", "exam") || "לא נמצאו שאלות במבחן הזה."}
+              {failText(status.error ?? "", "exam") || (sheet ? "לא נמצאו שאלות בדף הזה." : "לא נמצאו שאלות במבחן הזה.")}
             </p>
             <div className="a-row">
-              <RouteLink to={{ v: "exams", isNew: true, c: courseId ?? undefined }} go={ctx.go} className="a-btn primary">
-                להעלות מבחן מחדש
+              <RouteLink to={{ v: "exams", isNew: sheet ? "sheet" : true, c: courseId ?? undefined }} go={ctx.go} className="a-btn primary">
+                {sheet ? "להעלות את הדף מחדש" : "להעלות מבחן מחדש"}
               </RouteLink>
             </div>
           </>
@@ -277,7 +305,11 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
             <div className="a-sec">
               <h2>כשזה נגמר</h2>
             </div>
-            <p className="a-small a-muted">לרוב 10–20 דקות. בסוף יופיע כאן כמה שאלות נמצאו, והמבחן יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול.</p>
+            <p className="a-small a-muted">
+              {sheet
+                ? "בסוף יופיע כאן כמה שאלות נמצאו, והדף יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול. בשלב הזה מועתקות שאלות הבחירה; שאלות פתוחות וחישובים נספרים בלבד."
+                : "לרוב 10–20 דקות. בסוף יופיע כאן כמה שאלות נמצאו, והמבחן יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול."}
+            </p>
           </>
         ) : null}
       </main>
@@ -300,6 +332,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
       reload={load}
       retry={retryAll}
       busy={busy}
+      sheet={sheet}
     />
   );
 }
@@ -319,19 +352,40 @@ function ExamReviewBody(p: {
   reload: () => Promise<ExamStatus | null>;
   retry: (pages: number[] | null) => Promise<void>;
   busy: boolean;
+  sheet: boolean;
 }) {
   const { ctx, review, status } = p;
-  const counts = useMemo(() => reviewCounts(review.items), [review.items]);
+  // The copy against its page's PDF text (uploaded sheets, D9): items whose copy is not there are to check too.
+  const [lines, setLines] = useState<Map<number, string[]> | null>(null);
+  useEffect(() => {
+    if (!flags.sheets) return;
+    let alive = true;
+    pageLines(p.examId)
+      .then((m) => alive && setLines(m))
+      .catch(() => undefined); // no flags: the review as before
+    return () => {
+      alive = false;
+    };
+  }, [p.examId]);
+  const off = useMemo(() => (lines ? inexact(review.items, lines) : new Set<string>()), [review.items, lines]);
+  const look = (q: ReviewItem) => itemState(q) !== "ok" || off.has(q.id);
+  const counts = useMemo(() => {
+    const c = reviewCounts(review.items);
+    const toCheck = review.items.filter((q) => !q.retired && (itemState(q) !== "ok" || off.has(q.id))).length;
+    return { ...c, toCheck, withAnswer: c.found - toCheck };
+  }, [review.items, off]);
   const [filter, setFilter] = useState<Filter>(() => (counts.toCheck ? "look" : "all"));
   const [open, setOpen] = useState<string | null>(null);
   const [hidden, setHidden] = useState(review.exam.hidden);
+  const [editTick, setEditTick] = useState(0);
   const closed = useRef<string | null>(null);
+  const wide = useWide() && flags.sheets;
   const live = review.items.filter((q) => !q.retired);
   // The open item stays in the list until it is closed, even when "לאשר" moved it out of the filter (its "לבטל" with it).
   const shown = live.filter((q) => {
     if (q.id === open) return true;
     const st = itemState(q);
-    if (filter === "look") return st !== "ok";
+    if (filter === "look") return look(q);
     if (filter === "suggested") return st === "suggested";
     if (filter === "nokey") return st === "nokey";
     return true;
@@ -355,6 +409,32 @@ function ExamReviewBody(p: {
     const r = await examReview(p.examId);
     p.setReview(r);
   };
+  // The wide review's page: the open item's, else the one picked, else the first.
+  const readPages = review.pages.filter((x) => !x.key).map((x) => x.n);
+  const [pick, setPick] = useState<number | null>(null);
+  const openItem = live.find((q) => q.id === open) ?? null;
+  const pageNo = (openItem ? (parsePageBox(openItem.figure)?.page ?? openItem.page) : null) ?? pick ?? readPages[0] ?? 1;
+  const ids = shown.map((q) => q.id);
+  // The keyboard (matched on event.code, so a Hebrew layout works): ↑ ↓ the item before or after, E "לתקן טקסט".
+  useEffect(() => {
+    if (!wide) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (e.code === "ArrowDown" || e.code === "ArrowUp") {
+        const next = step(ids, open, e.code === "ArrowDown" ? 1 : -1);
+        if (!next || next === open) return;
+        e.preventDefault();
+        setOpen(next);
+      } else if (e.code === "KeyE" && open) {
+        e.preventDefault();
+        setEditTick((n) => n + 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   const chips: Array<{ f: Filter; label: string; n: number }> = [
     { f: "all", label: "הכל", n: counts.found },
     { f: "look", label: "לבדיקה", n: counts.toCheck },
@@ -363,7 +443,7 @@ function ExamReviewBody(p: {
   ].filter((c) => c.f === "all" || c.n > 0) as Array<{ f: Filter; label: string; n: number }>;
 
   return (
-    <main className="exam-review">
+    <main className={`exam-review${wide ? " is-wide" : ""}`}>
       {p.head}
       {p.sub}
       <section className="a-card r-sum" aria-label="מה נמצא">
@@ -397,12 +477,12 @@ function ExamReviewBody(p: {
         {cancelledLine(status.cancelled) ? <p className="a-small a-muted">{cancelledLine(status.cancelled)}</p> : null}
         {counts.found ? (
           <RouteLink to={{ v: "practice", s: `e.${p.examId}`, n: "all" }} go={ctx.go} className="a-btn primary wide">
-            לתרגל את המבחן
+            {p.sheet ? "לתרגל כמו בדף" : "לתרגל את המבחן"}
           </RouteLink>
         ) : null}
         {/* A session asks only items with an answer (isActive): say so, rather than "1/6" after "12 נמצאו". */}
         {counts.found && unkeyedLine(review.items) ? <p className="a-small a-muted r-nokey-note">{unkeyedLine(review.items)}</p> : null}
-        {p.courseId && counts.found >= 5 ? (
+        {p.courseId && counts.found >= 5 && !p.sheet ? (
           <RouteLink to={{ v: "mock", c: p.courseId, e: p.examId }} go={ctx.go} className="a-btn wide">
             סימולציה מהמבחן
           </RouteLink>
@@ -410,6 +490,9 @@ function ExamReviewBody(p: {
       </section>
       {p.unitList}
 
+      {wide ? (
+        <div className="rw">
+          <div className="rw-text">
       {live.length ? (
         <div className="r-filters" role="radiogroup" aria-label="להראות">
           {chips.map((c) => (
@@ -425,7 +508,7 @@ function ExamReviewBody(p: {
           {shown.map((q) => (
             <li key={q.id} className="r-row">
               {open === q.id ? (
-                <ItemCard {...p} q={q} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} />
+                <ItemCard {...p} q={q} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} inexact={off.has(q.id)} editTick={editTick} />
               ) : (
                 <button type="button" id={`rh-${q.id}`} className="a-li r-head" aria-expanded={false} onClick={() => setOpen(q.id)}>
                   <div>
@@ -435,7 +518,7 @@ function ExamReviewBody(p: {
                     </span>
                     {keyByLine(q, wasConfirmed(review.key_log, q.id)) ? <span className="r-who a-small">{keyByLine(q, wasConfirmed(review.key_log, q.id))}</span> : null}
                   </div>
-                  <RowChip q={q} />
+                  <RowChip q={q} inexact={off.has(q.id)} />
                 </button>
               )}
             </li>
@@ -445,6 +528,76 @@ function ExamReviewBody(p: {
         <p className="a-para a-muted">{filter === "look" ? "אין שאלות לבדיקה." : "אין כאן שאלות."}</p>
       )}
 
+            <p className="a-small a-muted rw-keys">מקשים: חצים למעלה ולמטה, השאלה הקודמת או הבאה · E: לתקן טקסט.</p>
+          </div>
+          <aside className="rw-page" aria-label="העמוד">
+            <PageView
+              groupId={p.groupId}
+              examId={p.examId}
+              pages={readPages}
+              page={pageNo}
+              current={open}
+              items={live.map((q) => ({ id: q.id, label: `שאלה ${q.no}`, box: parsePageBox(q.figure) }))}
+              onPage={(n) => {
+                if (open) close(open);
+                setPick(n);
+              }}
+              onPick={(id) => setOpen(id)}
+            />
+            <ul className="rw-here" aria-label="השאלות בעמוד הזה">
+              {live
+                .filter((q) => (parsePageBox(q.figure)?.page ?? q.page) === pageNo)
+                .map((q) => (
+                  <li key={q.id}>
+                    <button type="button" className="a-chip" aria-current={q.id === open} onClick={() => setOpen(q.id)}>
+                      שאלה {q.no}
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </aside>
+        </div>
+      ) : (
+        <>
+      {live.length ? (
+        <div className="r-filters" role="radiogroup" aria-label="להראות">
+          {chips.map((c) => (
+            <button key={c.f} type="button" className={`a-chip r-f-${c.f}`} role="radio" aria-checked={filter === c.f} onClick={() => setFilter(c.f)}>
+              {c.label} · {c.n}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {shown.length ? (
+        <ul className="a-list r-rows">
+          {shown.map((q) => (
+            <li key={q.id} className="r-row">
+              {open === q.id ? (
+                <ItemCard {...p} q={q} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} inexact={off.has(q.id)} editTick={editTick} />
+              ) : (
+                <button type="button" id={`rh-${q.id}`} className="a-li r-head" aria-expanded={false} onClick={() => setOpen(q.id)}>
+                  <div>
+                    <b>שאלה {q.no}</b>
+                    <span className="m" dir="rtl">
+                      {firstWords(q.question)}
+                    </span>
+                    {keyByLine(q, wasConfirmed(review.key_log, q.id)) ? <span className="r-who a-small">{keyByLine(q, wasConfirmed(review.key_log, q.id))}</span> : null}
+                  </div>
+                  <RowChip q={q} inexact={off.has(q.id)} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="a-para a-muted">{filter === "look" ? "אין שאלות לבדיקה." : "אין כאן שאלות."}</p>
+      )}
+
+        </>
+      )}
+
+      {p.sheet ? null : (
       <label className="a-card flat r-hide">
         <span className="a-stack">
           <span>לא לכלול בחישוב הנושאים</span>
@@ -463,12 +616,28 @@ function ExamReviewBody(p: {
           }}
         />
       </label>
+      )}
     </main>
   );
 }
 
-function RowChip({ q }: { q: ReviewItem }) {
+/** From 760 px wide (iPad portrait and wider): the review in two columns. */
+function useWide(): boolean {
+  const q = "(min-width: 760px)";
+  const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(q).matches);
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const m = matchMedia(q);
+    const f = () => setOn(m.matches);
+    m.addEventListener("change", f);
+    return () => m.removeEventListener("change", f);
+  }, []);
+  return on;
+}
+
+function RowChip({ q, inexact: off }: { q: ReviewItem; inexact?: boolean }) {
   const st = itemState(q);
+  if (st === "ok" && off) return <span className="a-chip warn">לבדוק מול הדף</span>;
   if (st !== "ok") return <span className={STATE_CHIP[st].cls}>{st === "suggested" ? "תשובה מוצעת" : STATE_CHIP[st].label}</span>;
   if (q.form !== "one") return <span className="a-chip ok">יש תשובה</span>;
   return <span className="a-chip ok">תשובה {letter(q.answer)}</span>;
@@ -485,11 +654,24 @@ function ItemCard(p: {
   refresh: () => Promise<void>;
   retry: (pages: number[] | null) => Promise<void>;
   busy: boolean;
+  /** Uploaded sheets: the copy is not in its page's PDF text (D9). */
+  inexact?: boolean;
+  /** Uploaded sheets: E pressed in the wide review ("לתקן טקסט"). */
+  editTick?: number;
 }) {
   const { q, ctx } = p;
-  const [mode, setMode] = useState<"view" | "pick" | "edit">("view");
+  const [mode, setMode] = useState<"view" | "pick" | "edit" | "seq">("view");
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState({ question: q.question, vignette: q.vignette, options: [...q.options] });
+  // A true/false or match item keyed by hand (section O 1): one value a statement, or an option a prompt.
+  const size = q.form === "match" ? q.prompts.length : q.options.length;
+  const [seqDraft, setSeqDraft] = useState<Array<number | null>>(() => Array.from({ length: size }, (_, i) => q.seq?.[i] ?? null));
+  const tick = useRef(p.editTick ?? 0);
+  useEffect(() => {
+    if ((p.editTick ?? 0) === tick.current) return;
+    tick.current = p.editTick ?? 0;
+    setMode("edit");
+  }, [p.editTick]);
   const st = itemState(q);
   const undo = lastUndoable(p.log, q.id);
   const confirmed = wasConfirmed(p.log, q.id);
@@ -514,6 +696,11 @@ function ItemCard(p: {
   const mark = (i: number) => void run(() => setExamKey(q.id, i), `סומנה תשובה ${letter(i)}.`);
   const confirm = () =>
     one && q.answer !== null ? void run(() => setExamKey(q.id, q.answer), `התשובה ${letter(q.answer)} אושרה.`) : void run(() => examKeyConfirm(q.id), "התשובה המוצעת אושרה.");
+  const saveSeq = () => {
+    const seq = seqComplete(q.form, seqDraft, size);
+    if (!seq) return ctx.say(q.form === "tf" ? "צריך לסמן נכון או לא נכון לכל משפט." : "צריך לבחור תשובה לכל שורה.");
+    void run(() => examKeySet(q.id, null, seq), "התשובה סומנה.");
+  };
   const saveEdit = () =>
     void run(async () => {
       if (draft.question.trim() !== q.question) await examItemEdit(q.id, "question", null, draft.question);
@@ -579,6 +766,7 @@ function ItemCard(p: {
               </p>
             </div>
           </div>
+          {p.inexact ? <p className="a-callout quiet r-exact">ההעתקה שונה מהטקסט בקובץ · כדאי לבדוק מול העמוד.</p> : null}
           {q.form === "match" && q.prompts.length ? (
             <ol className="a-stack r-prompts" aria-label="מה להתאים">
               {q.prompts.map((t, i) => (
@@ -626,6 +814,61 @@ function ItemCard(p: {
             })}
           </ol>
           {q.form === "match" && q.seq ? <p className="a-small a-muted">ההתאמה: {q.seq.map((v, i) => `${i + 1}→${letter(v)}`).join(" · ")}</p> : null}
+          {mode === "seq" ? (
+            <div className="a-stack">
+              <p className="a-small r-pickhint">{q.form === "tf" ? "לכל משפט: נכון או לא נכון. התשובה תשתנה לכל הקבוצה:" : "לכל שורה, התשובה המתאימה. התשובה תשתנה לכל הקבוצה:"}</p>
+              <ol className="r-seq">
+                {(q.form === "tf" ? q.options : q.prompts).map((t, i) => (
+                  <li key={i}>
+                    <span className="a-small" dir="rtl">
+                      {q.form === "tf" ? `${LETTERS[i]}. ` : `${i + 1}. `}
+                      {t}
+                    </span>
+                    {q.form === "tf" ? (
+                      <div className="a-seg" role="radiogroup" aria-label={`משפט ${LETTERS[i]}`}>
+                        {[1, 0].map((v) => (
+                          <button
+                            key={v}
+                            type="button"
+                            className="a-btn small"
+                            role="radio"
+                            aria-checked={seqDraft[i] === v}
+                            disabled={sending}
+                            onClick={() => setSeqDraft((d) => d.map((x, k) => (k === i ? v : x)))}
+                          >
+                            {v ? "נכון" : "לא נכון"}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <select
+                        className="a-input"
+                        aria-label={`שורה ${i + 1}`}
+                        value={seqDraft[i] ?? ""}
+                        disabled={sending}
+                        onChange={(e) => setSeqDraft((d) => d.map((x, k) => (k === i ? (e.target.value === "" ? null : Number(e.target.value)) : x)))}
+                      >
+                        <option value="">לבחור</option>
+                        {q.options.map((o, k) => (
+                          <option key={k} value={k}>
+                            {`${LETTERS[k]}. ${o}`}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </li>
+                ))}
+              </ol>
+              <div className="a-row">
+                <button type="button" className="a-btn primary small" disabled={sending} onClick={saveSeq}>
+                  לשמור
+                </button>
+                <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("view")}>
+                  ביטול
+                </button>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
       {mode === "view" ? (
@@ -638,6 +881,18 @@ function ItemCard(p: {
           {one ? (
             <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("pick")}>
               {q.answer === null ? "לסמן תשובה" : "לסמן תשובה אחרת"}
+            </button>
+          ) : flags.sheets && (q.form === "tf" || q.form === "match") ? (
+            <button
+              type="button"
+              className="a-btn small"
+              disabled={sending}
+              onClick={() => {
+                setSeqDraft(Array.from({ length: size }, (_, i) => q.seq?.[i] ?? null));
+                setMode("seq");
+              }}
+            >
+              {q.seq?.length ? "לסמן תשובה אחרת" : "לסמן תשובה"}
             </button>
           ) : null}
           <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("edit")}>
@@ -658,11 +913,11 @@ function ItemCard(p: {
       {/* What a tap here does: the answer changes for the whole group, with the member's name, and can be undone. */}
       {mode === "view" && st === "suggested" ? (
         <p className="a-small a-muted r-group">האפליקציה הציעה את התשובה המסומנת ״מוצעת״. ״לאשר״ או ״לסמן תשובה אחרת״ משנים אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.</p>
-      ) : mode === "view" && one ? (
+      ) : mode === "view" && (one || flags.sheets) ? (
         <p className="a-small a-muted r-group">סימון תשובה משנה אותה לכל הקבוצה, עם השם שלך, ואפשר לבטל.</p>
       ) : null}
       {mode === "view" && q.page && st === "unclear" && !q.fixed && !q.answered ? <p className="a-small a-muted r-reread-note">{`${REREAD_COST} אם רק מילה שגויה, ״לתקן טקסט״ בחינם.`}</p> : null}
-      {mode === "view" && !one && st === "nokey" ? <p className="a-small a-muted">בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד.</p> : null}
+      {mode === "view" && !one && st === "nokey" && !flags.sheets ? <p className="a-small a-muted">בשאלת נכון או לא נכון ובשאלת התאמה עוד אי אפשר לסמן תשובה ביד.</p> : null}
       {keyByLine(q, confirmed) || undo ? (
         <p className="r-who a-small">
           {keyByLine(q, confirmed) ? <span>{keyByLine(q, confirmed)}</span> : null}

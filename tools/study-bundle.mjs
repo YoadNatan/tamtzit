@@ -88,7 +88,7 @@ const COMPONENT = {
   L: ["InstallScreen", "InstallParts"],
   R: ["NotifyScreen", "InboxScreen", "NotifyParts"],
   QS: ["MakeScreen", "MakeParts", "MakeProgress", "MakeEntry", "SetPage", "SetsShelf", "SetsScreen", "SetStats", "SetCard", "SetJoinNote", "SetsEntries"],
-  O: ["SheetUpload", "PageView", "DeepLinkCard", "ReviewWide"],
+  O: ["SheetUpload", "PageView", "DeepLinkCard"],
 };
 const LIB = {
   W: ["generate", "writing", "transcript", "transcribe", "transcribe.worker", "pdf-export"],
