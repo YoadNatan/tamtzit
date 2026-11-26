@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createDecipheriv, createECDH, hkdfSync } from "node:crypto";
 import { beforeEach, test } from "node:test";
 import { b64urlEncode } from "../../shared/study/b64url.js";
+import { keyId } from "./push.js";
 import { HttpError } from "./study.js";
 import { _resetVapidMemo, batches, dwp, notifyStep, PAYLOAD_MAX, readClaim, topicOf, ttlOf, withMarker, type Claim, type Claimed, type NotifyDeps } from "./notify.js";
 
@@ -173,6 +174,24 @@ test("each push service's answer goes into p_results as section R reads it", asy
     assert.match(e, /^study notify \d+ \d+ -?\d+$/, e);
     assert.ok(!e.includes("googleapis") && !e.includes("קינטיקה"));
   }
+});
+
+test("a device saved with another VAPID key's id is not posted to: reported 410, so section R deletes it", async () => {
+  const current = await keyId(vapidEnv.STUDY_VAPID_PUBLIC!);
+  const fresh = { ...dev(201), key_id: current };
+  const stale = { ...dev(201), key_id: "oldkeyid1234" };
+  const unknown = dev(201); // an older section R that does not send key_id: posted as before
+  const r = row({}, [fresh, stale, unknown]);
+  claims = [{ rows: [r], more: false, wait_ms: null }];
+  await notifyStep(ORIGIN, deps());
+  await settle();
+  assert.deepEqual(done()[0], [
+    { notice: r.notice.id, sub: fresh.id, status: 201 },
+    { notice: r.notice.id, sub: stale.id, status: 410 },
+    { notice: r.notice.id, sub: unknown.id, status: 201 },
+  ]);
+  assert.equal(sent.length, 2, "nothing went to the stale device");
+  assert.ok(!sent.some((x) => x.endpoint === stale.endpoint));
 });
 
 test("batches of about 8 devices, study_notify_done after each; a notice's devices stay in one batch", async () => {

@@ -196,3 +196,137 @@ test("the asks: each once on a device; \"לא עכשיו\" hides them all for 14
     g.localStorage = saved;
   }
 });
+
+/* ── A VAPID key changed on the server (a leaked key replaced): the device subscribes again ── */
+
+const KEY_A = "B" + "A".repeat(86);
+const KEY_B = "B" + "Q".repeat(86);
+const bytes = (k: string) => new Uint8Array(Buffer.from(k, "base64url"));
+
+/** A browser with the permission given, a registered /sw.js and one subscription made with `subKey`. */
+function rotationBrowser(o: { subKey: string | null; healthKey: string; memory: Record<string, unknown> }) {
+  const g = globalThis as Record<string, unknown>;
+  const store = new Map<string, string>([["study-notify", JSON.stringify({ v: 1, ...o.memory })]]);
+  const log = { unsubscribed: 0, subscribedWith: [] as string[], health: 0 };
+  const saved = { Notification: g.Notification, navigator: Object.getOwnPropertyDescriptor(globalThis, "navigator"), window: g.window, localStorage: g.localStorage, fetch: g.fetch };
+  let sub: unknown = null;
+  const makeSub = (key: Uint8Array | null) => ({
+    endpoint: "https://fcm.googleapis.com/fcm/send/rot-" + log.subscribedWith.length,
+    options: { userVisibleOnly: true, applicationServerKey: key ? key.buffer.slice(key.byteOffset, key.byteOffset + key.byteLength) : null },
+    toJSON: () => ({ keys: { p256dh: "B" + "x".repeat(86), auth: "y".repeat(22) } }),
+    unsubscribe: async () => {
+      log.unsubscribed++;
+      sub = null;
+      return true;
+    },
+  });
+  if (o.subKey) sub = makeSub(bytes(o.subKey));
+  const reg = {
+    active: { scriptURL: "https://study.example/sw.js" },
+    pushManager: {
+      getSubscription: async () => sub,
+      subscribe: async (opts: { applicationServerKey: Uint8Array }) => {
+        log.subscribedWith.push(Buffer.from(opts.applicationServerKey).toString("base64url"));
+        sub = makeSub(opts.applicationServerKey);
+        return sub;
+      },
+    },
+    unregister: async () => true,
+  };
+  g.Notification = { permission: "granted", requestPermission: async () => "granted" };
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { onLine: true, userAgent: ANDROID, maxTouchPoints: 0, serviceWorker: { getRegistration: async () => reg, getRegistrations: async () => [reg], register: async () => reg, ready: Promise.resolve(reg) } },
+  });
+  g.window = { PushManager: function PushManager() {} };
+  g.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+  g.fetch = async () => {
+    log.health++;
+    return new Response(JSON.stringify({ vapid: o.healthKey, notify: true }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return {
+    log,
+    memory: () => JSON.parse(store.get("study-notify") ?? "{}"),
+    restore() {
+      g.Notification = saved.Notification;
+      if (saved.navigator) Object.defineProperty(globalThis, "navigator", saved.navigator);
+      g.window = saved.window;
+      g.localStorage = saved.localStorage;
+      g.fetch = saved.fetch;
+    },
+  };
+}
+
+test("subOnKey: the subscription's own key decides; without it, the key the device last saved with", () => {
+  const sub = (k: string | null) => ({ options: { applicationServerKey: k ? bytes(k).buffer : null } }) as unknown as PushSubscription;
+  assert.equal(N.subOnKey(sub(KEY_A), KEY_A, "idA", { v: 1 }), true);
+  assert.equal(N.subOnKey(sub(KEY_A), KEY_B, "idB", { v: 1, subKeyId: "idB" }), false, "the browser's word wins over the memory");
+  assert.equal(N.subOnKey(sub(null), KEY_B, "idB", { v: 1, subKeyId: "idA" }), false, "no key in the subscription: the memory");
+  assert.equal(N.subOnKey(sub(null), KEY_B, "idB", { v: 1, subKeyId: "idB" }), true);
+  assert.equal(N.subOnKey(sub(null), KEY_B, "idB", { v: 1 }), true, "nothing known: taken as current (noted at the next save)");
+});
+
+test("a key changed on the server: resync drops the old subscription and subscribes with the new key", async () => {
+  const idA = await N.keyIdOf(KEY_A);
+  // wiring() has already written key B's id into the memory? It must not matter: the subscription says A.
+  const b = rotationBrowser({ subKey: KEY_A, healthKey: KEY_B, memory: { key: KEY_A, keyId: idA, keyAt: 1, ok: true, subKeyId: idA, uid: "u1" } });
+  try {
+    await N.resync("u1");
+    assert.equal(b.log.health, 1, "health asked (the memory was a day old)");
+    assert.equal(b.log.unsubscribed, 1, "the subscription made with key A is dropped");
+    assert.deepEqual(b.log.subscribedWith, [KEY_B], "and made again with key B");
+    assert.equal(b.memory().keyId, await N.keyIdOf(KEY_B));
+  } finally {
+    b.restore();
+  }
+});
+
+test("enable() after a key change: a new subscription with the new key, even when the memory already has the new key's id", async () => {
+  const idB = await N.keyIdOf(KEY_B);
+  const b = rotationBrowser({ subKey: KEY_A, healthKey: KEY_B, memory: { key: KEY_B, keyId: idB, keyAt: Date.now(), ok: true, uid: "u1" } });
+  try {
+    await N.enable(KEY_B, idB, "u1"); // section R is not reachable here: the save fails, after the subscribe
+    assert.equal(b.log.unsubscribed, 1);
+    assert.deepEqual(b.log.subscribedWith, [KEY_B]);
+  } finally {
+    b.restore();
+  }
+});
+
+test("another member signed in on this browser: never subscribed without a tap; the earlier member's subscription is dropped", async () => {
+  const idA = await N.keyIdOf(KEY_A);
+  let b = rotationBrowser({ subKey: KEY_A, healthKey: KEY_A, memory: { key: KEY_A, keyId: idA, keyAt: Date.now(), ok: true, subKeyId: idA, uid: "u1" } });
+  try {
+    await N.resync("u2");
+    assert.equal(b.log.unsubscribed, 1, "u1's subscription stops on this browser");
+    assert.deepEqual(b.log.subscribedWith, [], "u2 is not subscribed");
+    assert.equal(b.memory().uid, undefined);
+  } finally {
+    b.restore();
+  }
+  // The permission given long ago, no subscription, nobody turned pushes on here: nothing happens.
+  b = rotationBrowser({ subKey: null, healthKey: KEY_A, memory: { key: KEY_A, keyId: idA, keyAt: Date.now(), ok: true } });
+  try {
+    await N.resync("u2");
+    assert.deepEqual(b.log.subscribedWith, []);
+  } finally {
+    b.restore();
+  }
+  // The member who turned them on: kept current (a missing subscription made again).
+  b = rotationBrowser({ subKey: null, healthKey: KEY_A, memory: { key: KEY_A, keyId: idA, keyAt: Date.now(), ok: true, subKeyId: idA, uid: "u2" } });
+  try {
+    await N.resync("u2");
+    assert.deepEqual(b.log.subscribedWith, [KEY_A]);
+  } finally {
+    b.restore();
+  }
+});
+
+test("an iPad's home-screen app (a Mac's user agent, with touch) is not a computer, and an old one is ios-old", () => {
+  const IPAD_APP = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15";
+  assert.equal(N.isComputer({ kind: "standalone" }, IPAD_APP, 5), false);
+  assert.equal(N.isComputer({ kind: "standalone" }, IPAD_APP, 0), true, "a real Mac's installed app");
+  assert.equal(N.isComputer({ kind: "desktop" }, MAC_CHROME, 0), true);
+  assert.equal(st({ env: { kind: "standalone" }, ua: IPAD_APP, touch: 5, hasPush: false }), "ios-old");
+  assert.equal(st({ env: { kind: "standalone" }, ua: IPAD_APP, touch: 0, hasPush: false }), "unsupported");
+});

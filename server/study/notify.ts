@@ -2,7 +2,7 @@ import { getDeadline, waitUntil } from "@vercel/functions"; // 3.10.5, pinned
 import { utf8 } from "../../shared/study/b64url.js";
 import { render } from "../../shared/study/notifyCopy.js";
 import { routeQuery } from "../../shared/study/notifyRoute.js";
-import { send, sha256b64, vapidFromEnv, vapidPairOk, type Sub, type Urgency, type Vapid } from "./push.js";
+import { keyId, send, sha256b64, vapidFromEnv, vapidPairOk, type Sub, type Urgency, type Vapid } from "./push.js";
 import { assertSchema, errorText, HttpError, json, keyed, serverClient } from "./study.js";
 
 /* ── Sending the pushes (notifications, section R; POST /api/study/work {notify:true}) ──
@@ -26,8 +26,11 @@ import { assertSchema, errorText, HttpError, json, keyed, serverClient } from ".
  * Every payload is Declarative Web Push (iOS 18.4+ and Safari 18.5 show it
  * without running the service worker; public/sw.js reads the same JSON):
  * the notice's words from shared/study/notifyCopy.ts for the lock screen,
- * and its link with nt=<id>, which the app marks seen. Logs carry notice
- * ids, device ids and statuses only: never an endpoint, a key, args or words. */
+ * and its link with nt=<id>, which the app marks seen. A device saved with
+ * another VAPID key's id (the keys changed since) is never posted to: it is
+ * reported 410, so section R deletes it, and the app subscribes it again with
+ * the new key on its next open. Logs carry notice ids, device ids and
+ * statuses only: never an endpoint, a key, args or words. */
 
 export type ClaimedNotice = {
   id: number;
@@ -40,7 +43,7 @@ export type ClaimedNotice = {
   expires_at: string;
   silent: boolean;
 };
-export type Claimed = { notice: ClaimedNotice; subs: Array<Sub & { id: number }> };
+export type Claimed = { notice: ClaimedNotice; subs: Array<Sub & { id: number; key_id?: string }> };
 export type Claim = { rows: Claimed[]; more: boolean; wait_ms: number | null };
 export type Result = { notice: number; sub: number; status: number; retry_after?: number };
 
@@ -173,7 +176,8 @@ export async function notifyStep(origin: string, deps: NotifyDeps = {}): Promise
   if (!first.rows.length && !first.more) return json(200, { claimed: false });
   const now = deps.now ?? Date.now;
   const deadline = deps.deadline ?? getDeadline()?.getTime() ?? now() + 300_000;
-  const work = notifyRun(first, { rpc, claim, vapid, origin, deadline, now, sleep: deps.sleep, fetchImpl: deps.fetchImpl }).catch((e) =>
+  const kid = await keyId(vapid.publicKey);
+  const work = notifyRun(first, { rpc, claim, vapid, keyId: kid, origin, deadline, now, sleep: deps.sleep, fetchImpl: deps.fetchImpl }).catch((e) =>
     console.error(`study notify: ${errorText(e)}`),
   );
   (deps.waitUntil ?? waitUntil)(work);
@@ -184,6 +188,8 @@ type RunOpts = {
   rpc: Rpc;
   claim: () => Promise<Claim>;
   vapid: Vapid;
+  /** The id of the current public key (devices saved with another are stale). */
+  keyId?: string;
   origin: string;
   deadline: number;
   now: () => number;
@@ -247,7 +253,8 @@ async function sendBatch(batch: Claimed[], o: RunOpts): Promise<Result[]> {
     for (const s of row.subs) {
       jobs.push(
         (async (): Promise<Result> => {
-          const r = payload === null ? { status: 413 } : await send(s, payload, { ttl: ttlOf(n.expires_at, Date.now()), urgency: URGENCY[n.cat] ?? "normal", topic, vapid: o.vapid, fetchImpl: o.fetchImpl });
+          const stale = Boolean(o.keyId && typeof s.key_id === "string" && s.key_id && s.key_id !== o.keyId);
+          const r = stale ? { status: 410 } : payload === null ? { status: 413 } : await send(s, payload, { ttl: ttlOf(n.expires_at, Date.now()), urgency: URGENCY[n.cat] ?? "normal", topic, vapid: o.vapid, fetchImpl: o.fetchImpl });
           if (r.status < 200 || r.status > 299) console.error(`study notify ${n.id} ${s.id} ${r.status}`);
           const out: Result = { notice: n.id, sub: s.id, status: r.status };
           if ("retryAfter" in r && typeof r.retryAfter === "number") out.retry_after = r.retryAfter;

@@ -15,8 +15,13 @@ import { keepOnlyDevice, notifyState, subscribeDevice, unsubscribeDevice } from 
  *
  * The device's memory, localStorage "study-notify" (every access in
  * try/catch): {v:1, asked:{home?,upload?,bar?}, snooze?, key?, keyId?,
- * keyAt?, ok?}: the VAPID public key, its id and when health gave it (asked
- * again after a day), and whether health said pushes work. */
+ * keyAt?, ok?, subKeyId?, uid?}: the VAPID public key, its id and when
+ * health gave it (asked again after a day), and whether health said pushes
+ * work; then, written only once section R has saved this device, the id of
+ * the key its subscription was made with (a changed key makes a new
+ * subscription: wiring() never writes it) and the member who turned pushes
+ * on here (another member signed in on this browser is never subscribed
+ * without a tap of their own). */
 
 export type PushState = "off" | "ios-install" | "ios-old" | "inapp" | "unsupported" | "denied" | "ask" | "on" | "broken" | "offline";
 
@@ -31,9 +36,13 @@ export type StateInput = {
   failed: boolean;
   online: boolean;
   ua: string;
+  /** navigator.maxTouchPoints: an iPad's home-screen app says "Macintosh", with touch. */
+  touch?: number;
 };
 
 const IOS_UA = /iPhone|iPad|iPod/;
+/** An iPhone or an iPad, also the iPad that reports a Mac (the same rule as deviceOf). */
+const appleTouch = (ua: string, touch = 0) => IOS_UA.test(ua) || (/Macintosh/.test(ua) && touch > 1);
 
 /** Where this device stands. In order: not offered; an iPhone outside the
  *  home-screen app; another app's browser; the home-screen app on an iOS
@@ -43,7 +52,7 @@ export function pushState(o: StateInput): PushState {
   if (!o.available) return "off";
   if (o.env.kind === "ios-safari" || o.env.kind === "ios-browser") return "ios-install";
   if (o.env.kind === "ios-inapp" || o.env.kind === "android-inapp") return "inapp";
-  if (o.env.kind === "standalone" && IOS_UA.test(o.ua) && !o.hasPush) return "ios-old";
+  if (o.env.kind === "standalone" && appleTouch(o.ua, o.touch) && !o.hasPush) return "ios-old";
   if (!o.hasPush || !o.hasSw) return "unsupported";
   if (o.perm === "denied") return "denied";
   if (o.perm === "granted" && o.subscribed) return "on";
@@ -102,6 +111,10 @@ export type NotifyMemory = {
   keyId?: string;
   keyAt?: number;
   ok?: boolean;
+  /** The key the saved subscription was made with (only after section R saved it). */
+  subKeyId?: string;
+  /** The member who turned pushes on on this device. */
+  uid?: string;
 };
 const DAY = 86_400_000;
 
@@ -153,6 +166,31 @@ export function snoozeAsks(now = Date.now()): NotifyMemory {
 export async function keyIdOf(key: string): Promise<string> {
   const raw = b64urlDecode(key);
   return b64urlEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(raw)))).slice(0, 12);
+}
+
+/** Was this subscription made with this VAPID key? The subscription says so
+ *  itself (options.applicationServerKey) where the browser keeps it; else the
+ *  device's memory of the key its last saved subscription used (none noted:
+ *  taken as this key, and noted at the next save). A subscription made with
+ *  an older key gets 403 from its push service, so it is made again. */
+export function subOnKey(sub: PushSubscription, key: string, keyId: string, m: NotifyMemory = readMemory()): boolean {
+  let raw: ArrayBuffer | null = null;
+  try {
+    raw = sub.options?.applicationServerKey ?? null;
+  } catch {
+    raw = null;
+  }
+  if (raw && raw.byteLength > 0) {
+    let want: Uint8Array;
+    try {
+      want = b64urlDecode(key);
+    } catch {
+      return false;
+    }
+    const got = new Uint8Array(raw);
+    return got.length === want.length && got.every((b, i) => b === want[i]);
+  }
+  return m.subKeyId === undefined || m.subKeyId === keyId;
 }
 
 /* ── The browser ── */
@@ -213,7 +251,7 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
 /** The kill path: the keys were removed on the server, so the worker goes. */
 export async function removeWorker(): Promise<number> {
   const c = sw();
-  writeMemory({ key: undefined, keyId: undefined, keyAt: undefined, ok: false });
+  writeMemory({ key: undefined, keyId: undefined, keyAt: undefined, subKeyId: undefined, ok: false });
   if (!c) return 0;
   const regs = await c.getRegistrations().catch(() => [] as readonly ServiceWorkerRegistration[]);
   let n = 0;
@@ -264,6 +302,7 @@ export async function readState(isAvailable: boolean, failed = false): Promise<P
     failed,
     online: typeof navigator === "undefined" || navigator.onLine !== false,
     ua: p.ua,
+    touch: typeof navigator === "undefined" ? 0 : (navigator.maxTouchPoints ?? 0),
   });
 }
 
@@ -282,10 +321,12 @@ async function save(s: PushSubscription, keyId: string): Promise<void> {
   await subscribeDevice({ ...k, keyId, device: d.device, browser: d.browser });
 }
 
-/** "להפעיל התראות": straight from a click. The browser's question is the
- *  first thing it does (Safari asks only from the tap itself); then the
- *  worker, the subscription and section R, each step given 10 s. */
-export async function enable(key: string, keyId: string): Promise<PushState> {
+/** "להפעיל התראות": call it as the tap's first statement, before any await
+ *  (Safari asks only from the tap itself), so the browser's question is the
+ *  first thing it does; then the worker, the subscription (made again when it
+ *  was made with another key) and section R, each step given 10 s. `uid`: the
+ *  member who tapped (resync keeps only that member's subscription). */
+export async function enable(key: string, keyId: string, uid?: string): Promise<PushState> {
   let answer: NotificationPermission;
   try {
     answer = await Notification.requestPermission();
@@ -301,13 +342,13 @@ export async function enable(key: string, keyId: string): Promise<PushState> {
     await withTimeout(registerWorker().then((r) => r ?? Promise.reject(new Error("no worker"))));
     const reg = await withTimeout(c.ready);
     let sub = await reg.pushManager.getSubscription();
-    if (sub && readMemory().keyId !== keyId) {
+    if (sub && !subOnKey(sub, key, keyId)) {
       await sub.unsubscribe().catch(() => false);
       sub = null;
     }
     sub ??= await withTimeout(reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: new Uint8Array(b64urlDecode(key)) }));
     await withTimeout(save(sub, keyId));
-    writeMemory({ key, keyId });
+    writeMemory({ subKeyId: keyId, ...(uid ? { uid } : {}) });
     return "on";
   } catch {
     return typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "broken";
@@ -315,25 +356,37 @@ export async function enable(key: string, keyId: string): Promise<PushState> {
 }
 
 let syncing: Promise<void> | null = null;
-/** On each open, once the page is idle: with the permission given, the
- *  subscription is made again when it is missing or was made with an older
- *  key, and section R hears of it (which also moves a device to the member
- *  now signed in on it). Health is asked at most daily; a health without a
- *  key removes the worker. */
-export function resync(): Promise<void> {
+/** On each open, once the page is idle, for the member signed in (`uid`):
+ *  with the permission given and pushes turned on here by this member, the
+ *  subscription is made again when it is missing or was made with another
+ *  key (a key changed on the server), and section R hears of it. Another
+ *  member's subscription on this browser is dropped, never moved: the member
+ *  now signed in turns pushes on with a tap of their own. Health is asked at
+ *  most daily; a health without a key removes the worker. */
+export function resync(uid?: string): Promise<void> {
   syncing ??= (async () => {
     try {
-      const has = Boolean(await currentSubscription());
+      const has = await currentSubscription();
       if (perm() !== "granted" && !has) return;
       const w = await wiring(false);
       if (!w.key || !w.keyId) return; // no key: removed above when health said so
       if (perm() !== "granted") return;
       const c = sw();
       if (!c || !hasPush()) return;
+      const m = readMemory();
+      // A device from before this memory had uid: it stays with whoever is signed in now.
+      const mine = uid !== undefined && (m.uid === uid || (m.uid === undefined && Boolean(has)));
+      if (!mine) {
+        if (has && m.uid !== undefined && uid !== undefined && m.uid !== uid) {
+          // The earlier member's pushes stop on this browser (their push service then answers 410).
+          await has.unsubscribe().catch(() => false);
+          writeMemory({ uid: undefined, subKeyId: undefined });
+        }
+        return;
+      }
       const reg = await withTimeout(registerWorker().then((r) => r ?? Promise.reject(new Error("no worker"))));
       let sub = await reg.pushManager.getSubscription();
-      const old = readMemory();
-      if (sub && old.keyId && old.keyId !== w.keyId) {
+      if (sub && !subOnKey(sub, w.key, w.keyId, m)) {
         await sub.unsubscribe().catch(() => false);
         sub = null;
       }
@@ -342,7 +395,7 @@ export function resync(): Promise<void> {
         sub = await withTimeout(ready.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: new Uint8Array(b64urlDecode(w.key)) }));
       }
       await save(sub, w.keyId);
-      writeMemory({ keyId: w.keyId });
+      writeMemory({ subKeyId: w.keyId, uid });
     } catch {
       /* the next open tries again; the inbox has everything meanwhile */
     } finally {
@@ -361,6 +414,7 @@ export async function dropThisDevice(): Promise<void> {
       if (!s) return;
       await unsubscribeDevice(s.endpoint).catch(() => 0);
       await s.unsubscribe().catch(() => false);
+      writeMemory({ uid: undefined, subKeyId: undefined });
     })(),
     3_000,
   ).catch(() => undefined);
@@ -378,6 +432,7 @@ export async function removeThisDevice(): Promise<void> {
   if (s) {
     await unsubscribeDevice(s.endpoint);
     await s.unsubscribe().catch(() => false);
+    writeMemory({ uid: undefined, subKeyId: undefined });
   }
 }
 
@@ -386,5 +441,6 @@ export async function thisEndpoint(): Promise<string | null> {
   return (await currentSubscription().catch(() => null))?.endpoint ?? null;
 }
 
-/** A computer (the test toast adds where its notifications are allowed). */
-export const isComputer = (env: Env, ua: string) => env.kind === "desktop" || (env.kind === "standalone" && !/Mobile|Android|iPhone|iPad/.test(ua));
+/** A computer (the test toast adds where its notifications are allowed); never an iPad, whatever it reports. */
+export const isComputer = (env: Env, ua: string, touch = 0) =>
+  !appleTouch(ua, touch) && (env.kind === "desktop" || (env.kind === "standalone" && !/Mobile|Android/.test(ua)));

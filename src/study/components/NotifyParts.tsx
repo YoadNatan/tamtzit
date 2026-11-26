@@ -4,7 +4,7 @@ import { flags } from "../lib/flags";
 import { guideMark } from "../lib/guideMark";
 import { detect, probe } from "../lib/install";
 import { markSeen, readPrefs, seenFor, setShell, useNotices, watchNotices } from "../lib/notices";
-import type { Ask } from "../lib/notify";
+import { askAllowed, available, enable, markAsked, meState, readState, resync, snoozeAsks, type Ask } from "../lib/notify";
 import { bellCount, bellLabel, enabledToast, NT } from "../lib/notifyText";
 import { parseRoute, routeUrl, tabOf, type Route } from "../lib/route";
 import { Loading, RouteLink } from "./Shell";
@@ -28,8 +28,10 @@ import "../styles/notify.css";
  * "לקבל התראות" as its step instead), NotifyOffer (after an upload, for the
  * member who uploaded), and the inbox's one line (InboxScreen). Each shows
  * once on a device; "לא עכשיו" hides them all for 14 days. "להפעיל
- * התראות" asks the browser straight from the tap. NotifyQuizBox: the quiz
- * setup's "להודיע לקבוצה". */
+ * התראות" asks the browser straight from the tap: lib/notify.ts is imported
+ * here statically (this file is itself a lazy chunk), so enable() is the
+ * tap's first call, before any await (Safari on iOS asks only inside the
+ * tap). NotifyQuizBox: the quiz setup's "להודיע לקבוצה". */
 
 /** A push's link carries the notice's id as nt=<id>: seen, and the address
  *  loses it (the route itself never had it). */
@@ -73,7 +75,7 @@ export function NotifyCore({ route, ctx }: { route: Route; ctx: Ctx }) {
   // Idle after the first paint, and again when the member on this device changes.
   useEffect(() => {
     let cancel = () => undefined as void;
-    const run = () => void import("../lib/notify").then((m) => m.resync()).catch(() => undefined);
+    const run = () => void resync(ctx.userId).catch(() => undefined);
     const w = window as Window & { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (n: number) => void };
     if (w.requestIdleCallback) {
       const h = w.requestIdleCallback(run, { timeout: 5000 });
@@ -124,12 +126,11 @@ export function NotifyMeRow({ ctx }: { ctx: Ctx }) {
   const [word, setWord] = useState<MeWord | null>(null);
   useEffect(() => {
     let alive = true;
-    void import("../lib/notify")
-      .then(async (m) => {
-        const a = await m.available(false);
-        if (!a.ok) return null;
-        return m.meState(await m.readState(true));
-      })
+    void (async () => {
+      const a = await available(false);
+      if (!a.ok) return null;
+      return meState(await readState(true));
+    })()
       .then((w) => alive && setWord(w))
       .catch(() => undefined);
     return () => {
@@ -157,18 +158,20 @@ type Key = { key: string; keyId: string };
 /** The VAPID key when this ask may show now: pushes offered to this member,
  *  this device can be asked, and this ask was not shown (or snoozed). */
 async function askable(which: Ask): Promise<Key | null> {
-  const m = await import("../lib/notify");
-  if (!m.askAllowed(which)) return null;
-  const a = await m.available(false);
+  if (!askAllowed(which)) return null;
+  const a = await available(false);
   if (!a.ok || !a.key || !a.keyId) return null;
-  if ((await m.readState(true)) !== "ask") return null;
+  if ((await readState(true)) !== "ask") return null;
   return { key: a.key, keyId: a.keyId };
 }
 
-/** "להפעיל התראות" from an ask: the browser's question first, then the toast. */
-async function turnOn(ctx: Ctx, k: Key): Promise<boolean> {
-  const m = await import("../lib/notify");
-  const s = await m.enable(k.key, k.keyId);
+/** "להפעיל התראות" from an ask. Called as the tap's first statement: enable()
+ *  asks the browser before anything else; then the toast. */
+function turnOn(ctx: Ctx, k: Key): Promise<boolean> {
+  return enable(k.key, k.keyId, ctx.userId).then(afterTurnOn(ctx));
+}
+
+const afterTurnOn = (ctx: Ctx) => async (s: Awaited<ReturnType<typeof enable>>): Promise<boolean> => {
   if (s === "on") {
     guideMark("notify");
     const p = await readPrefs().catch(() => ({ live: true, mine: true, digest: false }));
@@ -179,26 +182,48 @@ async function turnOn(ctx: Ctx, k: Key): Promise<boolean> {
   if (s === "ask") return false;
   ctx.say(s === "denied" ? NT.device.denied : s === "offline" ? NT.device.offline : NT.device.broken);
   return true;
+};
+
+/** A card that goes while it holds the focus: the focus moves to the screen's next heading (else its title). */
+function focusAfter(card: HTMLElement | null): void {
+  if (!card || !card.contains(document.activeElement)) return;
+  let next: Element | null = card.nextElementSibling;
+  let h: HTMLElement | null = null;
+  while (next && !h) {
+    h = next.matches("h1, h2, h3") ? (next as HTMLElement) : next.querySelector<HTMLElement>("h1, h2, h3");
+    next = next.nextElementSibling;
+  }
+  h ??= document.querySelector<HTMLElement>("main h1");
+  if (!h) return;
+  if (!h.hasAttribute("tabindex")) h.setAttribute("tabindex", "-1");
+  h.focus();
 }
 
 function AskCard({ ctx, which, k, head, line, more, onGone }: { ctx: Ctx; which: Ask; k: Key; head?: string; line: string; more?: string; onGone: () => void }) {
   const [busy, setBusy] = useState(false);
   const shown = useRef(false);
+  const card = useRef<HTMLElement>(null);
   useEffect(() => {
     if (shown.current) return;
     shown.current = true;
-    void import("../lib/notify").then((m) => m.markAsked(which));
+    markAsked(which);
   }, [which]);
-  const yes = () => {
-    setBusy(true);
-    void turnOn(ctx, k).then((done) => (done ? onGone() : setBusy(false)));
-  };
-  const no = () => {
-    void import("../lib/notify").then((m) => m.snoozeAsks());
+  const gone = () => {
+    focusAfter(card.current);
     onGone();
   };
+  const yes = () => {
+    // The browser's question is the tap's first call (no await before it).
+    const asked = turnOn(ctx, k);
+    setBusy(true);
+    void asked.then((done) => (done ? gone() : setBusy(false)));
+  };
+  const no = () => {
+    snoozeAsks();
+    gone();
+  };
   return (
-    <section className="a-card ntf-ask" data-ask={which} aria-label={head ?? line}>
+    <section ref={card} className="a-card ntf-ask" data-ask={which} aria-label={head ?? line}>
       {head ? <h2 className="a-h2">{head}</h2> : null}
       <p className={head ? "a-small" : "ntf-ask-q"}>{line}</p>
       <div className="a-row">
@@ -214,11 +239,14 @@ function AskCard({ ctx, which, k, head, line, more, onGone }: { ctx: Ctx; which:
   );
 }
 
-/** The guide's card holds the home and still takes steps (it shows "לקבל התראות" itself). */
+/** The guide holds the home: its card still takes steps (it shows "לקבל
+ *  התראות" itself), or the one-time offer of the app tour is still
+ *  unanswered (one ask on a launch, not two; the card waits for the next). */
 async function guideHolds(userId: string): Promise<boolean> {
   if (!flags.guide) return false;
   const g = await import("../lib/guide");
-  return g.cardTakesSteps(g.readMemory(userId), Date.now());
+  const m = g.readMemory(userId);
+  return g.cardTakesSteps(m, Date.now()) || g.offerWanted(m);
 }
 
 /** Today, the first launch from the home-screen icon: once. */
@@ -263,7 +291,7 @@ export function NotifyOffBar({ ctx }: { ctx: Ctx }) {
       .then((got) => {
         if (!alive || !got) return;
         setOn(true);
-        void import("../lib/notify").then((m) => m.markAsked("bar"));
+        markAsked("bar");
       })
       .catch(() => undefined);
     return () => {

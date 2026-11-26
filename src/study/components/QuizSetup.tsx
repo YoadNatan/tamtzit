@@ -9,6 +9,7 @@ import type { Route } from "../lib/route";
 import { Icon } from "./Icon";
 import { BackLink, Head, Loading, RouteLink, StickyActions } from "./Shell";
 import { flags } from "../lib/flags";
+import ErrorBoundary from "./ErrorBoundary";
 
 /** "להודיע לקבוצה" (notifications, section R; lazy, nothing without VITE_STUDY_NOTIFY). */
 const NotifyQuizBox = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyQuizBox })));
@@ -308,9 +309,11 @@ export default function QuizSetup({ route, ctx }: ScreenProps<"quiz">) {
       </section>
 
       {flags.notify ? (
-        <Suspense fallback={null}>
-          <NotifyQuizBox checked={tell} onChange={setTell} />
-        </Suspense>
+        <ErrorBoundary reset="notify" fallback="none">
+          <Suspense fallback={null}>
+            <NotifyQuizBox checked={tell} onChange={setTell} />
+          </Suspense>
+        </ErrorBoundary>
       ) : null}
 
       <section className="a-card flat quiz-summary" aria-label="סיכום">

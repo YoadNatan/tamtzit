@@ -93,9 +93,14 @@ async function codesOn(schema: unknown, features: unknown, workerOk: boolean): P
 /** The VAPID public key when the three keys are set and the private one is
  *  the public one's pair; null otherwise. Worked out here, without the
  *  database, so a slow database never reads as "keys removed". */
+let pairMemo: { key: string; ok: Promise<boolean> } | null = null;
+/** The public key when the keys are a pair; the check runs once per instance and keys (health is public). */
 async function vapidPublic(): Promise<string | null> {
   const v = vapidFromEnv(process.env);
-  return v && (await vapidPairOk(v)) ? v.publicKey : null;
+  if (!v) return null;
+  const key = `${v.publicKey} ${v.privateKey}`;
+  if (pairMemo?.key !== key) pairMemo = { key, ok: vapidPairOk(v).catch(() => false) };
+  return (await pairMemo.ok) ? v.publicKey : null;
 }
 
 type NotifyOk = { wired?: unknown; on?: unknown; stuck?: unknown };

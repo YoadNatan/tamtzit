@@ -33,6 +33,7 @@ import { timeAgo } from "./Together";
 const NotifyHome = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyHomeCard })));
 import TodaySession from "./TodaySession";
 import "../styles/today.css";
+import ErrorBoundary from "./ErrorBoundary";
 
 /* ── Today, "היום" (package T, T-1; today.html s1, spec §12.4.T) ──
  *
@@ -130,9 +131,11 @@ function TodayHome({ ctx }: { ctx: Ctx }) {
       <InstallHomeCard ctx={ctx} />
       {/* Notifications: opened from the icon for the first time, once (the guide's card says it itself when it holds the home). */}
       {flags.notify ? (
-        <Suspense fallback={null}>
-          <NotifyHome ctx={ctx} />
-        </Suspense>
+        <ErrorBoundary reset="notify" fallback="none">
+          <Suspense fallback={null}>
+            <NotifyHome ctx={ctx} />
+          </Suspense>
+        </ErrorBoundary>
       ) : null}
 
       <div className="a-sec t-sec">

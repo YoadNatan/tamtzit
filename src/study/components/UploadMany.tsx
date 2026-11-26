@@ -26,6 +26,7 @@ import type { Ctx } from "../features/types";
 import { softBreaks } from "../lib/rich";
 import { BackLink, Head, RouteLink, StickyActions } from "./Shell";
 import "../styles/courses.css";
+import ErrorBoundary from "./ErrorBoundary";
 
 /** "להודיע כשהסיכום מוכן?" (notifications, section R; lazy, nothing without VITE_STUDY_NOTIFY). */
 const NotifyOffer = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyOffer })));
@@ -427,9 +428,11 @@ export default function UploadMany({ ctx, courses, courseId }: { ctx: Ctx; cours
             </p>
           ) : null}
           {flags.notify && done > 0 ? (
-            <Suspense fallback={null}>
-              <NotifyOffer ctx={ctx} />
-            </Suspense>
+            <ErrorBoundary reset="notify" fallback="none">
+              <Suspense fallback={null}>
+                <NotifyOffer ctx={ctx} />
+              </Suspense>
+            </ErrorBoundary>
           ) : null}
           <div className="a-row">
             {failed.length ? (
