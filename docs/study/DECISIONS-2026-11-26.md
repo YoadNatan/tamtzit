@@ -541,3 +541,18 @@ Also decided for this build:
   are in `server/study/budget.ts`, outside `POLICY`.
 - **Not done here:** the calibration itself (Yoad runs the read-only query
   in `sets.md`; production was not queried).
+
+### Practice sets, slice A's entry points and fixes (WP7-WP8), built on 26 November 2026
+
+- **One name on every way in** ([`sets.md`](sets.md), "The entry points and
+  the fixes"): Today's card "תרגול", the library's chip "+ סט" (also on a
+  lecture with no questions), the lecture page's row after reading ("סט
+  חדש" · "לפתור"), the hub's "סט חדש" card; each only with
+  `VITE_STUDY_MAKE`.
+- **Today's free primary is "תרגול מהבנק"**, not the design's "סבב חדש":
+  from Today there is no lecture to start a round on, so the button opens
+  the hub's lectures, and COPY.md's glossary already names practising from
+  the bank "תרגול מהבנק". With a queue the card keeps that link beside "סט
+  חדש ‹", so the hub stays one tap from Today.
+- **The fixes of §5.11** are behind the same flag (flags off is the app as
+  it was, and `practice.cjs` keeps checking the old words).

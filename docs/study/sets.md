@@ -16,7 +16,7 @@ a view over bank questions.
 
 | Slice | What | Flag | SQL | State |
 |---|---|---|---|---|
-| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | WP0-WP6 built (docs, bundle owner, shared planning and price, the server's `plan`, the flag and routes, the create and generating screens); the entry points and the fixes of the practice screens (WP7) and the rest of slice A's e2e (WP8) follow |
+| A | The generator: one create screen ("סט חדש") with the price on the button, the generating screen ("סט בהכנה"), the entry points, the fixes of the practice screens | `VITE_STUDY_MAKE` | none | Built (WP0-WP8): docs, bundle owner, shared planning and price, the server's `plan`, the flag and routes, the create and generating screens, the entry points and the fixes of the practice screens, and slice A's e2e (§14 steps 1-4, 12-13) |
 | B | Sets and sharing: the shelf, the set page, set sessions `s=k.<set>`, group numbers, Today's row | `VITE_STUDY_SETS` | L 1 | not built yet |
 | C | The notices `set_shared` and `set_solved` (WP17), with section R | (R's) | L 1, R | not built yet |
 
@@ -53,6 +53,14 @@ design's static share of it is capped at **2,000 B**: bundle owner `QS` in
 `QS` keeps only its slot module in the entry chunk (`SLOT_ONLY`), and the
 check fails when its share passes 2,000 B. The tool also turns on
 `VITE_STUDY_MAKE` and `VITE_STUDY_SETS` with every other flag.
+
+Measured on 26 Nov 2026 with WP7 (the entry points and the fixes): the
+entry chunk is **401,662 B** with every flag on (8,338 B left; +482 B: the
+slot's lecture row wrapper, the library's "+ סט" chip in Q's slot and the
+condition in the lecture page), QS's share **742 B** of its 2,000, and
+400,897 B with every flag off. The Today card, the hub card, the fixes and
+the row's words are in lazy chunks (TodayScreen, PracticeHome, the practice
+screens, `MakeEntry`).
 
 Measured on 26 Nov 2026 with WP4-WP6 (the flag, the routes, the slot and
 the two screens): the entry chunk is **401,180 B** with every flag on (8,820
@@ -302,7 +310,53 @@ are no sets yet); slice B replaces it with "הסט ישותף עם הקבוצה"
   10 s. Its live region says the first ready question, each quarter and
   the end.
 
-## The e2e (WP5-WP6)
+## The entry points and the fixes (WP7)
+
+Every entry point says **"סט חדש"** (design §5.1), each only with `flags.make`
+(without it every screen below is as it was):
+
+| Place | What |
+|---|---|
+| Today (`TodayScreen`) | The card **"תרגול"** replaces the ghost "תרגול חופשי". With an empty queue the free primary in the bar is **"תרגול מהבנק"** (the hub's lectures: the glossary's name for practising from the bank) and the card holds "סט חדש" (secondary); with a queue the card is two quiet links, "סט חדש ‹" and "תרגול מהבנק ‹", so the queue keeps the screen's one primary. "סט חדש" opens the create screen without a lecture, which prefills the last one read: Today → a set is 2 taps (סט חדש → ליצור). The day's end in the session says "תרגול מהבנק" too |
+| The library (`usePracticeChip`, Q's slot) | **"+ סט"** (named "סט חדש" for screen readers) beside "N שאלות" on every lecture whose summary is ready, also with no questions; it opens `?v=practice&l=…&x=new` |
+| The lecture page (`LectureView`) | Under the summary, "אחרי הקריאה: תרגול על ההרצאה" becomes one row (a group named "אחרי הקריאה"): **"סט חדש"** and the lecture's practice, **"לפתור"** once the lecture has a bank ("תרגול על ההרצאה" before). The row is `components/MakeEntry.tsx`, a lazy part of the slot with its own boundary (`MakeLectureRow`): the entry chunk holds only the condition |
+| The hub (`PracticeHome`) | The **"סט חדש"** card first ("שאלות חדשות על הרצאה, נבדקות לפני הבנק"), then the lectures under **"תרגול מהבנק"** with "סט חדש" where a lecture has no questions (was "יצירה"), and the group quiz last |
+| A lecture's practice (`LecturePractice`) | "שאלות חדשות" → **"סט חדש"**; the card of an open request says "סט בהכנה" (or "הסט מוכן" once only decisions wait) with "לפתוח את הסט" |
+
+Design §5.1's other rows wait for slice B: Today's "לפתור סט חדש" and
+"סטים חדשים בקבוצה", the resume row, the hub's and the lecture page's sets,
+and the mistakes end's paid secondary.
+
+The fixes of the practice screens (§5.11), each with `flags.make`:
+
+- **"סבב חדש"** (`PracticeRound`): the sources in one person, "שלא עניתי ·
+  שטעיתי · שסימנתי לבדיקה · הכול" (a flag is "סימנתי לבדיקה", never a
+  bookmark); the size "הכול (n)", shown only when the bank's count differs
+  from 5 and 10 (it read "10 · הכול" beside "10").
+- **The question at 390 px** (`PracticeSession`, `PracticeQuestion`): the
+  session measures the bottom bar (and the tab bar under it) into
+  `--pq-foot-h` on a layout effect, so the bet card's
+  `scroll-margin-bottom` (the bar plus 16 px) is right in the frame where a
+  pick scrolls it into view (`reveal()`); while an option is picked and no
+  bet, the bar says **"קודם לבחור כמה בטוחים"** above "לבדוק" (its
+  `aria-describedby`). "מבוסס על ש׳ 12" → "מבוסס על שקף 12".
+- **"שאלה משלי"** (`ExtrasCard`): no "רק לך" chip (the question goes to
+  everyone's bank); the heading's line reads "נכנסת לבנק של הקבוצה בלי שם".
+- **The review's verdict** (`PracticeBank`, `x=review`): "בבדיקה, Claude
+  ענה אחרת מהמפתח" → "הבדיקה ענתה אחרת מהמפתח" (no model's name in member
+  copy); its slide tag "ש׳ 12" → "שקף 12".
+- **"ש׳" in lists**: "שקף 12" in the review, the blank tables' rows and the
+  question's line; the generating screen's list already said "שקף N".
+- **A lecture without a table** shows no "טבלה ריקה" card (it was a dashed
+  "אין טבלה למילוי" on every visit), and the group's other tables are not
+  read for it.
+
+Help gains the row **"סט חדש"** (`helpCopy.ts`, with the flag): where it is,
+the two choices, what the preview shows before paying, the check before the
+bank, starting while the rest is written, and that a re-read part's
+coverage starts again at 0.
+
+## The e2e (WP5-WP8)
 
 `e2e/study/sets.cjs` with the flag set **`pm`** (`notify` with
 `VITE_STUDY_MAKE`; `ps` adds `VITE_STUDY_SETS` for slice B; both in
@@ -312,7 +366,17 @@ price on the button, the read as a phase, the three tile states, a failed
 batch and "לנסות שוב", "להתחיל לפתור" keeping and starting, a budget stop, a
 failed example read, offline on both screens, and at 1280 px the keyboard,
 the sticky preview and the 560 px sheet; each screen in light and dark
-through `a11y.cjs`. The mock's action `plan` answers `inputs` (steered by
+through `a11y.cjs`. WP7-WP8 added (step 1 now starts on the lecture page's
+row): the library's "+ סט" on both lectures (a second, synthetic lecture with
+no table and no questions), the hub's order, Today's card and "תרגול מהבנק"
+with an empty queue and its way to the create screen with a lecture
+prefilled, the lecture page's row, no "טבלה ריקה" card without a table, the
+question at 390 px (the note above "לבדוק", the bet card above the bar),
+"סבב חדש"'s words, "שאלה משלי", the review's verdict and "שקף N"; and step
+13: the four tabs at 1280 px, and no horizontal scroll at 320×568 on the
+create screen (with "עוד אפשרויות" open), the hub, Today and "סבב חדש". The
+mock loads Today's plugin (`mocks/today.cjs`) beside practice's; slice A
+needs no plugin of its own (`mocks/sets.cjs` comes with slice B's RPCs). The mock's action `plan` answers `inputs` (steered by
 `db.practice.inputs`), and `db.practice.styleFail` refuses an example's read.
 The build for it: every s2 flag with `VITE_STUDY_INSTALL`, `VITE_STUDY_NOTIFY`,
 `VITE_STUDY_MAKE` and `VITE_STUDY_SETS`.
