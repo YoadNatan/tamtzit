@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { courseKey } from "../../../shared/study/courseKey";
 import { examPriceUsd, priceText } from "../../../shared/study/examPrice";
-import { SHEET_CONFIRM_USD, SHEET_KEY_MAX_PAGES, SHEET_MAX_PAGES, sheetMinutes } from "../../../shared/study/sheetPrice";
+import { SHEET_CONFIRM_USD, SHEET_KEY_MAX_PAGES, SHEET_MAX_PAGES, sheetMinutes, sheetReaderPriceUsd } from "../../../shared/study/sheetPrice";
 import { listLectures, type LectureRow } from "../lib/api";
 import { courseOverview, type CourseOverview } from "../lib/courses";
 import { MAX_EXAM_PAGES, MAX_PHOTOS, openExamPdf, photoPage, type ExamPageFile, type ExamPdf } from "../lib/examPages";
 import { examCreate, pageRows, signPages, uploadExamPages, type KeySource } from "../lib/exams";
 import { failText } from "../lib/failText";
+import { flags } from "../lib/flags";
 import {
   fallbackName,
   isImage,
@@ -222,7 +223,9 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
   const courseLectures = useMemo(() => (course ? lectures.filter((l) => courseKey(l.course) === courseKey(course.name)) : []), [course, lectures]);
   const pages = pagesOf(parts);
   const keyPages = keySource === "separate" ? pagesOf(keyParts) : 0;
-  const price = useMemo(() => examPriceUsd({ pages, keyPages, keySource }), [pages, keyPages, keySource]);
+  // Release A1 (VITE_STUDY_SHEETS_FORMS): a sheet is read by the sheet reader, at its price; a past exam as before.
+  const forms = flags.sheetForms && kind === "sheet";
+  const price = useMemo(() => (forms ? sheetReaderPriceUsd({ pages, keyPages, keySource }) : examPriceUsd({ pages, keyPages, keySource })), [forms, pages, keyPages, keySource]);
   const span = sheetMinutes({ pages, keyPages, keySource });
   const first = parts[0];
   const cover = first?.kind === "pdf" && first.skip === 0 && !coverOff && looksLikeCover(first.pdf.firstLines);
@@ -443,7 +446,7 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
       setBusy("שולחים להעתקה…");
       const rows = pageRows(prefix, drawn);
       const { urls, until } = await signPages(rows.map((r) => r.path));
-      const r = await sheetReadStart(examId, rows, urls, until, confirmed);
+      const r = await sheetReadStart(examId, rows, urls, until, confirmed, forms);
       setDrive(examId, !r.server);
       void holdScreen(false);
       setBusy("");

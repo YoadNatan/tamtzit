@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelledLine,
   examHide,
@@ -23,6 +23,7 @@ import {
   repeatsLine,
   reviewCounts,
   setExamKey,
+  signPages,
   skippedLine,
   unitLines,
   type ExamStatus,
@@ -31,10 +32,12 @@ import {
   type Review,
   type ReviewItem,
 } from "../lib/exams";
+import { priceText } from "../../../shared/study/examPrice";
 import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { richText } from "../lib/rich";
-import { examKeySet, inexact, pageLines, seqComplete, step, uploadMeta, type UploadKind } from "../lib/sheets";
+import { EXACT_BELOW, examKeySet, inexact, pageLines, seqComplete, step, uploadMeta, type UploadKind } from "../lib/sheets";
+import { itemFix, itemRetire, itemSolution, itemUnretire, labelOf, numLine, openAdd, originLine, partLine, partOf, sheetResume, sheetReview } from "../lib/sheetForms";
 import { parsePageBox } from "../lib/exams";
 import type { ScreenProps } from "../features/types";
 import { drives, holdScreen, PageCrop, setDrive } from "./ExamParts";
@@ -42,6 +45,17 @@ import PageView from "./PageView";
 import { BackLink, Head, Loading, RouteLink } from "./Shell";
 import "../styles/exams.css";
 import "../styles/sheets.css";
+
+/* Release A1 (VITE_STUDY_SHEETS_FORMS): the exact text, the edit sheet and the answer editor, loaded when first needed. */
+const SheetText = lazy(() => import("./SheetText"));
+const EditSheet = lazy(() => import("./SheetEdit"));
+const AnswerEdit = lazy(() => import("./SheetEdit").then((m) => ({ default: m.AnswerEdit })));
+/** The review: with release A1, study_sheet_review (S's and the sheet reader's fields). */
+const reviewOf = (examId: string) => (flags.sheetForms ? sheetReview(examId) : examReview(examId));
+/** An item's printed label ("3א"); before release A1, its number. */
+const lab = (q: ReviewItem) => (flags.sheetForms ? labelOf(q) : String(q.no));
+/** " · מספרית" / " · פתוחה" after an item's label (design §5.6). */
+const kindTag = (q: ReviewItem) => (q.form === "numeric" ? " · מספרית" : q.form === "open" ? " · פתוחה" : "");
 
 /* ── One past exam: its reading, then its review (sources.md B6.2, B7;
  *    mockups exam-reading.html and exam-review.html) ──
@@ -119,7 +133,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
     try {
       const s = await examStatus(examId);
       setStatus(s);
-      if (s.status === "ready" || s.status === "failed" || s.found > 0) setReview(await examReview(examId));
+      if (s.status === "ready" || s.status === "failed" || s.found > 0) setReview(await reviewOf(examId));
       setError("");
       return s;
     } catch (e) {
@@ -182,7 +196,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
   const retryAll = async (pages: number[] | null) => {
     setBusy(true);
     try {
-      const r = review ?? (await examReview(examId));
+      const r = review ?? (await reviewOf(examId));
       const n = await examRetry(
         examId,
         r.pages.map((p) => p.path),
@@ -281,12 +295,49 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
     ) : null;
   // A failed exam with nothing found is not a review: its failure, and a new upload (WP6; no paid re-run).
   // In a review, "לנסות שוב" and its cost sit together in the callout at the top (ExamReviewBody).
+  // Release A1 (design D23): a sheet whose unit the budget refused is held, not failed.
+  const paused = flags.sheetForms && status.status === "reading" && status.error === "budget";
+  const resume = async (skipSolve: boolean) => {
+    setBusy(true);
+    try {
+      await sheetResume(examId, skipSolve);
+      ctx.say(skipSolve ? "הדף נשמר בלי תשובות מוצעות." : "ההעתקה ממשיכה.");
+      await load();
+    } catch (e) {
+      const c = codeOf(e);
+      ctx.say(
+        c === "budget" || c === "sheets_cap" || c === "reserve"
+          ? "התקציב החודשי עוד לא מספיק להמשך. הוא מתחדש ב-1 בחודש; אפשר גם לסיים בלי תשובות מוצעות."
+          : failText(c, "exam"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
   if (!review || reading || failedEmpty) {
     return (
       <main className="exam-review">
         {head}
         {sub}
-        {progress}
+        {paused ? (
+          <section className="a-card ss-paused" aria-labelledby="ss-paused-h">
+            <h2 id="ss-paused-h" className="x-big">
+              נעצר: נגמר התקציב החודשי.
+            </h2>
+            <p className="a-small">{status.found ? `✓ ${status.found === 1 ? "שאלה אחת הועתקה" : `${status.found} שאלות הועתקו`}${status.unkeyed ? ` · ${status.unkeyed} עוד בלי תשובה` : ""}` : "עוד לא הועתקו שאלות."}</p>
+            <p className="a-small a-muted">מה שכבר הועתק נשמר. אפשר להמשיך כשיש שוב תקציב החודש, או לסיים עכשיו: השאלות יישארו בלי תשובות מוצעות, ואפשר לסמן להן תשובה ביד.</p>
+            <div className="a-row">
+              <button type="button" className="a-btn primary" disabled={busy} onClick={() => void resume(false)}>
+                להמשיך
+              </button>
+              <button type="button" className="a-btn" disabled={busy} onClick={() => void resume(true)}>
+                לסיים בלי תשובות מוצעות
+              </button>
+            </div>
+          </section>
+        ) : (
+          progress
+        )}
         {unitList}
         {!reading && status.status === "failed" ? (
           <>
@@ -300,14 +351,16 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
             </div>
           </>
         ) : null}
-        {reading ? (
+        {reading && !paused ? (
           <>
             <div className="a-sec">
               <h2>כשזה נגמר</h2>
             </div>
             <p className="a-small a-muted">
               {sheet
-                ? "בסוף יופיע כאן כמה שאלות נמצאו, והדף יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול. בשלב הזה מועתקות שאלות הבחירה; שאלות פתוחות וחישובים נספרים בלבד."
+                ? flags.sheetForms
+                  ? "בסוף יופיע כאן כמה שאלות נמצאו, והדף יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול. כל השאלות מועתקות כמו בדף: שאלות בחירה, שאלות פתוחות, חישובים וטבלאות."
+                  : "בסוף יופיע כאן כמה שאלות נמצאו, והדף יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול. בשלב הזה מועתקות שאלות הבחירה; שאלות פתוחות וחישובים נספרים בלבד."
                 : "לרוב 10–20 דקות. בסוף יופיע כאן כמה שאלות נמצאו, והמבחן יופיע לכל הקבוצה בעמוד הקורס, לבדיקה ולתרגול."}
             </p>
           </>
@@ -367,7 +420,12 @@ function ExamReviewBody(p: {
       alive = false;
     };
   }, [p.examId]);
-  const off = useMemo(() => (lines ? inexact(review.items, lines) : new Set<string>()), [review.items, lines]);
+  const off = useMemo(() => {
+    const out = lines ? inexact(review.items, lines) : new Set<string>();
+    // Release A1: the sheet reader's own exactness, stored with the item (design D9).
+    if (flags.sheetForms) for (const q of review.items) if (!q.retired && q.exact !== null && q.exact !== undefined && q.exact < EXACT_BELOW) out.add(q.id);
+    return out;
+  }, [review.items, lines]);
   const look = (q: ReviewItem) => itemState(q) !== "ok" || off.has(q.id);
   const counts = useMemo(() => {
     const c = reviewCounts(review.items);
@@ -379,6 +437,44 @@ function ExamReviewBody(p: {
   const [hidden, setHidden] = useState(review.exam.hidden);
   const [editTick, setEditTick] = useState(0);
   const closed = useRef<string | null>(null);
+  // Release A1: "+ להוסיף שאלה שלא הועתקה", the items taken out, "להעתיק גם N שאלות פתוחות".
+  const [adding, setAdding] = useState(false);
+  const retiredItems = flags.sheetForms ? review.items.filter((q) => q.retired) : [];
+  const skipped = review.skipped_open ?? status.skipped_open;
+  const canOpenAdd = flags.sheetForms && status.status === "ready" && skipped > 0 && review.reader !== "sheet" && !review.extra;
+  const [openPrice, setOpenPrice] = useState<number | null>(null);
+  const [openBusy, setOpenBusy] = useState(false);
+  useEffect(() => {
+    if (!canOpenAdd) return;
+    let alive = true;
+    openAdd(p.examId, { dry: true })
+      .then((r) => alive && setOpenPrice(r.priceUsd))
+      .catch(() => undefined); // no button without its price
+    return () => {
+      alive = false;
+    };
+  }, [canOpenAdd, p.examId]);
+  const copying = Boolean(flags.sheetForms && review.extra && review.extra.done < review.extra.units);
+  useEffect(() => {
+    if (!copying) return;
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") void reviewOf(p.examId).then(p.setReview, () => undefined);
+    }, POLL_MS);
+    return () => clearInterval(t);
+  }, [copying, p.examId]);
+  const runOpenAdd = async () => {
+    setOpenBusy(true);
+    try {
+      const { urls, until } = await signPages(review.pages.map((x) => x.path));
+      await openAdd(p.examId, { urls, until });
+      ctx.say("מעתיקים את השאלות הפתוחות. הן יופיעו כאן בעוד כמה דקות.");
+      p.setReview(await reviewOf(p.examId));
+    } catch (e) {
+      ctx.say(failText(codeOf(e), "exam"));
+    } finally {
+      setOpenBusy(false);
+    }
+  };
   const wide = useWide() && flags.sheets;
   const live = review.items.filter((q) => !q.retired);
   // The open item stays in the list until it is closed, even when "לאשר" moved it out of the filter (its "לבטל" with it).
@@ -406,7 +502,7 @@ function ExamReviewBody(p: {
     setOpen(null);
   };
   const refresh = async () => {
-    const r = await examReview(p.examId);
+    const r = await reviewOf(p.examId);
     p.setReview(r);
   };
   // The wide review's page: the open item's, else the one picked, else the first.
@@ -472,7 +568,17 @@ function ExamReviewBody(p: {
           </div>
         </div>
         <p className="sr-only">{foundLine(counts)}</p>
-        {skippedLine(status.skipped_open) ? <p className="a-small a-muted">{skippedLine(status.skipped_open)}</p> : null}
+        {skippedLine(skipped) ? <p className="a-small a-muted">{skippedLine(skipped)}</p> : null}
+        {canOpenAdd && openPrice !== null ? (
+          <button type="button" className="a-btn wide ss-openadd" disabled={openBusy} onClick={() => void runOpenAdd()}>
+            {`להעתיק גם ${skipped === 1 ? "שאלה פתוחה אחת" : `${skipped} שאלות פתוחות`} · ${priceText(openPrice)}`}
+          </button>
+        ) : null}
+        {flags.sheetForms && review.extra ? (
+          <p className="a-small a-muted ss-extra" role="status">
+            {copying ? `מעתיקים גם את השאלות הפתוחות… ${review.extra.done}/${review.extra.units}` : review.extra.copied ? `הועתקו גם ${review.extra.copied === 1 ? "שאלה פתוחה אחת" : `${review.extra.copied} שאלות פתוחות`}.` : "השאלות הפתוחות הועתקו."}
+          </p>
+        ) : null}
         {repeatsLine(status.repeats) ? <p className="a-small a-muted">{repeatsLine(status.repeats)}</p> : null}
         {cancelledLine(status.cancelled) ? <p className="a-small a-muted">{cancelledLine(status.cancelled)}</p> : null}
         {counts.found ? (
@@ -508,11 +614,14 @@ function ExamReviewBody(p: {
           {shown.map((q) => (
             <li key={q.id} className="r-row">
               {open === q.id ? (
-                <ItemCard {...p} q={q} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} inexact={off.has(q.id)} editTick={editTick} />
+                <ItemCard {...p} q={q} all={review.items} pages={readPages} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} inexact={off.has(q.id)} editTick={editTick} />
               ) : (
                 <button type="button" id={`rh-${q.id}`} className="a-li r-head" aria-expanded={false} onClick={() => setOpen(q.id)}>
                   <div>
-                    <b>שאלה {q.no}</b>
+                    <b>
+                      שאלה {lab(q)}
+                      {kindTag(q)}
+                    </b>
                     <span className="m" dir="rtl">
                       {firstWords(q.question)}
                     </span>
@@ -537,7 +646,7 @@ function ExamReviewBody(p: {
               pages={readPages}
               page={pageNo}
               current={open}
-              items={live.map((q) => ({ id: q.id, label: `שאלה ${q.no}`, box: parsePageBox(q.figure) }))}
+              items={live.map((q) => ({ id: q.id, label: `שאלה ${lab(q)}`, box: parsePageBox(q.figure) }))}
               onPage={(n) => {
                 if (open) close(open);
                 setPick(n);
@@ -550,7 +659,7 @@ function ExamReviewBody(p: {
                 .map((q) => (
                   <li key={q.id}>
                     <button type="button" className="a-chip" aria-current={q.id === open} onClick={() => setOpen(q.id)}>
-                      שאלה {q.no}
+                      שאלה {lab(q)}
                     </button>
                   </li>
                 ))}
@@ -574,11 +683,14 @@ function ExamReviewBody(p: {
           {shown.map((q) => (
             <li key={q.id} className="r-row">
               {open === q.id ? (
-                <ItemCard {...p} q={q} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} inexact={off.has(q.id)} editTick={editTick} />
+                <ItemCard {...p} q={q} all={review.items} pages={readPages} log={review.key_log} onClose={() => close(q.id)} refresh={refresh} inexact={off.has(q.id)} editTick={editTick} />
               ) : (
                 <button type="button" id={`rh-${q.id}`} className="a-li r-head" aria-expanded={false} onClick={() => setOpen(q.id)}>
                   <div>
-                    <b>שאלה {q.no}</b>
+                    <b>
+                      שאלה {lab(q)}
+                      {kindTag(q)}
+                    </b>
                     <span className="m" dir="rtl">
                       {firstWords(q.question)}
                     </span>
@@ -596,6 +708,59 @@ function ExamReviewBody(p: {
 
         </>
       )}
+
+      {flags.sheetForms ? (
+        <div className="a-stack ss-tail">
+          {adding ? (
+            <Suspense fallback={<Loading />}>
+              <EditSheet
+                groupId={p.groupId}
+                examId={p.examId}
+                q={null}
+                pages={readPages}
+                page={pageNo}
+                onCancel={() => setAdding(false)}
+                onDone={(said) => {
+                  setAdding(false);
+                  ctx.say(said);
+                  void refresh();
+                }}
+              />
+            </Suspense>
+          ) : (
+            <button type="button" className="a-btn ss-add" onClick={() => setAdding(true)}>
+              + להוסיף שאלה שלא הועתקה
+            </button>
+          )}
+          {retiredItems.length ? (
+            <details className="a-card flat ss-retired">
+              <summary>{retiredItems.length === 1 ? "שאלה אחת הוצאה מהדף" : `${retiredItems.length} שאלות הוצאו מהדף`}</summary>
+              <ul className="a-list">
+                {retiredItems.map((q) => (
+                  <li key={q.id} className="a-li">
+                    <div>
+                      <b>שאלה {lab(q)}</b>
+                      <span className="m">{q.retired_by ? `הוצאה ע״י ${q.retired_by}` : "הוצאה"}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="a-btn small"
+                      onClick={() =>
+                        void itemUnretire(q.id)
+                          .then(refresh)
+                          .then(() => ctx.say(`שאלה ${lab(q)} חזרה לדף.`))
+                          .catch((e: unknown) => ctx.say(codeOf(e) === "not yours" ? "אחרי 24 שעות, השאלה חוזרת רק מהחשבון שהוציא אותה." : failText(codeOf(e), "exam")))
+                      }
+                    >
+                      להחזיר
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
 
       {p.sheet ? null : (
       <label className="a-card flat r-hide">
@@ -658,9 +823,16 @@ function ItemCard(p: {
   inexact?: boolean;
   /** Uploaded sheets: E pressed in the wide review ("לתקן טקסט"). */
   editTick?: number;
+  /** Release A1: every item (a multi-part question's parts) and the upload's pages (the edit sheet's). */
+  all?: ReviewItem[];
+  pages?: number[];
 }) {
   const { q, ctx } = p;
-  const [mode, setMode] = useState<"view" | "pick" | "edit" | "seq">("view");
+  const [mode, setMode] = useState<"view" | "pick" | "edit" | "seq" | "fix" | "figs" | "answer" | "retire">("view");
+  const [more, setMore] = useState(false);
+  const a1 = flags.sheetForms;
+  const personal = q.form === "open" || q.form === "numeric";
+  const part = a1 ? partOf(q, p.all ?? []) : null;
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState({ question: q.question, vignette: q.vignette, options: [...q.options] });
   // A true/false or match item keyed by hand (section O 1): one value a statement, or an option a prompt.
@@ -695,7 +867,13 @@ function ItemCard(p: {
   };
   const mark = (i: number) => void run(() => setExamKey(q.id, i), `סומנה תשובה ${letter(i)}.`);
   const confirm = () =>
-    one && q.answer !== null ? void run(() => setExamKey(q.id, q.answer), `התשובה ${letter(q.answer)} אושרה.`) : void run(() => examKeyConfirm(q.id), "התשובה המוצעת אושרה.");
+    q.form === "numeric" && q.num !== null && q.num !== undefined
+      ? void run(() => itemSolution(q.id, { num: q.num! }), "התשובה המוצעת אושרה.")
+      : q.form === "open" && q.model_answer
+        ? void run(() => itemSolution(q.id, { model_answer: q.model_answer! }), "התשובה המוצעת אושרה.")
+        : one && q.answer !== null
+          ? void run(() => setExamKey(q.id, q.answer), `התשובה ${letter(q.answer)} אושרה.`)
+          : void run(() => examKeyConfirm(q.id), "התשובה המוצעת אושרה.");
   const saveSeq = () => {
     const seq = seqComplete(q.form, seqDraft, size);
     if (!seq) return ctx.say(q.form === "tf" ? "צריך לסמן נכון או לא נכון לכל משפט." : "צריך לבחור תשובה לכל שורה.");
@@ -703,6 +881,15 @@ function ItemCard(p: {
   };
   const saveEdit = () =>
     void run(async () => {
+      // Release A1: one fix that keeps the lines (study_exam_item_fix), whatever the length.
+      if (a1) {
+        const patch: { question?: string; vignette?: string; options?: string[] } = {};
+        if (draft.question !== q.question) patch.question = draft.question;
+        if (draft.vignette !== q.vignette) patch.vignette = draft.vignette;
+        if (draft.options.some((o, i) => o.trim() !== q.options[i])) patch.options = draft.options.map((o) => o.trim());
+        if (Object.keys(patch).length) await itemFix(q.id, patch);
+        return;
+      }
       if (draft.question.trim() !== q.question) await examItemEdit(q.id, "question", null, draft.question);
       if (draft.vignette.trim() !== q.vignette) await examItemEdit(q.id, "vignette", null, draft.vignette);
       for (const [i, o] of draft.options.entries()) if (o.trim() !== q.options[i]) await examItemEdit(q.id, "option", i, o);
@@ -712,16 +899,36 @@ function ItemCard(p: {
     <article className="a-card r-item" aria-labelledby={`ri-${q.id}`}>
       <div className="a-row between">
         <b id={`ri-${q.id}`} tabIndex={-1}>
-          שאלה {q.no}
+          שאלה {lab(q)}
+          {kindTag(q)}
+          {part ? <span className="a-small a-muted"> · {partLine(part)}</span> : null}
         </b>
         <span className="a-row">
           {st !== "ok" ? <span className={STATE_CHIP[st].cls}>{STATE_CHIP[st].label}</span> : null}
-          <button type="button" className="a-btn ghost small" aria-label={`לסגור את שאלה ${q.no}`} onClick={p.onClose}>
+          <button type="button" className="a-btn ghost small" aria-label={`לסגור את שאלה ${lab(q)}`} onClick={p.onClose}>
             סגירה
           </button>
         </span>
       </div>
-      {mode === "edit" ? (
+      {mode === "fix" || mode === "figs" ? (
+        <Suspense fallback={<Loading />}>
+          <EditSheet
+            groupId={p.groupId}
+            examId={p.examId}
+            q={q}
+            pages={p.pages ?? []}
+            page={q.page ?? 1}
+            figuresFirst={mode === "figs"}
+            onCancel={() => setMode("view")}
+            onDone={(said) => void run(async () => undefined, said)}
+            onRetire={() => setMode("retire")}
+          />
+        </Suspense>
+      ) : mode === "answer" ? (
+        <Suspense fallback={<Loading />}>
+          <AnswerEdit q={q} onCancel={() => setMode("view")} onDone={(said) => void run(async () => undefined, said)} />
+        </Suspense>
+      ) : mode === "edit" ? (
         <div className="a-stack r-edit">
           {q.vignette || draft.vignette ? (
             <label className="a-field">
@@ -756,14 +963,23 @@ function ItemCard(p: {
               {q.page ? <span className="a-small a-muted">עמוד {q.page}</span> : null}
             </div>
             <div className="a-stack r-text">
-              {q.vignette ? (
-                <p className="a-para" dir="rtl">
-                  {richText(q.vignette, "v")}
-                </p>
-              ) : null}
-              <p className="a-para" dir="rtl">
-                {richText(q.question, "q")}
-              </p>
+              {a1 ? (
+                <Suspense fallback={<p className="a-para">{q.question}</p>}>
+                  {q.vignette ? <SheetText text={q.vignette} label={lab(q)} /> : null}
+                  <SheetText text={q.question} label={lab(q)} />
+                </Suspense>
+              ) : (
+                <>
+                  {q.vignette ? (
+                    <p className="a-para" dir="rtl">
+                      {richText(q.vignette, "v")}
+                    </p>
+                  ) : null}
+                  <p className="a-para" dir="rtl">
+                    {richText(q.question, "q")}
+                  </p>
+                </>
+              )}
             </div>
           </div>
           {p.inexact ? <p className="a-callout quiet r-exact">ההעתקה שונה מהטקסט בקובץ · כדאי לבדוק מול העמוד.</p> : null}
@@ -777,6 +993,7 @@ function ItemCard(p: {
             </ol>
           ) : null}
           {mode === "pick" ? <p className="a-small r-pickhint">בוחרים את התשובה הנכונה. היא תשתנה לכל הקבוצה:</p> : null}
+          {personal ? null : (
           <ol className="a-opts r-opts" aria-label="התשובות">
             {q.options.map((o, i) => {
               const key = one && q.answer === i;
@@ -813,6 +1030,51 @@ function ItemCard(p: {
               );
             })}
           </ol>
+          )}
+          {a1 && personal ? (
+            <div className="ss-answer">
+              {q.form === "numeric" ? (
+                q.num !== null && q.num !== undefined ? (
+                  <p className="a-para">
+                    <b>התשובה: {numLine(q.num, q.num_unit)}</b>
+                    <span className={`a-chip ss-tag${q.origin === "solved" ? " warn" : " ok"}`}>{originLine(q.origin, q.key_by)}</span>
+                  </p>
+                ) : (
+                  <p className="a-small a-muted">עוד אין תשובה. ״לתקן תשובה״ מוסיף אותה לכל הקבוצה.</p>
+                )
+              ) : q.model_answer ? (
+                <>
+                  <p className="a-small">
+                    <b>תשובה לדוגמה</b> <span className={`a-chip ss-tag${q.origin === "solved" ? " warn" : " ok"}`}>{originLine(q.origin, q.key_by)}</span>
+                  </p>
+                  <Suspense fallback={<p className="a-para">{q.model_answer}</p>}>
+                    <SheetText text={q.model_answer} label={lab(q)} />
+                  </Suspense>
+                  {q.rubric?.length ? (
+                    <ul className="sa-rubric" aria-label="מה צריך להיות בתשובה">
+                      {q.rubric.map((r, i) => (
+                        <li key={i} className="a-small" dir="auto">
+                          {r}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
+              ) : (
+                <p className="a-small a-muted">עוד אין תשובה לדוגמה. ״לתקן תשובה״ מוסיף אותה לכל הקבוצה.</p>
+              )}
+            </div>
+          ) : null}
+          {a1 && q.solution ? (
+            <details className="ss-sol">
+              <summary>פתרון מלא</summary>
+              <Suspense fallback={<p className="a-para">{q.solution}</p>}>
+                <SheetText text={q.solution} label={lab(q)} />
+              </Suspense>
+              {originLine(q.solution_origin ?? null) ? <p className="a-small a-muted">{originLine(q.solution_origin ?? null)}</p> : null}
+              {q.form === "numeric" && q.num_tol ? <p className="a-small a-muted">בטווח של ±{q.num_tol}%</p> : null}
+            </details>
+          ) : null}
           {q.form === "match" && q.seq ? <p className="a-small a-muted">ההתאמה: {q.seq.map((v, i) => `${i + 1}→${letter(v)}`).join(" · ")}</p> : null}
           {mode === "seq" ? (
             <div className="a-stack">
@@ -894,10 +1156,19 @@ function ItemCard(p: {
             >
               {q.seq?.length ? "לסמן תשובה אחרת" : "לסמן תשובה"}
             </button>
+          ) : a1 && personal ? (
+            <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("answer")}>
+              לתקן תשובה
+            </button>
           ) : null}
           <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("edit")}>
             {st === "unclear" ? "לא נקראה טוב · לתקן טקסט" : "לתקן טקסט"}
           </button>
+          {a1 ? (
+            <button type="button" className="a-btn small ss-more-btn" aria-expanded={more} disabled={sending} onClick={() => setMore((v) => !v)}>
+              ⋯ עוד
+            </button>
+          ) : null}
           {/* A page read again would not change an item someone fixed or answered: "לתקן טקסט" does. */}
           {q.page && st === "unclear" && !q.fixed && !q.answered ? (
             <button type="button" className="a-btn small r-reread" disabled={sending || p.busy} onClick={() => void p.retry([q.page!])}>
@@ -909,6 +1180,37 @@ function ItemCard(p: {
         <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("view")}>
           סגירה
         </button>
+      ) : mode === "retire" ? (
+        <div className="a-callout warn a-stack ss-retire" role="group" aria-label="להוציא את השאלה">
+          <p>{`להוציא את שאלה ${lab(q)} מהדף?`}</p>
+          <p className="a-small a-muted">היא לא תופיע בתרגול ולא תיספר. אפשר להחזיר אותה מתחתית הרשימה.</p>
+          <div className="a-row">
+            <button type="button" className="a-btn primary small" disabled={sending} onClick={() => void run(() => itemRetire(q.id), `שאלה ${lab(q)} הוצאה מהדף.`).then(p.onClose)}>
+              להוציא
+            </button>
+            <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("view")}>
+              ביטול
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {mode === "view" && a1 && more ? (
+        <div className="ss-menu" role="group" aria-label="עוד פעולות">
+          {!personal ? (
+            <button type="button" className="a-btn small" disabled={sending} onClick={() => (setMore(false), setMode("answer"))}>
+              {q.solution ? "לתקן את הפתרון המלא" : "להוסיף פתרון מלא"}
+            </button>
+          ) : null}
+          <button type="button" className="a-btn small" disabled={sending} onClick={() => (setMore(false), setMode("fix"))}>
+            לתקן את השאלה
+          </button>
+          <button type="button" className="a-btn small" disabled={sending || !(p.pages ?? []).length} onClick={() => (setMore(false), setMode("figs"))}>
+            לסמן איור
+          </button>
+          <button type="button" className="a-btn small" disabled={sending} onClick={() => (setMore(false), setMode("retire"))}>
+            להוציא את השאלה
+          </button>
+        </div>
       ) : null}
       {/* What a tap here does: the answer changes for the whole group, with the member's name, and can be undone. */}
       {mode === "view" && st === "suggested" ? (

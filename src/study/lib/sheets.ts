@@ -50,6 +50,8 @@ export async function sheetReadStart(
   urls: Record<string, string>,
   until: string,
   confirmBig: boolean,
+  /** Release A1: a sheet read by the sheet reader (open, numeric, multi-part; section O 2). */
+  forms = false,
 ): Promise<{ units: number; server: boolean; priceUsd: number }> {
   const res = await postStudy("/api/study/ai", {
     op: "exam_read",
@@ -58,6 +60,7 @@ export async function sheetReadStart(
     urls,
     until,
     confirmBig,
+    ...(forms ? { forms: true } : {}),
   });
   if (!res.ok) {
     let code = `http_${res.status}`;
