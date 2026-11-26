@@ -269,11 +269,13 @@ export default function MakeProgress({ route, ctx }: ScreenProps<"practice">) {
   const online = useOnline();
   const wide = useWide();
 
+  const batchesRef = useRef<RequestBatch[]>([]);
   const load = useCallback(async () => {
     const [all, bs, ds] = await Promise.all([listRequests(lectureId), requestBatches(requestId), listDrafts(requestId)]);
     const r = all.find((x) => x.id === requestId) ?? null;
     if (!r) return setPhase("none");
     setRequest(r);
+    batchesRef.current = bs;
     setBatches(bs);
     setDrafts(ds);
     setNow(Date.now());
@@ -306,8 +308,22 @@ export default function MakeProgress({ route, ctx }: ScreenProps<"practice">) {
   useEffect(() => {
     if (round && !round.running) void load().catch(() => undefined);
   }, [round?.running]);
+  // Back online: read again, and when this phone was writing the set and its
+  // round stopped meanwhile (a part lost to the connection), write on.
+  const wasOff = useRef(false);
   useEffect(() => {
-    if (online) void load().catch(() => undefined);
+    if (!online) {
+      wasOff.current = true;
+      return;
+    }
+    if (!wasOff.current) return;
+    wasOff.current = false;
+    void load()
+      .then(() => {
+        const r = roundRef.current;
+        if (r && !r.running) resumeRef.current();
+      })
+      .catch(() => undefined);
   }, [online]);
 
   const t = useMemo(() => tilesOf(batches, drafts), [batches, drafts]);
@@ -335,9 +351,13 @@ export default function MakeProgress({ route, ctx }: ScreenProps<"practice">) {
 
   const resume = () => {
     if (!request) return;
-    const ids = batches.filter((b) => writable(b, Date.now())).map((b) => b.id);
-    void writeRequest(lectureId, request.id, ids).catch(() => undefined);
+    const ids = batchesRef.current.filter((b) => writable(b, Date.now())).map((b) => b.id);
+    if (ids.length) void writeRequest(lectureId, request.id, ids).catch(() => undefined);
   };
+  const roundRef = useRef(round);
+  roundRef.current = round;
+  const resumeRef = useRef(resume);
+  resumeRef.current = resume;
   const start = async () => {
     if (!request || starting || t.ready < 1) return;
     setStarting(true);
