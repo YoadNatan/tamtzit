@@ -35,5 +35,5 @@ export const SIMILAR_FAIL_CODES: readonly string[] = Object.keys(SIMILAR_FAIL);
 
 /** A refusal of similar questions in words; anything else as practice words it. */
 export function similarFail(code: string): string {
-  return Object.hasOwn(SIMILAR_FAIL, code) ? SIMILAR_FAIL[code] : failText(code, "practice");
+  return Object.prototype.hasOwnProperty.call(SIMILAR_FAIL, code) ? SIMILAR_FAIL[code] : failText(code, "practice");
 }
