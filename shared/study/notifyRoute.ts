@@ -80,8 +80,8 @@ export function routeQuery(route: unknown): string {
 
 /** The object a screen shows, as section R's obj: 'lec:<id>', 'quiz:<id>',
  *  'exam:<id>', 'meet:<id>', 'disp:<id>', 'wall:<lecture>', a set's 'qset:<id>'
- *  and the group's shelf 'qsets' (section L), a comparison's 'lab:<run>'
- *  (section Y); null for any other screen. */
+ *  and the group's shelf 'qsets' (section L), the list of comparisons to rate 'labs'
+ *  (section Y's lab_new) and a run's 'lab:<run>'; null for any other screen. */
 export function objOf(route: unknown): string | null {
   if (!isObj(route)) return null;
   const id = (k: string) => (typeof route[k] === "string" && /^[0-9a-f-]{36}$/.test(route[k] as string) ? (route[k] as string) : null);
@@ -102,8 +102,10 @@ export function objOf(route: unknown): string | null {
       // A set's page sees its set_solved; the group's shelf sees set_shared.
       return id("k") ? `qset:${id("k")}` : route.l === undefined && route.k === undefined ? "qsets" : null;
     case "models":
-      // A comparison's run sees its lab_new (section Y's obj 'lab:<run>').
-      return id("r") ? `lab:${id("r")}` : null;
+      // The list of runs to rate sees lab_new (section Y's obj 'labs'; one
+      // notice for several runs opens them all); a run's own 'lab:<run>' is
+      // kept for a notice made before that.
+      return id("r") ? `lab:${id("r")}` : route.x === undefined && route.k === undefined ? "labs" : null;
     default:
       return null;
   }

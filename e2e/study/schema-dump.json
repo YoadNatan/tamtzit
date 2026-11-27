@@ -1283,6 +1283,18 @@
     "required": 5
    }
   ],
+  "study_lab_claim_slots": [
+   {
+    "args": [
+     "p_run",
+     "p_slots",
+     "p_cap",
+     "p_strict",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
   "study_lab_judge_input": [
    {
     "args": [

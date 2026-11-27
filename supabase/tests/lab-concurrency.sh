@@ -11,6 +11,10 @@
 #   LC4  four answers of one run claimed at once (each its own slot), with
 #        the month's comparison line room for three: three reservations and
 #        one "lab_budget", 10 rounds (the line holds under the group's lock).
+#   LC5  a run's slots claimed together (study_lab_claim_slots) from two
+#        sessions at once, as two tabs resuming, 10 rounds: each slot claimed
+#        once, the other session's answer naming them "not waiting", one
+#        ledger row a slot.
 # It loads supabase/tests/stubs.sql, tests/board-schema.sql and study-schema.sql
 # from this checkout into a new database and drops it at the end.
 #   bash supabase/tests/lab-concurrency.sh
@@ -104,4 +108,22 @@ for round in $(seq 1 10); do
   if [ "$(ids "$OUT")" = 3 ] && [ "$BUDGET" = 1 ] && [ "$WAITING" = 1 ]; then ok4=$((ok4 + 1)); else echo "LC4 round $round: $OUT waiting $WAITING"; fi
 done
 echo "LC4. $( [ $ok4 = 10 ] && echo ok || echo FAIL ): four answers claimed at once with room for three under the line, 10 rounds: $ok4 of 10 with three reservations, one lab_budget, its slot still waiting (expect 10)"
+# LC5
+slots() { # $1 = run
+  su postgres -c "psql -X -q -tA -d $DB" <<SQL 2>&1 | tr '\n' ' '
+set request.jwt.claim.sub = '';
+select public.study_lab_claim_slots('$1', '[{"label":"א","estimate":0.05},{"label":"ב","estimate":0.05},{"label":"ג","estimate":0.05}]', 33, false, '$KEY');
+SQL
+}
+ok5=0
+echo "delete from public.study_usage where group_id = '$G';" | q >/dev/null
+for round in $(seq 1 10); do
+  R=$(plan 3)
+  OUT=$( (slots "$R"; echo) & (slots "$R"; echo) & wait )
+  ROWS=$(echo "select count(*) from public.study_usage where group_id = '$G' and ref like 'run:$R:%:answer';" | q)
+  RUN=$(echo "select count(*) from public.study_lab_outputs where run_id = '$R' and status = 'running';" | q)
+  NW=$(grep -oE 'not waiting' <<<"$OUT" | wc -l)
+  if [ "$ROWS" = 3 ] && [ "$RUN" = 3 ] && [ "$NW" = 3 ]; then ok5=$((ok5 + 1)); else echo "LC5 round $round: $OUT rows $ROWS running $RUN"; fi
+done
+echo "LC5. $( [ $ok5 = 10 ] && echo ok || echo FAIL ): a run's slots claimed together from two sessions at once, 10 rounds: $ok5 of 10 with each slot once, the other told not waiting (expect 10)"
 echo "dropping $DB"

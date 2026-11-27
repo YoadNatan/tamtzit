@@ -130,7 +130,8 @@ test("objOf: what each screen sees", () => {
   assert.equal(objOf({ v: "sets", l: L }), null, "a lecture's sets are not the whole shelf");
   assert.equal(objOf({ v: "sets", k: "x" }), null);
   assert.equal(objOf({ v: "models", r: Q }), `lab:${Q}`, "a comparison's run sees its lab_new");
-  assert.equal(objOf({ v: "models" }), null);
+  assert.equal(objOf({ v: "models" }), "labs", "the list of runs to rate sees lab_new");
+  assert.equal(objOf({ v: "models", x: "board", k: "solver" }), null);
   for (const r of [{ v: "today" }, { v: "me" }, { v: "library" }, { v: "quiz" }, { v: "quiz", isNew: true }, { v: "exams" }, { v: "lecture", l: "x" }, null, "lec"])
     assert.equal(objOf(r), null, JSON.stringify(r));
 });
@@ -146,8 +147,8 @@ test("objOf agrees with the obj section R's hooks store", () => {
   const l = sql.slice(sql.indexOf("-- ════ BEGIN SECTION L "));
   assert.match(l, /jsonb_build_object\('v', 'sets', 'k', s\.id\), 'qset:' \|\| s\.id::text/);
   assert.match(l, /'set_shared',[\s\S]{0,300}'qsets', v_dedupe/);
-  // Section Y: a comparison waiting for ratings links to its run and is seen there.
+  // Section Y: comparisons waiting for ratings link to the list of runs to rate and are seen there (one notice for several).
   const y = sql.slice(sql.indexOf("-- ════ BEGIN SECTION Y "));
-  assert.match(y, /jsonb_build_object\('v', 'models', 'r', r\.id\), 'lab:' \|\| r\.id/);
-  assert.equal(objOf({ v: "models", r: Q }), `lab:${Q}`);
+  assert.match(y, /jsonb_build_object\('v', 'models'\), 'labs', 'lab_new'/);
+  assert.equal(objOf({ v: "models" }), "labs");
 });
