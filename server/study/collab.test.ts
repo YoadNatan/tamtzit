@@ -10,7 +10,7 @@ import ai from "../../api/study/ai.js";
 import { readShare } from "./ask.js";
 import { POLICY } from "./budget.js";
 import { cleanSchema } from "./claude.js";
-import { citedSlidesText, FixCheck } from "./ops/fixcheck.js";
+import { citedSlidesText, FixCheck, fixCheckOpts } from "./ops/fixcheck.js";
 import { FIX_CHECK_MAX_TOKENS } from "./limits.js";
 import { askTurnText, FIX_CHECK_SYSTEM, fixCheckRequest } from "./prompts/collab.js";
 import { MODEL, REQUIRED_SCHEMA, slideText, type Lecture, type StoredSlide } from "./study.js";
@@ -314,6 +314,19 @@ test("fix_check: one reservation, one call (effort low, 800 tokens, { ok, note }
   assert.ok(checked.auth?.endsWith(TOKEN), "with the member's token");
   // the proposal was read with the member's token too
   assert.ok(restCalls("/rest/v1/study_edit_proposals")[0].auth?.endsWith(TOKEN));
+});
+
+test("fixCheckOpts (design-models §7.6): the check's request, pure, as checkCall sends it", () => {
+  const request = fixCheckRequest({ before: "a [ש' 7]", after: "b [ש' 7]", slides: "[ש' 7] שקף" });
+  assert.deepEqual(fixCheckOpts(request), {
+    kind: "fix_check",
+    system: [{ type: "text", text: FIX_CHECK_SYSTEM }],
+    messages: [{ role: "user", content: request }],
+    effort: "low",
+    maxTokens: FIX_CHECK_MAX_TOKENS,
+    format: { type: "json_schema", schema: cleanSchema(zodOutputFormat(FixCheck).schema as Record<string, unknown>) },
+  });
+  assert.deepEqual(fixCheckOpts(request), fixCheckOpts(request), "the same every time");
 });
 
 test("fix_check: a proposal that no longer waits, another group's, or one without a slide is refused before any reservation", async () => {

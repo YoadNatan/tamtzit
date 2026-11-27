@@ -3,8 +3,9 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod/v4";
 import { numberBlocks } from "../../shared/study/blocks.js";
-import { costUsd, estimateUsd, imageTokens, reserve, type UsageLike } from "./budget.js";
-import { cleanSchema, run, type Spend } from "./claude.js";
+import { costUsd, estimateUsd, imageTokens, reserve, settle, type UsageLike } from "./budget.js";
+import { claudeFields, cleanSchema, run, type FallbackReserve, type RunOpts, type Spend } from "./claude.js";
+import { modelFor } from "./routes.js";
 import { checkNotes, Notes, parseNotes, type RecNoteItem } from "./notes.js";
 import { RECORDING_SYSTEM, recordingRequest } from "./prompts/recording.js";
 import { correctionsForRewrite, OUTLINE_INSTRUCTIONS, sectionRequest, SUMMARY_SYSTEM, targetWords } from "./prompts/summary.js";
@@ -376,7 +377,10 @@ async function prepareOutline(store: Store, lectureId: string, unit: Unit, input
   if (lecture.slides.length > MAX_SLIDES) return endEarly(store, lectureId, unit, "too many slides", new HttpError(413, "too many slides"));
   const prompt = `${OUTLINE_INSTRUCTIONS}\n\n${deckText(lecture)}`;
   const format = zodOutputFormat(Outline);
-  const r = await reserveFor(store, lectureId, unit, lecture, estimateUsd(MODEL, prompt.length + JSON.stringify(format.schema).length, OUTLINE_TOKENS));
+  // The outline key takes Claude models only and stays outside run() (D5): only its model is routed.
+  const model = await modelFor(store.sb, lecture.group_id, "outline", { lectureId });
+  const f = claudeFields(model, OUTLINE_TOKENS, unit.effort);
+  const r = await reserveFor(store, lectureId, unit, lecture, estimateUsd(model, prompt.length + JSON.stringify(format.schema).length, OUTLINE_TOKENS));
   if ("done" in r) return r;
   return {
     run: async () => {
@@ -385,9 +389,9 @@ async function prepareOutline(store: Store, lectureId: string, unit: Unit, input
       try {
         const res = await anthropic().messages.parse(
           {
-            model: MODEL,
-            max_tokens: OUTLINE_TOKENS,
-            output_config: { effort: unit.effort, format },
+            model: f.model,
+            max_tokens: f.max_tokens,
+            output_config: f.effort ? { effort: f.effort, format } : { format },
             messages: [{ role: "user", content: prompt }],
           },
           { signal: AbortSignal.timeout(Math.max(5_000, opts.stopAt - Date.now())) },
@@ -428,6 +432,89 @@ function asCorrections(v: unknown): Correction[] {
     .filter((c) => c.before !== c.after);
 }
 
+/* ── A part's request, pure (design-models §7.6, WP4): extracted from
+ * preparePart, which calls it once the pictures are signed and the
+ * corrections read; a comparison freezes the same request. ── */
+export type PartFigure = { n: number; k: number; w: number; h: number; url: string };
+export function partRequest(o: { lecture: Lecture; sections: InputSection[]; idx: number; figures: PartFigure[]; corrections: Correction[] }): {
+  request: Pick<RunOpts, "kind" | "ref" | "system" | "messages" | "maxTokens">;
+  inputChars: number;
+  imageTokens: number;
+} {
+  const { lecture, sections, idx } = o;
+  const sec = sections.find((s) => s.idx === idx);
+  if (!sec) throw new HttpError(400, "section not found");
+  const sent = o.figures;
+  // Pictures that carry content of their own (diagrams, life cycles) raise the
+  // word target. Small ones (often chemical structures, which the summary
+  // leaves out) and PDF page renders (they repeat the slide's text) do not.
+  const contentPictures = lecture.source_kind === "pdf" ? 0 : sent.filter((f) => !f.w || Math.max(f.w, f.h) >= 300).length;
+  const deck = lectureBlock(lecture);
+  const request = sectionRequest({
+    index: idx,
+    count: sections.length,
+    heading: sec.title,
+    from: sec.slide_from,
+    to: sec.slide_to,
+    others: sections.filter((s) => s.idx !== idx).map((s) => ({ heading: s.title, from: s.slide_from, to: s.slide_to })),
+    hasFigures: sent.length > 0,
+    isLast: idx === sections.length - 1,
+    targetWords: targetWords(lecture.slides.filter((s) => s.n >= sec.slide_from && s.n <= sec.slide_to).map(slideText).join("\n"), contentPictures),
+  });
+  const content: Anthropic.Beta.BetaContentBlockParam[] = [
+    { type: "text", text: deck, cache_control: { type: "ephemeral" } },
+    { type: "text", text: request },
+  ];
+  for (const f of sent) {
+    content.push({ type: "text", text: `fig:${f.n}-${f.k} (שקף ${f.n})` });
+    content.push({ type: "image", source: { type: "url", url: f.url } });
+  }
+  // One more block after everything else, so the rest is byte-identical with or without corrections (W-3).
+  const rewrite = correctionsForRewrite(o.corrections);
+  if (rewrite) content.push({ type: "text", text: rewrite });
+  const labels = sent.reduce((n, f) => n + `fig:${f.n}-${f.k} (שקף ${f.n})`.length, 0);
+  return {
+    request: {
+      kind: "part",
+      ref: String(idx),
+      system: [{ type: "text", text: SUMMARY_SYSTEM, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content }],
+      maxTokens: PART_TOKENS,
+    },
+    inputChars: SUMMARY_SYSTEM.length + deck.length + request.length + labels + rewrite.length,
+    imageTokens: sent.reduce((n, f) => n + imageTokens(f.w, f.h), 0),
+  };
+}
+
+/* ── D8 in the writer: a routed model without server-side fallback that
+ * refuses or fails before any text is run once more on the default under
+ * its own reservation (kind and ref of the unit, no daily count). The
+ * finish then charges the rerun (the model that wrote the text), and the
+ * first call's reservation is settled on its own. ── */
+type Rerun = { charge: number | null; spent: Spend | null };
+function rerunReserve(store: Store, lectureId: string, unit: Unit, lecture: Lecture, rerun: Rerun): FallbackReserve {
+  return async (estimateUsd) => {
+    const id = await reserve(store.sb, {
+      groupId: lecture.group_id,
+      lectureId,
+      kind: unit.kind,
+      ref: unit.kind === "outline" ? null : String(unit.idx),
+      estimateUsd,
+      daily: false,
+    });
+    rerun.charge = id;
+    return async (s) => {
+      rerun.spent = s;
+    };
+  };
+}
+async function chargesOf(store: Store, lectureId: string, unit: Unit, first: number, spent: Spend | null, rerun: Rerun) {
+  if (rerun.charge === null) return { charge: first, model: spent?.model ?? null, usage: spent?.usage ?? null, cost: spent?.costUsd ?? 0 };
+  if (!(await settle(store.sb, first, { model: spent?.model ?? MODEL, usage: spent?.usage ?? null }))) log(lectureId, unit, "settle", "the first call kept its estimate");
+  const s = rerun.spent;
+  return { charge: rerun.charge, model: s?.model ?? null, usage: s?.usage ?? null, cost: s?.costUsd ?? 0 };
+}
+
 /* ── A part: today's request (section.ts), its pictures checked, plus the corrections block ── */
 async function preparePart(store: Store, lectureId: string, unit: Unit, input: WritingInput, opts: WriteOpts): Promise<Prepared> {
   const lecture = input.lecture;
@@ -451,44 +538,12 @@ async function preparePart(store: Store, lectureId: string, unit: Unit, input: W
     return endEarly(store, lectureId, unit, "figures_expired");
   }
   const sent = figs.filter((f) => urls[f.path]);
-  // Pictures that carry content of their own (diagrams, life cycles) raise the
-  // word target. Small ones (often chemical structures, which the summary
-  // leaves out) and PDF page renders (they repeat the slide's text) do not.
-  const contentPictures = lecture.source_kind === "pdf" ? 0 : sent.filter((f) => !f.w || Math.max(f.w, f.h) >= 300).length;
 
   // The corrections of the part's earlier generation, read after the claim (which started the new one).
   const corrections = asCorrections(opts.corrections ? await opts.corrections(idx) : sec.corrections);
-  const deck = lectureBlock(lecture);
-  const request = sectionRequest({
-    index: idx,
-    count: sections.length,
-    heading: sec.title,
-    from: sec.slide_from,
-    to: sec.slide_to,
-    others: sections.filter((s) => s.idx !== idx).map((s) => ({ heading: s.title, from: s.slide_from, to: s.slide_to })),
-    hasFigures: sent.length > 0,
-    isLast: idx === sections.length - 1,
-    targetWords: targetWords(lecture.slides.filter((s) => s.n >= sec.slide_from && s.n <= sec.slide_to).map(slideText).join("\n"), contentPictures),
-  });
-  const content: Anthropic.Beta.BetaContentBlockParam[] = [
-    { type: "text", text: deck, cache_control: { type: "ephemeral" } },
-    { type: "text", text: request },
-  ];
-  for (const f of sent) {
-    content.push({ type: "text", text: `fig:${f.n}-${f.k} (שקף ${f.n})` });
-    content.push({ type: "image", source: { type: "url", url: urls[f.path] } });
-  }
-  // One more block after everything else, so the rest is byte-identical with or without corrections (W-3).
-  const rewrite = correctionsForRewrite(corrections);
-  if (rewrite) content.push({ type: "text", text: rewrite });
-
-  const labels = sent.reduce((n, f) => n + `fig:${f.n}-${f.k} (שקף ${f.n})`.length, 0);
-  const estimate = estimateUsd(
-    MODEL,
-    SUMMARY_SYSTEM.length + deck.length + request.length + labels + rewrite.length,
-    PART_TOKENS,
-    sent.reduce((n, f) => n + imageTokens(f.w, f.h), 0),
-  );
+  const req = partRequest({ lecture, sections, idx, figures: sent.map((f) => ({ ...f, url: urls[f.path] })), corrections });
+  const model = await modelFor(store.sb, lecture.group_id, "part", { lectureId, pictures: sent.length > 0 });
+  const estimate = estimateUsd(model, req.inputChars, req.request.maxTokens, req.imageTokens);
   const r = await reserveFor(store, lectureId, unit, lecture, estimate);
   if ("done" in r) return r;
 
@@ -498,6 +553,9 @@ async function preparePart(store: Store, lectureId: string, unit: Unit, input: W
       let spent: Spend | null = null;
       let leaseLost = false;
       let thrown: unknown = null;
+      // D8: a routed model without server-side fallback that refuses before any text is written again on the default.
+      const rerun: Rerun = { charge: null, spent: null };
+      const fallback = rerunReserve(store, lectureId, unit, lecture, rerun);
       const stop = new AbortController();
       // The text so far, every ~15 s while it grows, one save at a time; a
       // refused save means another writer took the part: stop.
@@ -524,15 +582,13 @@ async function preparePart(store: Store, lectureId: string, unit: Unit, input: W
       let res: Awaited<ReturnType<typeof run>> | null = null;
       try {
         res = await run({
+          ...req.request,
           client: anthropic(),
-          kind: "part",
-          ref: String(idx),
+          model,
+          reserveFallback: fallback,
           // Completeness is what the students judge: high effort; a part that
           // ran out of time before is written at medium (study_claim decides).
-          system: [{ type: "text", text: SUMMARY_SYSTEM, cache_control: { type: "ephemeral" } }],
-          messages: [{ role: "user", content }],
           effort: unit.effort,
-          maxTokens: PART_TOKENS,
           stopAt: opts.stopAt,
           ledger: async (s) => {
             spent = s;
@@ -559,7 +615,7 @@ async function preparePart(store: Store, lectureId: string, unit: Unit, input: W
         status = "ready";
         error = res?.stop === "max_tokens" ? "truncated" : null;
       }
-      const s = spent as Spend | null;
+      const fin = await chargesOf(store, lectureId, unit, r.id, spent as Spend | null, rerun);
       try {
         const ok = await store.finish({
           lectureId,
@@ -569,10 +625,10 @@ async function preparePart(store: Store, lectureId: string, unit: Unit, input: W
           status,
           error,
           text: tidyMarkdown(text),
-          model: s?.model ?? MODEL,
-          usage: s?.usage ?? null,
-          cost: s?.costUsd ?? 0,
-          charge: r.id,
+          model: fin.model ?? model,
+          usage: fin.usage,
+          cost: fin.cost,
+          charge: fin.charge,
         });
         if (!ok && status === "ready") return { status: "failed", error: "lease_lost" };
       } catch (e) {
@@ -606,8 +662,9 @@ async function prepareNotes(store: Store, lectureId: string, unit: Unit, input: 
     numbered: blocks.map((b) => ({ n: b.n, text: b.text })),
   });
   const schema = cleanSchema(zodOutputFormat(Notes).schema as Record<string, unknown>);
+  const model = await modelFor(store.sb, lecture.group_id, "notes");
   const estimate = estimateUsd(
-    MODEL,
+    model,
     RECORDING_SYSTEM.length + deck.length + transcriptBlock.length + request.length + JSON.stringify(schema).length,
     NOTES_TOKENS,
   );
@@ -620,10 +677,13 @@ async function prepareNotes(store: Store, lectureId: string, unit: Unit, input: 
       let all = "";
       let spent: Spend | null = null;
       let thrown: unknown = null;
+      const rerun: Rerun = { charge: null, spent: null };
       let res: Awaited<ReturnType<typeof run>> | null = null;
       try {
         res = await run({
           client: anthropic(),
+          model,
+          reserveFallback: rerunReserve(store, lectureId, unit, lecture, rerun),
           kind: "notes",
           ref: String(idx),
           system: [{ type: "text", text: RECORDING_SYSTEM, cache_control: { type: "ephemeral" } }],
@@ -660,14 +720,14 @@ async function prepareNotes(store: Store, lectureId: string, unit: Unit, input: 
       else if (res?.timedOut) error = "timeout"; // tried again after a minute, at low effort (study_claim)
       else if (res?.stop === "refusal") error = "refusal";
       else {
-        const drafts = res?.stop === "max_tokens" ? null : parseNotes(byModel, res?.model ?? MODEL);
+        const drafts = res?.stop === "max_tokens" ? null : parseNotes(byModel, res?.model ?? model);
         if (!drafts) error = "truncated";
         else {
           status = "ready";
           items = checkNotes(drafts, blocks, { hasTimes: Boolean(input.recording?.has_times), durationS: input.recording?.duration_s ?? null });
         }
       }
-      const s = spent as Spend | null;
+      const fin = await chargesOf(store, lectureId, unit, r.id, spent as Spend | null, rerun);
       try {
         const ok = await store.finish({
           lectureId,
@@ -677,10 +737,10 @@ async function prepareNotes(store: Store, lectureId: string, unit: Unit, input: 
           status,
           error,
           items,
-          model: s?.model ?? MODEL,
-          usage: s?.usage ?? null,
-          cost: s?.costUsd ?? 0,
-          charge: r.id,
+          model: fin.model ?? model,
+          usage: fin.usage,
+          cost: fin.cost,
+          charge: fin.charge,
         });
         if (!ok && status === "ready") return { status: "failed", error: "lease_lost" };
       } catch (e) {

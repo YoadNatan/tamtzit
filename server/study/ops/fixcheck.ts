@@ -4,11 +4,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod/v4";
 import { assertCollabSchema } from "../ask.js";
 import { estimateUsd, reserve } from "../budget.js";
-import { cleanSchema, run, settleFor, type Ledger } from "../claude.js";
+import { cleanSchema, run, settleFor, type FallbackReserve, type Ledger, type RunOpts } from "../claude.js";
+import { fallbackReserve, modelFor } from "../routes.js";
 import { COLLAB_TIME_LIMIT_MS, FIX_CHECK_EFFORT, FIX_CHECK_MAX_TOKENS, FIX_CHECK_SLIDES_CHARS } from "../limits.js";
 import type { Op } from "./types.js";
 import { FIX_CHECK_SYSTEM, fixCheckRequest } from "../prompts/collab.js";
-import { anthropic, HttpError, json, keyed, loadLecture, memberClient, MODEL, slideText, type Lecture } from "../study.js";
+import { anthropic, HttpError, json, keyed, loadLecture, memberClient, slideText, type Lecture } from "../study.js";
 
 /* ── "לבדוק מול השקף": a proposed correction against its slides (package K) ──
  *
@@ -61,24 +62,43 @@ export function citedSlidesText(lecture: Pick<Lecture, "slides">, cited: number[
   return out.join("\n\n");
 }
 
+/** A check's request, pure: what checkCall sends and what a comparison
+ *  freezes (design-models §7.6), everything but the call's own plumbing. */
+export function fixCheckOpts(request: string): Pick<RunOpts, "kind" | "system" | "messages" | "effort" | "maxTokens" | "format"> {
+  return {
+    kind: "fix_check",
+    system: [{ type: "text", text: FIX_CHECK_SYSTEM }],
+    messages: [{ role: "user", content: request }],
+    effort: FIX_CHECK_EFFORT,
+    maxTokens: FIX_CHECK_MAX_TOKENS,
+    format: { type: "json_schema", schema: cleanSchema(zodOutputFormat(FixCheck).schema as Record<string, unknown>) },
+  };
+}
+
 /** The structured call: JSON text through claude.ts's run(), settled in its
- *  `finally`. A refusal or an answer that is not { ok, note } is null. */
-export async function checkCall(o: { client: Anthropic; request: string; stopAt: number; ledger: Ledger; signal?: AbortSignal }): Promise<{
+ *  `finally`, on the key's model (the default when none is given). A
+ *  refusal or an answer that is not { ok, note } is null. */
+export async function checkCall(o: {
+  client: Anthropic;
+  request: string;
+  stopAt: number;
+  ledger: Ledger;
+  signal?: AbortSignal;
+  model?: string;
+  reserveFallback?: FallbackReserve;
+}): Promise<{
   result: FixCheckResult | null;
   stop: string | null;
 }> {
   let text = "";
   const r = await run({
+    ...fixCheckOpts(o.request),
     client: o.client,
-    kind: "fix_check",
-    system: [{ type: "text", text: FIX_CHECK_SYSTEM }],
-    messages: [{ role: "user", content: o.request }],
-    effort: FIX_CHECK_EFFORT,
-    maxTokens: FIX_CHECK_MAX_TOKENS,
     stopAt: o.stopAt,
-    format: { type: "json_schema", schema: cleanSchema(zodOutputFormat(FixCheck).schema as Record<string, unknown>) },
     ledger: o.ledger,
     signal: o.signal,
+    model: o.model,
+    reserveFallback: o.reserveFallback,
     onText: (d) => {
       text += d;
     },
@@ -118,16 +138,19 @@ export const fixCheckOp: Op = async (req, body, started) => {
   const slides = citedSlidesText(lecture, cited);
   if (!slides) throw new HttpError(400, "bad source");
   const request = fixCheckRequest({ before: p.before_text, after: p.after_text, slides });
+  const model = await modelFor(sb, lecture.group_id, "fix_check");
   const reservation = await reserve(sb, {
     groupId: lecture.group_id,
     lectureId: lecture.id,
     kind: "fix_check",
     ref: p.id,
-    estimateUsd: estimateUsd(MODEL, FIX_CHECK_SYSTEM.length + request.length, FIX_CHECK_MAX_TOKENS),
+    estimateUsd: estimateUsd(model, FIX_CHECK_SYSTEM.length + request.length, FIX_CHECK_MAX_TOKENS),
   });
   const { result, stop } = await checkCall({
     client: anthropic(),
     request,
+    model,
+    reserveFallback: fallbackReserve(sb, { groupId: lecture.group_id, lectureId: lecture.id, kind: "fix_check", ref: p.id }),
     stopAt: started + COLLAB_TIME_LIMIT_MS,
     ledger: settleFor(sb, reservation),
     signal: req.signal,
