@@ -2387,6 +2387,18 @@
     "required": 3
    }
   ],
+  "study_qset_answer_value": [
+   {
+    "args": [
+     "p_attempt",
+     "p_question",
+     "p_value",
+     "p_mode",
+     "p_ms"
+    ],
+    "required": 3
+   }
+  ],
   "study_qset_attach": [
    {
     "args": [
@@ -3181,6 +3193,18 @@
      "p_meta"
     ],
     "required": 2
+   }
+  ],
+  "study_sheet_hold": [
+   {
+    "args": [
+     "p_exam",
+     "p_worst",
+     "p_cap",
+     "p_solve",
+     "p_key"
+    ],
+    "required": 3
    }
   ],
   "study_sheet_open_add": [

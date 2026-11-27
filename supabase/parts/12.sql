@@ -134,6 +134,9 @@ create table if not exists study_private.similar_jobs (
 );
 create index if not exists similar_jobs_run on study_private.similar_jobs (run_id, status);
 create index if not exists similar_jobs_live on study_private.similar_jobs (group_id) where status = 'running';
+-- The roots a job saved twins for already: a job claimed again (its finish
+-- lost after its save) writes only the others, and is done once none is left.
+alter table study_private.similar_jobs add column if not exists done_roots uuid[] not null default '{}';
 
 -- A running run's kicks and the pages' fresh links (D24), as exam_queue's.
 create table if not exists study_private.similar_queue (
@@ -282,6 +285,16 @@ $$;
 -- (how many beyond 24), forms, today (a run of the whole sheet already
 -- today), joined, pages}. 'not signed in', 'exam not found', 'off',
 -- 'question not found', 'not eligible' (an open item, one without a sure key).
+-- Whether a run of the whole sheet uses up the sheet's day (once a day):
+-- one still making, one that made something, or one that paid for calls
+-- (a run whose every twin was dropped still spent; one that stopped before
+-- its first call did not).
+create or replace function study_private.similar_today(x public.study_similar_runs)
+returns boolean language sql stable as $$
+  select x.status = 'running' or x.made > 0 or x.charged_usd > 0
+$$;
+revoke all on function study_private.similar_today(public.study_similar_runs) from public;
+
 create or replace function public.study_similar_plan(p_exam uuid, p_question uuid default null, p_scope text default 'item')
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
@@ -328,7 +341,7 @@ begin
                    'pages', to_jsonb(study_private.similar_fig_pages(u))) order by o)
                    from unnest(ids[1:24]) with ordinality t(u, o)), '[]'),
       'today', exists (select 1 from public.study_similar_runs x
-                        where x.exam_id = p_exam and x.scope = 'sheet' and x.created_at >= v_day and (x.status <> 'failed' or x.made > 0)),
+                        where x.exam_id = p_exam and x.scope = 'sheet' and x.created_at >= v_day and study_private.similar_today(x)),
       'joined', (select x.id from public.study_similar_runs x
                   where x.exam_id = p_exam and x.scope = 'sheet' and x.status = 'running' and study_private.similar_live(x.id)
                   order by x.created_at desc limit 1),
@@ -401,7 +414,7 @@ begin
      order by x.created_at desc limit 1;
     if v_join is not null then return jsonb_build_object('joined', v_join); end if;
     if exists (select 1 from public.study_similar_runs x
-                where x.exam_id = p_exam and x.scope = 'sheet' and x.created_at >= v_day and (x.status <> 'failed' or x.made > 0)) then
+                where x.exam_id = p_exam and x.scope = 'sheet' and x.created_at >= v_day and study_private.similar_today(x)) then
       raise exception 'today';
     end if;
     v_per := 1;
@@ -490,8 +503,13 @@ begin
   if v_server then update study_private.similar_queue set kicks_since_claim = 0 where run_id = p_run; end if;
   if x.charged_usd >= x.reserved_usd then return null; end if;
   if study_private.group_live(x.group_id) >= study_private.exam_cap(x.group_id) then return null; end if;
+  -- A job whose every root got its twins (its save went in, its finish did not) is done.
+  update study_private.similar_jobs z set status = 'done', error = null, retry_at = null, lease_id = null, lease_until = null, updated_at = now()
+   where z.run_id = p_run and z.status <> 'done' and z.items <@ z.done_roots
+     and (z.status <> 'running' or z.lease_until <= now());
+  if found then perform study_private.similar_advance(p_run); end if;
   select * into j from study_private.similar_jobs z
-   where z.run_id = p_run
+   where z.run_id = p_run and not (z.items <@ z.done_roots)
      and (z.status = 'pending'
           or (z.status = 'running' and z.lease_until <= now() and z.attempts < 4)
           or (z.status = 'failed' and z.attempts < 4 and z.retry_at is not null and (not v_server or z.retry_at <= now())))
@@ -532,7 +550,7 @@ begin
         'twins', coalesce((select jsonb_agg(left(t.question, 400) order by t.created_at) from public.study_questions t
                             where t.source = 'twin' and t.twin_of = r.id), '[]'::jsonb))
       order by array_position(j.items, r.id))
-      from public.study_questions r where r.id = any (j.items) and r.retired_at is null), '[]'::jsonb));
+      from public.study_questions r where r.id = any (j.items) and not (r.id = any (j.done_roots)) and r.retired_at is null), '[]'::jsonb));
 end;
 $$;
 
@@ -595,6 +613,7 @@ declare
   v_id   uuid;
   v_new  uuid[] := '{}';
   v_made int := 0;
+  v_roots uuid[] := '{}';
   v_drop int := greatest(0, least(coalesce(p_dropped, 0), 200));
   opts   text[];
   prm    text[];
@@ -616,7 +635,7 @@ begin
           and coalesce(t ->> 'check', '') in ('recalc', 'blind', 'slides') and jsonb_typeof(t -> 'parts') = 'array';
     if ok then
       select * into r from public.study_questions z where z.id = (t ->> 'root')::uuid;
-      ok := found and r.id = any (j.items) and r.exam_id = x.exam_id and r.retired_at is null
+      ok := found and r.id = any (j.items) and not (r.id = any (j.done_roots)) and r.exam_id = x.exam_id and r.retired_at is null
             and study_private.similar_count(r.id) < 6;
     end if;
     if ok then
@@ -699,10 +718,11 @@ begin
       v_new := v_new || v_id;
     end loop;
     v_made := v_made + 1;
+    v_roots := v_roots || r.id;
   end loop;
   update study_private.similar_jobs z
      set made = z.made + v_made, dropped = z.dropped + v_drop, skipped = z.skipped + greatest(0, least(coalesce(p_skipped, 0), 8)),
-         updated_at = now()
+         done_roots = array(select distinct u from unnest(z.done_roots || v_roots) u), updated_at = now()
    where z.id = p_job;
   update public.study_similar_runs z
      set made = z.made + v_made, dropped = z.dropped + v_drop, skipped_figs = z.skipped_figs + greatest(0, least(coalesce(p_skipped, 0), 8)),
@@ -922,6 +942,36 @@ grant execute on function public.study_similar_begin(uuid, uuid[], text, int, bi
 grant execute on function public.study_claim_similar(uuid, text), public.study_similar_charge(uuid, uuid, text, jsonb, numeric, numeric, text),
   public.study_similar_save(uuid, uuid, jsonb, int, int, text, text), public.study_finish_similar_job(uuid, uuid, text, text, text)
   to anon, authenticated;
+
+-- ── A numeric answer inside a practice set's attempt (section L) ──
+-- The sheet's set (kind 'sheet') holds numeric twins; their answer is O 2's
+-- study_answer_value, so inside a round of a set it goes through this
+-- wrapper as section L's study_qset_answer does a choice: the attempt
+-- checked (L's qset_attempt_open), the same answer and reply, then the
+-- attempt stamped on the row this call added (L's qset_stamp), so the set's
+-- score and its group numbers count it. 'off' without section L; L's and
+-- O 2's refusals as theirs.
+create or replace function public.study_qset_answer_value(p_attempt uuid, p_question uuid, p_value numeric, p_mode text default 'exam',
+  p_ms int default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  v_before uuid[];
+  r        jsonb;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  if to_regprocedure('study_private.qset_attempt_open(uuid,uuid)') is null
+     or to_regprocedure('study_private.qset_stamp(uuid,uuid,uuid[])') is null then
+    raise exception 'off';
+  end if;
+  perform study_private.qset_attempt_open(p_attempt, p_question);
+  v_before := array(select y.id from public.study_answers y where y.user_id = auth.uid() and y.question_id = p_question);
+  r := public.study_answer_value(p_question, p_value, p_mode, p_ms);
+  perform study_private.qset_stamp(p_attempt, p_question, v_before);
+  return r;
+end;
+$$;
+revoke all on function public.study_qset_answer_value(uuid, uuid, numeric, text, int) from public, anon;
+grant execute on function public.study_qset_answer_value(uuid, uuid, numeric, text, int) to authenticated;
 
 -- The similar sweeper: every minute, its own job (only with pg_cron).
 do $$

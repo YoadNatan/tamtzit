@@ -11643,6 +11643,153 @@ delete from auth.users where id in (:'pa', :'pb', :'pz');
 select pg_temp.ook('O2-end', not exists (select 1 from public.study_exams where group_id = :'pg')
   and not exists (select 1 from study_private.open_marks m where m.user_id in (:'pa', :'pb')),
   'the fixtures are gone');
+-- ── O: a sheet's hold on the sheets line (the review's fix; docs/study/sheets.md "The hold") ──
+-- Fixtures of their own (every text invented), removed at the end.
+reset role;
+set request.jwt.claim.sub = '';
+\set ha '0e200000-0000-4000-8000-000000000001'
+\set hb '0e200000-0000-4000-8000-000000000002'
+\set hz '0e200000-0000-4000-8000-000000000009'
+\set hg '0e200000-0000-4000-8000-0000000000a1'
+\set hzg '0e200000-0000-4000-8000-0000000000a2'
+\set hl1 '0e200000-0000-4000-8000-0000000000b1'
+\set hx '0e200000-0000-4000-8000-0000000000c9'
+insert into auth.users (id, raw_user_meta_data) values
+ (:'ha', '{"app":"study","full_name":"הדר"}'), (:'hb', '{"app":"study","full_name":"חן"}'), (:'hz', '{"app":"study","full_name":"זיו"}');
+insert into public.study_groups (id, name, join_code, created_by) values (:'hg', 'קבוצת הקו', 'OHOLDS', :'ha'), (:'hzg', 'קבוצה זרה ג', 'OHOLDZ', :'hz');
+insert into public.study_members (group_id, user_id, name) values (:'hg', :'ha', 'הדר'), (:'hg', :'hb', 'חן'), (:'hzg', :'hz', 'זיו');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'hl1', :'hg', 'פרמקו קו', 'הרצאה בדויה', 'pptx', '[]', 'ready', :'ha');
+select id as hc from public.study_courses where group_id = :'hg' and name_key = 'פרמקו קו' \gset
+select count(*) = 0 as h_nokey from vault.decrypted_secrets where name = 'study_worker_key' \gset
+\if :h_nokey
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef');
+\endif
+select decrypted_secret as hkey from vault.decrypted_secrets where name = 'study_worker_key' limit 1 \gset
+select coalesce((select enabled from study_private.features where name = 'exams'), false) as h_exams_was \gset
+update study_private.features set enabled = true where name in ('exams', 'sheets');
+select (pg_temp.oas(:'ha', format('select public.study_sheet_create(%L, %L) ->> %L', :'hc', '{"title":"דף א (בדוי)"}', 'exam_id'))) as hs1 \gset
+select (pg_temp.oas(:'ha', format('select public.study_sheet_create(%L, %L) ->> %L', :'hc', '{"title":"דף ב (בדוי)"}', 'exam_id'))) as hs2 \gset
+select (pg_temp.oas(:'hb', format('select public.study_sheet_create(%L, %L) ->> %L', :'hc', '{"title":"דף ג (בדוי)"}', 'exam_id'))) as hs3 \gset
+insert into public.study_exams (id, group_id, course, title, year, status, kind, created_by) values (:'hx', :'hg', 'פרמקו קו', 'מועד א (בדוי)', 2025, 'ready', 'exam', :'ha');
+
+-- Two sheets started back to back, each with a worst case of $4 against the $6 line: the second waits.
+select pg_temp.oas(:'ha', format('select public.study_sheet_hold(%L, 4, 6, %L, %L)::text', :'hs1', '{"exam":0.5,"sheet":0.25}', :'hkey')) as h_r1 \gset
+select pg_temp.oas(:'ha', format('select public.study_sheet_hold(%L, 4, 6, null, %L)::text', :'hs2', :'hkey')) as h_r2 \gset
+select pg_temp.ook('OH1', (:'h_r1')::jsonb = '{"held": 4, "used": 0}'::jsonb and :'h_r2' = 'error: sheets_cap'
+  and pg_temp.oas(:'hb', format('select sheets_usd::text from public.study_sheet_room(%L)', :'hg')) = '4.00000'
+  and pg_temp.oas(:'ha', format('select public.study_sheet_hold(%L, 2, 6, null, %L) ->> %L', :'hs2', :'hkey', 'used')) = '4.00000',
+  'the first sheet holds its $4; the second''s $4 no longer fits the line ($6 less the hold); $2 does; the room counts the holds');
+select pg_temp.ook('OH2', (select string_agg(x, ' · ') from (select pg_temp.oas(u, q) x from (values
+    (1, :'ha', format('select public.study_sheet_hold(%L, 1, 6)', :'hs1')),
+    (2, :'hz', format('select public.study_sheet_hold(%L, 1, 6, null, %L)', :'hs1', :'hkey')),
+    (3, :'ha', format('select public.study_sheet_hold(%L, 1, 6, null, %L)', :'hx', :'hkey')),
+    (4, :'ha', format('select public.study_sheet_hold(%L, 1001, 2000, null, %L)', :'hs1', :'hkey')),
+    (5, :'ha', format('select public.study_sheet_hold(%L, 1, 6, %L, %L)', :'hs1', '{"exam":"x"}', :'hkey'))
+  ) v(o, u, q) order by o) y) = 'error: forbidden · error: exam not found · error: not a sheet · error: bad hold · error: bad hold'
+  and not has_function_privilege('anon', 'public.study_sheet_hold(uuid, numeric, numeric, jsonb, text)', 'execute'),
+  'the hold: only with the key, only a member, only a sheet, a sane amount and solve prices; anon cannot');
+-- A hold of an upload that never started stops counting after 30 minutes; 0 drops it.
+reset role;
+update study_private.sheet_holds set at = now() - interval '31 minutes' where exam_id = :'hs2';
+select pg_temp.oas(:'hb', format('select sheets_usd::text from public.study_sheet_room(%L)', :'hg')) as h_room2 \gset
+select pg_temp.oas(:'ha', format('select public.study_sheet_hold(%L, 0, 6, null, %L) ->> %L', :'hs1', :'hkey', 'held')) as h_drop \gset
+select pg_temp.ook('OH3', :'h_room2' = '4.00000' and :'h_drop' = '0'
+  and not exists (select 1 from study_private.sheet_holds where exam_id = :'hs1')
+  and pg_temp.oas(:'hb', format('select sheets_usd::text from public.study_sheet_room(%L)', :'hg')) = '0',
+  'an upload that never started holds nothing after 30 minutes; a hold of 0 is dropped (a start that failed)');
+select pg_temp.oas(:'ha', format('select public.study_sheet_hold(%L, 4, 6, %L, %L) ->> %L', :'hs1', '{"exam":0.5,"sheet":0.25}', :'hkey', 'held')) as h_r3 \gset
+
+-- Read: the solve units are checked with the real item count and become the hold.
+reset role;
+insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form, figure, parse_conf, page, has_key, created_by)
+select :'hg', :'hs1', 99 + n, 'exam', 'mcq', 'שאלה בדויה ' || n, array['א', 'ב'], 'one', '', 3, 1, false, :'ha' from generate_series(1, 6) n;
+update public.study_exams set status = 'reading' where id = :'hs1';
+insert into study_private.exam_jobs (group_id, exam_id, kind, range, status, cost_usd) values (:'hg', :'hs1', 'read', '{"pages":[1,2,3],"reader":"sheet"}', 'done', 0.3);
+select study_private.exam_advance(:'hs1') is null as h_adv \gset
+select pg_temp.ook('OH4', (select hold_usd || ' ' || base_usd from study_private.sheet_holds where exam_id = :'hs1') = '0.50000 0.30000'
+  and (select count(*) || ' ' || string_agg(status, ',') from study_private.exam_jobs where exam_id = :'hs1' and kind = 'solve') = '2 pending,pending'
+  and pg_temp.oas(:'hb', format('select sheets_usd::text from public.study_sheet_room(%L)', :'hg')) = '0.80000',
+  'six items without answers: two solve units ($0.25 each at worst) fit, and are the sheet''s hold now; the line counts the read and the hold');
+-- A sheet that spent its hold (a unit paid twice) runs no more units: they wait as the budget would hold them.
+update study_private.exam_jobs set status = 'done', cost_usd = 0.55
+ where id = (select id from study_private.exam_jobs where exam_id = :'hs1' and kind = 'solve' order by created_at, id limit 1);
+select public.study_claim_exam(:'hs1', :'hkey') is null as h_c1 \gset
+select pg_temp.ook('OH5', :'h_c1'::boolean
+  and (select string_agg(status || ':' || error, ',') from study_private.exam_jobs where exam_id = :'hs1' and kind = 'solve' and status <> 'done') = 'failed:budget'
+  and (select status || ' ' || error from public.study_exams where id = :'hs1') = 'reading budget'
+  and pg_temp.oas(:'hb', format('select sheets_usd::text from public.study_sheet_room(%L)', :'hg')) = '0.85000',
+  'the hold spent: the next unit is held (D23), the sheet waits with "budget", the line counts what it cost');
+-- "לנסות שוב" does not restart what the budget holds; the switch; "להמשיך" after a fresh hold.
+update study_private.features set enabled = false where name = 'sheets';
+select pg_temp.oas(:'ha', format('select public.study_exam_retry(%L, null, %L)', :'hs1', '{}')) as h_off \gset
+update study_private.features set enabled = true where name = 'sheets';
+select pg_temp.ook('OH6', :'h_off' = 'error: off'
+  and pg_temp.oas(:'hb', format('select public.study_exam_retry(%L, null, %L)', :'hs1', '{}')) = 'error: paused'
+  and pg_temp.oas(:'hb', format('select public.study_exam_retry(%L, array[1], %L)', :'hs1', '{}')) = 'error: paused'
+  and (select count(*) from study_private.exam_jobs where exam_id = :'hs1' and status = 'pending') = 0,
+  'a retry of a held sheet is refused (the phone offers "להמשיך"); with sheets off, off');
+select pg_temp.oas(:'ha', format('select public.study_sheet_hold(%L, 0.3, 6, null, %L) ->> %L', :'hs1', :'hkey', 'held')) as h_r4 \gset
+select pg_temp.oas(:'ha', format('select public.study_sheet_resume(%L, false, false, %L) ->> %L', :'hs1', :'hkey', 'solve')) as h_res \gset
+select public.study_claim_exam(:'hs1', :'hkey') ->> 'kind' as h_c2 \gset
+select pg_temp.ook('OH7', :'h_r4' = '0.30000' and :'h_res' in ('2', '4') and :'h_c2' = 'solve'
+  and (select solve_sheet || ' ' || base_usd from study_private.sheet_holds where exam_id = :'hs1') = '0.25000 0.85000',
+  '"להמשיך" after the op''s new hold (its base what the sheet cost so far; the solve prices kept): the held unit runs');
+
+-- The real count does not fit: the solve units wait (D23) and the sheet says so.
+reset role;
+insert into study_private.sheet_holds (exam_id, group_id, hold_usd, cap_usd, solve_sheet) values (:'hs2', :'hg', 1, 6, 5)
+on conflict (exam_id) do update set hold_usd = 1, base_usd = 0, cap_usd = 6, solve_sheet = 5, at = now();
+insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form, figure, parse_conf, page, has_key, created_by)
+select :'hg', :'hs2', 99 + n, 'exam', 'mcq', 'שאלה בדויה ב' || n, array['א', 'ב'], 'one', '', 3, 1, false, :'ha' from generate_series(1, 6) n;
+update public.study_exams set status = 'reading' where id = :'hs2';
+insert into study_private.exam_jobs (group_id, exam_id, kind, range, status, cost_usd) values (:'hg', :'hs2', 'read', '{"pages":[1],"reader":"sheet"}', 'done', 0.1);
+select study_private.exam_advance(:'hs2') is null as h_adv2 \gset
+select pg_temp.ook('OH8', (select string_agg(status || ':' || error, ',') from study_private.exam_jobs where exam_id = :'hs2' and kind = 'solve') = 'failed:budget,failed:budget'
+  and (select status || ' ' || error from public.study_exams where id = :'hs2') = 'reading budget'
+  and (select hold_usd from study_private.sheet_holds where exam_id = :'hs2') = 1,
+  'two solve units at $5 each do not fit the line: they wait, the sheet says "budget", the hold is not raised');
+-- A ready sheet whose held units are only open-add''s stays ready (practice keeps it).
+insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form, figure, parse_conf, page, has_key, created_by)
+values (:'hg', :'hs3', 100, 'exam', 'mcq', 'שאלה בדויה ג', array['א', 'ב'], 'one', '', 3, 1, true, :'hb');
+insert into public.study_question_keys (question_id, answer, key_origin) select id, 0, 'member' from public.study_questions where exam_id = :'hs3';
+update public.study_exams set status = 'ready' where id = :'hs3';
+insert into study_private.exam_jobs (group_id, exam_id, kind, range, status, error) values (:'hg', :'hs3', 'read', '{"pages":[1],"reader":"open","extra":true}', 'failed', 'budget');
+select study_private.exam_advance(:'hs3') is null as h_adv3 \gset
+select status as h_st3 from public.study_exams where id = :'hs3' \gset
+insert into study_private.exam_jobs (group_id, exam_id, kind, range, status, error) values (:'hg', :'hs3', 'read', '{"pages":[1],"reader":"sheet"}', 'failed', 'budget');
+select study_private.exam_advance(:'hs3') is null as h_adv4 \gset
+select pg_temp.ook('OH9', :'h_st3' = 'ready' and (select status || ' ' || error from public.study_exams where id = :'hs3') = 'reading budget',
+  'only open-add held: still ready; a held unit of its own reading: it waits');
+
+-- A sheet never teaches the style, and its hiding stays; "locked" for an answered item (no "marked").
+reset role;
+insert into public.study_questions (group_id, exam_id, exam_no, source, kind, question, options, form, figure, parse_conf, page, has_key, created_by)
+values (:'hg', :'hx', 1, 'exam', 'mcq', 'שאלה בדויה ממבחן', array['א', 'ב'], 'one', '', 3, 1, false, :'ha');
+update public.study_exams set hide_from_profile = false where id = :'hs3';
+select pg_temp.oas(:'ha', format('select public.study_exam_hide(%L, false)', :'hs1')) as h_hd1 \gset
+select pg_temp.oas(:'ha', format('select public.study_exam_hide(%L, true)::text || %L', :'hx', 'done')) as h_hd2 \gset
+select (select hide_from_profile from public.study_exams where id = :'hx') as h_hid \gset
+select pg_temp.oas(:'ha', format('select public.study_exam_hide(%L, false)::text || %L', :'hx', 'done')) as h_hd3 \gset
+select pg_temp.ook('OH10', :'h_hd1' = 'error: not an exam' and :'h_hd2' = 'done' and :'h_hid'::boolean and :'h_hd3' = 'done'
+  and pg_temp.oas(:'hb', format('select string_agg(exam_id::text, %L) from public.study_course_style_items(%L, %L)', ',', :'hg', 'פרמקו קו')) = :'hx',
+  'a sheet''s hiding cannot be undone; a past exam''s can; the style''s items are past exams'' only (a sheet not hidden is still left out)');
+insert into public.study_answers (user_id, question_id, choice, correct, mode) select :'hb', id, 0, false, 'exam' from public.study_questions where exam_id = :'hs3';
+select pg_temp.oas(:'ha', format('select public.study_sheet_review(%L)::text', :'hs3')) as h_rev \gset
+select pg_temp.ook('OH11', (select bool_and((v ->> 'locked')::boolean) and bool_and(not (v ? 'marked')) from jsonb_each((:'h_rev')::jsonb -> 'items_extra') t(k, v)),
+  'an answered item is "locked" (its form and options stay); no "marked" flag tells who opened an open solution');
+
+-- ── The fixtures go ──
+reset role;
+set request.jwt.claim.sub = '';
+update study_private.features set enabled = false where name = 'sheets';
+update study_private.features set enabled = :'h_exams_was'::boolean where name = 'exams';
+delete from public.study_exams where group_id in (:'hg', :'hzg');
+delete from public.study_groups where id in (:'hg', :'hzg');
+delete from auth.users where id in (:'ha', :'hb', :'hz');
+select pg_temp.ook('OH-end', not exists (select 1 from study_private.sheet_holds where group_id = :'hg')
+  and not exists (select 1 from public.study_exams where group_id = :'hg'),
+  'the fixtures are gone (the holds with their sheets)');
 -- ── O 3: similar questions (docs/study/sheets.md, "SQL section O 3") ──
 -- Fixtures of their own (every text invented), removed at the end.
 reset role;
@@ -11880,11 +12027,57 @@ select pg_temp.ook('O3k', (:'s_sv2')::jsonb = '{"saved": 2, "dropped": 2}'::json
   and (select count(*) from public.study_notices where kind = 'similar_ready' and user_id = :'sb'
          and route = jsonb_build_object('v', 'sets', 'k', :'sset') and args ->> 'k' = '2') = 1,
   'a numeric twin with its unit and tolerance; a twin of a two-part question in parts of its own series, each part the twin of its root''s part; one with fewer parts dropped; the set holds the four; the requester is told (similar_ready, to the set)');
+-- A numeric twin answered inside a round of the sheet's set (study_qset_answer_value): stamped on the attempt, so the score counts it.
+select id as stwinn from public.study_questions where twin_of = :'sq3' \gset
+select pg_temp.oas(:'sa', format('select (public.study_qset_attempt_start(%L)).id::text', :'sset')) as satt \gset
+select pg_temp.oas(:'sa', format('select public.study_qset_answer_value(%L, %L, 4.6, %L, 4000)::text', :'satt', :'stwinn', 'lecture')) as s_qv1 \gset
+select pg_temp.oas(:'sa', format('select public.study_qset_answer_value(%L, %L, 9, %L, 4000)::text', :'satt', :'stwinn', 'lecture')) as s_qv2 \gset
+select pg_temp.oas(:'sa', format('select public.study_qset_attempt_finish(%L)::text', :'satt')) as s_qfin \gset
+select pg_temp.ook('O3k2', (:'s_qv1')::jsonb ->> 'correct' = 'true' and (:'s_qv1')::jsonb ->> 'num' = '4.62'
+  and (:'s_qv2')::jsonb ->> 'correct' = 'false'
+  and (select count(*) from public.study_answers where question_id = :'stwinn' and user_id = :'sa' and set_attempt = :'satt') = 2
+  and (:'s_qfin')::jsonb ->> 'answered' = '1' and (:'s_qfin')::jsonb ->> 'right_n' = '1'
+  and pg_temp.oas(:'sa', format('select public.study_qset_answer_value(%L, %L, 4.6)', :'satt', :'stwinn')) = 'error: attempt finished'
+  and pg_temp.oas(:'sb', format('select public.study_qset_answer_value(%L, %L, 4.6)', :'satt', :'stwinn')) = 'error: attempt not found'
+  and pg_temp.oas(:'sa', format('select public.study_qset_answer_value((public.study_qset_attempt_start(%L)).id, %L, 4.6)', :'sset', :'sq3')) = 'error: not in set'
+  and not has_function_privilege('anon', 'public.study_qset_answer_value(uuid, uuid, numeric, text, int)', 'execute'),
+  'a numeric twin in a round of the set: both answers stamped, the first one scored (answered 1, right 1); a finished attempt, another''s attempt, a question not in the set refused; anon cannot');
 update public.study_usage set cost_usd = 0, settled_at = now() where id = :s_r5;
 select pg_temp.oas(:'sa', format('select public.study_reserve(%L, null, %L, %L, 1.00, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) as s_r6 \gset
 select pg_temp.ook('O3l', pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, null, %L, 1, %s, 1.00, 5, null, null, %L)', :'ssh', 'sheet', :'s_r6', :'skey')) = 'error: today'
   and pg_temp.oas(:'sa', format('select public.study_similar_plan(%L, null, %L)::text', :'ssh', 'sheet'))::jsonb ->> 'today' = 'true',
   'the whole sheet once a day');
+-- Once a day counts a run that made something, is making, or paid for calls; not one that stopped before its first call.
+reset role;
+select made as s_m2, status as s_st2, charged_usd as s_ch2x from public.study_similar_runs where id = :'srun2' \gset
+update public.study_similar_runs set made = 0, status = 'failed', charged_usd = 0 where id = :'srun2';
+select pg_temp.oas(:'sa', format('select public.study_similar_plan(%L, null, %L) ->> %L', :'ssh', 'sheet', 'today')) as s_t1 \gset
+reset role;
+update public.study_similar_runs set charged_usd = 0.05 where id = :'srun2';
+select pg_temp.oas(:'sa', format('select public.study_similar_plan(%L, null, %L) ->> %L', :'ssh', 'sheet', 'today')) as s_t2 \gset
+reset role;
+update public.study_similar_runs set status = 'done', charged_usd = 0 where id = :'srun2';
+select pg_temp.oas(:'sa', format('select public.study_similar_plan(%L, null, %L) ->> %L', :'ssh', 'sheet', 'today')) as s_t3 \gset
+reset role;
+select pg_temp.ook('O3l2', :'s_t1' = 'false' and :'s_t2' = 'true' and :'s_t3' = 'false',
+  'a failed run that charged nothing leaves the day; one that paid for calls uses it; a done run that made and paid nothing does not');
+-- A job claimed again after its save went in (its finish lost): only the roots still without their twins.
+select array_to_string(done_roots, ',') as s_done from study_private.similar_jobs where id = :'sj2' \gset
+update public.study_similar_runs set status = 'running', made = :s_m2 where id = :'srun2';
+update study_private.similar_jobs set status = 'running', lease_until = now() - interval '1 minute', attempts = 1 where id = :'sj2';
+select public.study_claim_similar(:'srun2', :'skey') as sc2b \gset
+select pg_temp.ook('O3l3', :'s_done' = :'sq3' || ',' || :'sq6' or :'s_done' = :'sq6' || ',' || :'sq3', 'the save marked the roots it saved twins for');
+select public.study_similar_save(((:'sc2b')::jsonb ->> 'job')::uuid, ((:'sc2b')::jsonb ->> 'lease')::uuid, jsonb_build_array(:'stw4'::jsonb), 0, 0, null, :'skey') ->> 'saved' as s_sv3 \gset
+select pg_temp.ook('O3l4', (select string_agg(i ->> 'id', ',') from jsonb_array_elements((:'sc2b')::jsonb -> 'items') i) = :'sq2'
+  and :'s_sv3' = '0' and study_private.similar_count(:'sq3') = 1,
+  'claimed again: only the root still without a twin; a twin for a root it saved already is dropped (no second twin)');
+update study_private.similar_jobs set done_roots = items, status = 'running', lease_until = now() - interval '1 minute' where id = :'sj2';
+select public.study_claim_similar(:'srun2', :'skey') is null as s_c5 \gset
+select pg_temp.ook('O3l5', :'s_c5'::boolean
+  and (select status from study_private.similar_jobs where id = :'sj2') = 'done'
+  and (select status from public.study_similar_runs where id = :'srun2') = 'done',
+  'every root saved: the job is done when claimed, and its run with it');
+update public.study_similar_runs set made = :s_m2, status = :'s_st2', charged_usd = :s_ch2x where id = :'srun2';
 -- Six a root: four more twins of item 1 (as the owner), then the seventh is refused, and a save past it is dropped.
 reset role;
 insert into public.study_questions (group_id, source, from_exam, twin_of, twin_check, kind, question, options, form, has_key, created_by)

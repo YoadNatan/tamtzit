@@ -14,15 +14,17 @@
 --  O 1 (this version, release A0): the kind and the one optional lecture of
 --  an upload; the switch 'sheets' (off); "a new sheet" (study_sheet_create);
 --  keying any choice item by hand, true/false and match included
---  (study_exam_key_set), with its undo; and three of section S's functions
+--  (study_exam_key_set), with its undo; and five of section S's functions
 --  redefined here (create or replace, the list is in sheets.md): the course
 --  page lists each upload's kind and lecture, the library counts past exams
---  only, and a simulation takes past exams only and only their choice items.
---  The op exam_read keeps a sheet to 40 pages and checks the sheets line and
---  the headroom (study_sheet_room) before it calls S's study_exam_pages_done,
---  so release A0's sheets are read by the exam reader as they are. Sheets
---  are created with hide_from_profile, so the course's style examples never
---  learn from them.
+--  only, a simulation takes past exams only and only their choice items,
+--  and a sheet's hiding from the profile stays and the course's style
+--  examples take past exams only. The op exam_read keeps a sheet to 40
+--  pages, checks the sheets line and the headroom (study_sheet_room) and
+--  takes the sheet's hold on the line (study_sheet_hold, under the group's
+--  budget lock) before it calls S's study_exam_pages_done, so release A0's
+--  sheets are read by the exam reader as they are. Sheets are created with
+--  hide_from_profile, so the course's style examples never learn from them.
 --
 --  O 2 (below: the sheet reader, open and numeric forms) and O 3 (below:
 --  similar questions, a set of kind 'sheet' in section L). Every reference
@@ -306,15 +308,76 @@ end;
 $$;
 
 -- ── The sheets line and the headroom (OD3, OD13) ──
+-- A sheet holds its worst case on the sheets line while it is read
+-- (study_private.sheet_holds; the review's fix: a unit's cost is known only
+-- when it finishes, so the line counted finished work alone and any number
+-- of sheets started close together each passed it). The op exam_read takes
+-- the hold before the pages are queued (study_sheet_hold: the worker's key,
+-- under the group's budget lock, so two starts never both pass), and again
+-- for open-add and "להמשיך". A hold counts what is left of it (its worst
+-- case less what the sheet's units cost since) while the sheet has a unit
+-- that will run, or for 30 minutes after it was taken while the sheet is
+-- still uploading; a sheet that finished, failed, was deleted or is held
+-- by the budget (D23) counts only what it cost. The hold also bounds the
+-- sheet itself: a unit is not run once the sheet spent its hold (O 2's
+-- claim holds it as the budget would, D23), and before solve units are
+-- queued the line is checked again for them with the real item count (O 2's
+-- exam_advance; solve_exam and solve_sheet are one solve unit's worst case
+-- for each reader, the op's numbers).
+create table if not exists study_private.sheet_holds (
+  exam_id     uuid          primary key references public.study_exams (id) on delete cascade,
+  group_id    uuid          not null references public.study_groups (id) on delete cascade,
+  hold_usd    numeric(10,5) not null check (hold_usd > 0 and hold_usd <= 1000),
+  base_usd    numeric(10,5) not null default 0,     -- what the sheet's units had cost when the hold was taken
+  cap_usd     numeric(10,5) not null default 0,     -- the sheets line the op checked it against
+  solve_exam  numeric(10,5) not null default 0,     -- one solve unit's worst case, the exam reader (20 items)
+  solve_sheet numeric(10,5) not null default 0,     -- one solve unit's worst case, the sheet reader
+  at          timestamptz   not null default now()
+);
+create index if not exists sheet_holds_group on study_private.sheet_holds (group_id);
+
+-- What a sheet's units cost so far.
+create or replace function study_private.sheet_cost(p_exam uuid)
+returns numeric language sql stable security definer set search_path = public as $$
+  select coalesce((select sum(j.cost_usd) from study_private.exam_jobs j where j.exam_id = p_exam), 0)::numeric
+$$;
+-- What is left of a sheet's hold that still counts on the line (0 when none counts).
+create or replace function study_private.sheet_hold_left(p_exam uuid)
+returns numeric language sql stable security definer set search_path = public as $$
+  select coalesce((
+    select greatest(h.hold_usd - (study_private.sheet_cost(h.exam_id) - h.base_usd), 0)
+      from study_private.sheet_holds h join public.study_exams e on e.id = h.exam_id
+     where h.exam_id = p_exam and e.deleted_at is null
+       and (exists (select 1 from study_private.exam_jobs j where j.exam_id = h.exam_id and study_private.exam_job_active(j))
+            or (e.status = 'uploading' and h.at > now() - interval '30 minutes'))), 0)::numeric
+$$;
+-- Whether a sheet spent all of its hold (its units stop: O 2's claim).
+create or replace function study_private.sheet_hold_spent(p_exam uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from study_private.sheet_holds h
+                  where h.exam_id = p_exam and study_private.sheet_cost(h.exam_id) - h.base_usd >= h.hold_usd)
+$$;
+-- The sheets line's use this calendar month (UTC, as study_spent): what
+-- sheets' units cost, and what is left of the holds that count (but
+-- p_except's, which a new hold of that sheet replaces).
+create or replace function study_private.sheets_used(p_group uuid, p_except uuid default null)
+returns numeric language sql stable security definer set search_path = public as $$
+  select coalesce((select sum(j.cost_usd) from study_private.exam_jobs j join public.study_exams e on e.id = j.exam_id
+                    where j.group_id = p_group and e.kind = 'sheet'
+                      and j.updated_at >= date_trunc('month', now() at time zone 'utc') at time zone 'utc'), 0)::numeric
+       + coalesce((select sum(study_private.sheet_hold_left(h.exam_id)) from study_private.sheet_holds h
+                    where h.group_id = p_group and h.exam_id is distinct from p_except), 0)::numeric
+$$;
+revoke all on function study_private.sheet_cost(uuid), study_private.sheet_hold_left(uuid), study_private.sheet_hold_spent(uuid),
+  study_private.sheets_used(uuid, uuid) from public;
+
 -- What the op exam_read needs before a sheet is read, which a member cannot
 -- read from the ledger or the private queue: whether the switch 'sheets' is
--- on, what reading sheets (their read, key and solve units) cost the group
--- this calendar month (UTC, as study_spent), and the group's whole spend
--- this month. The op refuses a sheet whose worst case passes the sheets
--- line ($6 a month, STUDY_SHEETS_MONTHLY_USD) or the room left under the 80%
--- line. A unit's cost is known when it finishes, so two sheets started
--- minutes apart may both pass (the design's accepted gap: one sheet's worst
--- case at most; the 80% line still holds).
+-- on, the sheets line's use this month (study_private.sheets_used: sheets'
+-- cost and the holds that count), and the group's whole spend this month.
+-- The op refuses a sheet whose worst case passes the room left on the
+-- sheets line ($6 a month, STUDY_SHEETS_MONTHLY_USD) or under the 80% line;
+-- the hold itself (study_sheet_hold) decides under the lock.
 create or replace function public.study_sheet_room(p_group uuid)
 returns table (sheets_on boolean, sheets_usd numeric, spent_usd numeric)
 language plpgsql stable security definer set search_path = public as $$
@@ -323,14 +386,89 @@ begin
   if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
   return query
   select study_private.feature_on('exams') and study_private.feature_on('sheets'),
-         coalesce((select sum(j.cost_usd) from study_private.exam_jobs j join public.study_exams e on e.id = j.exam_id
-                    where j.group_id = p_group and e.kind = 'sheet' and j.updated_at >= since), 0)::numeric,
+         study_private.sheets_used(p_group, null),
          coalesce((select sum(u.cost_usd) from public.study_usage u where u.group_id = p_group and u.created_at >= since), 0)::numeric;
 end;
 $$;
 
-revoke all on function public.study_sheet_create(uuid, jsonb), public.study_exam_key_set(uuid, int, int[]), public.study_sheet_room(uuid) from public, anon;
-grant execute on function public.study_sheet_create(uuid, jsonb), public.study_exam_key_set(uuid, int, int[]), public.study_sheet_room(uuid) to authenticated;
+-- The hold (the op's: the worker's key and the member's token): under the
+-- group's budget lock, p_worst must fit p_cap (the sheets line) less the
+-- line's use without this sheet's own hold ('sheets_cap'); then it is the
+-- sheet's hold, its base what the sheet cost so far. p_worst 0 drops the
+-- hold (the start that took it failed). p_solve: {exam, sheet}, one solve
+-- unit's worst case by reader (kept when absent). Returns {held, used}.
+-- 'forbidden', 'exam not found', 'off', 'not a sheet', 'bad hold', 'sheets_cap'.
+create or replace function public.study_sheet_hold(p_exam uuid, p_worst numeric, p_cap numeric, p_solve jsonb default null,
+  p_key text default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  e      public.study_exams;
+  v_used numeric;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  e := study_private.exam_for(p_exam);
+  if e.kind <> 'sheet' then raise exception 'not a sheet'; end if;
+  if not study_private.feature_on('sheets') then raise exception 'off'; end if;
+  perform pg_advisory_xact_lock(hashtext('study_budget:' || e.group_id::text));
+  if coalesce(p_worst, 0) <= 0 then
+    delete from study_private.sheet_holds h where h.exam_id = e.id;
+    return jsonb_build_object('held', 0, 'used', study_private.sheets_used(e.group_id, null));
+  end if;
+  if p_worst > 1000 or p_cap is null or p_cap < 0 or p_cap > 1000
+     or (p_solve is not null and (jsonb_typeof(p_solve) <> 'object'
+                                  or coalesce(p_solve ->> 'exam', '0') !~ '^[0-9]{1,3}(\.[0-9]{1,5})?$'
+                                  or coalesce(p_solve ->> 'sheet', '0') !~ '^[0-9]{1,3}(\.[0-9]{1,5})?$')) then
+    raise exception 'bad hold';
+  end if;
+  v_used := study_private.sheets_used(e.group_id, e.id);
+  if p_worst > p_cap - v_used then raise exception 'sheets_cap'; end if;
+  insert into study_private.sheet_holds as h (exam_id, group_id, hold_usd, base_usd, cap_usd, solve_exam, solve_sheet, at)
+  values (e.id, e.group_id, round(p_worst, 5), study_private.sheet_cost(e.id), p_cap,
+          coalesce((p_solve ->> 'exam')::numeric, 0), coalesce((p_solve ->> 'sheet')::numeric, 0), now())
+  on conflict (exam_id) do update
+     set hold_usd = excluded.hold_usd, base_usd = excluded.base_usd, cap_usd = excluded.cap_usd,
+         solve_exam = case when p_solve ? 'exam' then excluded.solve_exam else h.solve_exam end,
+         solve_sheet = case when p_solve ? 'sheet' then excluded.solve_sheet else h.solve_sheet end,
+         at = now();
+  return jsonb_build_object('held', round(p_worst, 5), 'used', v_used);
+end;
+$$;
+
+revoke all on function public.study_sheet_create(uuid, jsonb), public.study_exam_key_set(uuid, int, int[]), public.study_sheet_room(uuid),
+  public.study_sheet_hold(uuid, numeric, numeric, jsonb, text) from public, anon;
+grant execute on function public.study_sheet_create(uuid, jsonb), public.study_exam_key_set(uuid, int, int[]), public.study_sheet_room(uuid),
+  public.study_sheet_hold(uuid, numeric, numeric, jsonb, text) to authenticated;
+
+-- ── Redefined from section S: "לא לכלול בחישוב הנושאים" and the style's items ──
+-- S's text, for past exams only: a sheet is created hidden from the profile
+-- and stays so ('not an exam'), and the course's style examples take past
+-- exams' items only (a sheet's never teach the question writer its style).
+create or replace function public.study_exam_hide(p_exam uuid, p_hide boolean)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare e public.study_exams;
+begin
+  e := study_private.exam_for(p_exam);
+  if e.kind <> 'exam' then raise exception 'not an exam'; end if;
+  update public.study_exams set hide_from_profile = coalesce(p_hide, false), updated_at = now() where id = p_exam;
+end;
+$$;
+create or replace function public.study_course_style_items(p_group uuid, p_course text)
+returns table (id uuid, exam_id uuid, exam_no int, kind text, vignette text, question text, options text[], has_key boolean,
+               exam_created_at timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  return query
+  select q.id, q.exam_id, q.exam_no, q.kind, q.vignette, q.question, q.options,
+         coalesce(k.key_origin in ('exam', 'sheet', 'member') and (k.answer is not null or k.seq is not null), false), e.created_at
+    from public.study_exams e
+    join public.study_questions q on q.exam_id = e.id and q.source = 'exam' and q.retired_at is null
+    left join public.study_question_keys k on k.question_id = q.id
+   where e.group_id = p_group and e.deleted_at is null and not e.hide_from_profile and e.kind = 'exam'
+     and study_private.course_key(e.course) = study_private.course_key(p_course) and study_private.course_key(p_course) <> '';
+end;
+$$;
 
 insert into study_private.schema_sections (section, version) values ('O', 1)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
@@ -363,7 +501,7 @@ on conflict (section) do update set version = excluded.version, loaded_at = now(
 --
 --  Section S's functions O 2 redefines (create or replace; each is S's text
 --  with the change said above it): study_claim_exam, exam_advance,
---  exam_printed, exam_unkeyed.
+--  exam_printed, exam_unkeyed, study_exam_retry.
 -- ════════════════════════════════════════════════════════════════════════
 
 do $$
@@ -573,8 +711,10 @@ $$;
 -- exam's choice items 20 a unit, reader 'exam'; a sheet-read sheet's items
 -- and any open or numeric item sheet_solve_items() a unit, reader 'sheet');
 -- a ready upload stays ready while only open-add units and their solving
--- run; and a sheet whose unit the budget refused (D23) stays 'reading' with
--- error 'budget' when nothing else runs.
+-- run; a sheet whose unit the budget refused (D23) stays 'reading' with
+-- error 'budget' when nothing else runs (a ready sheet whose held units are
+-- only open-add's stays ready); and a sheet's solve units are checked on the
+-- sheets line with their real count before they run (its hold, O 1).
 create or replace function study_private.exam_advance(p_exam uuid)
 returns void language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -585,6 +725,10 @@ declare
   v_rd  text;
   v_sr  boolean;
   v_cid uuid;
+  h     study_private.sheet_holds;
+  v_jobs uuid[] := '{}';
+  v_jid uuid;
+  v_need numeric := 0;
 begin
   select * into e from public.study_exams x where x.id = p_exam for update;
   if not found or e.status not in ('reading', 'linking', 'ready', 'failed') then return; end if;
@@ -615,10 +759,33 @@ begin
         insert into study_private.exam_jobs (group_id, course_id, exam_id, kind, range)
         values (e.group_id, v_cid, p_exam, 'solve',
                 jsonb_build_object('items', to_jsonb(ids[k + 1 : k + per]), 'reader', v_rd)
-                || case when e.status = 'ready' then '{"extra": true}'::jsonb else '{}'::jsonb end);
+                || case when e.status = 'ready' then '{"extra": true}'::jsonb else '{}'::jsonb end)
+        returning id into v_jid;
+        v_jobs := v_jobs || v_jid;
         k := k + per;
       end loop;
     end loop;
+    -- A sheet's solve units, with the real item count, on the sheets line
+    -- again (its hold, O 1): when they fit, they are the sheet's hold; when
+    -- not, they wait as the budget would hold them (D23: "להמשיך" checks the
+    -- line once more, "לסיים בלי תשובות מוצעות" drops them).
+    if e.kind = 'sheet' and cardinality(v_jobs) > 0 then
+      select * into h from study_private.sheet_holds x where x.exam_id = p_exam;
+      if found then
+        select coalesce(sum(case when j.range ->> 'reader' = 'exam' then h.solve_exam else h.solve_sheet end), 0) into v_need
+          from study_private.exam_jobs j where j.id = any (v_jobs);
+        if v_need > 0 then
+          perform pg_advisory_xact_lock(hashtext('study_budget:' || e.group_id::text));
+          if v_need > h.cap_usd - study_private.sheets_used(e.group_id, p_exam) then
+            update study_private.exam_jobs j set status = 'failed', error = 'budget', retry_at = null, updated_at = now()
+             where j.id = any (v_jobs);
+          else
+            update study_private.sheet_holds x set hold_usd = least(1000, v_need), base_usd = study_private.sheet_cost(p_exam), at = now()
+             where x.exam_id = p_exam;
+          end if;
+        end if;
+      end if;
+    end if;
   end if;
   if exists (select 1 from study_private.exam_jobs j where j.exam_id = p_exam and study_private.exam_job_active(j)) then
     -- Open-add and its solving run beside a ready upload: it stays ready.
@@ -629,6 +796,12 @@ begin
     end if;
     update public.study_exams set status = 'reading', updated_at = now() where id = p_exam and status <> 'reading';
   elsif e.kind = 'sheet' and exists (select 1 from study_private.exam_jobs j where j.exam_id = p_exam and study_private.exam_job_paused(j)) then
+    -- A ready sheet whose held units are only open-add's (or their solving) stays ready: practice keeps it.
+    if e.status = 'ready' and not exists (select 1 from study_private.exam_jobs j
+                                           where j.exam_id = p_exam and study_private.exam_job_paused(j)
+                                             and not coalesce((j.range ->> 'extra')::boolean, false)) then
+      return;
+    end if;
     update public.study_exams x set status = 'reading', error = 'budget', updated_at = now() where x.id = p_exam;
   else
     update public.study_exams x
@@ -647,7 +820,7 @@ revoke all on function study_private.exam_unkeyed(uuid), study_private.exam_prin
 -- reads the sheet's own printed solutions, the next page's lines (the
 -- exactness check), and for a solve unit each item's label, series, step,
 -- figures, page and that page's link. A sheet's unit is not taken while the
--- switch 'sheets' is off.
+-- switch 'sheets' is off, nor once the sheet spent its hold (O 1).
 create or replace function public.study_claim_exam(p_exam uuid, p_key text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -680,6 +853,16 @@ begin
    order by case x.kind when 'key' then 0 when 'read' then 1 else 2 end, x.created_at, (x.range -> 'pages' ->> 0)::int, x.id
    limit 1 for update;
   if not found then return null; end if;
+  -- A sheet that spent all of its hold (O 1: a unit paid twice, a retry) runs
+  -- no more units: they wait as the budget would hold them (D23), and
+  -- "להמשיך" checks the sheets line before they go on.
+  if e.kind = 'sheet' and study_private.sheet_hold_spent(e.id) then
+    update study_private.exam_jobs x
+       set status = 'failed', error = 'budget', retry_at = null, lease_id = null, lease_until = null, updated_at = now()
+     where x.exam_id = p_exam and study_private.exam_job_active(x) and (x.status <> 'running' or x.lease_until <= now());
+    perform study_private.exam_advance(p_exam);
+    return null;
+  end if;
   update study_private.exam_jobs x
      set status = 'running', lease_id = v_lease, lease_until = now() + interval '330 seconds', attempts = x.attempts + 1,
          retry_at = null, updated_at = now()
@@ -1283,7 +1466,10 @@ begin
         'rubric', case when k.held_until > now() then '[]'::jsonb else to_jsonb(k.rubric) end,
         'solution', case when k.held_until > now() then null else k.solution end,
         'solution_origin', k.solution_origin, 'solution_conf', k.solution_conf,
-        'marked', exists (select 1 from study_private.open_marks m where m.question_id = q.id)))
+        -- only the text may change now (study_exam_item_fix's 'answered'): anyone answered or self-marked it;
+        -- one flag, so the group never learns who opened whose open solution
+        'locked', exists (select 1 from public.study_answers a where a.question_id = q.id)
+                  or exists (select 1 from study_private.open_marks m where m.question_id = q.id)))
       from public.study_questions q left join public.study_question_keys k on k.question_id = q.id
       where q.exam_id = e.id), '{}'::jsonb));
 end;
@@ -1802,6 +1988,66 @@ begin
   update study_private.exam_queue x set urls = p_urls, urls_until = p_until, queued_by = auth.uid(), kicks_since_claim = 0 where x.exam_id = e.id;
   perform study_private.exam_dispatch(e.id, true);
   return jsonb_build_object('units', nu, 'pages', np, 'skipped', e.skipped_open);
+end;
+$$;
+
+-- ── Redefined from section S: "לנסות שוב" ──
+-- S's text, and for a sheet: the switch 'sheets' ('off'); units the budget
+-- holds (D23) are not restarted here ('paused': the phone offers "להמשיך",
+-- whose op checks the sheets line first); and what a retry or a page read
+-- again spends stays within the sheet's hold (O 2's claim holds its units
+-- once the hold is spent).
+create or replace function public.study_exam_retry(p_exam uuid, p_pages int[], p_urls jsonb, p_until timestamptz default null)
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  e     public.study_exams;
+  v_day date := ((now() at time zone 'Asia/Jerusalem') - interval '4 hours')::date;
+  n     int := 0;
+  pg    int;
+  nx    int;
+begin
+  e := study_private.exam_for(p_exam);
+  if e.kind = 'sheet' then
+    if not study_private.feature_on('sheets') then raise exception 'off'; end if;
+    if exists (select 1 from study_private.exam_jobs j where j.exam_id = e.id and study_private.exam_job_paused(j)) then
+      raise exception 'paused';
+    end if;
+  end if;
+  if e.status in ('new', 'uploading') then raise exception 'nothing to retry'; end if;
+  if not study_private.exam_urls_ok(e.id, p_urls) then raise exception 'bad urls'; end if;
+  if e.retry_day is distinct from v_day then e.retries := 0; end if;
+  if e.retries >= 3 then raise exception 'retry limit'; end if;
+  if cardinality(coalesce(p_pages, '{}')) = 0 then
+    update study_private.exam_jobs j
+       set status = 'pending', attempts = 0, error = null, retry_at = null, lease_id = null, lease_until = null, updated_at = now()
+     where j.exam_id = e.id and j.status = 'failed'
+       and coalesce(j.error, '') <> 'versions';   -- a key sheet of several versions reads the same again: keyed by hand
+    get diagnostics n = row_count;
+    -- Nothing failed but units still wait (the worker stopped answering):
+    -- fresh links and fresh kicks for them.
+    if n = 0 then
+      select count(*) into n from study_private.exam_jobs j where j.exam_id = e.id and study_private.exam_job_active(j);
+    end if;
+    if n = 0 then raise exception 'nothing to retry'; end if;
+  else
+    if cardinality(p_pages) > 4 then raise exception 'bad pages'; end if;
+    foreach pg in array p_pages loop
+      if not exists (select 1 from public.study_exam_pages x where x.exam_id = e.id and x.n = pg and not x.is_key) then
+        raise exception 'bad pages';
+      end if;
+      select min(x.n) into nx from public.study_exam_pages x where x.exam_id = e.id and x.n > pg and not x.is_key;
+      insert into study_private.exam_jobs (group_id, course_id, exam_id, kind, range)
+      select e.group_id, (select c.id from public.study_courses c where c.group_id = e.group_id and c.name_key = study_private.course_key(e.course)),
+             e.id, 'read', jsonb_build_object('pages', jsonb_build_array(pg), 'next', nx, 'reread', true);
+      n := n + 1;
+    end loop;
+  end if;
+  update public.study_exams x set retries = e.retries + 1, retry_day = v_day, status = 'reading', error = null, updated_at = now()
+   where x.id = e.id;
+  update study_private.exam_queue x set urls = p_urls, urls_until = p_until, queued_by = auth.uid(), kicks_since_claim = 0
+   where x.exam_id = e.id;
+  perform study_private.exam_dispatch(e.id, true);
+  return n;
 end;
 $$;
 
