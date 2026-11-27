@@ -1180,7 +1180,7 @@ every other row is the recommended default.
 | OD14 | Claude Fable 5.2 (and every model at about twice the default's price or more) in comparisons; a production route to it needs a second confirmation |
 | OD15 | **Changed by Yoad:** the entry chunk's limit is 410,000 B (about 406,087 B used with every flag on); Y's entry share is capped at **1,500 B** (bundle owner `Y`); everything else lazy |
 | OD16 | Check `/api/study/health` for `budgetUsd: 33`; the code's default is 33 |
-| OD17 | **Changed by the build order:** section Y comes **after O 3** in `study-schema.sql` (O was built first); it goes into part 12 while part 12 stays at or under 170 KB (it does: 124,476 B), otherwise it would start part 13 |
+| OD17 | **Changed by the build order:** section Y comes **after O 3** in `study-schema.sql` (O was built first); it goes into part 12 while part 12 stays at or under 170 KB (it does: 125,965 B with WP4's two functions), otherwise it would start part 13 |
 | OD18 | $5 prepaid credit per provider with auto-recharge off (Gemini: a low requests-per-day quota); keys on Production only, never Preview |
 | OD19 | **Changed by Yoad:** other providers may see everything (lectures with pictures, past exams, sheets, members' text). Once Yoad approves a provider in the app ("לאשר שליחה", recorded per provider, D17), its scope is `all`; scope `text` stays an option |
 | OD20 | **Changed by Yoad:** past exam pages and sheets may go to an approved provider (scope `all`) |
@@ -1211,10 +1211,29 @@ every other row is the recommended default.
   `shared/study/models` and `estimate`) with a cap of 1,500 B and only its
   slot in the entry. `shared/study/prices.ts` stays F's: the phone's price
   cards (batch, examPrice, practice2) read it already. Y's share today: 0 B.
-- **SQL section Y 1 (WP3)** after O 3, in part 12 (124,476 B): see
+- **SQL section Y 1 (WP3)** after O 3, in part 12 (124,476 B then; 125,965 B with WP4's two functions): see
   [`models.md`](models.md). The line of $3.30 is `lab_settings.lab_usd`
   (no date, no second share). Providers approved in the app get scope `all`.
   The notice is R's reserved kind `lab_new` (cat `inapp`, push off); to push
   it, one SQL line (`cat = 'mine', push = true`). Its words are in
   `shared/study/notifyCopy.ts`; Y's refusals in `src/study/lib/modelsCopy.ts`
   (lazy), the fourth source of `failText.test.ts`.
+
+### The routing seam (WP4), built on 27 November 2026
+
+- Every paid call takes its route key's model (`server/study/routes.ts`'s
+  `modelFor`), including sections L's and O's generators (`set_write`,
+  `sheet_read`, `sheet_key`, `sheet_solve`, `similar`); with no route set
+  every request is today's (the unit tests' 370 requests compared with the
+  commit before: the same, but for the blind solver's shuffled letters).
+- Any error reading section Y is the default (D22); the switch `routes` off
+  is the default everywhere (D23); outline and part keep the model of their
+  lecture's first 48 hours (D7), for which Y 1 gains `study_lecture_made`
+  (the worker's writing input does not carry the moment); health's
+  `stalePrices` reads `study_model_routed`. Both still Y 1 (not released).
+- D8: a refusal or an error before the first text, on a model without
+  server-side fallback, runs once more on Opus under its own reservation.
+- The outline and the ask route stay outside `run()` and take only their
+  model (Claude only); moving them into `run()` stays WP12.
+- A sheet's hold counts the dearest of its reader's three keys' models.
+- `estimateUsd` reserves a model's output floor (Haiku 5.5: 2,000 tokens).

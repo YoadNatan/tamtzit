@@ -12,8 +12,8 @@ same frozen request to 2-4 models side by side under a hard cap, and members
 rate the short answers blind (labels א-ד), then see names, time and cost.
 
 This file grows with the package. Built so far: the registry (WP1), the
-bundle room (WP2) and the SQL (WP3). The server (routing, the op `lab`, the
-adapters) and the screens come next.
+bundle room (WP2), the SQL (WP3) and the routing seam (WP4). The op `lab`,
+the adapters and the screens come next.
 
 ## The registry (`shared/study/models.ts`, `prices.ts`, `estimate.ts`)
 
@@ -57,7 +57,7 @@ the components `ModelsScreen`, `ModelsNewScreen`, `ModelsRunScreen`,
 ## SQL section Y 1
 
 After section O 3 at the end of `supabase/study-schema.sql`, so it is in
-**part 12** (124,476 B of 170,000). It is optional for every other path: no
+**part 12** (125,965 B of 170,000). It is optional for every other path: no
 other section reads its tables, and `REQUIRED_SCHEMA` does not list it (only
 the op `lab` and the flag will). Re-runnable; it records `('Y', 1)` last.
 
@@ -96,6 +96,8 @@ skipped), `study_lab_judgements`.
 | `study_lab_owner(group)` | member | Which buttons show |
 | `study_models(group, key?)` | member, or worker | `{routes, providers, switches: {lab, routes}, lab: {line_usd, run_cap, daily_runs, member_kinds, todo_days, spent_usd, runs_today}}` |
 | `study_model_at(group, route, at, key)` | worker | The model a key had at a moment (null: the default); for summaries begun within 48 hours |
+| `study_lecture_made(lecture, key)` | worker, or member | When a lecture was made: the as-of rule of its outline and parts |
+| `study_model_routed(key)` | worker | Every model some key is routed to, in any group (health's `stalePrices`) |
 | `study_model_set(group, route, model\|null, note, key)` | owner + key | Sets or clears a route (the server checked the model) and logs it |
 | `study_model_provider_set(group, provider, allowed, scope = 'all')` | owner | "לאשר שליחה" or its undo for openai, google or openrouter; recorded |
 | `study_lab_plan(group, lecture, route, title, source, request, hash, differs, models, judge, estimate, cap, key)` | owner + key | Raises in order `off`, `not the creator`, `bad slots`, `run_cap`, `daily_runs`, `lab_budget`, `reserve`; returns `{run, labels}`, never a model map |
@@ -169,3 +171,83 @@ update public.study_model_providers set allowed = false where provider = '<provi
 - `shared/study/models.test.ts`: the registry, and that section Y's route
   keys are exactly `ROUTE_KEYS`; `src/study/lib/modelsCopy.test.ts`: every
   code Y raises has words.
+
+## Routing in production (WP4, `server/study/routes.ts`)
+
+Every paid call asks `modelFor(sb, group, key, {lectureId?, pictures?})` for
+its route key's model, reserves its estimate on that model and passes it to
+`run({…, model, reserveFallback})`. **With nothing set every request is
+today's, byte for byte**: `run()` without a model (or with the default) sends
+exactly the request it sent before, and the outline's `messages.parse` and the
+ask route's `messages.create` (D5: not moved into `run()`) only take their
+model's id and fields (`claudeFields`).
+
+`modelFor`:
+
+1. `study_models` once per instance and group every 60 s. **Any error** (Y not
+   loaded, PGRST202, a refusal, the network) is the default, with one log line
+   per instance: Y is optional for every path (D22).
+2. The switch `routes` off: the default for every key (D23).
+3. `outline` and `part`, for a lecture made less than 48 hours ago: the model
+   the key had when the lecture was made (`study_lecture_made`, then
+   `study_model_at`), so one summary is never written by two models (D7).
+4. The default, with one log line, when the model is not in the registry, its
+   price is unverified, it serves only organizations Anthropic verified, its
+   provider has no key or no adapter in this build, the group did not approve
+   the provider or its scope does not take the key, it cannot read the
+   pictures the call sends, or the key takes Claude models only (outline,
+   ask_route). `routeRefusal` gives the reason (the op `lab`'s route action
+   words it, `MODELS_FAIL`).
+
+| Call site | Key |
+|---|---|
+| `writer.ts` | `outline` (Claude only), `part`, `notes` |
+| `practice.ts` (op `questions`, a batch) | `practice` (a release-1 round) or `set_write` (a practice set's batch); its solver checks `solver` |
+| `practice2.ts` | `points` (with `bank.ts`'s read ahead), `style`, `reword` and its solver checks `solver` |
+| `cards.ts`, `ask.ts` | `cards`; `ask`, `ask_route` (Claude only) |
+| `mnemonic.ts`, `ops/wall.ts` | `mnemonic` (the aids and the wall's drafts), `wall_check` |
+| `ops/fixcheck.ts`, `ops/var.ts`, `ops/extras.ts` | `fix_check`, `var`, `trap_check` |
+| `exams.ts` (a unit) | `exam_read`, `exam_key`, `exam_solve`; a sheet's unit its ref (`sheet_read`, `sheet_key`, `sheet_solve`) |
+| `ops/exams.ts` (a sheet's holds) | the dearest of the reader's three keys' models, so a hold covers what its units reserve |
+| `ops/similar.ts`, `similarGen.ts` | `similar` (the run's worst case, its writing and its checks) |
+
+`routeKeyFor(kind, ref)` maps a ledger row back to its key (a past exam's read
+and key units share the ref `unit`, counted as `exam_read`; kind `lab` has
+none of its own).
+
+**`run()`** (`claude.ts`, a documented signature change): `model` (left out:
+the default), `fallbacks` (false: no server-side fallback, for comparisons),
+`appFallback` and `reserveFallback` (D8), `reservedUsd` (the adapters' floor);
+`RunResult.chars`. A Claude model is called with its id, its effort control
+(none on Haiku 4.5), at least its output floor (Haiku 5.5: 2,000, which
+`estimateUsd` reserves too) and at most its output cap, and server-side
+fallback only where it has it. Any other provider goes through its adapter in
+`server/study/llm/index.ts` (none in this build; `modelFor` never resolves a
+key to a provider without one).
+
+**D8, the app's fallback.** A model without server-side fallback (Haiku 5.5,
+every non-Anthropic model) that refuses or fails **before its first text** is
+run once more on the default, under its own reservation (`fallbackReserve`:
+the same group, lecture, kind and ref, no daily count; a refusal there is the
+op's 402). After text has streamed, the op's refusal path applies as today.
+The writer's rerun is charged by the unit's finish (the first call settles on
+its own); similar questions' rerun is charged to its run. Comparisons never
+use it.
+
+**Health** (`/api/study/health`): `providers` (`anthropic`, `openai`,
+`google`, `openrouter`: whether each key is set, booleans only) and
+`stalePrices` (the routed models whose price was checked 45 days ago or
+more; `[]` without Y).
+
+**Not routed yet:** the phone's price cards (`shared/study/batch.ts`,
+`examPrice.ts`, `practice2.ts`'s `perQuestionUsd`) and the sets line's
+expected cost still price the default; they move with the screens.
+
+**Tests:** `server/study/routes.test.ts` (the default when unset or on any
+error, the 60 s cache, the switch, the as-of rule, scope and pictures,
+Claude-only keys, `routeKeyFor`, `fallbackReserve`, `stalePrices`);
+`claude.test.ts` (today's request as a snapshot, a routed Claude model's
+fields, D8 before and after text); `ask.test.ts` (the ask route);
+`writer.test.ts` and `collab.test.ts` (`partRequest`, `fixCheckOpts`);
+`section.test.ts` still pins the outline's and the parts' bytes against
+bc01207's; `health.test.ts`.

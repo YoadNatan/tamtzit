@@ -171,6 +171,7 @@ the page's build stamp, an old `/study/` link, `/api/study/health` and
 | `STUDY_MONTHLY_USD` | server | the monthly budget in dollars (approved 33; 33 when unset) |
 | `STUDY_SETS_MONTHLY_USD` | server | practice sets' monthly line in dollars (approved 12; 12 when unset; [`docs/study/sets.md`](docs/study/sets.md)) |
 | `SEND_EMAIL_HOOK_SECRET`, `STUDY_TRANSCRIBE_KEY` | server | **secret**; for packages not built yet |
+| `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY` | server, **Production only** | **secret**, marked Sensitive; other providers' models for routes and "השוואת מודלים" ([`docs/study/models.md`](docs/study/models.md)); unset, every key stays on Claude. `/api/study/health`'s `providers` says which are set (booleans only) |
 | `STUDY_VAPID_PUBLIC`, `STUDY_VAPID_SUBJECT` | server, **Production only** | notifications' push key (public) and its subject, `https://<the app's address>`; made with `node tools/vapid-keys.mjs` ([`docs/study/RELEASE-R1.md`](docs/study/RELEASE-R1.md)) |
 | `STUDY_VAPID_PRIVATE` | server, **Production only** | **secret**, marked Sensitive; never on Preview, never in a chat or git |
 | `VITE_STUDY_*` | build (and health on the server) | release flags, `1` or unset; the list is in [`.env.example`](.env.example) |
