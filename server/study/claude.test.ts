@@ -387,3 +387,150 @@ test("settleFor settles the reservation through study_settle and counts a failur
   }
   assert.equal(failed, 1);
 });
+
+// ── 4. Routing (design-models §7.4, D8): run({ model }) ──
+const refusalEnd = end("refusal", { output_tokens: 3 });
+const okText = "תשובה קצרה [ש' 5]";
+/** Answers each request in turn with the next stream (the last one repeats). */
+function sseSeq(streams: Array<{ events: object[]; status?: number }>) {
+  const sent: Sent[] = [];
+  let i = 0;
+  const fetch = async (url: string | URL | Request, init?: RequestInit) => {
+    sent.push({ url: String(url), headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+    const s = streams[Math.min(i++, streams.length - 1)];
+    if (s.status && s.status >= 400) {
+      return new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: "boom" } }), { status: s.status, headers: { "content-type": "application/json" } });
+    }
+    const enc = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        for (const e of s.events) c.enqueue(enc.encode(`event: ${(e as { type: string }).type}\ndata: ${JSON.stringify(e)}\n\n`));
+        c.close();
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_test" } });
+  };
+  const client = new Anthropic({ apiKey: "test-key", fetch: fetch as unknown as typeof globalThis.fetch, maxRetries: 0 });
+  return { client, sent };
+}
+
+test("no model, or the default by name: today's request exactly (the snapshot), and chars in the result", async () => {
+  const format = { type: "json_schema" as const, schema: cleanSchema(zodOutputFormat(QuestionSet).schema as Record<string, unknown>) };
+  const bodies: Array<Record<string, unknown>> = [];
+  const betas: string[] = [];
+  for (const model of [undefined, "claude-opus-5-5"]) {
+    const { client, sent } = sse([start(), ...textBlock(0, okText), ...end("end_turn", { output_tokens: 20 })]);
+    const res = await run({ ...base, client, model, format, cacheTail: false, stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined });
+    assert.equal(res.chars, okText.length);
+    assert.equal(res.model, "claude-opus-5-5");
+    bodies.push(sent[0].body);
+    betas.push(sent[0].headers.get("anthropic-beta") ?? "");
+  }
+  // Today's request (claude.ts before the routing seam), field by field.
+  const today = {
+    model: MODEL,
+    max_tokens: 32000,
+    fallbacks: "default",
+    output_config: { effort: "high", format },
+    system,
+    messages: user,
+    stream: true,
+  };
+  assert.deepEqual(bodies[0], today);
+  assert.deepEqual(bodies[1], today);
+  for (const b of betas) assert.ok(b.includes("server-side-fallback-2026-07-01"));
+});
+
+test("a routed Claude model: its id; no server-side fallback where it has none; the output floor; no effort where there is none", async () => {
+  const haiku = sse([start("claude-haiku-5-5"), ...textBlock(0, okText), ...end("end_turn", { output_tokens: 20 })]);
+  await run({ ...base, maxTokens: 800, client: haiku.client, model: "claude-haiku-5-5", stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined });
+  const b = haiku.sent[0].body;
+  assert.equal(b.model, "claude-haiku-5-5");
+  assert.equal(b.fallbacks, undefined, "Haiku 5.5 has no server-side fallback");
+  assert.ok(!(haiku.sent[0].headers.get("anthropic-beta") ?? "").includes("server-side-fallback"));
+  assert.equal(b.max_tokens, 2000, "at least 2,000: thinking shares max_tokens");
+  assert.deepEqual(b.output_config, { effort: "high" });
+
+  const h45 = sse([start("claude-haiku-4-5"), ...textBlock(0, okText), ...end("end_turn", { output_tokens: 20 })]);
+  await run({ ...base, maxTokens: 100_000, client: h45.client, model: "claude-haiku-4-5", stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined });
+  assert.equal(h45.sent[0].body.output_config, undefined, "no effort control, no format: no output_config");
+  assert.equal(h45.sent[0].body.max_tokens, 64_000, "capped at the model's output limit");
+
+  const sonnet = sse([start("claude-sonnet-5-5"), ...textBlock(0, okText), ...end("end_turn", { output_tokens: 20 })]);
+  await run({ ...base, client: sonnet.client, model: "claude-sonnet-5-5", fallbacks: false, stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined });
+  assert.equal(sonnet.sent[0].body.fallbacks, undefined, "fallbacks: false is honoured (comparisons)");
+  assert.equal(sonnet.sent[0].body.model, "claude-sonnet-5-5");
+  await assert.rejects(run({ ...base, client: sonnet.client, model: "claude-someday-9", stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined }), /unknown model/);
+});
+
+test("D8: a refusal before any text runs once more on the default, under its own reservation", async () => {
+  const { client, sent } = sseSeq([
+    { events: [start("claude-haiku-5-5"), ...thinking, ...refusalEnd] },
+    { events: [start(), ...textBlock(0, okText), ...end("end_turn", { output_tokens: 20 })] },
+  ]);
+  const first: Spend[] = [];
+  const second: Spend[] = [];
+  const reserved: number[] = [];
+  let starts = 0;
+  let text = "";
+  const res = await run({
+    ...base,
+    client,
+    model: "claude-haiku-5-5",
+    stopAt: Date.now() + 60_000,
+    onStart: () => (starts += 1),
+    onText: (d, by) => (text += `${by}:${d}`),
+    ledger: async (s) => void first.push(s),
+    reserveFallback: async (usd) => {
+      reserved.push(usd);
+      return async (s) => void second.push(s);
+    },
+  });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].body.model, "claude-opus-5-5");
+  assert.equal(sent[1].body.fallbacks, "default", "the rerun is today's request");
+  assert.equal(res.model, "claude-opus-5-5");
+  assert.equal(res.stop, "end_turn");
+  assert.equal(res.chars, okText.length);
+  assert.ok(text.startsWith("claude-opus-5-5:"));
+  assert.equal(first.length, 1, "the refused call settles on its own reservation");
+  assert.equal(first[0].model, "claude-haiku-5-5");
+  assert.equal(second.length, 1, "the rerun on its own");
+  assert.equal(reserved.length, 1);
+  assert.ok(reserved[0] > 0.6 && reserved[0] < 0.8, `the rerun's worst case on the default: ${reserved[0]}`);
+  assert.equal(starts, 1, "onStart once");
+});
+
+test("D8: an error before any text reruns too; after text, a refusal stays; without reserveFallback or with appFallback off, as today", async () => {
+  const errThenOk = sseSeq([{ events: [], status: 500 }, { events: [start(), ...textBlock(0, okText), ...end("end_turn", { output_tokens: 20 })] }]);
+  const res = await run({ ...base, client: errThenOk.client, model: "claude-haiku-5-5", stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined, reserveFallback: async () => async () => undefined });
+  assert.equal(res.model, "claude-opus-5-5");
+  assert.equal(errThenOk.sent.length, 2);
+
+  const late = sseSeq([{ events: [start("claude-haiku-5-5"), ...textBlock(0, "חלק"), ...refusalEnd] }]);
+  const r2 = await run({ ...base, client: late.client, model: "claude-haiku-5-5", stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined, reserveFallback: async () => async () => undefined });
+  assert.equal(r2.stop, "refusal");
+  assert.equal(late.sent.length, 1, "text had streamed: the op's refusal path, as today");
+
+  const none = sseSeq([{ events: [start("claude-haiku-5-5"), ...refusalEnd] }]);
+  const r3 = await run({ ...base, client: none.client, model: "claude-haiku-5-5", stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined });
+  assert.equal(r3.stop, "refusal");
+  assert.equal(none.sent.length, 1);
+
+  const off = sseSeq([{ events: [], status: 500 }]);
+  await assert.rejects(
+    run({ ...base, client: off.client, model: "claude-haiku-5-5", appFallback: false, stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined, reserveFallback: async () => async () => undefined }),
+    (e: unknown) => e instanceof Anthropic.APIError,
+  );
+  // The default never reruns on itself (it has server-side fallback).
+  const opus = sseSeq([{ events: [start(), ...refusalEnd] }]);
+  const r4 = await run({ ...base, client: opus.client, stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined, reserveFallback: async () => async () => undefined });
+  assert.equal(r4.stop, "refusal");
+  assert.equal(opus.sent.length, 1);
+});
+
+test("an id the registry does not list is refused before any request", async () => {
+  const { client, sent } = sseSeq([{ events: [start(), ...textBlock(0, okText), ...end("end_turn", { output_tokens: 20 })] }]);
+  await assert.rejects(run({ ...base, client, model: "openai:gpt-x", stopAt: Date.now() + 60_000, onText: () => undefined, ledger: async () => undefined }), /unknown model/);
+  assert.equal(sent.length, 0);
+});

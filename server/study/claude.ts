@@ -2,8 +2,10 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { z } from "zod/v4";
-import { costUsd, floorUsage, settle, type UsageLike } from "./budget.js";
-import { MODEL } from "./study.js";
+import { DEFAULT_MODEL, modelInfo, type ModelInfo } from "../../shared/study/models.js";
+import { costUsd, estimateUsd, floorUsage, imageTokens, settle, type UsageLike } from "./budget.js";
+import { adapterFor } from "./llm/index.js";
+import { HttpError, MODEL } from "./study.js";
 
 /* ── Calling Claude: the one helper every feature uses (spec §2.6, §4.2) ──
  *
@@ -25,6 +27,11 @@ export type Effort = "low" | "medium" | "high";
 export type Spend = { kind: string; ref?: string | null; model: string; usage: UsageLike | null; costUsd: number; estimated: boolean };
 /** Settles the call's reservation (settleFor). */
 export type Ledger = (s: Spend) => Promise<unknown>;
+/** D8's own reservation for the rerun on the default model: reserves
+ *  `estimateUsd` (the rerun's worst case, worked out by run()) and returns
+ *  the ledger that settles it (routes.ts's fallbackReserve). A refusal is
+ *  thrown, as the op's own reservations are. */
+export type FallbackReserve = (estimateUsd: number) => Promise<Ledger>;
 export type RunOpts = {
   client: Anthropic;
   kind: string;
@@ -44,8 +51,34 @@ export type RunOpts = {
   onText: (delta: string, servedBy: string) => void;
   /** The phone closed the stream: stop the model too. */
   signal?: AbortSignal;
+  /* ── Routing (design-models §7.4, a documented signature change) ── */
+  /** The model the call's route key resolved to (routes.ts's modelFor);
+   *  left out: DEFAULT_MODEL, and the request is exactly today's. */
+  model?: string;
+  /** Anthropic's server-side fallback, sent only where the model has it
+   *  (the registry's serverFallback); false: never (comparisons, D15). */
+  fallbacks?: boolean;
+  /** D8: a model without server-side fallback that refuses, or fails,
+   *  before its first text is run once more on DEFAULT_MODEL under its own
+   *  reservation (reserveFallback). On by default; false in comparisons. */
+  appFallback?: boolean;
+  reserveFallback?: FallbackReserve;
+  /** The call's reservation: the least a non-Anthropic call that ends
+   *  without its final usage settles at (D4; the adapters). */
+  reservedUsd?: number;
 };
-export type RunResult = { stop: string | null; model: string; timedOut: boolean; costUsd: number; estimated: boolean };
+export type RunResult = {
+  stop: string | null;
+  model: string;
+  timedOut: boolean;
+  costUsd: number;
+  estimated: boolean;
+  /** Characters of text that streamed. */
+  chars: number;
+};
+/** A call's end inside run(): `cause` is the error of a call that failed
+ *  before its first text, kept for D8 and never in RunResult. */
+type Outcome = RunResult & { cause?: unknown };
 
 /** Copies the counts that are present: message_delta omits or nulls the ones that don't apply. */
 function merge(into: UsageLike | null, from: object): UsageLike {
@@ -54,11 +87,73 @@ function merge(into: UsageLike | null, from: object): UsageLike {
   return out as UsageLike;
 }
 
+/** The registry's entry for a call's model (the default when none is given). */
+function infoOf(model: string | undefined): ModelInfo {
+  const m = modelInfo(model ?? DEFAULT_MODEL);
+  if (!m) throw new HttpError(500, `unknown model ${String(model).slice(0, 80)}`);
+  return m;
+}
+
+/** Whether a call that refused or failed before its first text is run again on the default (D8). */
+function appFallbackOn(o: RunOpts, m: ModelInfo): boolean {
+  return o.appFallback !== false && !m.serverFallback && m.id !== DEFAULT_MODEL && typeof o.reserveFallback === "function";
+}
+
+/** The worst case of the request on `model`, as a reservation counts it:
+ *  every text block's characters, each picture at the largest size the app
+ *  stores, all of max_tokens. D8's rerun reserves this. */
+export function requestEstimate(model: string, o: Pick<RunOpts, "system" | "messages" | "maxTokens" | "format">): number {
+  let chars = o.system.reduce((n, b) => n + b.text.length, 0) + (o.format ? JSON.stringify(o.format.schema).length : 0);
+  let pictures = 0;
+  for (const msg of o.messages) {
+    if (typeof msg.content === "string") chars += msg.content.length;
+    else
+      for (const b of msg.content ?? []) {
+        if (b.type === "text") chars += b.text.length;
+        else if (b.type === "image") pictures += 1;
+      }
+  }
+  return estimateUsd(model, chars, o.maxTokens, pictures * imageTokens());
+}
+
 /** One streamed call. Text arrives through onText with the model serving it
  *  at that moment (message_start's model, then a fallback block's). A timeout
- *  or a closed phone keeps what arrived; any other error is the caller's. */
+ *  or a closed phone keeps what arrived; any other error is the caller's.
+ *
+ *  `model` picks the routed model (left out: DEFAULT_MODEL, today's request
+ *  byte for byte). A Claude model is called here; any other provider through
+ *  its adapter (llm/index.ts). D8: a model with no server-side fallback that
+ *  refuses or fails before its first text is run once more on the default,
+ *  under the reservation reserveFallback makes. */
 export async function run(o: RunOpts): Promise<RunResult> {
-  let model: string = MODEL;
+  const m = infoOf(o.model);
+  let started = false;
+  const onStart = o.onStart
+    ? () => {
+        if (started) return;
+        started = true;
+        o.onStart?.();
+      }
+    : undefined;
+  const first = m.provider === "anthropic" ? await runAnthropic({ ...o, onStart }, m) : await runAdapter({ ...o, onStart }, m);
+  if (first.chars === 0 && (first.stop === "refusal" || first.stop === "error") && appFallbackOn(o, m)) {
+    const def = infoOf(DEFAULT_MODEL);
+    const ledger = await o.reserveFallback!(requestEstimate(def.id, o));
+    const again = await runAnthropic({ ...o, onStart, ledger, model: def.id, reserveFallback: undefined, appFallback: false }, def);
+    return result(again);
+  }
+  if (first.stop === "error") throw first.cause;
+  return result(first);
+}
+
+const result = (r: Outcome): RunResult => ({ stop: r.stop, model: r.model, timedOut: r.timedOut, costUsd: r.costUsd, estimated: r.estimated, chars: r.chars });
+
+/** A Claude model: today's call, with the routed model's id, its effort
+ *  control, its output floor and cap, and server-side fallback only where
+ *  the model has it. With D8 on, an error before the first text is
+ *  returned (stop "error") instead of thrown. */
+async function runAnthropic(o: RunOpts, m: ModelInfo): Promise<Outcome> {
+  let model: string = m.apiId;
   let usage: UsageLike | null = null;
   let finalUsage = false;
   let chars = 0;
@@ -66,12 +161,15 @@ export async function run(o: RunOpts): Promise<RunResult> {
   let timedOut = false;
   let started = false;
   let cost = 0;
+  let cause: unknown;
+  const serverFallback = m.serverFallback && o.fallbacks !== false;
+  const effort = m.effort ? (m.effort[o.effort] as Effort) : undefined;
+  const outputConfig = effort !== undefined ? (o.format ? { effort, format: o.format } : { effort }) : o.format ? { format: o.format } : undefined;
   const stream = o.client.beta.messages.stream({
-    model: MODEL,
-    max_tokens: o.maxTokens,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    output_config: o.format ? { effort: o.effort, format: o.format } : { effort: o.effort },
+    model: m.apiId,
+    max_tokens: Math.min(m.maxOut, Math.max(o.maxTokens, m.minMaxTokens ?? 0)),
+    ...(serverFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+    ...(outputConfig ? { output_config: outputConfig } : {}),
     ...(o.cacheTail ? { cache_control: { type: "ephemeral" as const } } : {}),
     system: o.system,
     messages: o.messages,
@@ -111,8 +209,12 @@ export async function run(o: RunOpts): Promise<RunResult> {
     finalUsage = true;
     stop = final.stop_reason;
   } catch (e) {
-    if (!timedOut && !o.signal?.aborted) throw e; // a timeout or a closed phone keeps what arrived
-    stop = timedOut ? "timeout" : "aborted";
+    if (!timedOut && !o.signal?.aborted) {
+      // D8: nothing streamed yet, so the default may answer instead.
+      if (chars > 0 || !appFallbackOn(o, m)) throw e;
+      stop = "error";
+      cause = e;
+    } else stop = timedOut ? "timeout" : "aborted"; // a timeout or a closed phone keeps what arrived
   } finally {
     clearTimeout(timer);
     o.signal?.removeEventListener("abort", onAbort);
@@ -123,7 +225,18 @@ export async function run(o: RunOpts): Promise<RunResult> {
       .ledger({ kind: o.kind, ref: o.ref, model, usage: settled, costUsd: cost, estimated: !finalUsage })
       .catch(() => undefined);
   }
-  return { stop, model, timedOut, costUsd: cost, estimated: !finalUsage };
+  return { stop, model, timedOut, costUsd: cost, estimated: !finalUsage, chars, cause };
+}
+
+/** Any other provider: its adapter (llm/index.ts), which streams, settles
+ *  through o.ledger in its own `finally` and never throws (stop "error"
+ *  with its cause). A provider without an adapter in this build settles $0
+ *  and fails before any text, so D8 can still answer on the default. */
+async function runAdapter(o: RunOpts, m: ModelInfo): Promise<Outcome> {
+  const adapter = adapterFor(m.provider);
+  if (adapter) return adapter(o, m);
+  await o.ledger({ kind: o.kind, ref: o.ref, model: m.id, usage: null, costUsd: 0, estimated: false }).catch(() => undefined);
+  return { stop: "error", model: m.id, timedOut: false, costUsd: 0, estimated: false, chars: 0, cause: new HttpError(500, "not configured") };
 }
 
 /** Structured generation: streams one {"<list>": [...]} document and hands
