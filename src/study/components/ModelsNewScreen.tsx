@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_MODEL, modelInfo } from "../../../shared/study/models";
 import type { ScreenProps } from "../features/types";
-import { FIRST_MODELS, LAB_KINDS, offered, preselect, price, readState, savedPick, savePick, startRun, totalOf, type ModelsState, type Price } from "../lib/models";
+import { FIRST_MODELS, KEYED_KINDS, LAB_KINDS, offered, preselect, price, RATED_KINDS, readState, savedPick, savePick, startRun, totalOf, type ModelsState, type Price } from "../lib/models";
 import { MC, modelsFail, ROUTE_SUBLINE, routeName, usd } from "../lib/modelsCopy";
 import "../styles/models.css";
 import { BudgetLine, ModelName, useKeys } from "./ModelsParts";
@@ -14,7 +14,11 @@ import { BackLink, Head, Loading, StickyActions, useOnline } from "./Shell";
  * models (today's model and the kind's candidate picked; the newest four
  * first, the older ones folded). The button says the run's worst case; a
  * run over the cap, over what is left of the month's line, past today's
- * runs, offline or with the switch off cannot start, and says why. */
+ * runs, offline or with the switch off cannot start, and says why.
+ * The kinds rated by people (WP8) are a second group of chips; "לשאול" asks
+ * for the owner's question (at most 500 characters); "עוד אפשרויות" holds
+ * the AI score (C11, off by default, OD12), whose worst case joins the
+ * button's, as does practice's paid check. */
 
 export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
   const kind = route.k && (LAB_KINDS as readonly string[]).includes(route.k) ? route.k : "solver";
@@ -27,6 +31,8 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [question, setQuestion] = useState("");
+  const [judge, setJudge] = useState(false);
   const online = useOnline();
   const keys = useKeys();
 
@@ -80,7 +86,9 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
   const first = usable.filter((m) => FIRST_MODELS.includes(m.id) || picked.includes(m.id) || m.id === today);
   const rest = usable.filter((m) => !first.includes(m));
   const shown = more ? usable : first;
-  const total = quote ? totalOf(picked, quote.models) : 0;
+  const rated = RATED_KINDS.has(kind);
+  const total = quote ? totalOf(picked, quote.models, quote.steps, rated && judge) : 0;
+  const asked = question.replace(/\s+/g, " ").trim();
   const left = Math.max(0, state.lab.line_usd - state.lab.spent_usd);
   const cap = quote?.runCap ?? state.lab.run_cap;
   const dailyDone = state.lab.runs_today >= state.lab.daily_runs;
@@ -93,6 +101,8 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
         ? MC.dailyDone(state.lab.runs_today)
         : left <= 0
           ? modelsFail("lab_budget")
+        : kind === "ask" && !asked
+          ? MC.needQuestion
         : picked.length < 2
           ? MC.pickTwo
           : picked.length > 4
@@ -112,7 +122,7 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
     setBusy(true);
     setError("");
     try {
-      const run = await startRun({ group: ctx.group.id, route: kind, models: picked, source: quote.source });
+      const run = await startRun({ group: ctx.group.id, route: kind, models: picked, source: kind === "ask" ? { ...quote.source, question: asked.slice(0, 500) } : quote.source, ...(rated && judge ? { judge: true } : {}) });
       ctx.go({ v: "models", r: run }, { replace: true });
     } catch (e) {
       setError(modelsFail(e instanceof Error ? e.message : ""));
@@ -132,22 +142,33 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
           </span>
           {MC.step1}
         </h2>
-        <div className="a-wrap md-kinds" role="radiogroup" aria-labelledby="md-s1">
-          {LAB_KINDS.map((k) => (
-            <button
-              key={k}
-              type="button"
-              role="radio"
-              aria-checked={k === kind}
-              aria-disabled={Boolean(quoteFail[k]) && k !== kind}
-              className={`a-chip md-kind${k === kind ? " on" : ""}`}
-              onClick={() => ctx.go({ v: "models", x: "new", k }, { replace: true })}
-            >
-              {routeName(k)}
-            </button>
-          ))}
-        </div>
+        {[
+          { id: "md-k1", name: MC.keyedGroup, kinds: LAB_KINDS.filter((k) => KEYED_KINDS.has(k)) },
+          { id: "md-k2", name: MC.ratedGroup, kinds: LAB_KINDS.filter((k) => RATED_KINDS.has(k)) },
+        ].map((g) => (
+          <div key={g.id} className="a-stack">
+            <p id={g.id} className="a-small md-kind-group">
+              {g.name}
+            </p>
+            <div className="a-wrap md-kinds" role="radiogroup" aria-labelledby={g.id}>
+              {g.kinds.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="radio"
+                  aria-checked={k === kind}
+                  aria-disabled={Boolean(quoteFail[k]) && k !== kind}
+                  className={`a-chip md-kind${k === kind ? " on" : ""}`}
+                  onClick={() => ctx.go({ v: "models", x: "new", k }, { replace: true })}
+                >
+                  {routeName(k)}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
         {ROUTE_SUBLINE[kind] ? <p className="a-small a-muted">{ROUTE_SUBLINE[kind]}</p> : null}
+        {kind === "part" ? <p className="a-small a-muted">{MC.partOwner}</p> : null}
       </section>
 
       <section className="a-stack md-step" aria-labelledby="md-s2">
@@ -175,6 +196,13 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
             ) : null}
           </div>
         )}
+        {kind === "ask" && !noMaterial ? (
+          <label className="md-ask">
+            <span className="a-small">{MC.question}</span>
+            <textarea className="a-input" maxLength={500} value={question} onChange={(e) => setQuestion(e.target.value)} dir="auto" />
+            <span className="a-small a-muted">{MC.questionHint}</span>
+          </label>
+        ) : null}
       </section>
 
       <section className="a-stack md-step" aria-labelledby="md-s3">
@@ -213,6 +241,19 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
         ) : null}
         {models.every((m) => modelInfo(m.id)?.provider === "anthropic") ? <p className="a-small a-muted">{MC.otherProviders}</p> : null}
         {quote ? <p className="a-small a-muted">{MC.priceNote}</p> : null}
+        {rated ? (
+          <details className="md-fold md-more">
+            <summary>{MC.more}</summary>
+            <label className="a-li md-check">
+              <input type="checkbox" checked={judge} onChange={(e) => setJudge(e.target.checked)} />
+              <span className="md-check-name">
+                <b>{MC.aiTitle}</b>
+                <span className="a-small a-muted">{MC.aiText}</span>
+              </span>
+              <span className="md-check-usd a-small">{quote?.steps ? MC.aiPrice(usd(quote.steps.judge[Math.min(4, Math.max(2, picked.length))] ?? 0)) : ""}</span>
+            </label>
+          </details>
+        ) : null}
       </section>
 
       {error ? (

@@ -445,3 +445,210 @@
 .md-me-row {
   min-height: 56px;
 }
+
+/* The blind rating (design-models §5.5): one answer at a time on a phone,
+   its score box under it; from 768 px every answer side by side, each with
+   its box, and the last step under them. */
+.md-rate {
+  display: grid;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+.md-switch {
+  gap: var(--sp-4);
+}
+.md-switch-btn {
+  min-height: 44px;
+  min-width: 44px;
+  gap: var(--sp-2);
+}
+.md-switch-btn.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.md-rate-grid {
+  display: grid;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+.md-rate-panel,
+.md-rate-best {
+  display: none;
+  gap: var(--sp-5);
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+.md-rate-panel.on,
+.md-rate-best.on {
+  display: grid;
+}
+@media (min-width: 768px) {
+  .md-rate-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  .md-rate-panel,
+  .md-rate-best {
+    display: grid;
+  }
+  .md-switch,
+  .md-next {
+    display: none;
+  }
+}
+.md-shown {
+  margin: 0;
+  padding-inline-start: var(--sp-10);
+  display: grid;
+  gap: var(--sp-6);
+  overflow-wrap: anywhere;
+  max-height: 34rem;
+  overflow: auto;
+}
+.md-shown p {
+  margin: 0 0 var(--sp-2);
+}
+.md-shown-text {
+  padding: var(--sp-5);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  white-space: pre-wrap;
+}
+.md-shown-cards {
+  list-style: none;
+  padding: 0;
+}
+.md-shown-cards > li {
+  padding: var(--sp-4) var(--sp-5);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.md-correct {
+  font-weight: 700;
+}
+.md-scorebox {
+  display: grid;
+  gap: var(--sp-4);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+.md-score,
+.md-best {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.md-score legend,
+.md-best legend {
+  font-weight: 700;
+  margin-bottom: var(--sp-4);
+}
+.md-score-row {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.md-score-n {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  font-weight: 800;
+  cursor: pointer;
+}
+.md-score-n input,
+.md-best-pick input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.md-score-n.on {
+  background: var(--accent-fill);
+  border-color: var(--accent);
+  color: var(--accent-fill-ink);
+}
+.md-score-n:focus-within,
+.md-best-pick:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.md-scale-ends {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+}
+.md-error-tick {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-height: 44px;
+}
+.md-error-tick input {
+  width: 22px;
+  height: 22px;
+}
+.md-note {
+  display: grid;
+  gap: var(--sp-2);
+}
+.md-best-pick {
+  position: relative;
+  min-height: 44px;
+  padding-inline: var(--sp-6);
+  cursor: pointer;
+}
+.md-best-pick.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.md-rate-best .a-link {
+  justify-self: start;
+  min-height: 44px;
+}
+.md-rate-others {
+  margin: 0;
+}
+.md-rated-facts {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.md-differs {
+  margin: 0;
+}
+.md-pending {
+  display: grid;
+  gap: var(--sp-4);
+}
+.md-pending p {
+  margin: 0;
+}
+.md-share {
+  min-height: 44px;
+}
+.md-share-text {
+  margin: 0;
+  padding: var(--sp-5);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+.md-ask {
+  display: grid;
+  gap: var(--sp-3);
+}
+.md-ask textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+.md-kind-group {
+  margin: 0;
+  font-weight: 700;
+}

@@ -65,7 +65,7 @@ function Home({ route, ctx }: ScreenProps<"models">) {
       </main>
     );
   }
-  if (!owner) return <MemberList ctx={ctx} back={back} />;
+  if (!owner) return route.x === "board" && route.k ? <MemberBoard ctx={ctx} back={back} routeKey={route.k} /> : <MemberList ctx={ctx} back={back} />;
   return <OwnerHome route={route} ctx={ctx} back={back} />;
 }
 
@@ -121,6 +121,39 @@ function MemberList({ ctx, back }: { ctx: Ctx; back: React.ReactNode }) {
             ))}
           </ul>
         </section>
+      ) : null}
+    </main>
+  );
+}
+
+/* ── A member: one kind's results, read only (design-models §5.6: quality,
+ *    checks, cost a call; no monthly projection, no route) ── */
+
+function MemberBoard({ ctx, back, routeKey }: { ctx: Ctx; back: React.ReactNode; routeKey: string }) {
+  const [board, setBoard] = useState<Board | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void readBoard(ctx.group.id, routeKey)
+      .then((b) => alive && setBoard(b))
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [ctx.group.id, routeKey]);
+  const max = board ? Math.max(0, ...board.models.map((m) => m.mean_usd ?? 0)) : 0;
+  return (
+    <main className="md-screen">
+      <Head back={back} title={MC.toBoard(routeName(routeKey))} />
+      {failed ? <p className="a-error">{MC.failed}</p> : null}
+      {!board && !failed ? <Loading /> : null}
+      {board && !board.models.length ? <p className="a-muted">{MC.boardHidden}</p> : null}
+      {board?.models.length ? (
+        <div className="md-cards" aria-label={MC.boardLabel}>
+          {board.models.map((m) => (
+            <ModelCard key={m.model} m={m} route={routeKey} board={{ ...board, usage30: null }} max={max} />
+          ))}
+        </div>
       ) : null}
     </main>
   );

@@ -78,6 +78,26 @@ export const NOTIFY_HELP = {
   text: "הפעמון למעלה מראה מה חדש: תשובות בשרשור שלך, מבחן קבוצתי שנפתח, פגישה שמתחילה, וסיכום או מבחן קודם שהעלית כשהם מוכנים. כשההתראות זמינות בקבוצה, אפשר לקבל את זה גם כהתראה בטלפון או במחשב: שלי ← הגדרות התראות ← ״להפעיל התראות במכשיר הזה״. נשלחות רק ״עכשיו בקבוצה״ ו״בשבילך״, ותזכורת יומית רק למי שמפעילים אותה. בלילה (מ-23:00 עד 07:30) לא שולחים, ומה שמגיע מחכה בפעמון. באייפון ההתראות מגיעות רק כשפותחים את תמצית מהאייקון במסך הבית. על המסך הנעול מופיע שם ההרצאה, בלי שמות ובלי תוכן של תגובות.",
 } as const;
 
+/** Help's row on "השוואת מודלים" (docs/study/models.md, design-models C58; VITE_STUDY_MODELS). */
+export const MODELS_HELP = {
+  title: "השוואת מודלים",
+  text: "מי שפתחו את הקבוצה יכולים לשלוח את אותו חומר לכמה מודלים ולהשוות ביניהם, ולבחור לכל סוג עבודה את המודל שכותב אותו. את התשובות הקצרות (שאלות תרגול, ״לשאול״, נקודות שצריך לדעת, כרטיסיות) כל הקבוצה יכולה לדרג בלי לדעת איזה מודל כתב כל תשובה: ציון אחד מ-1 עד 5 לכל תשובה, ״יש כאן טעות עובדתית״ כשיש, ובסוף התשובה הכי טובה. השמות, הזמן והעלות מופיעים רק אחרי הדירוג, ואפשר גם לדלג. השוואות לדירוג מופיעות ב״שלי״ ובפעמון. השוואות עולות מהתקרה החודשית של הקבוצה, עד $3.30 בחודש, ולא מהחלק של מי שמריצים אותן.",
+} as const;
+
+/** The providers' names as the group knows them. */
+const PROVIDER_NAMES: Readonly<Record<string, string>> = { anthropic: "Anthropic (Claude)", openai: "OpenAI", google: "Google", openrouter: "OpenRouter" };
+const list = (xs: readonly string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} ו-${xs[xs.length - 1]}` : (xs[0] ?? ""));
+
+/** Help's one line on the companies the group's material is sent to (OD21:
+ *  informational, not a gate): the providers that write for the group (the
+ *  routed kinds' and Anthropic) and those approved for comparisons. */
+export function providersLine(o: { inUse: readonly string[]; approved: readonly string[] }): string {
+  const name = (p: string) => PROVIDER_NAMES[p] ?? p;
+  const used = [...new Set(["anthropic", ...o.inUse])].map(name);
+  const more = [...new Set(o.approved)].filter((p) => p !== "anthropic" && !o.inUse.includes(p)).map(name);
+  return `החומר של הקבוצה נשלח לכתיבה ל-${list(used)}${more.length ? `, ובהשוואת מודלים גם ל-${list(more)}` : ""}. אף אחד מהם לא מקבל שמות של חברי הקבוצה.`;
+}
+
 /** The help screen's rows that are shown under these flags, in order. */
 export function helpRows(f: Flags, w: WritingHelp, ends: Ends = ENDS): HelpRow[] {
   const rows: Array<HelpRow & { on: boolean }> = [
@@ -373,6 +393,12 @@ export function helpRows(f: Flags, w: WritingHelp, ends: Ends = ENDS): HelpRow[]
       title: "התקציב החודשי",
       on: true,
       text: `לכל הקבוצה יש תקרה חודשית לשימוש ב-Claude: סיכומים, הערות מהקלטות, שאלות, ${f.exams ? "מבחנים קודמים, " : ""}כרטיסיות, ״לשאול״ ואסוציאציות. כל מה שאינו סיכום נעצר ב-80% ממנה, כדי שיישאר תקציב לסיכומים של ההרצאות הבאות, והשימוש האישי מוגבל ל-40% ממנה בחודש. כשמגיעים לתקרה, כתיבה חדשה נעצרת עד תחילת החודש הבא.`,
+    },
+    {
+      // "השוואת מודלים" (docs/study/models.md, WP8): who runs, who rates blind, what it costs.
+      title: MODELS_HELP.title,
+      on: f.models,
+      text: MODELS_HELP.text,
     },
     {
       title: "כשמשהו נתקע",

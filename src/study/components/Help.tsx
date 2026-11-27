@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { groupSpent, health } from "../lib/api";
 import { flags } from "../lib/flags";
 import { matches } from "../lib/guide";
-import { helpRows } from "../lib/helpCopy";
+import { helpRows, providersLine } from "../lib/helpCopy";
 import { isolateLatin } from "../lib/rich";
 import { useCodesOn } from "../features/account";
 import { writingHelp } from "../features/writing";
@@ -12,9 +12,29 @@ import { Head } from "./Shell";
 /** "$12.40", and a cap of "$33" without cents. */
 const dollars = (n: number) => "$" + (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
-/** Help's footer for members: "השימוש של הקבוצה החודש: $12.40 מתוך $33". */
+/** Help's footer for members: "השימוש של הקבוצה החודש: $12.40 מתוך $33";
+ *  with VITE_STUDY_MODELS, the line on the companies the material is sent to
+ *  (OD21, informational), from section Y's study_models (none without Y). */
 export function HelpSpend({ ctx }: { ctx: Ctx }) {
   const [line, setLine] = useState("");
+  const [sent, setSent] = useState("");
+  useEffect(() => {
+    if (!flags.models) return;
+    let alive = true;
+    void import("../lib/models")
+      .then(async (m) => {
+        const st = await m.readState(ctx.group.id);
+        const inUse = st.switches.routes ? Object.values(st.routes).map((r) => r.model.split(":")[0]).filter((p) => p && !p.startsWith("claude")) : [];
+        const approved = Object.entries(st.providers)
+          .filter(([, p]) => p.allowed)
+          .map(([k]) => k);
+        if (alive) setSent(providersLine({ inUse, approved }));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [ctx.group.id]);
   useEffect(() => {
     let alive = true;
     Promise.all([groupSpent(ctx.group.id), health()])
@@ -28,7 +48,13 @@ export function HelpSpend({ ctx }: { ctx: Ctx }) {
       alive = false;
     };
   }, [ctx.group.id]);
-  return line ? <>{line}</> : null;
+  return line || sent ? (
+    <>
+      {line}
+      {line && sent ? <br /> : null}
+      {sent}
+    </>
+  ) : null;
 }
 
 /* ── Help (spec §6.2: F renders) ──

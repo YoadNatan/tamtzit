@@ -7,6 +7,7 @@ import {
   FIRST_MODELS,
   isOwner,
   KEYED_KINDS,
+  listRuns,
   nextPrice,
   priceFactor,
   projection,
@@ -54,13 +55,25 @@ export const LabelDot = ({ label }: { label: string }) => (
 export function ModelsRows({ ctx }: { ctx: Ctx }) {
   const [owner, setOwner] = useState(false);
   const [todo, setTodo] = useState(0);
+  const [oldest, setOldest] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     void isOwner(ctx.group.id)
       .then((o) => alive && setOwner(o))
       .catch(() => undefined);
     void todoCount(ctx.group.id)
-      .then((n) => alive && setTodo(n))
+      .then((n) => {
+        if (!alive) return;
+        setTodo(n);
+        // The row opens the oldest run waiting for the caller's rating directly (design-models §5.1).
+        if (n > 0)
+          void listRuns(ctx.group.id)
+            .then((rows) => {
+              const wait = rows.filter((r) => r.mine === "todo" && r.member_rate);
+              if (alive && wait.length) setOldest(wait[wait.length - 1].id);
+            })
+            .catch(() => undefined);
+      })
       .catch(() => undefined);
     return () => {
       alive = false;
@@ -78,7 +91,7 @@ export function ModelsRows({ ctx }: { ctx: Ctx }) {
         </RouteLink>
       ) : null}
       {todo > 0 ? (
-        <RouteLink to={{ v: "models" }} go={ctx.go} className="a-li row-link md-me-row">
+        <RouteLink to={oldest ? { v: "models", r: oldest } : { v: "models" }} go={ctx.go} className="a-li row-link md-me-row">
           <div>
             <b>{MC.todoRow(todo)}</b>
             <div className="a-small a-muted">{MC.todoSub}</div>
@@ -109,12 +122,30 @@ export function BudgetLine({ state }: { state: ModelsState }) {
 /* ── An answer's automatic checks ($0, the server's checksFor) ── */
 
 /** The chips of an answer's checks, in words (C29): the match with the key, false rejects, the group's decision, the copy. */
-export function checkChips(route: string, c: Checks | undefined): Array<{ text: string; tone: "ok" | "warn" | "bad" | "" }> {
+export function checkChips(route: string, c: Checks | undefined, checkStatus?: string): Array<{ text: string; tone: "ok" | "warn" | "bad" | "" }> {
   if (!c || Object.keys(c).length === 0) return [];
   const out: Array<{ text: string; tone: "ok" | "warn" | "bad" | "" }> = [];
   const items = Number(c.items) || 0;
   const match = Number(c.match) || 0;
-  if (c.pass === false && match === 0) out.push({ text: MC.checks.unreadable, tone: "bad" });
+  const n = (k: string) => Number(c[k]) || 0;
+  const share = (a: number, b: number): "ok" | "warn" | "bad" => (a === b ? "ok" : b > 0 && a / b >= 0.8 ? "warn" : "bad");
+  if (c.pass === false && match === 0 && route !== "ask" && route !== "part") out.push({ text: MC.checks.unreadable, tone: "bad" });
+  // The kinds members rate: production's own checks, and practice's paid check (the solver).
+  if (route === "practice" || route === "set_write" || route === "points" || route === "cards") {
+    if (items > 0) out.push({ text: (route === "points" ? MC.checks.points : route === "cards" ? MC.checks.cards : MC.checks.questions)(match, items), tone: share(match, items) });
+    if (route === "points" && n("red") > 0) out.push({ text: MC.checks.red(n("red")), tone: "" });
+    if ("solved" in c) out.push(n("solver_differs") > 0 ? { text: MC.checks.solverDiffers(n("solver_differs")), tone: "warn" } : { text: MC.checks.solverAgrees, tone: "ok" });
+    else if (checkStatus === "pending") out.push({ text: MC.checks.pending, tone: "" });
+    else if (checkStatus === "running") out.push({ text: MC.checks.running, tone: "" });
+    return out;
+  }
+  if (route === "ask" || route === "part") {
+    const tags = route === "part" ? match : n("tags");
+    out.push(tags > 0 ? { text: MC.checks.tags(tags), tone: "ok" } : { text: MC.checks.noTags, tone: "warn" });
+    if (n("bad") > 0) out.push({ text: MC.checks.badTags(n("bad")), tone: "bad" });
+    if (route === "part" && n("numbers_of") > 0) out.push({ text: MC.checks.numbers(n("numbers"), n("numbers_of")), tone: share(n("numbers"), n("numbers_of")) });
+    return out;
+  }
   if (route === "fix_check") {
     if (c.pass !== false) out.push(c.agrees ? { text: MC.checks.agrees, tone: "ok" } : { text: MC.checks.disagrees, tone: "bad" });
     return out;
@@ -130,8 +161,8 @@ export function checkChips(route: string, c: Checks | undefined): Array<{ text: 
   return out;
 }
 
-export function ChecksLine({ route, checks }: { route: string; checks: Checks | undefined }) {
-  const chips = checkChips(route, checks);
+export function ChecksLine({ route, checks, checkStatus }: { route: string; checks: Checks | undefined; checkStatus?: string }) {
+  const chips = checkChips(route, checks, checkStatus);
   if (!chips.length) return null;
   return (
     <div className="a-wrap md-checks">

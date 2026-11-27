@@ -121,6 +121,7 @@ const HELP: Array<[string, (f: Flags) => boolean]> = [
   ["הקלטות", (f) => f.recordings],
   ["PDF ושיתוף", () => true],
   ["התקציב החודשי", () => true],
+  ["השוואת מודלים", (f) => f.models],
   ["כשמשהו נתקע", () => true],
 ];
 test("help's rows, each with its flag, under every release's set; no privacy note", () => {
