@@ -455,6 +455,9 @@ async function call<T>(
   return { items, error };
 }
 
+/** The time the check call needs at least; with less left the job is retried instead. */
+export const CHECK_MIN_MS = 45_000;
+
 /** Runs one claimed job to its end (see the top of this file). */
 export async function runSimilarJob(sb: SupabaseClient, c: SimilarClaim, opts: { stopAt: number }): Promise<JobResult> {
   const { call: gen, roots, skipped } = similarCall(c);
@@ -504,6 +507,11 @@ export async function runSimilarJob(sb: SupabaseClient, c: SimilarClaim, opts: {
   const numericOnly = candidates.filter((t) => t.check === "recalc");
   const toCheck = candidates.filter((t) => t.check !== "recalc");
   if (out.error && !candidates.length) return end("failed", out.error, [], dropped);
+  // The writing call stopped early (a timeout, a cut-off) or too little time is left for the check:
+  // the numeric twins are kept and the job is retried for the rest (study_similar_save marks the
+  // roots it saved, so the retry writes only the others).
+  const late = Date.now() > opts.stopAt - CHECK_MIN_MS;
+  if (!state.failed && state.fits && (out.error || (late && toCheck.length))) return end("failed", out.error ?? "timeout", numericOnly, dropped);
   if (!toCheck.length || state.failed || !state.fits) {
     dropped += toCheck.length;
     return end(state.failed || !state.fits ? "failed" : "done", state.failed ? "unsettled" : !state.fits ? "reserve_used" : null, numericOnly, dropped);

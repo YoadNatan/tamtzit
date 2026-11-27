@@ -8,7 +8,8 @@ import ai from "../../api/study/ai.js";
 import work from "../../api/study/work.js";
 import { costUsd, POLICY } from "./budget.js";
 import { EXAM_PROMPT_CHARS, examPriceUsd as phonePriceUsd } from "../../shared/study/examPrice.js";
-import { EXAM_SOLVE_ITEMS, EXAM_UNIT_TOKENS, SHEET_CONFIRM_USD, sheetMinutes, sheetPriceUsd, sheetWorstUsd } from "../../shared/study/sheetPrice.js";
+import { EXAM_SOLVE_ITEMS, EXAM_UNIT_TOKENS, SHEET_CONFIRM_USD, sheetHoldUsd, sheetMinutes, sheetPriceUsd, sheetReaderWorstUsd, sheetWorstUsd, solveUnitWorstUsd } from "../../shared/study/sheetPrice.js";
+import { sheetPrompts } from "./sheets.js";
 import { sheetGate } from "./ops/exams.js";
 import { examPriceUsd, examPrompts, KEY_TOKENS, READ_TOKENS, SOLVE_TOKENS, readUnits, toSaveItems, toSheetKeys, toSolvedKeys, unitCall, type ExamClaim, type SaveItem } from "./exams.js";
 import { courseStyle } from "./practice.js";
@@ -161,6 +162,8 @@ const rest = createServer(async (req, res) => {
       return send(res, 200, true);
     case "/rest/v1/rpc/study_sheet_room":
       return send(res, 200, sheetRoom);
+    case "/rest/v1/rpc/study_sheet_hold":
+      return send(res, 200, { held: body?.p_worst ?? 0, used: 0 });
     case "/rest/v1/rpc/study_exam_pages_done":
       return send(res, 200, { units: 4, server: true });
     case "/rest/v1/rpc/study_exam_status":
@@ -723,7 +726,29 @@ test("op exam_read on a sheet: within its bounds, read as an exam (the usual pri
   const [r] = rpcs("study_reserve");
   assert.ok(r.seq > room.seq, "the bounds first, then the gate");
   assert.deepEqual([r.body.p_kind, r.body.p_ref, r.body.p_daily, r.body.p_member_share], ["exam", "read", 3, null], "group work (OD13)");
+  const [h] = rpcs("study_sheet_hold");
+  assert.ok(room.seq < h.seq && h.seq < r.seq, "the hold is taken after the bounds, before the start");
+  const hold = sheetHoldUsd({ pages: 6, keyPages: 0, keySource: "none" }, "exam", MODEL, examPrompts());
+  assert.deepEqual([h.body.p_exam, h.body.p_worst, h.body.p_cap, h.body.p_key], [EXAM, Math.ceil(hold * 100) / 100, 6, KEY]);
+  assert.deepEqual(h.body.p_solve, { exam: solveUnitWorstUsd("exam", MODEL, examPrompts()), sheet: solveUnitWorstUsd("sheet", MODEL, sheetPrompts()) });
   assert.equal(rpcs("study_exam_pages_done").length, 1);
+  // A start refused after the hold (the member's 3 a day): the hold is dropped again.
+  log = [];
+  examRow = { id: EXAM, group_id: GROUP, key_source: "none", status: "uploading", kind: "sheet" };
+  reserveAnswer = { status: 400, body: { code: "P0001", message: "daily", details: null, hint: null } };
+  const late = await post(sheetBody(6));
+  assert.notEqual(late.status, 200);
+  assert.deepEqual(rpcs("study_sheet_hold").map((c) => c.body.p_worst), [Math.ceil(hold * 100) / 100, 0]);
+  assert.equal(rpcs("study_exam_pages_done").length, 0);
+});
+
+test("a sheet's hold: the usual items solved at their worst, so a 10-page sheet without answers fits the $6 line (the full worst case did not)", () => {
+  const p = sheetPrompts();
+  assert.ok(sheetHoldUsd({ pages: 10, keySource: "none" }, "sheet", MODEL, p) < 6);
+  assert.ok(sheetHoldUsd({ pages: 10, keySource: "none" }, "sheet", MODEL, p) < sheetReaderWorstUsd({ pages: 10, keySource: "none" }, MODEL, p));
+  assert.ok(sheetHoldUsd({ pages: 40, keySource: "none" }, "sheet", MODEL, p) > 6, "a 40-page sheet without answers still does not fit");
+  assert.ok(sheetHoldUsd({ pages: 6, keySource: "marked" }, "exam", MODEL, examPrompts()) <= sheetWorstUsd({ pages: 6, keySource: "marked" }, MODEL, examPrompts()));
+  assert.ok(solveUnitWorstUsd("exam", MODEL, examPrompts()) > solveUnitWorstUsd("sheet", MODEL, p), "20 items a unit against 4");
 });
 
 test("op exam_read on a sheet: over 40 pages 400, the switch off 403, the sheets line 402 sheets_cap, the 80% line 402 budget", async () => {
@@ -736,7 +761,7 @@ test("op exam_read on a sheet: over 40 pages 400, the switch off 403, the sheets
   sheetRoom = [{ sheets_on: false, sheets_usd: 0, spent_usd: 0 }];
   const off = await post(sheetBody(6));
   assert.deepEqual([off.status, await off.json()], [403, { error: "off" }]);
-  const worst = sheetWorstUsd({ pages: 6, keyPages: 0, keySource: "none" }, MODEL, examPrompts());
+  const worst = sheetHoldUsd({ pages: 6, keyPages: 0, keySource: "none" }, "exam", MODEL, examPrompts());
   sheetRoom = [{ sheets_on: true, sheets_usd: 6 - worst + 0.01, spent_usd: 0 }];
   const line = await post(sheetBody(6));
   assert.deepEqual([line.status, await line.json()], [402, { error: "sheets_cap" }]);

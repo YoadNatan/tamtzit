@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { coverage } from "../../shared/study/coverage.js";
-import { SHEET_UNIT_TOKENS, sheetSolveTokens as solveTokens } from "../../shared/study/sheetPrice.js";
+import { capPageLines, SHEET_UNIT_TOKENS, sheetSolveTokens as solveTokens } from "../../shared/study/sheetPrice.js";
 import { recompute } from "./calc.js";
 import { cleanSchema, type Effort } from "./claude.js";
 import type { ExamClaim, ExamPage } from "./exams.js";
@@ -470,7 +470,7 @@ export function sheetCall(c: ExamClaim): SheetCall | null {
   for (const { p, context } of shown) {
     const img = picture(p.url, p.path);
     if (!img) return null;
-    const label = sheetPageText(p.n, p.lines ?? [], context);
+    const label = sheetPageText(p.n, capPageLines(p.lines ?? []), context); // the worst case's page at most (the exactness check keeps them all)
     content.push({ type: "text", text: label }, img);
     chars += label.length;
     tokens += pageTokens(p);

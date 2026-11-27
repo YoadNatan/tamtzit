@@ -234,6 +234,10 @@ const TEXT: Record<string, string> = {
   "exam:bad item": "משהו בשאלה לא תקין. כדאי לבדוק את הטקסט והאפשרויות.",
   "exam:nothing to resume": "אין מה להמשיך: ההעתקה כבר ממשיכה.",
   "exam:nothing to copy": "אין שאלות פתוחות להעתיק.",
+  // The review's fixes: the sheets line held per sheet, a held sheet's retry, a sheet's hiding.
+  "exam:sheets_cap": "התקציב לדפי תרגילים נגמר החודש. מתחדש ב-1 בחודש.",
+  "exam:paused": "ההעתקה מחכה לתקציב. ״להמשיך״ שבכרטיס למעלה ימשיך אותה כשיש מקום.",
+  "exam:not an exam": "דף תרגילים לא נכנס לחישוב הנושאים של הקורס.",
 
   // practice 2.0 (docs/study/practice-2-api.md): the points to know, a request's
   // options, the example read back, the drafts reviewed before the bank
@@ -442,6 +446,7 @@ export const INTERNAL_CODES: readonly string[] = [
   // uploaded sheets (section O 2): the worker's and the op's own checks, and answers the screens never send
   "not a sheet",
   "bad page",
+  "bad hold",
   "not retired",
   "not a numeric question",
   "not an open question",

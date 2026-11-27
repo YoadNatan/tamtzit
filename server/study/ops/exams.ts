@@ -5,10 +5,10 @@ import {
   SHEET_SOLVE_PER_UNIT,
   SHEET_UNIT_TOKENS,
   sheetReaderPriceUsd,
-  sheetReaderWorstUsd,
   sheetSizeProblem,
+  sheetHoldUsd,
   sheetSolveTokens,
-  sheetWorstUsd,
+  solveUnitWorstUsd,
 } from "../../../shared/study/sheetPrice.js";
 import { estimateUsd, monthlyCap, POLICY, reserve, settle, sheetsMonthlyCap } from "../budget.js";
 import { claimExam, examPriceUsd, examPrompts, runExamUnit, UNIT_STOP_MS } from "../exams.js";
@@ -36,15 +36,22 @@ import type { Op } from "./types.js";
  *   (design-exams OD13): at most 40 pages and an answers file of at most 10
  *   (400 too many pages); the switch 'sheets' (403 off); a usual price above
  *   $3 needs the body's confirmBig: true (409 confirm: the phone asked
- *   "הדף ארוך … להמשיך?" first); and its worst case (sheetWorstUsd) must fit
- *   both the sheets line, STUDY_SHEETS_MONTHLY_USD less what sheets cost
- *   this month (402 sheets_cap), and the room under the group's 80% line
- *   (402 budget), so a sheet that starts can finish.
+ *   "הדף ארוך … להמשיך?" first); and its hold (sheetHoldUsd: the read and
+ *   key units at their worst case, the usual item count solved at its worst)
+ *   must fit both the sheets line, STUDY_SHEETS_MONTHLY_USD less what sheets
+ *   cost this month and the holds of sheets still reading (402 sheets_cap),
+ *   and the room under the group's 80% line (402 budget). The hold is then
+ *   taken under the group's budget lock (study_sheet_hold, section O 1), so
+ *   two sheets started at once never both pass, and dropped again if the
+ *   start fails after it. Before solve units run, the line is checked again
+ *   with the real item count (O 2's exam_advance, with the hold's solve
+ *   prices, solveUnitWorstUsd); a sheet that spent its hold runs no more
+ *   units (O 2's claim). Either waits as the budget would hold it (D23).
  *
  *   With forms: true (the client's VITE_STUDY_SHEETS_FORMS) a sheet is read
  *   by the sheet reader (section O 2, server/study/sheets.ts): its price and
- *   worst case are the sheet reader's (sheetReaderPriceUsd and
- *   sheetReaderWorstUsd), the same bounds apply, and
+ *   hold are the sheet reader's (sheetReaderPriceUsd, sheetHoldUsd), the
+ *   same bounds apply, and
  *   study_sheet_pages_done queues 3-page units. 503 schema without O 2.
  *   Without it (a release A0 client) a sheet is read as before.
  *
@@ -53,14 +60,15 @@ import type { Op } from "./types.js";
  *   sheet read by the exam reader) with open questions skipped. dry: 200
  *   {units, pages, skipped, priceUsd} and nothing else. Otherwise with fresh
  *   links: its worst case must fit the room under the 80% line (a sheet's,
- *   the sheets line too); reserved as a start (ref "read", 3 a day) and
+ *   the sheets line too, and is its hold); reserved as a start (ref "read", 3 a day) and
  *   settled at $0; the units run beside the ready upload. 200 {units,
  *   priceUsd}. 409 nothing to copy | already, 402 sheets_cap | budget.
  *
  * {op:"exam_read", action:"resume", examId, skipSolve?}
  *   "להמשיך" / "לסיים בלי תשובות מוצעות" (D23): the units the budget held
  *   go on (with skipSolve, the held solve units are dropped) once their
- *   worst case fits the sheets line and the room under the 80% line again.
+ *   worst case fits the sheets line and the room under the 80% line again
+ *   (a sheet's: its hold now).
  *   200 {read, key, solve, skipped}. 409 nothing to resume, 402 as above.
  *
  * {op:"exam_read", action:"unit", examId}
@@ -85,6 +93,8 @@ const STATUS: Record<string, number> = {
   "nothing to copy": 409,
   already: 409,
   "nothing to resume": 409,
+  sheets_cap: 402,
+  "bad hold": 500,
 };
 const rpcError = (e: { message: string }) => new HttpError(STATUS[e.message] ?? 500, e.message);
 
@@ -128,6 +138,7 @@ export const examReadOp: Op = async (req, body, started) => {
   const keyPages = pages.filter((p) => p && p.key === true).length;
   let priceUsd = examPriceUsd({ pages: pages.length - keyPages, keyPages, keySource: e.key_source });
   let reader: "exam" | "sheet" = "exam";
+  let hold: number | null = null;
   // An uploaded sheet's bounds (section O 1): the kind is read only where it exists.
   if (await schemaHas(sb, VARIANT_SCHEMA.sheets)) {
     const { data: k, error: kindError } = await sb.from("study_exams").select("kind").eq("id", examId).maybeSingle();
@@ -139,17 +150,24 @@ export const examReadOp: Op = async (req, body, started) => {
         reader = "sheet";
         priceUsd = sheetReaderPriceUsd({ pages: pages.length - keyPages, keyPages, keySource: e.key_source }, sheetPrompts());
       }
-      await sheetGate(sb, e, { pages: pages.length - keyPages, keyPages, priceUsd, confirmed: body.confirmBig === true, reader });
+      hold = (await sheetGate(sb, e, { pages: pages.length - keyPages, keyPages, priceUsd, confirmed: body.confirmBig === true, reader })).worstUsd;
     }
   }
 
-  const id = await reserve(sb, { groupId: e.group_id, kind: "exam", ref: "read", estimateUsd: priceUsd });
-  await settle(sb, id, { model: MODEL, usage: null }); // the gate only: the units pay for themselves
+  if (hold !== null) await takeHold(sb, examId, hold);
+  let r: { units?: number; server?: boolean };
+  try {
+    const id = await reserve(sb, { groupId: e.group_id, kind: "exam", ref: "read", estimateUsd: priceUsd });
+    await settle(sb, id, { model: MODEL, usage: null }); // the gate only: the units pay for themselves
 
-  const until = typeof body.until === "string" && !Number.isNaN(Date.parse(body.until)) ? body.until : null;
-  const { data, error } = await sb.rpc(reader === "sheet" ? "study_sheet_pages_done" : "study_exam_pages_done", keyed({ p_exam: examId, p_pages: body.pages, p_urls: body.urls, p_until: until }));
-  if (error) throw rpcError(error);
-  const r = (data ?? {}) as { units?: number; server?: boolean };
+    const until = typeof body.until === "string" && !Number.isNaN(Date.parse(body.until)) ? body.until : null;
+    const { data, error } = await sb.rpc(reader === "sheet" ? "study_sheet_pages_done" : "study_exam_pages_done", keyed({ p_exam: examId, p_pages: body.pages, p_urls: body.urls, p_until: until }));
+    if (error) throw rpcError(error);
+    r = (data ?? {}) as { units?: number; server?: boolean };
+  } catch (e) {
+    if (hold !== null) await dropHold(sb, examId);
+    throw e;
+  }
   return json(200, { units: r.units ?? 0, server: r.server === true, priceUsd, ...(reader === "sheet" ? { reader } : {}) });
 };
 
@@ -178,6 +196,24 @@ async function roomFor(sb: Sb, e: { group_id: string; kind: string }, worstUsd: 
   if (worstUsd > monthlyCap() * POLICY.exam.share - Number(room.spent_usd ?? 0)) throw new HttpError(402, "budget");
 }
 
+/** One solve unit's worst case by reader: the hold's prices for O 2's check before solve units run. */
+export const holdSolvePrices = () => ({ exam: solveUnitWorstUsd("exam", MODEL, examPrompts()), sheet: solveUnitWorstUsd("sheet", SHEET_MODEL, sheetPrompts()) });
+
+/** A sheet's hold on the sheets line, decided under the group's budget lock
+ *  (section O 1's study_sheet_hold). Throws 402 sheets_cap, 403 off. */
+async function takeHold(sb: Sb, examId: string, worstUsd: number): Promise<void> {
+  const { error } = await sb.rpc("study_sheet_hold", keyed({ p_exam: examId, p_worst: Math.ceil(worstUsd * 100) / 100, p_cap: sheetsMonthlyCap(), p_solve: holdSolvePrices() }));
+  if (error) throw rpcError(error);
+}
+/** The hold of a start that failed after it was taken goes (best effort: it lapses in 30 minutes anyway). */
+async function dropHold(sb: Sb, examId: string): Promise<void> {
+  try {
+    await sb.rpc("study_sheet_hold", keyed({ p_exam: examId, p_worst: 0, p_cap: sheetsMonthlyCap(), p_solve: null }));
+  } catch {
+    /* it lapses */
+  }
+}
+
 /** "להעתיק גם N שאלות פתוחות" (OD15). */
 async function openAdd(sb: Sb, examId: string, body: Record<string, unknown>): Promise<Response> {
   await assertSchema(sb, "sheet_forms");
@@ -189,13 +225,21 @@ async function openAdd(sb: Sb, examId: string, body: Record<string, unknown>): P
   const priceUsd = openAddPriceUsd(size, sheetPrompts());
   if (body.dry === true) return json(200, { units: plan.units ?? 0, pages: size.pages, skipped: size.skipped, priceUsd });
   if (!body.urls || typeof body.urls !== "object" || Array.isArray(body.urls)) throw new HttpError(400, "bad request");
-  await roomFor(sb, e, openAddWorstUsd(size, SHEET_MODEL, sheetPrompts()));
-  const id = await reserve(sb, { groupId: e.group_id, kind: "exam", ref: "read", estimateUsd: priceUsd });
-  await settle(sb, id, { model: MODEL, usage: null }); // the gate only: the units pay for themselves
-  const until = typeof body.until === "string" && !Number.isNaN(Date.parse(body.until)) ? body.until : null;
-  const { data, error } = await sb.rpc("study_sheet_open_add", keyed({ p_exam: examId, p_urls: body.urls, p_until: until, p_dry: false }));
-  if (error) throw rpcError(error);
-  return json(200, { units: (data as { units?: number } | null)?.units ?? 0, priceUsd });
+  const worst = openAddWorstUsd(size, SHEET_MODEL, sheetPrompts());
+  await roomFor(sb, e, worst);
+  const held = e.kind === "sheet";
+  if (held) await takeHold(sb, examId, worst);
+  try {
+    const id = await reserve(sb, { groupId: e.group_id, kind: "exam", ref: "read", estimateUsd: priceUsd });
+    await settle(sb, id, { model: MODEL, usage: null }); // the gate only: the units pay for themselves
+    const until = typeof body.until === "string" && !Number.isNaN(Date.parse(body.until)) ? body.until : null;
+    const { data, error } = await sb.rpc("study_sheet_open_add", keyed({ p_exam: examId, p_urls: body.urls, p_until: until, p_dry: false }));
+    if (error) throw rpcError(error);
+    return json(200, { units: (data as { units?: number } | null)?.units ?? 0, priceUsd });
+  } catch (x) {
+    if (held) await dropHold(sb, examId);
+    throw x;
+  }
 }
 
 /** The worst case of the units the budget held: their pages read again and
@@ -223,12 +267,14 @@ async function resume(sb: Sb, examId: string, body: Record<string, unknown>): Pr
   const held = (dry.data ?? {}) as { read?: number; key?: number; solve?: number };
   const worst = heldWorstUsd({ read: held.read ?? 0, key: held.key ?? 0, solve: held.solve ?? 0 });
   if (worst > 0) await roomFor(sb, e, worst);
+  // A sheet's held work is its hold now (a skipped solve is not); it lapses with the sheet's last unit.
+  if (worst > 0 && e.kind === "sheet") await takeHold(sb, examId, worst);
   const { data, error } = await sb.rpc("study_sheet_resume", keyed({ p_exam: examId, p_skip_solve: skip, p_dry: false }));
   if (error) throw rpcError(error);
   return json(200, data ?? {});
 }
 
-/** A sheet's bounds before it is read (OD13; docs/study/sheets.md). Throws the refusal. */
+/** A sheet's bounds before it is read (OD13; docs/study/sheets.md): what its hold will be. Throws the refusal. */
 export async function sheetGate(
   sb: Awaited<ReturnType<typeof memberClient>>["sb"],
   e: { group_id: string; key_source: string },
@@ -240,10 +286,8 @@ export async function sheetGate(
   const room = (Array.isArray(data) ? data[0] : data) as { sheets_on?: boolean; sheets_usd?: unknown; spent_usd?: unknown } | null;
   if (!room || room.sheets_on !== true) throw new HttpError(403, "off");
   if (o.priceUsd > SHEET_CONFIRM_USD && !o.confirmed) throw new HttpError(409, "confirm");
-  const worstUsd =
-    o.reader === "sheet"
-      ? sheetReaderWorstUsd({ pages: o.pages, keyPages: o.keyPages, keySource: e.key_source }, SHEET_MODEL, sheetPrompts())
-      : sheetWorstUsd({ pages: o.pages, keyPages: o.keyPages, keySource: e.key_source }, MODEL, examPrompts());
+  const size = { pages: o.pages, keyPages: o.keyPages, keySource: e.key_source };
+  const worstUsd = o.reader === "sheet" ? sheetHoldUsd(size, "sheet", SHEET_MODEL, sheetPrompts()) : sheetHoldUsd(size, "exam", MODEL, examPrompts());
   if (worstUsd > sheetsMonthlyCap() - Number(room.sheets_usd ?? 0)) throw new HttpError(402, "sheets_cap");
   if (worstUsd > monthlyCap() * POLICY.exam.share - Number(room.spent_usd ?? 0)) throw new HttpError(402, "budget");
   return { worstUsd };

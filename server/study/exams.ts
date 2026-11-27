@@ -2,6 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { examPriceUsd as sharedExamPriceUsd, readUnits as sharedReadUnits } from "../../shared/study/examPrice.js";
+import { capPageLines } from "../../shared/study/sheetPrice.js";
 import { estimateUsd, imageTokens, reserve } from "./budget.js";
 import { cleanSchema, JsonArrayItems, run, settleFor, type Effort, type Spend } from "./claude.js";
 import {
@@ -294,7 +295,8 @@ export function unitCall(c: ExamClaim): Call | null {
   for (const { p, context } of shown) {
     const img = picture(p);
     if (!img) return null;
-    const label = examPageText(p.n, p.lines ?? [], context);
+    // A sheet's page sends at most the worst case's lines (its hold counts no more); a past exam's as before.
+    const label = examPageText(p.n, c.exam.kind === "sheet" ? capPageLines(p.lines ?? []) : (p.lines ?? []), context);
     content.push({ type: "text", text: label }, img);
     chars += label.length;
     tokens += pageTokens(p);

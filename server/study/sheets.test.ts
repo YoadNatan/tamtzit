@@ -8,11 +8,14 @@ import ai from "../../api/study/ai.js";
 import { EXAM_PROMPT_CHARS } from "../../shared/study/examPrice.js";
 import { isChoiceForm, isPersonalForm, SHEET_FORMS } from "../../shared/study/forms.js";
 import {
+  capPageLines,
   openAddPriceUsd,
   openAddWorstUsd,
+  SHEET_PAGE_LINES_CHARS,
   SHEET_PROMPT_CHARS,
   SHEET_SOLVE_PER_UNIT,
   sheetReaderPriceUsd,
+  sheetHoldUsd,
   sheetReaderWorstUsd,
   sheetReadUnits,
   sheetSolveTokens,
@@ -436,6 +439,7 @@ beforeEach(() => {
     study_sheet_queue_key: 2,
     study_sheet_pages_done: { units: 3, server: true },
     study_exam_pages_done: { units: 2, server: true },
+    study_sheet_hold: { held: 1, used: 0 },
   };
 });
 
@@ -600,7 +604,7 @@ test("op exam_read with forms: the sheet reader's price reserved as a start, the
 });
 
 test("op exam_read with forms: the sheets line and the headroom with the sheet reader's worst case", async () => {
-  const worst = sheetReaderWorstUsd({ pages: 5, keyPages: 2, keySource: "separate" }, MODEL, sheetPrompts());
+  const worst = sheetHoldUsd({ pages: 5, keyPages: 2, keySource: "separate" }, "sheet", MODEL, sheetPrompts());
   room = [{ sheets_on: true, sheets_usd: 6 - worst + 0.01, spent_usd: 0 }];
   assert.equal((await post(startBody({ forms: true }))).status, 402);
   room = [{ sheets_on: true, sheets_usd: 0, spent_usd: 33 * 0.8 - worst + 0.01 }];
@@ -608,6 +612,14 @@ test("op exam_read with forms: the sheets line and the headroom with the sheet r
   assert.equal(r.status, 402);
   assert.equal(((await r.json()) as { error: string }).error, "budget");
   assert.equal(rpcs("study_sheet_pages_done").length, 0);
+  assert.equal(rpcs("study_sheet_hold").length, 0, "refused before any hold");
+  // Two sheets at once: the second's hold is refused under the lock (the SQL decides): 402, nothing queued.
+  log = [];
+  room = [{ sheets_on: true, sheets_usd: 0, spent_usd: 0 }];
+  rpcAnswers.study_sheet_hold = new Error("sheets_cap");
+  const second = await post(startBody({ forms: true }));
+  assert.deepEqual([second.status, ((await second.json()) as { error: string }).error], [402, "sheets_cap"]);
+  assert.deepEqual([rpcs("study_reserve").length, rpcs("study_sheet_pages_done").length], [0, 0]);
 });
 
 test('op exam_read {action:"open_add"}: dry says the price; the room, a start reserved at $0, then study_sheet_open_add with the links', async () => {
@@ -637,6 +649,9 @@ test('op exam_read {action:"resume"}: the held units\' worst case against the ro
   const ok = await post({ op: "exam_read", action: "resume", examId: SHEET });
   assert.equal(ok.status, 200);
   assert.deepEqual(rpcs("study_sheet_resume").map((c) => [c.body.p_dry, c.body.p_skip_solve]), [[true, false], [false, false]]);
+  const [h] = rpcs("study_sheet_hold");
+  assert.deepEqual([h.body.p_worst, h.body.p_cap], [Math.ceil(heldWorstUsd({ read: 3, key: 0, solve: 4 }) * 100) / 100, 6], "the held work is the sheet's hold, before it goes on");
+  assert.ok(log.indexOf(h) < log.indexOf(rpcs("study_sheet_resume")[1]));
   log = [];
   room = [{ sheets_on: true, sheets_usd: 5.99, spent_usd: 0 }];
   const full = await post({ op: "exam_read", action: "resume", examId: SHEET, skipSolve: true });
@@ -645,4 +660,14 @@ test('op exam_read {action:"resume"}: the held units\' worst case against the ro
   rpcAnswers.study_sheet_resume = new Error("nothing to resume");
   room = [{ sheets_on: true, sheets_usd: 0, spent_usd: 0 }];
   assert.equal((await post({ op: "exam_read", action: "resume", examId: SHEET })).status, 409);
+});
+
+test("a sheet's page sends at most the worst case's lines (capPageLines): the exactness check still has them all", () => {
+  assert.deepEqual(capPageLines(["אבג", "דה"]), ["אבג", "דה"]);
+  assert.deepEqual(capPageLines(["abcd", "efgh", "ijkl"], 9), ["abcd", "efgh"], "two lines and their break fill 9");
+  assert.deepEqual(capPageLines(["abcd", "efghij"], 7), ["abcd", "ef"], "the line that passes it is cut");
+  const dense = Array.from({ length: 400 }, (_, i) => `שורה ${i} `.repeat(10));
+  const cut = capPageLines(dense);
+  assert.ok(cut.join("\n").length <= SHEET_PAGE_LINES_CHARS && cut.join("\n").length > SHEET_PAGE_LINES_CHARS - 200);
+  assert.equal(capPageLines(dense.slice(0, 3)).length, 3);
 });

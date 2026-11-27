@@ -19,7 +19,7 @@ import { monthlyCap, POLICY, similarMonthlyCap } from "./budget.js";
 import { perOf, shapesOf, type SimilarPlan } from "./ops/similar.js";
 import { BLIND_SYSTEM, SIMILAR_SYSTEM } from "./prompts/sheets.js";
 import type { SimilarTwinOut } from "./questions.js";
-import { blindCall, blindVerdicts, keyText, runSimilarJob, similarCall, toTwins, type SimilarClaim, type SimilarClaimRoot, type Twin } from "./similarGen.js";
+import { blindCall, blindVerdicts, CHECK_MIN_MS, keyText, runSimilarJob, similarCall, toTwins, type SimilarClaim, type SimilarClaimRoot, type Twin } from "./similarGen.js";
 import { MODEL, OP_SCHEMA, REQUIRED_SCHEMA, schemaFor, serverClient, SIMILAR_MODEL, VARIANT_SCHEMA } from "./study.js";
 
 /* Similar questions on the server (section O 3; docs/study/sheets.md):
@@ -362,6 +362,19 @@ test("a job whose run is spent after the writing call: numeric twins are saved, 
   assert.equal(log.filter((l) => l.who === "anthropic").length, 1, "no check call");
   const save = rpcs("study_similar_save")[0].body;
   assert.deepEqual([save.p_twins.map((t: Twin) => t.check), save.p_dropped], [["recalc"], 1]);
+});
+
+test("a job with too little time left for the check: the numeric twins are saved, the job is retried (timeout) for the rest, no check call", async () => {
+  const num = root({ id: "r1", parts: [part({ form: "numeric", options: [], answer: null, num: 6.93 })] });
+  const ch = root({ id: "r2", label: "2" });
+  const n = twinPart({ question: "חשבו את הפינוי של תרופה Z בדויה: k = 0.1 לשעה, Vd = 50 ל", options: [], answer: -1, has_num: true, num: 5, unit: "ל/ש", tol: 1, whys: [], calc: { inputs: [{ name: "k", value: 0.1 }, { name: "vd", value: 50 }], formula: "k * vd" } });
+  replies = [{ twins: [twin({ parts: [n] }), twin({ ref: 2 })] }];
+  const r = await runSimilarJob(serverClient(), claim({ run: { ...claimRun(), scope: "sheet", per: 1 }, items: [num, ch] }), { stopAt: Date.now() + CHECK_MIN_MS - 5_000 });
+  assert.deepEqual([r.status, r.error], ["failed", "timeout"]);
+  assert.equal(log.filter((l) => l.who === "anthropic").length, 1, "no check call");
+  const save = rpcs("study_similar_save")[0].body;
+  assert.deepEqual([save.p_twins.map((t: Twin) => t.check), save.p_dropped], [["recalc"], 0], "the unchecked twin is not dropped: its root is written again");
+  assert.deepEqual([rpcs("study_finish_similar_job")[0].body.p_status, rpcs("study_finish_similar_job")[0].body.p_error], ["failed", "timeout"]);
 });
 
 test("a job whose first call would not fit what is left: nothing is called", async () => {

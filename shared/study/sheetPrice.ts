@@ -22,9 +22,31 @@ export const SHEET_CONFIRM_USD = 3;
 /** The exam reader's units (server/study/exams.ts): max_tokens, and items a solve unit. */
 export const EXAM_UNIT_TOKENS = { read: 12_000, key: 4_000, solve: 16_000 } as const;
 export const EXAM_SOLVE_ITEMS = 20;
-/** The worst case's page: its text lines (a PDF's, as many as the reader is sent) and its items. */
-const WORST_LINES_CHARS = 4_000;
+/** The PDF lines a page sends the reader at most (capPageLines cuts the rest; the
+ *  exactness check keeps them all): the worst case's page counts this much text. */
+export const SHEET_PAGE_LINES_CHARS = 4_000;
+const WORST_LINES_CHARS = SHEET_PAGE_LINES_CHARS;
+/** The worst case's items a page. */
 const WORST_ITEMS_PER_PAGE = 8;
+
+/** A page's PDF lines as a sheet's prompt sends them: in order, at most
+ *  `max` characters with their line breaks (the line that passes it cut). Pure. */
+export function capPageLines(lines: readonly string[], max: number = SHEET_PAGE_LINES_CHARS): string[] {
+  const out: string[] = [];
+  let used = 0;
+  for (const l of lines) {
+    const line = String(l ?? "");
+    const room = max - used - (out.length ? 1 : 0);
+    if (room <= 0) break;
+    if (line.length > room) {
+      out.push(line.slice(0, room));
+      break;
+    }
+    out.push(line);
+    used += line.length + (out.length > 1 ? 1 : 0);
+  }
+  return out;
+}
 /** A solve item as the request writes it, at most (question, options, prompts). */
 const WORST_ITEM_CHARS = 1_600;
 
@@ -39,7 +61,12 @@ export const sheetPriceUsd = (o: SheetSize, prompts: { read: number; key: number
  *  to the cent: the read units with their context pages, the answers file's
  *  unit, and solve units for 8 items a page with no answers (2 a page when
  *  the answers are marked or in a file: the items they missed). */
-export function sheetWorstUsd(o: SheetSize, model: string, prompts: { read: number; key: number; solve: number } = EXAM_PROMPT_CHARS): number {
+export function sheetWorstUsd(
+  o: SheetSize,
+  model: string,
+  prompts: { read: number; key: number; solve: number } = EXAM_PROMPT_CHARS,
+  opts: { solveItems?: number } = {},
+): number {
   const pages = Math.max(0, Math.round(o.pages));
   const keyPages = Math.max(0, Math.round(o.keyPages ?? 0));
   if (!pages) return 0;
@@ -50,7 +77,7 @@ export function sheetWorstUsd(o: SheetSize, model: string, prompts: { read: numb
   }
   if (keyPages) usd += estimateUsd(model, prompts.key + 200 + keyPages * (WORST_LINES_CHARS + 120), EXAM_UNIT_TOKENS.key, keyPages * PAGE_TOKENS);
   // Items the marks or the answers file left without an answer are solved too: a quarter of them at worst.
-  const items = Math.ceil((pages * WORST_ITEMS_PER_PAGE) / (o.keySource === "none" || o.keySource === undefined ? 1 : 4));
+  const items = opts.solveItems ?? Math.ceil((pages * WORST_ITEMS_PER_PAGE) / (o.keySource === "none" || o.keySource === undefined ? 1 : 4));
   for (let left = items; left > 0; left -= EXAM_SOLVE_ITEMS) {
     const n = Math.min(EXAM_SOLVE_ITEMS, left);
     usd += estimateUsd(model, prompts.solve + n * WORST_ITEM_CHARS, EXAM_UNIT_TOKENS.solve);
@@ -129,7 +156,12 @@ export function sheetReaderPriceUsd(o: SheetSize, prompts: { read: number; key: 
 /** The worst case of a sheet read by the sheet reader (every unit at all of
  *  its max_tokens, every page as full as a page gets, 8 items a page solved
  *  with no answers, 2 a page with them), rounded up to the cent. */
-export function sheetReaderWorstUsd(o: SheetSize, model: string, prompts: { read: number; key: number; solve: number } = SHEET_PROMPT_CHARS): number {
+export function sheetReaderWorstUsd(
+  o: SheetSize,
+  model: string,
+  prompts: { read: number; key: number; solve: number } = SHEET_PROMPT_CHARS,
+  opts: { solveItems?: number } = {},
+): number {
   const pages = Math.max(0, Math.round(o.pages));
   const keyPages = Math.max(0, Math.round(o.keyPages ?? 0));
   if (!pages) return 0;
@@ -139,13 +171,40 @@ export function sheetReaderWorstUsd(o: SheetSize, model: string, prompts: { read
     usd += estimateUsd(model, prompts.read + 600 + seen * (WORST_LINES_CHARS + 120), SHEET_UNIT_TOKENS.read, seen * PAGE_TOKENS);
   }
   if (keyPages) usd += estimateUsd(model, prompts.key + 200 + keyPages * (WORST_LINES_CHARS + 120), SHEET_UNIT_TOKENS.key, keyPages * PAGE_TOKENS);
-  const items = Math.ceil((pages * WORST_ITEMS_PER_PAGE) / (o.keySource === "none" || o.keySource === undefined ? 1 : 4));
+  const items = opts.solveItems ?? Math.ceil((pages * WORST_ITEMS_PER_PAGE) / (o.keySource === "none" || o.keySource === undefined ? 1 : 4));
   for (let left = items; left > 0; left -= SHEET_SOLVE_PER_UNIT) {
     const n = Math.min(SHEET_SOLVE_PER_UNIT, left);
     // a solve unit may attach one figure page per item
     usd += estimateUsd(model, prompts.solve + n * (WORST_ITEM_CHARS + 60), sheetSolveTokens(n), n * PAGE_TOKENS);
   }
   return Math.ceil(usd * 100) / 100;
+}
+
+/* ── A sheet's hold on the sheets line (section O 1's study_sheet_hold; docs/study/sheets.md "The hold") ──
+ * What the op holds when a sheet starts: its read and key units at their
+ * worst case, and its solving at the worst case of the usual item count
+ * (3 a page without answers, 0.75 with them: the price's). The line is
+ * checked again with the real count before the solve units run (O 2's
+ * exam_advance, with solveUnitWorstUsd's prices), so a sheet of many items
+ * waits ("להמשיך") instead of being refused at the start. */
+
+/** The items a sheet usually leaves to solve (the price's count). */
+export function sheetUsualSolveItems(o: SheetSize): number {
+  const pages = Math.max(0, Math.round(o.pages));
+  return Math.ceil(pages * (o.keySource === "none" || o.keySource === undefined ? SHEET_TYPICAL.itemsPerPage : SHEET_TYPICAL.missedPerPage));
+}
+/** The start's hold: the reader's worst case with the usual item count solved. */
+export function sheetHoldUsd(o: SheetSize, reader: "exam" | "sheet", model: string, prompts: { read: number; key: number; solve: number }): number {
+  const opts = { solveItems: sheetUsualSolveItems(o) };
+  return reader === "sheet" ? sheetReaderWorstUsd(o, model, prompts, opts) : sheetWorstUsd(o, model, prompts, opts);
+}
+/** One full solve unit's worst case for a reader (the hold's solve prices). */
+export function solveUnitWorstUsd(reader: "exam" | "sheet", model: string, prompts: { read: number; key: number; solve: number }): number {
+  const usd =
+    reader === "sheet"
+      ? estimateUsd(model, prompts.solve + SHEET_SOLVE_PER_UNIT * (WORST_ITEM_CHARS + 60), sheetSolveTokens(SHEET_SOLVE_PER_UNIT), SHEET_SOLVE_PER_UNIT * PAGE_TOKENS)
+      : estimateUsd(model, prompts.solve + EXAM_SOLVE_ITEMS * WORST_ITEM_CHARS, EXAM_UNIT_TOKENS.solve);
+  return Math.ceil(usd * 100000) / 100000;
 }
 
 /** "להעתיק גם N שאלות פתוחות · כ-$…" (OD15): the pages of the read units that
