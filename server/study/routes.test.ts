@@ -178,3 +178,10 @@ test("fallbackReserve: its own reservation, same kind and ref, no daily count, s
   assert.equal(calls[1].fn, "study_settle");
   assert.equal(calls[1].args.p_id, 41);
 });
+
+test("stalePrices: a routed model checked 45 days ago or more; unknown ids left out; each once, sorted", async () => {
+  const { stalePrices, STALE_PRICE_DAYS } = await import("./routes.js");
+  const checked = Date.parse(`${modelInfo("claude-haiku-5-5")!.checked}T00:00:00Z`);
+  assert.deepEqual(stalePrices(["claude-haiku-5-5"], checked + (STALE_PRICE_DAYS - 1) * 86_400_000), []);
+  assert.deepEqual(stalePrices(["claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-5-5", "openai:x"], checked + STALE_PRICE_DAYS * 86_400_000), ["claude-haiku-5-5", "claude-sonnet-5-5"]);
+});

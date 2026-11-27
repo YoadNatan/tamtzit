@@ -4,7 +4,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { SIMILAR_JOB_ROOTS, similarCheckTokens, similarGenTokens } from "../../shared/study/sheetPrice.js";
 import { estimateUsd, imageTokens } from "./budget.js";
 import { recompute } from "./calc.js";
-import { cleanSchema, JsonArrayItems, run, type Spend } from "./claude.js";
+import { cleanSchema, JsonArrayItems, run, type FallbackReserve, type Spend } from "./claude.js";
+import { modelFor } from "./routes.js";
 import { BLIND_SYSTEM, blindRequest, SIMILAR_SYSTEM, similarRequest, type BlindPart, type SimilarSource } from "./prompts/sheets.js";
 import { BlindAnswer, BlindOut, SimilarOut, SimilarTwinOut } from "./questions.js";
 import { normalize, similarity } from "./similar.js";
@@ -33,9 +34,8 @@ import { figureOk } from "./writer.js";
  * "similar" row in the requester's name; the reservation drops by as
  * much). Before each call its worst case must fit what the run has left;
  * when the charge says the next call no longer fits, the job saves what
- * passed and stops ("reserve_used"). The model is the current default
- * (SIMILAR_MODEL = MODEL; OD17, the models package routes the key
- * "similar" later). Never throws: an RPC that fails leaves the job to its
+ * passed and stops ("reserve_used"). The model is the key "similar"'s
+ * (routes.ts's modelFor; the default when nothing is set). Never throws: an RPC that fails leaves the job to its
  * lease (330 s), and the next claim counts it. */
 
 /** A root's part as the claim gives it. */
@@ -335,7 +335,7 @@ export function blindVerdicts(twins: readonly Twin[], answers: readonly BlindAns
 }
 
 /** One call's worst case, as its reservation share. */
-export const callEstimate = (call: Call) => estimateUsd(SIMILAR_MODEL, call.inputChars, call.maxTokens, call.imageTokens);
+export const callEstimate = (call: Call, model: string = SIMILAR_MODEL) => estimateUsd(model, call.inputChars, call.maxTokens, call.imageTokens);
 
 /** The slides' solver's items for the twins' choice parts, and which twin each part is. */
 function solverItems(twins: readonly Twin[]): { items: SolverItem[]; of: number[] } {
@@ -415,7 +415,16 @@ async function finishJob(sb: SupabaseClient, c: SimilarClaim, status: "done" | "
 
 /** Reads a streamed {"<list>": [...]} reply: the whole document, or the items that closed. */
 async function call<T>(
-  o: { system: string; content: Anthropic.Beta.BetaContentBlockParam[]; maxTokens: number; stopAt: number; schema: Record<string, unknown>; ledger: (s: Spend) => Promise<unknown> },
+  o: {
+    system: string;
+    content: Anthropic.Beta.BetaContentBlockParam[];
+    maxTokens: number;
+    stopAt: number;
+    schema: Record<string, unknown>;
+    ledger: (s: Spend) => Promise<unknown>;
+    model?: string;
+    reserveFallback?: FallbackReserve;
+  },
   list: string,
   parse: (x: unknown) => T | null,
 ): Promise<{ items: T[]; error: string | null }> {
@@ -426,6 +435,8 @@ async function call<T>(
   try {
     res = await run({
       client: anthropic(),
+      model: o.model,
+      reserveFallback: o.reserveFallback,
       kind: "similar",
       ref: "unit",
       system: [{ type: "text", text: o.system, cache_control: { type: "ephemeral" } }],
@@ -463,13 +474,21 @@ export async function runSimilarJob(sb: SupabaseClient, c: SimilarClaim, opts: {
   const { call: gen, roots, skipped } = similarCall(c);
   const { state, ledger } = charger(sb, c);
   let left = c.run.left_usd;
+  // The key's model (routes.ts). D8's rerun on the default is charged to the
+  // run like any of its calls (no reservation of its own: the run's is the
+  // reservation), when what is left of it holds the rerun's worst case.
+  const model = await modelFor(sb, c.exam.group_id, "similar");
+  const reserveFallback: FallbackReserve = async (usd) => {
+    if (usd > c.run.left_usd - state.costUsd) throw new HttpError(402, "reserve_used");
+    return ledger;
+  };
   const end = async (status: "done" | "failed", error: string | null, twins: Twin[], dropped: number): Promise<JobResult> => {
     let saved = 0;
     try {
       if (twins.length || dropped || skipped) {
         const { data, error: e } = await sb.rpc(
           "study_similar_save",
-          keyed({ p_job: c.job, p_lease: c.lease, p_twins: twins, p_dropped: dropped, p_skipped: skipped, p_model: SIMILAR_MODEL }),
+          keyed({ p_job: c.job, p_lease: c.lease, p_twins: twins, p_dropped: dropped, p_skipped: skipped, p_model: model }),
         );
         if (e) throw new HttpError(e.message === "lease lost" ? 409 : 500, e.message);
         const r = (data ?? {}) as { saved?: number; dropped?: number };
@@ -487,14 +506,14 @@ export async function runSimilarJob(sb: SupabaseClient, c: SimilarClaim, opts: {
   if (!gen) return end("done", null, [], 0); // every root needs a figure without a fresh link
   // The check's worst case, so the charge of the writing call says whether it still fits.
   const checkWorst = (twinParts: number, deck: number) =>
-    estimateUsd(SIMILAR_MODEL, BLIND_SYSTEM.length + twinParts * 3_500 + deck, similarCheckTokens(twinParts), roots.reduce((n, r) => n + r.pages.reduce((k, p) => k + imageTokens(p.w, p.h), 0), 0));
+    estimateUsd(model, BLIND_SYSTEM.length + twinParts * 3_500 + deck, similarCheckTokens(twinParts), roots.reduce((n, r) => n + r.pages.reduce((k, p) => k + imageTokens(p.w, p.h), 0), 0));
   const choiceParts = roots.reduce((n, r) => n + r.parts.filter((p) => p.form !== "numeric").length, 0) * c.run.per;
   const deck = c.lecture && c.lecture.slides?.length ? lectureBlock(c.lecture).length : 0;
-  const genWorst = callEstimate(gen);
+  const genWorst = callEstimate(gen, model);
   if (genWorst > left) return end("failed", "reserve_used", [], 0);
   state.nextWorst = choiceParts ? checkWorst(choiceParts, deck) : 0;
   const out = await call(
-    { system: gen.system, content: gen.content, maxTokens: gen.maxTokens, stopAt: opts.stopAt, schema: SIMILAR_SCHEMA, ledger },
+    { system: gen.system, content: gen.content, maxTokens: gen.maxTokens, stopAt: opts.stopAt, schema: SIMILAR_SCHEMA, ledger, model, reserveFallback },
     "twins",
     (x) => {
       const r = SimilarTwinOut.safeParse(x);
@@ -524,14 +543,14 @@ export async function runSimilarJob(sb: SupabaseClient, c: SimilarClaim, opts: {
   try {
     if (deck > 0 && c.lecture && !toCheck.some((t) => t.reuse_figure)) {
       const { items, of } = solverItems(toCheck);
-      if (solverEstimate(c.lecture, items) > left) return end("failed", "reserve_used", numericOnly, dropped + toCheck.length);
+      if (solverEstimate(c.lecture, items, model) > left) return end("failed", "reserve_used", numericOnly, dropped + toCheck.length);
       check = "slides";
-      const res = await solveQuestions({ client: anthropic(), lecture: c.lecture, items, ledger, stopAt: opts.stopAt, ref: "unit", kind: "similar" });
+      const res = await solveQuestions({ client: anthropic(), lecture: c.lecture, items, ledger, stopAt: opts.stopAt, ref: "unit", kind: "similar", model, reserveFallback });
       passed = toCheck.map((_, k) => of.every((t, j) => t !== k || res.verdicts[j]?.ok === true) && of.includes(k));
     } else {
       const { call: bc } = blindCall(toCheck, roots);
-      if (callEstimate(bc) > left) return end("failed", "reserve_used", numericOnly, dropped + toCheck.length);
-      const ans = await call({ ...bc, stopAt: opts.stopAt, schema: BLIND_SCHEMA, ledger }, "answers", (x) => {
+      if (callEstimate(bc, model) > left) return end("failed", "reserve_used", numericOnly, dropped + toCheck.length);
+      const ans = await call({ ...bc, stopAt: opts.stopAt, schema: BLIND_SCHEMA, ledger, model, reserveFallback }, "answers", (x) => {
         const r = BlindAnswer.safeParse(x);
         return r.success ? r.data : null;
       });

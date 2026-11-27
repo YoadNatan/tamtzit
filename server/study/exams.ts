@@ -18,6 +18,8 @@ import { ExamItem, ExamItems, ExamKey, ExamKeys, ExamSolved, ExamSolvedItem, She
 import { sheetCall, toSheetItems, toSheetKeyRows, toSolvedRows, type SheetSolveItem } from "./sheets.js";
 import { anthropic, errorText, HttpError, keyed, MODEL } from "./study.js";
 import { figureOk } from "./writer.js";
+import { fallbackReserve, modelFor } from "./routes.js";
+import type { RouteKey } from "../../shared/study/models.js";
 
 /* ── Past exams on the server (docs/study/sources.md B6.2, B7) ──
  *
@@ -314,8 +316,8 @@ export function unitCall(c: ExamClaim): Call | null {
 }
 
 /** One unit's worst case: its input and all of max_tokens (estimateUsd). */
-export function unitEstimate(call: Call): number {
-  return estimateUsd(MODEL, call.inputChars, call.maxTokens, call.imageTokens);
+export function unitEstimate(call: Call, model: string = MODEL): number {
+  return estimateUsd(model, call.inputChars, call.maxTokens, call.imageTokens);
 }
 
 /** Takes the exam's next unit (the worker with the key alone; the phone's op
@@ -417,9 +419,12 @@ export async function runExamUnit(sb: SupabaseClient, c: ExamClaim, opts: { stop
     return { status: "failed", error: "writer", saved: 0, costUsd: 0 };
   }
 
+  // A sheet's unit carries its key as its ref; a past exam's is its kind's.
+  const key: RouteKey = sheet && call.ref ? (call.ref as RouteKey) : c.kind === "key" ? "exam_key" : c.kind === "solve" ? "exam_solve" : "exam_read";
+  const model = await modelFor(sb, c.exam.group_id, key, { pictures: call.imageTokens > 0 });
   let reservation: number;
   try {
-    reservation = await reserve(sb, { groupId: c.exam.group_id, kind: "exam", ref, estimateUsd: unitEstimate(call), daily: false });
+    reservation = await reserve(sb, { groupId: c.exam.group_id, kind: "exam", ref, estimateUsd: unitEstimate(call, model), daily: false });
   } catch (e) {
     if (!isRefusal(e)) {
       log(c, "left to its lease", e);
@@ -440,9 +445,12 @@ export async function runExamUnit(sb: SupabaseClient, c: ExamClaim, opts: { stop
   let thrown: unknown = null;
   let res: Awaited<ReturnType<typeof run>> | null = null;
   const settleIt = settleFor(sb, reservation);
+  let rerunCost = 0;
   try {
     res = await run({
       client: anthropic(),
+      model,
+      reserveFallback: fallbackReserve(sb, { groupId: c.exam.group_id, kind: "exam", ref }, undefined, (sp) => (rerunCost += sp.costUsd)),
       kind: "exam",
       ref,
       system: [{ type: "text", text: call.system, cache_control: { type: "ephemeral" } }],
@@ -463,7 +471,7 @@ export async function runExamUnit(sb: SupabaseClient, c: ExamClaim, opts: { stop
   } catch (e) {
     thrown = e;
   }
-  const cost = (spent as Spend | null)?.costUsd ?? 0;
+  const cost = ((spent as Spend | null)?.costUsd ?? 0) + rerunCost;
 
   // What arrived: the whole document, or the items that closed before a stop.
   let doc: Record<string, unknown> | null = null;

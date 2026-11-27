@@ -3,6 +3,7 @@ import type { Box, FigureGeo } from "../../shared/study/figureGeo.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { flagsFrom, requiredSchema } from "../../shared/study/flags.js";
+import { DEFAULT_MODEL } from "../../shared/study/prices.js";
 
 /* ── Shared by the /api/study/* functions ──
  *
@@ -19,14 +20,15 @@ import { flagsFrom, requiredSchema } from "../../shared/study/flags.js";
  * The Anthropic key lives only here, in ANTHROPIC_API_KEY on Vercel.
  */
 
-export const MODEL = "claude-opus-5-5";
-/** The sheet reader's model (section O 2; OD17: the current default, not
- *  pinned to a provider, OD5). The models package (Y, not built) will route
- *  the keys "sheet_read" and "similar" here. */
+/** The default model (the registry's DEFAULT_MODEL, shared/study/models.ts),
+ *  under its old name. Every paid call asks routes.ts's modelFor for its
+ *  route key's model, which is this one unless the group's owner set
+ *  another (section Y). */
+export const MODEL = DEFAULT_MODEL;
+/** The sheet reader's default (section O 2); its units route the keys
+ *  sheet_read, sheet_key and sheet_solve (routes.ts). */
 export const SHEET_MODEL = MODEL;
-/** Similar questions' model (section O 3; OD17 and OD5 as Yoad changed it:
- *  the current default, any provider allowed). The models package (Y, not
- *  built) will route the key "similar" here. */
+/** Similar questions' default (section O 3); its runs route the key similar (routes.ts). */
 export const SIMILAR_MODEL = MODEL;
 
 /** geo: the picture's label geometry, when the upload (or the backfill) found labels (question types);

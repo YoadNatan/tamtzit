@@ -2,7 +2,8 @@ import { SIMILAR_ITEM_PER, similarPriceUsd, similarWorstUsd, type SimilarRootSha
 import { reserve, settle, similarMonthlyCap } from "../budget.js";
 import { UNIT_STOP_MS } from "../exams.js";
 import { claimSimilar, runSimilarJob } from "../similarGen.js";
-import { HttpError, json, keyed, lectureBlock, loadLecture, memberClient, QUICK_TOKEN_SECONDS, SIMILAR_MODEL } from "../study.js";
+import { modelFor } from "../routes.js";
+import { HttpError, json, keyed, lectureBlock, loadLecture, memberClient, QUICK_TOKEN_SECONDS } from "../study.js";
 import type { Op } from "./types.js";
 
 /* Op "similar" (section O 3, docs/study/sheets.md; design-exams §8.2, D19,
@@ -133,7 +134,9 @@ export const similarOp: Op = async (req, body, started) => {
   }
   const shapes = shapesOf(plan);
   const priceUsd = similarPriceUsd({ roots: shapes, per, scope });
-  const worstUsd = similarWorstUsd({ roots: shapes, per, scope, deckChars }, SIMILAR_MODEL);
+  // The run's whole worst case at the key's model (routes.ts), which its worker's calls then use.
+  const model = await modelFor(sb, e.group_id, "similar");
+  const worstUsd = similarWorstUsd({ roots: shapes, per, scope, deckChars }, model);
   if (action === "plan") return json(200, { plan, priceUsd, worstUsd });
 
   if (plan.joined) return json(200, { joined: plan.joined });
@@ -146,7 +149,7 @@ export const similarOp: Op = async (req, body, started) => {
   }
 
   const id = await reserve(sb, { groupId: e.group_id, kind: "similar", ref: "ask", estimateUsd: worstUsd });
-  const release = () => settle(sb, id, { model: SIMILAR_MODEL, usage: null }); // $0: nothing ran
+  const release = () => settle(sb, id, { model, usage: null }); // $0: nothing ran
   const until = typeof body.until === "string" && !Number.isNaN(Date.parse(body.until)) ? body.until : null;
   const { data, error } = await sb.rpc(
     "study_similar_begin",

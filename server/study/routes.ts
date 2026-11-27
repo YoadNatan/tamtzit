@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DEFAULT_MODEL, modelInfo, ROUTE_KEYS, ROUTE_RULES, scopeAllows, type ModelInfo, type Provider, type RouteKey } from "../../shared/study/models.js";
+import { DEFAULT_MODEL, modelInfo, priceOf, ROUTE_KEYS, ROUTE_RULES, scopeAllows, type ModelInfo, type Provider, type RouteKey } from "../../shared/study/models.js";
 import { reserve } from "./budget.js";
-import { settleFor, type FallbackReserve } from "./claude.js";
+import { settleFor, type FallbackReserve, type Spend } from "./claude.js";
 import { providerReady } from "./llm/index.js";
 import { workerKey } from "./study.js";
 
@@ -219,18 +219,64 @@ export async function modelFor(
   }
 }
 
+/** The dearest of these models (its output, then its input price): what a
+ *  budget hold over several keys counts, so a hold is never smaller than
+ *  what its units reserve. */
+export function dearest(models: readonly string[]): string {
+  let best = DEFAULT_MODEL;
+  for (const m of models) {
+    const a = priceOf(m);
+    const b = priceOf(best);
+    if (a.out > b.out || (a.out === b.out && a.in > b.in)) best = m;
+  }
+  return best;
+}
+
+/** The model a hold over these keys counts (dearest of their routes; the default when nothing is set). */
+export async function holdModel(sb: SupabaseClient, groupId: string, keys: readonly RouteKey[]): Promise<string> {
+  return dearest(await Promise.all(keys.map((k) => modelFor(sb, groupId, k))));
+}
+
+/** A past exam's keys, and an uploaded sheet's. */
+export const EXAM_KEYS = ["exam_read", "exam_key", "exam_solve"] as const satisfies readonly RouteKey[];
+export const SHEET_KEYS = ["sheet_read", "sheet_key", "sheet_solve"] as const satisfies readonly RouteKey[];
+
+/** A price checked this many days ago or more is flagged (D16). */
+export const STALE_PRICE_DAYS = 45;
+
+/** The routed models whose registry price was checked STALE_PRICE_DAYS or
+ *  more days ago (/api/study/health's stalePrices); ids only, sorted. */
+export function stalePrices(routed: readonly string[], now: number = Date.now()): string[] {
+  const out = new Set<string>();
+  for (const id of routed) {
+    const m = modelInfo(id);
+    if (!m) continue;
+    const checked = Date.parse(`${m.checked}T00:00:00Z`);
+    if (Number.isFinite(checked) && now - checked >= STALE_PRICE_DAYS * 86_400_000) out.add(m.id);
+  }
+  return [...out].sort();
+}
+
 /** D8's own reservation for a rerun on the default: the same group,
  *  lecture, kind and ref as the call, without the daily count (the call
  *  already counted), settled through settleFor. `onFail` counts a settle
- *  that failed, as the call's own ledger does. */
+ *  that failed, as the call's own ledger does; `onSpend` sees the rerun's
+ *  spend (a batch's cost, its serving model). */
 export function fallbackReserve(
   sb: SupabaseClient,
   r: { groupId: string; lectureId?: string | null; kind: string; ref?: string | null },
   onFail?: () => void,
+  onSpend?: (s: Spend) => void,
 ): FallbackReserve {
   return async (estimateUsd) => {
     const id = await reserve(sb, { groupId: r.groupId, lectureId: r.lectureId ?? null, kind: r.kind, ref: r.ref ?? null, estimateUsd, daily: false });
-    return settleFor(sb, id, onFail);
+    const settle = settleFor(sb, id, onFail);
+    return onSpend
+      ? async (s) => {
+          onSpend(s);
+          return settle(s);
+        }
+      : settle;
   };
 }
 

@@ -15,6 +15,7 @@ import { claimExam, examPriceUsd, examPrompts, runExamUnit, UNIT_STOP_MS } from 
 import { sheetPrompts } from "../sheets.js";
 import { assertSchema, HttpError, json, keyed, memberClient, MODEL, schemaHas, SHEET_MODEL, VARIANT_SCHEMA } from "../study.js";
 import type { Op } from "./types.js";
+import { EXAM_KEYS, holdModel, SHEET_KEYS } from "../routes.js";
 
 /* Op "exam_read" (docs/study/sources.md B2, B6.2, and its "Built so far"
  * block for phase 2). Behind the switch 'exams' and section S at 2 (VARIANT_SCHEMA
@@ -140,6 +141,7 @@ export const examReadOp: Op = async (req, body, started) => {
   let priceUsd = examPriceUsd({ pages: pages.length - keyPages, keyPages, keySource: e.key_source });
   let reader: "exam" | "sheet" = "exam";
   let hold: number | null = null;
+  let models: { exam: string; sheet: string } | undefined;
   // An uploaded sheet's bounds (section O 1): the kind is read only where it exists.
   if (await schemaHas(sb, VARIANT_SCHEMA.sheets)) {
     const { data: k, error: kindError } = await sb.from("study_exams").select("kind").eq("id", examId).maybeSingle();
@@ -151,11 +153,12 @@ export const examReadOp: Op = async (req, body, started) => {
         reader = "sheet";
         priceUsd = sheetReaderPriceUsd({ pages: pages.length - keyPages, keyPages, keySource: e.key_source }, sheetPrompts());
       }
-      hold = (await sheetGate(sb, e, { pages: pages.length - keyPages, keyPages, priceUsd, confirmed: body.confirmBig === true, reader })).worstUsd;
+      models = await holdModels(sb, e.group_id);
+      hold = (await sheetGate(sb, e, { pages: pages.length - keyPages, keyPages, priceUsd, confirmed: body.confirmBig === true, reader, models })).worstUsd;
     }
   }
 
-  if (hold !== null) await takeHold(sb, examId, hold);
+  if (hold !== null) await takeHold(sb, examId, hold, models);
   let r: { units?: number; server?: boolean };
   try {
     const id = await reserve(sb, { groupId: e.group_id, kind: "exam", ref: "read", estimateUsd: priceUsd });
@@ -197,13 +200,25 @@ async function roomFor(sb: Sb, e: { group_id: string; kind: string }, worstUsd: 
   if (worstUsd > monthlyCap() * POLICY.exam.share - Number(room.spent_usd ?? 0)) throw new HttpError(402, "budget");
 }
 
-/** One solve unit's worst case by reader: the hold's prices for O 2's check before solve units run. */
-export const holdSolvePrices = () => ({ exam: solveUnitWorstUsd("exam", MODEL, examPrompts()), sheet: solveUnitWorstUsd("sheet", SHEET_MODEL, sheetPrompts()) });
+/** One solve unit's worst case by reader: the hold's prices for O 2's check
+ *  before solve units run, at each reader's hold model (holdModels). */
+export const holdSolvePrices = (m: { exam: string; sheet: string } = { exam: MODEL, sheet: SHEET_MODEL }) => ({
+  exam: solveUnitWorstUsd("exam", m.exam, examPrompts()),
+  sheet: solveUnitWorstUsd("sheet", m.sheet, sheetPrompts()),
+});
+
+/** The models a group's holds count: per reader, the dearest of its keys'
+ *  routes (routes.ts; the default when nothing is set), so a hold covers
+ *  what its units will reserve. */
+export async function holdModels(sb: Sb, groupId: string): Promise<{ exam: string; sheet: string }> {
+  const [exam, sheet] = await Promise.all([holdModel(sb, groupId, EXAM_KEYS), holdModel(sb, groupId, SHEET_KEYS)]);
+  return { exam, sheet };
+}
 
 /** A sheet's hold on the sheets line, decided under the group's budget lock
  *  (section O 1's study_sheet_hold). Throws 402 sheets_cap, 403 off. */
-async function takeHold(sb: Sb, examId: string, worstUsd: number): Promise<void> {
-  const { error } = await sb.rpc("study_sheet_hold", keyed({ p_exam: examId, p_worst: Math.ceil(worstUsd * 100) / 100, p_cap: sheetsMonthlyCap(), p_solve: holdSolvePrices() }));
+async function takeHold(sb: Sb, examId: string, worstUsd: number, models?: { exam: string; sheet: string }): Promise<void> {
+  const { error } = await sb.rpc("study_sheet_hold", keyed({ p_exam: examId, p_worst: Math.ceil(worstUsd * 100) / 100, p_cap: sheetsMonthlyCap(), p_solve: holdSolvePrices(models) }));
   if (error) throw rpcError(error);
 }
 /** The hold of a start that failed after it was taken goes (best effort: it lapses in 30 minutes anyway). */
@@ -226,10 +241,11 @@ async function openAdd(sb: Sb, examId: string, body: Record<string, unknown>): P
   const priceUsd = openAddPriceUsd(size, sheetPrompts());
   if (body.dry === true) return json(200, { units: plan.units ?? 0, pages: size.pages, skipped: size.skipped, priceUsd });
   if (!body.urls || typeof body.urls !== "object" || Array.isArray(body.urls)) throw new HttpError(400, "bad request");
-  const worst = openAddWorstUsd(size, SHEET_MODEL, sheetPrompts());
+  const models = await holdModels(sb, e.group_id);
+  const worst = openAddWorstUsd(size, models.sheet, sheetPrompts());
   await roomFor(sb, e, worst);
   const held = e.kind === "sheet";
-  if (held) await takeHold(sb, examId, worst);
+  if (held) await takeHold(sb, examId, worst, models);
   try {
     const id = await reserve(sb, { groupId: e.group_id, kind: "exam", ref: "read", estimateUsd: priceUsd });
     await settle(sb, id, { model: MODEL, usage: null }); // the gate only: the units pay for themselves
@@ -270,11 +286,15 @@ async function resume(sb: Sb, examId: string, body: Record<string, unknown>): Pr
     key?: number;
     solve?: number;
   };
-  const worst = heldWorstUsd({
-    read: held.read ?? 0,
-    key: held.key ?? 0,
-    solve: held.solve ?? 0,
-  });
+  const models = await holdModels(sb, e.group_id);
+  const worst = heldWorstUsd(
+    {
+      read: held.read ?? 0,
+      key: held.key ?? 0,
+      solve: held.solve ?? 0,
+    },
+    models.sheet,
+  );
   // dry: whether it would go on now (the card offers "להמשיך" only then); nothing changes.
   if (body.dry === true) {
     const fits =
@@ -287,7 +307,7 @@ async function resume(sb: Sb, examId: string, body: Record<string, unknown>): Pr
   }
   if (worst > 0) await roomFor(sb, e, worst);
   // A sheet's held work is its hold now (a skipped solve is not); it lapses with the sheet's last unit.
-  if (worst > 0 && e.kind === "sheet") await takeHold(sb, examId, worst);
+  if (worst > 0 && e.kind === "sheet") await takeHold(sb, examId, worst, models);
   const { data, error } = await sb.rpc("study_sheet_resume", keyed({ p_exam: examId, p_skip_solve: skip, p_dry: false }));
   if (error) throw rpcError(error);
   return json(200, data ?? {});
@@ -297,7 +317,7 @@ async function resume(sb: Sb, examId: string, body: Record<string, unknown>): Pr
 export async function sheetGate(
   sb: Awaited<ReturnType<typeof memberClient>>["sb"],
   e: { group_id: string; key_source: string },
-  o: { pages: number; keyPages: number; priceUsd: number; confirmed: boolean; reader?: "exam" | "sheet" },
+  o: { pages: number; keyPages: number; priceUsd: number; confirmed: boolean; reader?: "exam" | "sheet"; models?: { exam: string; sheet: string } },
 ): Promise<{ worstUsd: number }> {
   if (sheetSizeProblem(o)) throw new HttpError(400, "too many pages");
   const { data, error } = await sb.rpc("study_sheet_room", { p_group: e.group_id });
@@ -306,7 +326,7 @@ export async function sheetGate(
   if (!room || room.sheets_on !== true) throw new HttpError(403, "off");
   if (o.priceUsd > SHEET_CONFIRM_USD && !o.confirmed) throw new HttpError(409, "confirm");
   const size = { pages: o.pages, keyPages: o.keyPages, keySource: e.key_source };
-  const worstUsd = o.reader === "sheet" ? sheetHoldUsd(size, "sheet", SHEET_MODEL, sheetPrompts()) : sheetHoldUsd(size, "exam", MODEL, examPrompts());
+  const worstUsd = o.reader === "sheet" ? sheetHoldUsd(size, "sheet", o.models?.sheet ?? SHEET_MODEL, sheetPrompts()) : sheetHoldUsd(size, "exam", o.models?.exam ?? MODEL, examPrompts());
   if (worstUsd > sheetsMonthlyCap() - Number(room.sheets_usd ?? 0)) throw new HttpError(402, "sheets_cap");
   if (worstUsd > monthlyCap() * POLICY.exam.share - Number(room.spent_usd ?? 0)) throw new HttpError(402, "budget");
   return { worstUsd };
