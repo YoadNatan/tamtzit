@@ -44,6 +44,9 @@ import FlagSheet from "./FlagSheet";
 import PracticeQuestion from "./PracticeQuestion";
 import { backTarget, Head, Loading, StickyActions } from "./Shell";
 import SlideSheet from "./SlideSheet";
+// The page crop's rules (PageCrop): a round opened straight from a link (a sheet's item with a
+// figure, a twin reusing one, a course's or the mistakes' round) never loaded the review's sheet first.
+import "../styles/exams.css";
 
 /* Uploaded sheets' release A1 (VITE_STUDY_SHEETS_FORMS): an open or numeric
  * question, and an uploaded item's exact text, load with the first that needs them. */
@@ -1103,7 +1106,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
           {flags.similar && scope?.kind === "exam" && data.examKinds?.[scope.exam] === "sheet" ? (
             // Release B (design §5.11, OD12): the whole sheet's offer at the end of practising it.
             <Suspense fallback={null}>
-              <SheetSimilar ctx={ctx} examId={scope.exam} />
+              <SheetSimilar ctx={ctx} examId={scope.exam} quiet />
             </Suspense>
           ) : null}
           {wrong.length ? (

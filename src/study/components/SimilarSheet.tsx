@@ -181,7 +181,7 @@ export default function SimilarOffer(p: {
         {result}
       </p>
       {result && added > 0 ? (
-        <button type="button" className="a-btn small primary sim-now" onClick={p.onNext}>
+        <button type="button" className="a-btn small sim-now" onClick={p.onNext}>
           {SIM.practiceNow}
         </button>
       ) : null}
@@ -210,8 +210,8 @@ export default function SimilarOffer(p: {
   );
 }
 
-/** "שאלות דומות לכל הדף" (the end of a sheet's round, the review's "⋯"). */
-export function SheetSimilar({ ctx, examId }: { ctx: Ctx; examId: string }) {
+/** "שאלות דומות לכל הדף" (the end of a sheet's round, the review's "⋯"). Quiet: nothing when it cannot be offered. */
+export function SheetSimilar({ ctx, examId, quiet }: { ctx: Ctx; examId: string; quiet?: boolean }) {
   const [state, setState] = useState<{ plan: Plan; price: number; setId: string | null } | null>(null);
   const [failed, setFailed] = useState("");
   const [busy, setBusy] = useState(false);
@@ -246,7 +246,7 @@ export function SheetSimilar({ ctx, examId }: { ctx: Ctx; examId: string }) {
     </button>
   ) : null;
 
-  if (failed) return failed === "off" || failed === "exam not found" ? null : <p className="a-small a-muted sim-fail">{similarFail(failed)}</p>;
+  if (failed) return quiet ? null : <p className="a-small a-muted sim-fail">{similarFail(failed)}</p>;
   if (!state) return <Loading />;
   const begin = async () => {
     setBusy(true);
