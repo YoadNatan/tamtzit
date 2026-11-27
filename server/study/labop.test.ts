@@ -385,3 +385,32 @@ test("cancel: study_lab_cancel with the owner's token; a member is refused", asy
   r = await call({ action: "cancel", run: RUN });
   assert.equal(`${r.status} ${(await r.json()).error}`, "403 not the creator");
 });
+
+test("price: the material and each model's worst case, read as run reads it; nothing planned, reserved or called", async () => {
+  const r = await call({ action: "price", group: GROUP, route: "solver", models: ["claude-opus-5-5", "claude-haiku-5-5", "claude-mythos-5-2", "gpt-nothing"] });
+  assert.equal(r.status, 200);
+  const p = await r.json();
+  assert.equal(p.route, "solver");
+  assert.match(p.title, /^הבדיקה של השאלות · 3 שאלות מהבנק$/);
+  assert.deepEqual(p.source, { lecture: LECTURE, n: 3 }, "a solver run picks its questions again: the lecture and the count only");
+  assert.equal(p.pictures, false);
+  assert.ok(p.models["claude-opus-5-5"].usd > p.models["claude-haiku-5-5"].usd, "Haiku costs less than Opus");
+  assert.ok(p.models["claude-haiku-5-5"].usd > 0);
+  assert.deepEqual(p.models["claude-mythos-5-2"], { refused: "bad model" }, "Mythos is listed, never offered");
+  assert.equal(p.models["gpt-nothing"], undefined, "an id the registry does not list is left out");
+  assert.equal(p.runCap, 1.5);
+  // Every listed model when none is named; an exam's read unit with pictures.
+  const all = await (await call({ action: "price", group: GROUP, route: "exam_read" })).json();
+  assert.equal(all.pictures, true);
+  assert.ok(Object.keys(all.models).length >= 10, Object.keys(all.models).join(","));
+  assert.deepEqual(all.source, { exam: EXAM, pages: [1, 2, 3, 4] });
+  for (const name of ["study_lab_plan", "study_lab_claim", "study_reserve"]) assert.equal(calls(name).length, 0, `${name} is not called`);
+  assert.equal(sent.length, 0, "no model called");
+  // The owner's gate and an unknown kind.
+  owner = false;
+  const refused = await call({ action: "price", group: GROUP, route: "solver" });
+  assert.equal(`${refused.status} ${(await refused.json()).error}`, "403 not the creator");
+  owner = true;
+  const bad = await call({ action: "price", group: GROUP, route: "part" });
+  assert.equal(`${bad.status} ${(await bad.json()).error}`, "400 bad route");
+});

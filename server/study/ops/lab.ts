@@ -1,7 +1,7 @@
 import { getDeadline, waitUntil } from "@vercel/functions"; // 3.10.5, pinned
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { modelInfo, ROUTE_KEYS, type RouteKey } from "../../../shared/study/models.js";
+import { MODELS, modelInfo, ROUTE_KEYS, type RouteKey } from "../../../shared/study/models.js";
 import { SHEET_READ_PAGES } from "../../../shared/study/sheetPrice.js";
 import { monthlyCap } from "../budget.js";
 import { run, settleFor, type RunResult, type Spend } from "../claude.js";
@@ -42,6 +42,7 @@ import type { AiBody, Op } from "./types.js";
  *   {op:"lab", action:"retry", run, label}                          → NDJSON
  *   {op:"lab", action:"route", group, route, model|null, note?, confirmExpensive?} → {route, model}
  *   {op:"lab", action:"cancel", run}                                → {cancelled: true}
+ *   {op:"lab", action:"price", group, route, source?, models?}       → the material and each model's worst case
  *   (check and judge, the paid check and the AI score, come with WP8: 501.)
  *
  * Only the group's owner (its creator, or a lab admin) runs comparisons
@@ -540,6 +541,37 @@ async function cancelAction(req: Request, body: AiBody): Promise<Response> {
   return json(200, { cancelled: true });
 }
 
+/** "השוואה חדשה" before the run (design-models §5.3): the material the run
+ *  would take (its title and source, read with the owner's token exactly as
+ *  `run` reads it), each model's worst case on it (× 1.5 for an unverified
+ *  price) or why it may not answer, the run's cap and the month's line.
+ *  Nothing is planned, reserved or spent; no model is called. The models'
+ *  prices exist only before a run, so they say nothing about its labels. */
+async function priceAction(req: Request, body: AiBody): Promise<Response> {
+  const group = uuidOf(body.group);
+  if (!group) throw new HttpError(403, "forbidden");
+  if (!isLabRoute(body.route)) throw new HttpError(400, "bad route");
+  const route = body.route;
+  const { sb } = await memberClient(req);
+  await assertOwner(sb, group);
+  const state = await readModels(sb, group);
+  const source = body.source && typeof body.source === "object" && !Array.isArray(body.source) ? (body.source as Record<string, unknown>) : {};
+  const m = await material(sb, group, route, source);
+  const pictures = picturePaths(m.frozen).length > 0;
+  const asked = Array.isArray(body.models) ? body.models.filter((x): x is string => typeof x === "string").slice(0, MODELS.length) : MODELS.map((x) => x.id);
+  const models: Record<string, { usd: number } | { refused: string }> = {};
+  for (const id of asked) {
+    const info = modelInfo(id);
+    if (!info) continue;
+    const why = labRefusal(info.id, route, { providers: state.providers, pictures });
+    models[info.id] = why ? { refused: why } : { usd: Number(labEstimate(m.frozen, info.id).toFixed(5)) };
+  }
+  const cap = Number(state.lab?.run_cap ?? LAB_RUN_CAP_USD);
+  // A solver run picks its questions at random again: the price's source keeps the lecture and the count only.
+  const again = route === "solver" ? { lecture: m.source.lecture, n: Array.isArray(m.source.questions) ? m.source.questions.length : undefined } : m.source;
+  return json(200, { route, title: m.title, source: again, pictures, models, runCap: Number.isFinite(cap) ? cap : LAB_RUN_CAP_USD });
+}
+
 /** POST /api/study/ai {op:"lab", action, …} */
 export const labOp: Op = async (req, body, started) => {
   switch (body.action) {
@@ -553,6 +585,8 @@ export const labOp: Op = async (req, body, started) => {
       return routeAction(req, body);
     case "cancel":
       return cancelAction(req, body);
+    case "price":
+      return priceAction(req, body);
     case "check":
     case "judge":
       throw new HttpError(501, "not built"); // the paid check and the AI score: WP8
