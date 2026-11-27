@@ -1416,6 +1416,43 @@ every other row is the recommended default.
   writer are neutral (COPY.md); the wall's "טיוטה של Claude" chip and
   failText's "Claude עמוס" stay (their words come from Anthropic-only paths
   or were not in the design's list).
-- **Health** keeps `providers` as key booleans; OpenRouter's key alone does
-  nothing until WP10's adapter (the providers' readiness needs both).
+- **Health** keeps `providers` as key booleans; OpenRouter's key alone did
+  nothing until WP10's adapter (the providers' readiness needs both; built
+  below).
 
+### OpenRouter: DeepSeek, Qwen, Kimi and GLM (WP10), built on 27 November 2026
+
+- **OD22 (the design's default, kept by Yoad):** the Chinese models go only
+  through OpenRouter. Every request carries `provider: {data_collection:
+  "deny", zdr: true}` and leaves out the providers based in China
+  (`ignore`), so an open model runs on a host outside China. "Where
+  available": a model only its maker serves (Qwen4 Max) is marked `china`
+  and goes without the exclusion, still with zero data retention; the new
+  comparison says "המעבד של Alibaba Cloud נמצא בסין." (C43). Where no host
+  meets the preferences, OpenRouter refuses before anything is generated
+  ($0). No direct endpoint (DeepSeek, DashScope, Moonshot, Z.ai) is listed
+  or has a key; section Y 1's `study_model_provider_set` still accepts only
+  openai, google and openrouter.
+- **OD18:** OpenRouter's key sheet and `RELEASE-Y2.md`: $5 prepaid with
+  auto-recharge off; the account's settings block providers that keep data
+  or train on it, and providers in China (a second layer); key on
+  Production only.
+- **D16:** `fee` 1.055 is reserved and settled; a call settles at
+  max(registry, OpenRouter's `usage.cost`) × 1.055, since that cost is
+  counted in credits bought with the fee. The OpenAI and Gemini adapters
+  report no cost, so nothing changes for them.
+- **D4:** `stream_options.include_usage` on every request; a stream that
+  ends without its usage chunk settles at no less than its reservation.
+- **Models and prices (Yoad's "Models" row):** DeepSeek V4 Pro and V4
+  Flash, Qwen3.8 2.4T A95B, Qwen4 Max, Kimi K3 and GLM 5.3. **All
+  `verified: false`:** openrouter.ai could not be loaded from the build
+  session (its host is outside the session's network), so the slugs and
+  prices come from searches limited to openrouter.ai, dated 2026-11-27, with
+  each model's page as `source`. The snapshots disagreed (several hosts per
+  model at their own prices, fast routes at more): the highest figure seen
+  is kept, so reservations err high; `max(registry, reported)` keeps the
+  ledger at no less than what OpenRouter charges. Compared × 1.5, never
+  routed until the owner reads the pages (`RELEASE-Y2.md`, step 6). No slug
+  was made up.
+- **Vision** only for Kimi K3 (its page calls it multimodal); the others are
+  refused for kinds with pictures until their pages say otherwise.

@@ -19,8 +19,9 @@ e2e (WP6, WP7; flag `VITE_STUDY_MODELS`, Yoad's steps in
 blind rating, the paid check, the AI score, the share and R's notice (WP8,
 WP11: "The kinds rated by people", below), and OpenAI's and Google's
 adapters with the providers' consent (WP9: "Other providers", below; the
-owner's steps in [`RELEASE-Y2.md`](RELEASE-Y2.md)). OpenRouter (WP10) comes
-next.
+owner's steps in [`RELEASE-Y2.md`](RELEASE-Y2.md)), and OpenRouter's
+adapter for the DeepSeek, Qwen, Kimi and GLM models (WP10: "OpenRouter",
+below; its steps in `RELEASE-Y2.md` too).
 
 ## The registry (`shared/study/models.ts`, `prices.ts`, `estimate.ts`)
 
@@ -28,8 +29,11 @@ next.
   `prices.ts`, one place), context, output cap, effort, vision, JSON mode,
   server-side fallback, characters a token, tier, `expensive` and
   `verifiedOrgsOnly`. `OTHER_MODELS`: OpenAI's and Google's (WP9,
-  `<provider>:<model>` ids), all `verified: false` for now; `ALL_MODELS` is
-  both lists, and `modelInfo` reads it. A price counts as verified only from
+  `<provider>:<model>` ids), all `verified: false` for now;
+  `OPENROUTER_MODELS`: DeepSeek, Qwen, Kimi and GLM through OpenRouter
+  (WP10, `openrouter:<slug>` ids, `fee` 1.055, `reportsCost`), all
+  `verified: false` for now; `ALL_MODELS` is the three lists, and
+  `modelInfo` reads it. A price counts as verified only from
   the vendor's own page (`verified: false`: × 1.5 in comparisons, never
   routed in production).
 - `ROUTE_KEYS` and `ROUTE_RULES`: the 25 route keys and what each sends
@@ -592,3 +596,66 @@ consent with each scope, the key sheet, a blind run with Gemini, no
 unverified price in the route sheet, help's line, the undo, 320 to 1440 px
 with the a11y check).
 
+## OpenRouter: DeepSeek, Qwen, Kimi and GLM (WP10)
+
+The Chinese open models go **only through OpenRouter** (OD22): one key
+(`OPENROUTER_API_KEY`), one processor, never the makers' direct endpoints
+(the registry lists none, and `providerReady` has no key for them).
+
+| File | What it does |
+|---|---|
+| `server/study/llm/compat.ts` | `POST https://openrouter.ai/api/v1/chat/completions`, `stream: true`, **`stream_options: {include_usage: true}`** and `usage: {include: true}` (without them a Chat Completions stream reports no usage, D4). The system blocks as one system message (with the JSON schema's text appended when a format is asked, since a host may ignore `response_format`); the messages as user and assistant turns, pictures as `image_url` data URLs (base64, never a link; a model without vision fails before anything is sent, $0); `reasoning: {effort, exclude: true}` (thinking is billed, never streamed); `max_tokens` within the floor and cap; `response_format` json_schema, strict when the schema allows it. **Every request carries `provider: {data_collection: "deny", zdr: true, ignore: CHINA_HOSTS}`**; a model with `china: true` goes without `ignore`. Read: `delta.content`, `delta.refusal`, `finish_reason` (stop, length → cut, content_filter → refused, error → failed), the last chunk's `usage` and `usage.cost`, an `error` object; `[DONE]` and `: OPENROUTER PROCESSING` comments are skipped |
+| `usage.ts` | `normalizeChat`: `prompt_tokens` less `cached_tokens` and `cache_write_tokens` (each its own count), `completion_tokens` with the reasoning inside it |
+| `stream.ts` | `Feed.reported(usd)`: the provider's own cost, in its credits |
+
+**Hosts (OD22).** `CHINA_HOSTS` lists OpenRouter's slugs for providers based
+in China (deepseek, alibaba, moonshotai, z-ai, siliconflow, baidu, minimax,
+stepfun, tencent, xiaomi, bytedance, baichuan); every request leaves them
+out, so an open model runs on a host elsewhere. Where no host outside China
+with zero data retention serves a model, OpenRouter refuses before anything
+is generated: the call costs $0 and fails (in a comparison "משהו השתבש"; in
+production D8 reruns it on Opus). A model only its maker serves is marked
+`china: true` with its `host` (today Qwen4 Max, Alibaba Cloud): it goes
+without the exclusion, still with zero data retention, and a new comparison
+says **"המעבד של Alibaba Cloud נמצא בסין."** under it (C43). The owner's
+OpenRouter account blocks the same providers in its settings, as a second
+layer (`RELEASE-Y2.md`).
+
+**Money (D16).** `fee: 1.055` (OpenRouter's 5.5% on the credits its prices
+are paid in) is reserved by `estimateUsd` and charged on settling: a call
+settles at **max(registry cost, `usage.cost`) × 1.055**; a stream cut before
+its usage chunk settles at no less than its reservation (D4); a refusal
+before the stream at $0.
+
+**The models** (`OPENROUTER_MODELS`, checked 2026-11-27, all `verified:
+false`: openrouter.ai is outside the build session's network, so the slugs
+and prices come from searches limited to openrouter.ai, whose snapshots
+disagree; the highest figure seen is kept, so a reservation errs high),
+per million tokens, input / cached input / output, before the fee:
+
+| Model | Slug | Prices | Vision |
+|---|---|---|---|
+| DeepSeek V4 Pro | `deepseek/deepseek-v4-pro` | 0.66 / 0.14 / 2.70 | no |
+| DeepSeek V4 Flash | `deepseek/deepseek-v4-flash` | 0.05 / 0.01 / 1.28 | no |
+| Qwen3.8 2.4T A95B | `qwen/qwen3.8-2.4t-a95b-20260812` | 2.00 / 0.25 / 6.00 | no |
+| Qwen4 Max (`china`, Alibaba Cloud) | `qwen/qwen4-max-20261115` | 1.50 / 0.075 / 4.50 (listed 5% off) | no |
+| Kimi K3 | `moonshotai/kimi-k3` | 2.28 / 0.228 / 24.00 | yes |
+| GLM 5.3 | `z-ai/glm-5.3` | 2.10 / 0.42 / 6.60 | no |
+
+Each row's `source` is the model's page (`https://openrouter.ai/<slug>`).
+Output cap 32,000 and context 128,000 where the pages disagree; at least
+4,000 output tokens a call (thinking shares the cap); no server-side
+fallback; 2.0 characters a token until the ledger calibrates it.
+
+**Tests:** `server/study/llm/compat.test.ts` (synthetic SSE only: the
+request's provider preferences on every model, the China-only model without
+`ignore`, include_usage, pictures as data URLs, a model without vision
+refused before sending, the schema strict and in the system text; text
+through comments, reasoning and `[DONE]`; settling at max(registry,
+reported) × 1.055 both ways; the finish reasons, a refusal, an error inside
+the stream; an abort and a finish without usage at the reservation; a 404
+for no ZDR host and a 401 at $0 with the key scrubbed; the fee in
+reservations; readiness and the comparison's and the route's gates);
+`e2e/study/models-providers.cjs` step 8 (the key sheet, consent, the models
+offered with "מחיר לא נבדק", C43's line, a blind run with DeepSeek, the
+route sheet still Claude only, help's line).

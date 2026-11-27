@@ -154,7 +154,8 @@ set keep working until the switch `routes` is off or the rows are deleted.
 
 **OpenAI and Google are built:** their steps (prices checked first, the
 limit at each provider, the keys, consent) are in
-[`RELEASE-Y2.md`](RELEASE-Y2.md). OpenRouter comes with its own package.
+[`RELEASE-Y2.md`](RELEASE-Y2.md), and so are OpenRouter's (the DeepSeek,
+Qwen, Kimi and GLM models).
 
 The app lists OpenAI, Google and OpenRouter in "מי כותב מה" → "ספקים" ("כרגע
 רק Claude" until a key is set). Before a key goes in, per provider (OD18):
