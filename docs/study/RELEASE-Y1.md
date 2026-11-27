@@ -152,6 +152,10 @@ set keep working until the switch `routes` is off or the rows are deleted.
 
 ## Other providers (later packages of this wave)
 
+**OpenAI and Google are built:** their steps (prices checked first, the
+limit at each provider, the keys, consent) are in
+[`RELEASE-Y2.md`](RELEASE-Y2.md). OpenRouter comes with its own package.
+
 The app lists OpenAI, Google and OpenRouter in "מי כותב מה" → "ספקים" ("כרגע
 רק Claude" until a key is set). Before a key goes in, per provider (OD18):
 $5 of prepaid credit with auto-recharge off (Google: a low requests-per-day
@@ -167,7 +171,7 @@ group's WhatsApp, with the provider's name):
 > את החומר (סיכומים, שאלות, בדיקות), ולבחור לכל סוג עבודה את המודל שמתאים
 > לו. מעכשיו החומר שלנו (הרצאות עם תמונות, מבחנים ודפים שהועלו, ונוסח
 > שכתבנו בקבוצה) עשוי להישלח גם ל-{ספק}, בלי שמות של חברי הקבוצה. אפשר לראות
-> לאן החומר הולך ב״עזרה״ ← ״פרטיות״.
+> לאן החומר הולך ב״עזרה״, בשורה האחרונה.
 
 ## Each month (OD23)
 

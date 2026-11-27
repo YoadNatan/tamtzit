@@ -17,17 +17,21 @@ for the kinds with an answer key (WP5), the owner's screens with their
 e2e (WP6, WP7; flag `VITE_STUDY_MODELS`, Yoad's steps in
 [`RELEASE-Y1.md`](RELEASE-Y1.md)), and the kinds rated by people with the
 blind rating, the paid check, the AI score, the share and R's notice (WP8,
-WP11: "The kinds rated by people", below). The other providers' adapters
-(WP9, WP10) come next.
+WP11: "The kinds rated by people", below), and OpenAI's and Google's
+adapters with the providers' consent (WP9: "Other providers", below; the
+owner's steps in [`RELEASE-Y2.md`](RELEASE-Y2.md)). OpenRouter (WP10) comes
+next.
 
 ## The registry (`shared/study/models.ts`, `prices.ts`, `estimate.ts`)
 
 - `MODELS`: every current Claude API model (16), with dated prices (from
   `prices.ts`, one place), context, output cap, effort, vision, JSON mode,
   server-side fallback, characters a token, tier, `expensive` and
-  `verifiedOrgsOnly`. Other providers' rows (`<provider>:<model>` ids) come
-  with their adapters; a price counts as verified only from the vendor's own
-  page (`verified: false`: × 1.5 in comparisons, never routed in production).
+  `verifiedOrgsOnly`. `OTHER_MODELS`: OpenAI's and Google's (WP9,
+  `<provider>:<model>` ids), all `verified: false` for now; `ALL_MODELS` is
+  both lists, and `modelInfo` reads it. A price counts as verified only from
+  the vendor's own page (`verified: false`: × 1.5 in comparisons, never
+  routed in production).
 - `ROUTE_KEYS` and `ROUTE_RULES`: the 25 route keys and what each sends
   (pictures, members' wording, exam or sheet pages; `anthropicOnly` for the
   outline and the ask route, which are not made through `run()`).
@@ -291,7 +295,8 @@ for these kinds); the tests compare it with the body production sends. A
 comparison never sends the server-side fallback and has no app fallback
 (D15). Pictures are kept as storage paths (`study-path:<path>`) and signed
 per call with the owner's token: 30 minutes for Claude, 120 s for another
-provider (D18). The request holds `material` (what the phone may show,
+provider (D18), whose adapter then fetches the picture itself and sends its
+bytes (WP9: no provider gets a link to the group's storage). The request holds `material` (what the phone may show,
 `study_lab_source`; never a key) and `key` (the checks' reference; the
 server reads it back through `study_lab_slot`).
 
@@ -525,3 +530,65 @@ what is pending; `price`'s steps; "לשאול" needs its question);
 `src/study/lib/models.test.ts` (the kinds and their candidate, the steps in
 the total, an answer as shown, the draft, the words, help's line);
 `e2e/study/models-rate.cjs` (design §12.3 scenarios 4-6 on the flag set `y`).
+
+## Other providers: OpenAI and Google (WP9)
+
+**The adapters** (`server/study/llm/`; plain `fetch`, no SDK, D6), behind
+`run()`'s seam (`llm/index.ts`'s `adapterFor`):
+
+| File | Does |
+|---|---|
+| `openai.ts` | `POST https://api.openai.com/v1/responses`, `stream: true`, `store: false`: the system blocks as `instructions`, the messages as `input` (`input_text`, `input_image` as a base64 data URL, an assistant's turn `output_text`), effort as `reasoning.effort`, max_tokens as `max_output_tokens`, a schema as `text.format` json_schema (strict when every property is required and no keyword strict mode refuses appears; best effort otherwise). Events: `response.output_text.delta`, `response.refusal.*`, `response.completed`, `response.incomplete` (`max_output_tokens`: cut; `content_filter`: refused), `response.failed`, `error` |
+| `gemini.ts` | `POST …/v1beta/models/<id>:streamGenerateContent?alt=sse`, the key in `x-goog-api-key` (never in the URL): `systemInstruction`, `contents` (an assistant's turn `model`, pictures `inlineData`), `thinkingConfig.thinkingLevel`, `maxOutputTokens`, `responseMimeType` + `responseJsonSchema`. Thought parts are skipped; `finishReason` STOP, MAX_TOKENS, and SAFETY / RECITATION / BLOCKLIST / PROHIBITED_CONTENT / SPII / IMAGE_SAFETY (refused); `promptFeedback.blockReason` is a refusal |
+| `stream.ts` | What both share: the deadline and the phone's signal (as Claude's calls), text to `onText` with the ledger id as the serving model, one more try on 429/5xx before the stream when 20 s or more are left, one settle in `finally`, never a throw (stop `error` with its cause, so D8 can rerun on Opus before any text) |
+| `request.ts` | The request as turns: the system blocks as one text (`cache_control` dropped: both cache a repeated prefix themselves), every picture as base64 (a link is fetched by the server, **only from the study's own Supabase host over https**, at most 8 MB a picture and 18 MB a request), max_tokens within the model's floor (4,000: thinking shares it) and cap |
+| `usage.ts` | Usage in Anthropic's shape (cached input taken out of the input, thinking in the output, `provider` and `raw` kept), and what a call settles at |
+| `sse.ts`, `keys.ts` | The SSE reader; the keys (`OPENAI_API_KEY`, `GEMINI_API_KEY` from `process.env` only, scrubbed from any error's words) |
+
+**Settling (D4, D16).** Final usage: the registry's cost × the provider's
+`fee`, or its reported cost when that is more. The stream opened but the
+final usage never came (an abort, a timeout, a cut stream): **no less than
+the call's reservation** (`reservedUsd`, else the request's own worst
+case). Refused before the stream (an HTTP error, no connection): $0.
+`settle()` now writes the call's own figure (`Spend.costUsd`) instead of
+pricing the usage again.
+
+**The models** (`OTHER_MODELS`, checked 2026-11-27, all `verified: false`:
+the build could not load the vendors' pages, so the ids and prices come from
+searches limited to openai.com and ai.google.dev): GPT-6.2 Astra ($8/$40,
+`expensive`), GPT-6.2 Sol ($2/$10), GPT-6.1 Terra ($1/$5), GPT-6 Luna
+($0.10/$0.50), OpenAI's long-context card above 272k; Gemini 4 Argon ($4/$20
+only, D16), Gemini 3.8 Flash ($0.75/$3.75, from 2027-01-01 $1.50/$7.50). No
+server-side fallback (D8 applies in production), vision, effort low /
+medium / high, 2.0 characters a token until the ledger calibrates it.
+
+**Consent (D17, OD19 as the owner changed it).** "לאשר שליחה" asks what is
+sent: **"כל החומר"** (scope `all`, the default) or **"רק טקסט"** (scope
+`text`: points, cards, a recording's notes, the AI score). Recorded per
+provider (`study_model_provider_set`, its log); "רק טקסט" shows as a chip;
+"לבטל את האישור" undoes it. A new comparison offers an approved provider's
+models beside the newest Claude ones, only for kinds its scope takes (the
+op's `price` refuses the rest); "מי כותב מה" never offers an unverified
+price. The block says "המחירים עוד לא נבדקו מול הדף של הספק" until a
+provider's rows are verified.
+
+**The key sheet (C42b)** gives the provider's spend limit first (OpenAI and
+OpenRouter: $5 prepaid, auto-recharge off; Google: a billing-enabled project
+and a daily request quota), then the Vercel variable, Production only, and
+when its prices are unchecked.
+
+**Words that named Claude as the writer** are neutral now (the bank's review,
+a thread's attached answer, a paragraph's history, three help lines; COPY.md,
+"Copy that named Claude as the writer"). Help's footer line names Anthropic
+and every approved provider (OD21).
+
+**Tests:** `server/study/llm/llm.test.ts` (synthetic SSE only: split reads,
+deltas, usage, the finish reasons, a refusal part, an abort and a timeout
+settling at the reservation, an HTTP refusal at $0 with the key scrubbed, the
+429 retry, D8 through an adapter, pictures inline and refused from another
+host, strict schemas, `generateItems` through an adapter, readiness);
+`e2e/study/models-providers.cjs` (scenario 9 on set `y`: no key, keys,
+consent with each scope, the key sheet, a blind run with Gemini, no
+unverified price in the route sheet, help's line, the undo, 320 to 1440 px
+with the a11y check).
+

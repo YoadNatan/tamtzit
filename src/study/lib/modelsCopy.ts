@@ -376,7 +376,7 @@ export const MC = {
   scopeAll: "כל החומר",
   scopeAllSub: "הרצאות עם תמונות, מבחנים ודפים שהועלו, ונוסח שחברי הקבוצה כתבו",
   scopeText: "רק טקסט",
-  scopeTextSub: "נקודות שצריך לדעת, כרטיסיות, חלוקה לחלקים וציון AI בהשוואות",
+  scopeTextSub: "נקודות שצריך לדעת, כרטיסיות, הערות מהקלטה וציון AI בהשוואות",
   scopeTextChip: "רק טקסט",
   approveYes: "לאשר",
   keyTitle: (p: string) => `להוסיף את ${p}`,

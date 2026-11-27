@@ -1377,3 +1377,45 @@ every other row is the recommended default.
   the worker's claim (`study_claim_similar`); comparing it needs a read of
   its own in section Y (like `study_lab_bank`). It stays a route key, so
   "מי כותב מה" can still move it.
+
+### Other providers: OpenAI and Google (WP9), built on 27 November 2026
+
+- **Adapters** (`server/study/llm/openai.ts`, `gemini.ts`, sharing
+  `stream.ts`): OpenAI's Responses API and Gemini's streamGenerateContent,
+  both over SSE with plain `fetch` (D6). OpenAI requests carry `store:
+  false`; Gemini's key goes in a header, never a URL. Pictures go as their
+  bytes, fetched by the server from the study's own Supabase host only: no
+  provider gets a link to the group's storage, short or long (D18, stricter
+  than the 120 s links it allowed).
+- **Money (D4, D16):** usage is normalized to Anthropic's shape and priced by
+  the registry; a call whose stream opened but whose final usage never came
+  settles at no less than its reservation; a request refused before the
+  stream (an HTTP error) settles at $0, since nothing was generated.
+  `settle()` writes the call's own cost (fee, reported cost, floor). A 429 or
+  5xx before the stream is tried once more.
+- **Models and prices (Yoad's "Models" row):** GPT-6.2 Astra, GPT-6.2 Sol,
+  GPT-6.1 Terra, GPT-6 Luna, Gemini 4 Argon (at $4/$20 only) and Gemini 3.8
+  Flash (its 2027 price dated). **All `verified: false`:** the vendors'
+  pricing pages (developers.openai.com, ai.google.dev) could not be loaded
+  from the build session, so each id and price comes from searches limited
+  to the vendor's own sites, with the page to check as `source` and
+  `checked: 2026-11-27`. They can be compared now (× 1.5) and are never
+  routed until the owner checks the page and a developer sets
+  `verified: true` (`RELEASE-Y2.md`, step 1). No id was made up.
+- **Consent (OD19, OD20, OD24 as Yoad changed them):** "לאשר שליחה" offers
+  "כל החומר" (scope `all`, the default) and "רק טקסט" (scope `text`, kept as
+  an option), recorded per provider (D17); no SQL change (section Y 1's
+  `study_model_provider_set` already took the scope).
+- **OD18:** the key sheet and `RELEASE-Y2.md` give each provider's limit
+  first: OpenAI $5 prepaid with auto-recharge off; Gemini a billing-enabled
+  project (the free tier's data may be used by Google) and a low daily
+  request quota (Google budgets only alert); keys on Production only.
+- **OD21:** help's footer line names Anthropic and every approved provider
+  (informational, not a gate); the WhatsApp message is in `RELEASE-Y2.md`.
+- **Copy (design §9.2, phase 2 fixes):** the lines that named Claude as the
+  writer are neutral (COPY.md); the wall's "טיוטה של Claude" chip and
+  failText's "Claude עמוס" stay (their words come from Anthropic-only paths
+  or were not in the design's list).
+- **Health** keeps `providers` as key booleans; OpenRouter's key alone does
+  nothing until WP10's adapter (the providers' readiness needs both).
+
