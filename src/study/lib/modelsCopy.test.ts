@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { hasText } from "./failText";
+import { hasText, isInternal } from "./failText";
 import { MODELS_FAIL, MODELS_FAIL_CODES, modelsFail } from "./modelsCopy";
 
 /* "השוואת מודלים": section Y's refusals in words (design-models §6.2, §8.2):
@@ -43,4 +43,18 @@ test("the server's route refusals (routes.ts's routeRefusal) have words", () => 
   const codes = [...type.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   assert.ok(codes.length >= 8, codes.join(", "));
   for (const c of codes) assert.ok(MODELS_FAIL_CODES.includes(c), `${c} is worded here`);
+});
+
+test("the op lab's refusals (server/study/ops/lab.ts) have words", () => {
+  const src = readFileSync(join(process.cwd(), "server", "study", "ops", "lab.ts"), "utf8");
+  const codes = new Set([...src.matchAll(/new HttpError\(\d+, "([^"]+)"\)/g)].map((m) => m[1]));
+  assert.ok(codes.size >= 8, [...codes].join(", "));
+  // "not built" and "bad action": the screens never meet them (an action not built yet, an action the app never sends).
+  for (const c of codes) assert.ok(MODELS_FAIL_CODES.includes(c) || hasText(c) || isInternal(c), `${c} has words`);
+  for (const c of ["no material", "pictures", "run_cap", "not the creator", "closed", "not waiting"]) assert.ok(codes.has(c), `the op raises ${c}`);
+  const lab = readFileSync(join(process.cwd(), "server", "study", "lab.ts"), "utf8");
+  const type = /export function labRefusal[\s\S]*?\): ([^{]+) \{/.exec(lab)?.[1] ?? "";
+  const refusals = [...type.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(refusals.length >= 5, refusals.join(", "));
+  for (const c of refusals) assert.ok(MODELS_FAIL_CODES.includes(c), `${c} is worded here`);
 });

@@ -2,6 +2,7 @@ import { cardsOp } from "../../server/study/ops/cards.js"; // package C
 import { askOp } from "../../server/study/ops/collab.js"; // package K (op "mnemonic" moved to J, §12.1.4)
 import { trapCheckOp, whoamiOp } from "../../server/study/ops/extras.js"; // package E (F seeds 501)
 import { fixCheckOp } from "../../server/study/ops/fixcheck.js"; // package K-2 (F seeds 501)
+import { labOp } from "../../server/study/ops/lab.js"; // package Y (section Y: "השוואת מודלים")
 import { examExplainOp, examReadOp, questionsOp } from "../../server/study/ops/practice.js"; // package Q
 import { plaqueOp } from "../../server/study/ops/pulse.js"; // package U-3 (F seeds 501)
 import { similarOp } from "../../server/study/ops/similar.js"; // package O (section O 3: similar questions)
@@ -15,7 +16,8 @@ import { assertSchema, errorText, HttpError, json, readBody, serverClient } from
  * within Hobby's 12 functions: practice questions and past exams (Q),
  * flashcards (C), "לשאול" and the check of a correction (K), the wall's
  * drafts and its check (J), VAR (V), the museum's plaque (U), a member's
- * trap and "מי אני?" (E), an uploaded sheet's similar questions (O). Each op checks the member, reserves before each
+ * trap and "מי אני?" (E), an uploaded sheet's similar questions (O), the
+ * models' comparison and routes (Y, op lab: the owner only). Each op checks the member, reserves before each
  * model call and settles after it (spec §4.2). The router answers 400 for an
  * unknown op and 503 "schema" while the database is older than the op needs
  * (assertSchema's per-op needs, §12.2.2); an op its package has not built
@@ -38,6 +40,7 @@ const OPS: Record<string, Op> = {
   trap_check: trapCheckOp,
   whoami: whoamiOp,
   similar: similarOp,
+  lab: labOp,
 };
 
 /** The 401s a member's session answers: logged, so the Vercel log tells a

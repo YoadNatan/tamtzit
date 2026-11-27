@@ -222,6 +222,9 @@ export const VARIANT_SCHEMA: Readonly<Record<string, Readonly<Record<string, num
   // reads it by the op's name) and work.ts's {similar} branch; a run's
   // twins go into a practice set of section L at 1.
   similar: { O: 3, L: 1 },
+  // "השוואת מודלים" (section Y, design-models D22): op "lab" (not one of
+  // §12.2.2's, so here) needs Y 1; every other op works without Y.
+  lab: { Y: 1 },
 };
 
 /** What a call of `op` (or of a variant, VARIANT_SCHEMA) needs of the

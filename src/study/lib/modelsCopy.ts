@@ -34,6 +34,9 @@ export const MODELS_FAIL: Readonly<Record<string, string>> = {
   "not allowed": "עוד לא אושרה שליחה לספק הזה.",
   "no vision": "המודל הזה לא קורא תמונות, והסוג הזה שולח תמונות.",
   expensive: "המודל הזה יקר בערך פי שניים. צריך לאשר שוב.",
+  // The op lab's own (server/study/ops/lab.ts): no material for the kind yet, pages that could not be signed.
+  "no material": "אין עדיין חומר מתאים להשוואה מהסוג הזה.",
+  pictures: "התמונות של החומר לא נטענו. אפשר לנסות שוב.",
 };
 
 export const MODELS_FAIL_CODES: readonly string[] = Object.keys(MODELS_FAIL);

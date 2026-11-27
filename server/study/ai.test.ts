@@ -172,6 +172,19 @@ test("a database older than an op needs answers 503 schema, op by op (§12.2.2)"
   assert.equal(anthropicCalls, 0);
 });
 
+test('op "lab" needs section Y 1, and nothing else does (design-models D22)', async () => {
+  assert.deepEqual(schemaFor("lab"), { ...REQUIRED_SCHEMA, Y: 1 });
+  assert.ok(!Object.hasOwn(OP_SCHEMA, "lab"), "not one of §12.2.2's ops: its need is a variant's");
+  for (const op of Object.keys(OP_SCHEMA)) assert.ok(!("Y" in schemaFor(op)), `${op} works without section Y`);
+  assert.ok(!("Y" in REQUIRED_SCHEMA));
+  schema = { status: 200, body: EVERYTHING };
+  assert.deepEqual(await answer(await post({ op: "lab", action: "run" })), { status: 503, body: { error: "schema" } }, "without Y: 503 schema");
+  schema = { status: 200, body: { ...EVERYTHING, Y: 1 } };
+  const r = await post({ op: "lab", action: "nonsense" });
+  assert.deepEqual(await answer(r), { status: 400, body: { error: "bad action" } }, "with Y: the op answers");
+  assert.equal(anthropicCalls, 0);
+});
+
 test("each op its package has not built answers 501 not built, and no model is called", async () => {
   for (const op of SEEDED) {
     // Exactly what the op needs, and nothing more.
