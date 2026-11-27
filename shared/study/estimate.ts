@@ -42,7 +42,8 @@ export function imageTokens(w?: number | null, h?: number | null): number {
  *  A request sent through Message Batches (`opts.batch`, the bank's worker)
  *  is priced at half (§12.2.4: the fifth argument, so F0's four keep their
  *  meaning). A model's output floor (the registry's minMaxTokens, which
- *  run() sends at least) is reserved too. */
+ *  run() sends at least) is reserved too, and so is a provider's fee (the
+ *  registry's `fee`: OpenRouter's 1.055). */
 export function estimateUsd(model: string, inputChars: number, maxTokens: number, extraInputTokens = 0, opts: { batch?: boolean } = {}): number {
   const input = Math.max(0, inputChars) / charsPerToken(model) + Math.max(0, extraInputTokens);
   // A model whose calls send at least so many (Haiku 5.5's 2,000: thinking shares max_tokens) reserves that many.
@@ -51,5 +52,7 @@ export function estimateUsd(model: string, inputChars: number, maxTokens: number
   // factor is an estimate, and a prompt just under the dearer card's line
   // that turns out just over it must not be reserved at a fifth of its cost.
   const p = priceOf(model, input * RESERVE_MARGIN);
-  return ((input * Math.max(p.in, p.w5m) + Math.max(0, maxTokens) * p.out) / 1_000_000) * (opts.batch ? 0.5 : 1);
+  // A provider's fee on top of its prices (OpenRouter's 5.5%, D16) is reserved too; Claude has none.
+  const fee = modelInfo(model)?.fee ?? 1;
+  return ((input * Math.max(p.in, p.w5m) + Math.max(0, maxTokens) * p.out) / 1_000_000) * (opts.batch ? 0.5 : 1) * fee;
 }

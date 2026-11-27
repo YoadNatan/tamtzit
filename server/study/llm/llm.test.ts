@@ -137,7 +137,7 @@ test("settling (D4, D16): final usage at max(registry × fee, reported); no fina
   const u = normalizeOpenAI(oaUsage);
   const list = costUsd(u, SOL);
   assert.ok(Math.abs(settled({ m, usage: u, final: true, chars: 10, opened: true, floorUsd: 9 }).costUsd - list * 1.055) < 1e-12, "the fee, and the floor does not apply to a final count");
-  assert.equal(settled({ m, usage: u, final: true, chars: 10, opened: true, floorUsd: 9, reportedUsd: 5 }).costUsd, 5, "the provider's own cost when it is more");
+  assert.ok(Math.abs(settled({ m, usage: u, final: true, chars: 10, opened: true, floorUsd: 9, reportedUsd: 5 }).costUsd - 5 * 1.055) < 1e-12, "the provider's own cost when it is more, × the fee on its credits");
   const early = settled({ m: { id: SOL }, usage: null, final: false, chars: 200, opened: true, floorUsd: 0.25 });
   assert.equal(early.costUsd, 0.25, "not ≈ $0: the reservation");
   assert.equal(early.estimated, true);
@@ -398,10 +398,12 @@ test("structured items stream through an adapter as through Claude (generateItem
   assert.equal(r.rejected, 0);
 });
 
-test("readiness: OpenAI and Google are ready with their keys (an adapter in this build); OpenRouter not yet; health booleans only", () => {
+test("readiness: OpenAI and Google are ready with their keys (an adapter in this build); OpenRouter without its key is not; health booleans only", () => {
   assert.equal(providerReady("openai"), true);
   assert.equal(providerReady("google"), true);
-  assert.equal(providerReady("openrouter"), false);
+  assert.equal(providerReady("openrouter"), false, "its adapter is in this build (compat.ts), its key is not set here");
+  assert.equal(providerReady("openrouter", { OPENROUTER_API_KEY: "sk-or-test" }), true);
+  assert.equal(providerReady("deepseek", { OPENROUTER_API_KEY: "sk-or-test" }), false, "never a direct endpoint (OD22)");
   assert.equal(providerReady("openai", {}), false, "no key, not ready");
   const h = providersConfigured();
   assert.deepEqual(h, { anthropic: Boolean(process.env.ANTHROPIC_API_KEY?.trim()), openai: true, google: true, openrouter: false });

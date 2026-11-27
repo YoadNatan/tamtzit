@@ -31,6 +31,9 @@ export type Feed = {
   text(delta: string): void;
   /** The provider's usage, in Anthropic's shape; final: its count for the whole call. */
   usage(u: UsageLike, final: boolean): void;
+  /** What the provider says the call cost, before its fee (OpenRouter's
+   *  usage.cost, in credits): the call settles at no less (D16). */
+  reported(usd: number): void;
   /** How the call ended: end_turn, max_tokens, refusal, error. */
   stop(reason: string): void;
   /** The provider's error inside the stream. */
@@ -66,6 +69,7 @@ export async function streamCall(a: Adapter, o: RunOpts, m: ModelInfo): Promise<
   let cause: unknown;
   let usage: UsageLike | null = null;
   let final = false;
+  let reportedUsd: number | null = null;
   let opened = false;
   let started = false;
   let failed: string | null = null;
@@ -90,6 +94,9 @@ export async function streamCall(a: Adapter, o: RunOpts, m: ModelInfo): Promise<
     usage(u, isFinal) {
       usage = u;
       if (isFinal) final = true;
+    },
+    reported(usd) {
+      if (Number.isFinite(usd) && usd > 0) reportedUsd = Math.max(reportedUsd ?? 0, usd);
     },
     stop(reason) {
       stop = reason;
@@ -143,7 +150,7 @@ export async function streamCall(a: Adapter, o: RunOpts, m: ModelInfo): Promise<
   } finally {
     clearTimeout(timer);
     o.signal?.removeEventListener("abort", onAbort);
-    const s = settled({ m, usage, final, chars, opened, floorUsd: o.reservedUsd ?? requestUsd(o, m) });
+    const s = settled({ m, usage, final, chars, opened, floorUsd: o.reservedUsd ?? requestUsd(o, m), reportedUsd });
     cost = s.costUsd;
     estimated = s.estimated;
     await o.ledger({ kind: o.kind, ref: o.ref, model: m.id, usage: s.usage, costUsd: cost, estimated }).catch(() => undefined);

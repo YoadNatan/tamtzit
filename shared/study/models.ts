@@ -57,7 +57,13 @@ export type ModelInfo = {
   tier: "top" | "mid" | "small";
   /** About twice the default's price: production routes need a second confirmation (OD14). */
   expensive?: true;
+  /** Served only from China (design-models C43, OD22): OpenRouter cannot
+   *  keep it on hosts outside China, so its requests go without the
+   *  China-hosts exclusion (still zero data retention), and the screens say
+   *  "המעבד של {host} נמצא בסין". */
   china?: true;
+  /** Who processes its requests, for that line (a company's own name). */
+  host?: string;
   /** Anthropic serves it only to organizations it verified: never offered. */
   verifiedOrgsOnly?: true;
   notes?: string;
@@ -222,8 +228,64 @@ export const OTHER_MODELS: readonly ModelInfo[] = [
   gm("gemini-3.8-flash", "Gemini 3.8 Flash", "mid", [geminiRow(0.75, 3.75), geminiRow(1.5, 7.5, "2027-01-01")]),
 ];
 
+/* ── The Chinese open models through OpenRouter (design-models phase 3, WP10; OD22) ──
+ *
+ * DeepSeek, Qwen, Kimi and GLM only through OpenRouter (one key, one
+ * processor), never their direct endpoints: every request asks for zero data
+ * retention and providers that do not collect data (compat.ts), and leaves
+ * out the providers based in China, so an open model runs on a host outside
+ * China. A model only its maker serves (`china: true`) goes without that
+ * exclusion, and the screens say where it is processed (C43).
+ *
+ * Ledger ids are "openrouter:<OpenRouter's slug>" (D3). OpenRouter passes the
+ * hosts' prices through and takes 5.5% on the credits they are paid with
+ * (`fee`); it reports each call's cost (usage.cost), and a call settles at
+ * the larger of that and the registry's price, × the fee (`reportsCost`,
+ * D16). Every row below is verified: false: openrouter.ai is outside the
+ * build session's network, so the slugs and figures come from searches
+ * limited to openrouter.ai, checked 2026-11-27, whose snapshots disagree
+ * (several hosts per model, each at its own price, and a fast route at
+ * more): the highest figure seen is kept, so a reservation errs high. The
+ * owner reads each model's page (`source`) before a route (RELEASE-Y2.md).
+ * Vision only where the model's page says it reads pictures; contexts and
+ * output caps are kept low where the pages disagree. */
+const OPENROUTER = "https://openrouter.ai/";
+const OPENROUTER_FEE = 1.055;
+const ROUTED = "Unverified: openrouter.ai could not be loaded from the build session (figures from searches of openrouter.ai, 2026-11-27, whose snapshots disagree: the highest is kept).";
+const chatRow = (input: number, hit: number, out: number): PriceRow => ({ in: input, out, w5m: input * 1.25, w1h: input * 2.5, hit });
+const or = (apiId: string, label: string, tier: ModelInfo["tier"], row: PriceRow, more: Partial<ModelInfo> = {}): ModelInfo => ({
+  ...other,
+  id: `openrouter:${apiId}`,
+  provider: "openrouter",
+  apiId,
+  label,
+  prices: [row],
+  source: `${OPENROUTER}${apiId}`,
+  fee: OPENROUTER_FEE,
+  reportsCost: true,
+  vision: false,
+  context: 128_000,
+  maxOut: 32_000,
+  json: "schema",
+  tier,
+  notes: `${ROUTED} Chat Completions through OpenRouter; reasoning.effort low, medium or high.`,
+  ...more,
+});
+
+/** The Chinese open models a kind may be compared on (and, once a price is
+ *  verified, routed to). Only slugs openrouter.ai's own pages show. */
+export const OPENROUTER_MODELS: readonly ModelInfo[] = [
+  or("deepseek/deepseek-v4-pro", "DeepSeek V4 Pro", "mid", chatRow(0.66, 0.14, 2.7)),
+  or("deepseek/deepseek-v4-flash", "DeepSeek V4 Flash", "small", chatRow(0.05, 0.01, 1.28)),
+  or("qwen/qwen3.8-2.4t-a95b-20260812", "Qwen3.8 2.4T A95B", "top", chatRow(2, 0.25, 6)),
+  // Qwen's own closed model: listed at 5% off ($1.425/$4.275); the full price is kept.
+  or("qwen/qwen4-max-20261115", "Qwen4 Max", "top", chatRow(1.5, 0.075, 4.5), { context: 1_000_000, china: true, host: "Alibaba Cloud" }),
+  or("moonshotai/kimi-k3", "Kimi K3", "top", chatRow(2.28, 0.228, 24), { vision: true, context: 1_048_576 }),
+  or("z-ai/glm-5.3", "GLM 5.3", "top", chatRow(2.1, 0.42, 6.6)),
+];
+
 /** Every model the registry lists: Claude's first. */
-export const ALL_MODELS: readonly ModelInfo[] = [...MODELS, ...OTHER_MODELS];
+export const ALL_MODELS: readonly ModelInfo[] = [...MODELS, ...OTHER_MODELS, ...OPENROUTER_MODELS];
 
 /* ── Route keys (design-models §7.2, §9.1): one per kind of work, the unit a
  * route is set for. Section Y's study_model_set accepts exactly these

@@ -1,6 +1,7 @@
 /// <reference path="../env.d.ts" />
 import type { ModelInfo, Provider } from "../../../shared/study/models.js";
 import type { RunOpts, RunResult } from "../claude.js";
+import { compatAdapter } from "./compat.js";
 import { geminiAdapter } from "./gemini.js";
 import { providersConfigured, PROVIDER_KEYS, type KeyedProvider } from "./keys.js";
 import { openaiAdapter } from "./openai.js";
@@ -18,8 +19,10 @@ export { PROVIDER_KEYS, providersConfigured, type KeyedProvider };
  * provider's final usage never came, D4), and never throws: a failure is
  * stop "error" with its `cause`, so run() can rerun on the default (D8).
  *
- * This build has OpenAI's (openai.ts, the Responses API) and Google's
- * (gemini.ts, streamGenerateContent); stream.ts is what they share. Until a
+ * This build has OpenAI's (openai.ts, the Responses API), Google's
+ * (gemini.ts, streamGenerateContent) and OpenRouter's (compat.ts, Chat
+ * Completions, for the DeepSeek, Qwen, Kimi and GLM models: zero data
+ * retention, hosts outside China, OD22); stream.ts is what they share. Until a
  * provider has both its key and an adapter, routes.ts never resolves a key
  * to it, and run() fails such a call before any text.
  *
@@ -39,6 +42,7 @@ const viaStream =
 const ADAPTERS: Partial<Record<Provider, Adapter>> = {
   openai: viaStream(openaiAdapter),
   google: viaStream(geminiAdapter),
+  openrouter: viaStream(compatAdapter),
 };
 
 /** The adapter for a provider, or null (Anthropic is claude.ts's own). */
