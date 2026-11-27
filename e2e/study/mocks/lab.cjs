@@ -55,7 +55,15 @@ const FACTOR = {
   "claude-sonnet-5-5": 0.5, "claude-sonnet-5": 0.5, "claude-sonnet-4-6": 0.6, "claude-haiku-5-5": 0.026, "claude-haiku-4-5": 0.25,
 };
 /** Other providers' models (WP9): unverified prices (× 1.5 in comparisons, never routed). */
-const OTHER = { "openai:gpt-6.2-astra": 2, "openai:gpt-6.2-sol": 0.5, "openai:gpt-6.1-terra": 0.25, "openai:gpt-6-luna": 0.025, "google:gemini-4-argon": 1, "google:gemini-3.8-flash": 0.19 };
+const OTHER = {
+  "openai:gpt-6.2-astra": 2, "openai:gpt-6.2-sol": 0.5, "openai:gpt-6.1-terra": 0.25, "openai:gpt-6-luna": 0.025, "google:gemini-4-argon": 1, "google:gemini-3.8-flash": 0.19,
+  // WP10, through OpenRouter (× its 1.055 fee): DeepSeek, Qwen, Kimi, GLM.
+  "openrouter:deepseek/deepseek-v4-pro": 0.15, "openrouter:deepseek/deepseek-v4-flash": 0.07, "openrouter:qwen/qwen3.8-2.4t-a95b-20260812": 0.32,
+  "openrouter:qwen/qwen4-max-20261115": 0.24, "openrouter:moonshotai/kimi-k3": 1.27, "openrouter:z-ai/glm-5.3": 0.35,
+};
+/** Models that read no pictures (the registry's vision: false), and the kinds whose material has them. */
+const NO_VISION = new Set(["openrouter:deepseek/deepseek-v4-pro", "openrouter:deepseek/deepseek-v4-flash", "openrouter:qwen/qwen3.8-2.4t-a95b-20260812", "openrouter:qwen/qwen4-max-20261115", "openrouter:z-ai/glm-5.3"]);
+const PICTURE_KINDS = ["exam_read", "sheet_read", "part"];
 Object.assign(FACTOR, OTHER);
 const providerOf = (id) => (id.includes(":") ? id.split(":")[0] : "anthropic");
 /** The lab kinds a provider approved with scope "text" may take (no pictures, members' wording or exam pages). */
@@ -146,6 +154,7 @@ module.exports = {
       if ((db.providers ?? {})[p] !== true) return "not configured";
       if (L.providers[p]?.allowed !== true) return "not allowed";
       if (L.providers[p].scope === "text" && !TEXT_KINDS.includes(route)) return "not for this kind";
+      if (NO_VISION.has(id) && PICTURE_KINDS.includes(route)) return "no vision";
       return null;
     };
     /** The run goes on on the server: answers whose time has come end (read at every call). */

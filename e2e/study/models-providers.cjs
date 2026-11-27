@@ -24,6 +24,13 @@
 //      האישור" takes OpenAI back.
 //   7. 320 to 1440 px, light and dark, no sideways scroll; the a11y check on
 //      the providers' block and both sheets.
+//   8. OpenRouter (WP10): its key sheet (the account blocks retaining hosts
+//      and hosts in China); with its key and "לאשר שליחה", a new comparison
+//      offers DeepSeek, Qwen, Kimi and GLM tagged "מחיר לא נבדק"; the model
+//      only its maker serves says "המעבד של Alibaba Cloud נמצא בסין." (C43),
+//      the others do not; a model without vision is not offered for a kind
+//      with pictures; a points run with DeepSeek runs blind on OpenRouter's
+//      slot; the route sheet still offers Claude only; help names OpenRouter.
 //
 //   NODE_PATH=$(npm root -g) E2E_FLAGS=y node e2e/study/models-providers.cjs <dist> <out dir>
 const fs = require("fs");
@@ -41,7 +48,7 @@ fs.mkdirSync(out, { recursive: true });
 const flags = flagSetOf();
 const norm = (s) => String(s).replace(/[⁦-⁩‎‏]/g, "").replace(/\s+/g, " ").trim();
 const PHONE = { width: 390, height: 844 };
-const MODEL_NAMES = /Claude|Opus|Sonnet|Haiku|Fable|GPT|Gemini/;
+const MODEL_NAMES = /Claude|Opus|Sonnet|Haiku|Fable|GPT|Gemini|DeepSeek|Qwen|Kimi|GLM/;
 
 (async () => {
   const mock = await createMock({ dist, flags: flags.set, members: ["שוהם", "נועה"] });
@@ -218,6 +225,68 @@ const MODEL_NAMES = /Claude|Opus|Sonnet|Haiku|Fable|GPT|Gemini/;
     await page.goto(mock.base + "/?v=models&x=new&k=points");
     names = await offeredNames();
     expect(!names.includes("GPT") && names.includes("Gemini 3.8 Flash"), "after the undo: no GPT in a new comparison");
+
+    /* ── 8. OpenRouter: DeepSeek, Qwen, Kimi and GLM (WP10, OD22) ── */
+    await page.goto(mock.base + "/?v=models&x=routes");
+    await row("OpenRouter").getByRole("button", { name: "אין מפתח ב-Vercel" }).click();
+    const orSheet = page.getByRole("dialog", { name: "להוסיף את OpenRouter" });
+    await orSheet.waitFor({ timeout: 5000 });
+    await has("אצל OpenRouter: קרדיט מראש של $5, הטעינה האוטומטית כבויה, ובהגדרות חסימה של ספקים ששומרים את המידע או מתאמנים עליו ושל ספקים שנמצאים בסין.");
+    await has("משתנה בשם OPENROUTER_API_KEY, בסביבת Production בלבד.");
+    expect(true, "OpenRouter's key sheet: $5 prepaid, the account blocks retaining hosts and hosts in China (OD18, OD22)");
+    await shot("providers-openrouter-key");
+    await page.keyboard.press("Escape");
+    await orSheet.waitFor({ state: "detached", timeout: 5000 });
+    db.providers = { anthropic: true, openai: true, google: true, openrouter: true };
+    await open("שוהם", "/?v=models&x=routes");
+    await row("OpenRouter").getByRole("button", { name: "לאשר שליחה" }).click();
+    const approveOr = page.getByRole("dialog", { name: "לאשר שליחה ל-OpenRouter?" });
+    await approveOr.waitFor({ timeout: 5000 });
+    expect(await approveOr.getByRole("radio", { name: /כל החומר/ }).isChecked(), "OpenRouter: scope all by default");
+    await approveOr.getByRole("button", { name: "לאשר", exact: true }).click();
+    await row("OpenRouter").getByText("מאושר").waitFor({ timeout: 10000 });
+    expect(L.providers.openrouter?.allowed === true && L.providers.openrouter.scope === "all", "OpenRouter approved with scope all (D17)");
+    await page.goto(mock.base + "/?v=models&x=new&k=points");
+    names = await offeredNames();
+    if (!names.includes("DeepSeek V4 Pro")) {
+      await page.locator(".md-new button.a-link", { hasText: /עוד \d+ מודלים/ }).click();
+      names = norm(await page.locator(".md-new").innerText());
+    }
+    for (const n of ["DeepSeek V4 Pro", "DeepSeek V4 Flash", "Qwen4 Max", "Kimi K3", "GLM 5.3"]) expect(names.includes(n), `points: ${n} offered through OpenRouter`);
+    const qmax = page.locator(".md-new label", { hasText: "Qwen4 Max" });
+    expect(norm(await qmax.innerText()).includes("המעבד של Alibaba Cloud נמצא בסין."), "C43: the model only its maker serves says where it is processed");
+    expect(norm(await qmax.innerText()).includes("מחיר לא נבדק"), "Qwen4 Max: מחיר לא נבדק");
+    const pro = page.locator(".md-new label", { hasText: "DeepSeek V4 Pro" });
+    expect(!norm(await pro.innerText()).includes("בסין") && norm(await pro.innerText()).includes("מחיר לא נבדק"), "DeepSeek V4 Pro: on hosts outside China, no C43 line; מחיר לא נבדק");
+    await shot("providers-openrouter-new");
+    await noSideScroll("providers-openrouter-new");
+    for (const id of ["claude-sonnet-5-5", "claude-haiku-5-5", "google:gemini-3.8-flash"]) {
+      const box = page.locator(".md-new label", { hasText: id === "google:gemini-3.8-flash" ? "Gemini 3.8 Flash" : id === "claude-haiku-5-5" ? "Claude Haiku 5.5" : "Claude Sonnet 5.5" }).getByRole("checkbox");
+      if ((await box.count()) && (await box.isChecked())) await box.uncheck();
+    }
+    await pro.getByRole("checkbox").check();
+    expect(await page.getByRole("checkbox", { name: /Claude Opus 5\.5/ }).isChecked(), "Opus beside DeepSeek");
+    await page.waitForFunction(() => !document.querySelector(".ph-foot .a-btn.primary")?.disabled, null, { timeout: 10000 });
+    await page.locator(".ph-foot .a-btn.primary").click();
+    await page.waitForURL(/r=/, { timeout: 10000 });
+    await has("תשובות מוכנות");
+    expect(!MODEL_NAMES.test((await body()).replace(/השוואת מודלים/g, "")), "blind while it runs: no model's name, DeepSeek's included");
+    const orRun = L.runs[L.runs.length - 1];
+    expect(
+      L.outputs.some((o) => o.run_id === orRun.id && o.model === "openrouter:deepseek/deepseek-v4-pro" && o.provider === "openrouter"),
+      "the run has DeepSeek's slot, served by openrouter",
+    );
+    await has("התשובות בלי שמות", 20000);
+    expect(L.refusal("openrouter:deepseek/deepseek-v4-pro", "part") === "no vision" && L.refusal("openrouter:moonshotai/kimi-k3", "part") === null, "a kind with pictures: DeepSeek refused (no vision), Kimi K3 reads them");
+    await page.goto(mock.base + "/?v=models&x=routes");
+    await page.locator(".md-route-row", { hasText: "נקודות שצריך לדעת" }).click();
+    const routeSheet2 = page.getByRole("dialog", { name: "מי כותב ״נקודות שצריך לדעת״" });
+    await routeSheet2.waitFor({ timeout: 5000 });
+    expect(!/DeepSeek|Qwen|Kimi|GLM/.test(norm(await routeSheet2.innerText())), "the route sheet offers no OpenRouter model: unverified prices (D16)");
+    await page.keyboard.press("Escape");
+    await page.goto(mock.base + "/?v=help");
+    await has("ובהשוואת מודלים גם ל-Google ו-OpenRouter.");
+    expect(true, "help names OpenRouter once approved (OD21)");
 
     steps.problems = mock.problems;
     steps.a11y = a11y;
