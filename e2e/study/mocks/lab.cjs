@@ -342,8 +342,22 @@ module.exports = {
           const s = xs.filter((v) => v !== null && v !== undefined).sort((a, b) => a - b);
           return s.length ? s[Math.floor((s.length - 1) / 2)] : null;
         };
+        // The group's score as study_lab_board: an answer's mean overall, at most 2.5 when more than a third flagged an error.
+        const scoreOf = (x) => {
+          const rs = L.ratings.filter((y) => y.output_id === x.id);
+          if (!rs.length) return null;
+          const mean = rs.reduce((a, y) => a + y.overall, 0) / rs.length;
+          return rs.filter((y) => y.error_flag).length * 3 > rs.length ? Math.min(mean, 2.5) : mean;
+        };
+        const scored = (xs) => xs.map(scoreOf).filter((v) => v !== null);
         const models = [...byModel.entries()].map(([model, xs]) => ({
-          model, today: model === today, runs: new Set(xs.map((x) => x.run_id)).size, answers: xs.length, score: null, rated: 0, flags: 0, ai: null, ai_n: 0, best: 0, shared: 0, same_or_better: 0,
+          model, today: model === today, runs: new Set(xs.map((x) => x.run_id)).size, answers: xs.length,
+          score: scored(xs).length ? Math.round((scored(xs).reduce((a, v) => a + v, 0) / scored(xs).length) * 100) / 100 : null,
+          rated: scored(xs).length,
+          flags: xs.reduce((a, x) => a + L.ratings.filter((y) => y.output_id === x.id && y.error_flag).length, 0),
+          ai: null, ai_n: 0,
+          best: L.seen.filter((s) => s.rated && xs.some((x) => x.run_id === s.run_id && x.label === s.best_label)).length,
+          shared: 0, same_or_better: 0,
           refused: xs.filter((x) => x.status === "refused").length, truncated: xs.filter((x) => x.status === "truncated").length, failed: xs.filter((x) => x.status === "timeout" || x.status === "error").length,
           checked: xs.filter((x) => "pass" in (x.checks ?? {})).length, passed: xs.filter((x) => x.checks?.pass === true).length,
           items: xs.reduce((a, x) => a + (Number(x.checks?.items) || 0), 0), match: xs.reduce((a, x) => a + (Number(x.checks?.match) || 0), 0), false_rejects: xs.reduce((a, x) => a + (Number(x.checks?.false_rejects) || 0), 0),

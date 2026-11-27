@@ -293,9 +293,11 @@ const MODEL_NAMES = /Claude|Opus|Sonnet|Haiku|Fable/;
       await parts.getByRole("button", { name: "להחליף", exact: true }).click();
       await has("המודל של ״סיכומים״ הוחלף.");
       expect(ops("route").some((c) => c.body.route === "part" && c.body.confirmExpensive === true), "an expensive model is set with its second confirmation (OD14)");
-      await page.locator(".md-route-row", { hasText: "סיכומים" }).click();
-      await page.getByRole("dialog", { name: "מי כותב ״סיכומים״" }).getByRole("button", { name: "חזרה לברירת המחדל" }).click();
-      await has("״סיכומים״ חוזר ל-Claude Opus 5.5.");
+      // OD10: one tap back to the model the kind had before, on the toast.
+      await page.locator(".a-toast").getByRole("button", { name: "ביטול" }).click();
+      await page.waitForFunction(() => document.querySelector(".md-route-row") && ![...document.querySelectorAll(".md-route-row")].some((r) => r.textContent.includes("סיכומים") && r.textContent.includes("Fable")), null, { timeout: 10000 });
+      expect(!L.routes.part, "ביטול on the toast puts the route back as it was (the default here)");
+      expect(ops("route").filter((c) => c.body.route === "part").length === 2, "the undo is one more route call");
 
       /* ── 8. מי כותב מה: providers, the switch; a member ── */
       await has("כרגע רק Claude");

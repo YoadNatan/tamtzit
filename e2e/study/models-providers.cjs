@@ -105,8 +105,12 @@ const MODEL_NAMES = /Claude|Opus|Sonnet|Haiku|Fable|GPT|Gemini|DeepSeek|Qwen|Kim
   const offeredNames = async () => {
     await page.getByRole("checkbox", { name: /Claude Opus 5\.5/ }).waitFor({ timeout: 10000 });
     await page.waitForTimeout(400); // the price answers, then the list settles
+    // Each approved provider is its own group, folded unless one of its models is ticked: open them to read the names.
+    for (const d of await page.locator(".md-new details.md-prov:not([open]) > summary").all()) await d.click();
     return norm(await page.locator(".md-new").innerText());
   };
+  /** A provider's group in a new comparison (its unverified note said once, in the summary). */
+  const group = (name) => page.locator(".md-new details.md-prov", { hasText: name });
 
   try {
     if (!flags.models) throw new Error("run with E2E_FLAGS=y (VITE_STUDY_MODELS)");
@@ -183,8 +187,9 @@ const MODEL_NAMES = /Claude|Opus|Sonnet|Haiku|Fable|GPT|Gemini|DeepSeek|Qwen|Kim
     names = await offeredNames();
     expect(names.includes("GPT-6.2 Sol") && names.includes("GPT-6 Luna"), "practice: OpenAI's models offered (scope all)");
     expect(!names.includes("Gemini"), "practice: Gemini not offered (scope text; practice sends pictures)");
-    const sol = page.locator(".md-new label", { hasText: "GPT-6.2 Sol" });
-    expect(norm(await sol.innerText()).includes("מחיר לא נבדק"), "an unverified price is tagged מחיר לא נבדק");
+    expect(norm(await group("GPT-6.2 Sol").locator("summary").innerText()).includes("מחיר לא נבדק"), "an unverified price is said once, on its provider's group: מחיר לא נבדק");
+    expect(!norm(await page.locator(".md-new label", { hasText: "GPT-6.2 Sol" }).innerText()).includes("מחיר לא נבדק"), "not on every row");
+    expect(norm(await page.locator(".md-new label", { hasText: "GPT-6.2 Sol" }).innerText()).includes("עד $"), "a model's worst case reads עד $…");
     await page.goto(mock.base + "/?v=models&x=new&k=points");
     names = await offeredNames();
     expect(names.includes("Gemini 3.8 Flash") && names.includes("GPT-6.2 Sol"), "points: both providers offered (text kinds)");
@@ -254,10 +259,10 @@ const MODEL_NAMES = /Claude|Opus|Sonnet|Haiku|Fable|GPT|Gemini|DeepSeek|Qwen|Kim
     }
     for (const n of ["DeepSeek V4 Pro", "DeepSeek V4 Flash", "Qwen4 Max", "Kimi K3", "GLM 5.3"]) expect(names.includes(n), `points: ${n} offered through OpenRouter`);
     const qmax = page.locator(".md-new label", { hasText: "Qwen4 Max" });
-    expect(norm(await qmax.innerText()).includes("המעבד של Alibaba Cloud נמצא בסין."), "C43: the model only its maker serves says where it is processed");
-    expect(norm(await qmax.innerText()).includes("מחיר לא נבדק"), "Qwen4 Max: מחיר לא נבדק");
+    expect(norm(await qmax.innerText()).includes("הבקשות למודל הזה מעובדות בסין (Alibaba Cloud)."), "C43: the model only its maker serves says where it is processed");
+    expect(norm(await group("Qwen4 Max").locator("summary").innerText()).includes("מחיר לא נבדק"), "OpenRouter's group: מחיר לא נבדק");
     const pro = page.locator(".md-new label", { hasText: "DeepSeek V4 Pro" });
-    expect(!norm(await pro.innerText()).includes("בסין") && norm(await pro.innerText()).includes("מחיר לא נבדק"), "DeepSeek V4 Pro: on hosts outside China, no C43 line; מחיר לא נבדק");
+    expect(!norm(await pro.innerText()).includes("בסין"), "DeepSeek V4 Pro: on hosts outside China, no C43 line");
     await shot("providers-openrouter-new");
     await noSideScroll("providers-openrouter-new");
     for (const id of ["claude-sonnet-5-5", "claude-haiku-5-5", "google:gemini-3.8-flash"]) {
