@@ -4,6 +4,7 @@ import { DEFAULT_MODEL, MODELS, modelInfo, ROUTE_KEYS } from "../../../shared/st
 import { KNOWN_KEYS, MC, ROUTE_NAMES, routeName, usd } from "./modelsCopy";
 import { MODELS_HELP, providersLine } from "./helpCopy";
 import {
+  PROVIDERS,
   CANDIDATE,
   differsOf,
   dropDraft,
@@ -281,3 +282,13 @@ test("help's line on where the material goes (OD21): Anthropic, the routed provi
   );
   assert.ok(!providersLine({ inUse: [], approved: ["google"] }).includes("לאן החומר הולך"), "not the privacy note Yoad removed");
 });
+
+test("providers (WP9): every provider's key sheet names its limit first; approving says what is sent for each scope", () => {
+  for (const p of PROVIDERS) assert.ok(MC.keyLimit[p.id]?.includes(p.name), `${p.id}: its limit`);
+  assert.ok(MC.keyLimit.openai.includes("$5") && MC.keyLimit.openai.includes("כבויה"), "OpenAI: $5 prepaid, auto-recharge off (OD18)");
+  assert.ok(MC.keyLimit.google.includes("Billing") && MC.keyLimit.google.includes("מכסה יומית"), "Google: a billing project and a daily quota (OD18)");
+  assert.ok(MC.approveText("OpenAI").includes("גם תמונות"), "scope all, the default: everything but names");
+  assert.ok(MC.approveText("Google", "text").includes("רק טקסט") && !MC.approveText("Google", "text").includes("גם תמונות"), "scope text");
+  assert.ok([MC.approveText("X"), MC.approveText("X", "text")].every((l) => l.includes("בלי שמות של חברי הקבוצה")), "never members' names");
+});
+
