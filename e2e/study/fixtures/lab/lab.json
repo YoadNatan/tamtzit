@@ -1,0 +1,10 @@
+{
+ "about": "Synthetic material for the model comparison's offline eval (tools/evals/lab.mjs): invented bank questions on the fixture lecture (slides.json, fictional teaching text) and one decided correction. exam/exam12.json gives the read unit. No real course material.",
+ "bank": [
+  { "id": "lab-q1", "vignette": "", "question": "באיזה מקטע של הנפרון נספג רוב ה-Na+ (לפי השקפים הבדויים)?", "options": ["Proximal tubule", "Thick ascending limb", "Distal convoluted tubule", "Collecting duct"], "form": "one", "answer": 0, "seq": null },
+  { "id": "lab-q2", "vignette": "מטופל בדוי בן 70 מקבל משתן לולאה.", "question": "איזו הפרעה צפויה?", "options": ["היפוקלמיה", "היפרקלמיה", "היפרנתרמיה"], "form": "one", "answer": 0, "seq": null },
+  { "id": "lab-q3", "vignette": "", "question": "איזה אחוז מה-Na+ נספג ב-Thick ascending limb?", "options": ["~5%", "~25%", "~65%", "~3%"], "form": "one", "answer": 1, "seq": null },
+  { "id": "lab-q4", "vignette": "", "question": "סמנו נכון או לא נכון (בדוי):", "options": ["Collecting duct סופג כ-3%", "Proximal tubule סופג כ-5%", "Distal convoluted tubule סופג כ-5%"], "form": "tf", "answer": null, "seq": [1, 0, 1] }
+ ],
+ "proposal": { "id": "lab-p1", "lecture_id": "eval", "part_idx": 0, "before_text": "רוב ה-Na+ נספג ב-Collecting duct.", "after_text": "רוב ה-Na+ (כ-65%) נספג ב-Proximal tubule.", "source_slides": [2], "state": "applied" }
+}

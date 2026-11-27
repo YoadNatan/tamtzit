@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -310,4 +311,12 @@ test("statusOf and the labels", () => {
   assert.deepEqual(statusOf(null, false), { status: "error", reason: null });
   const labels = ["א", "ב", "ג", "ד"];
   for (let i = 0; i < 20; i++) assert.deepEqual(shuffled(labels).sort(), [...labels].sort(), "a permutation");
+});
+
+test("tools/evals/lab.mjs refuses an output folder inside the repository (course material never lands in git)", () => {
+  for (const dir of [".", "e2e/study/lab-eval", join(process.cwd(), "tmp", "lab")]) {
+    const r = spawnSync(process.execPath, [join(process.cwd(), "tools", "evals", "lab.mjs"), "--print", dir], { encoding: "utf8" });
+    assert.equal(r.status, 2, `${dir}: ${r.stderr}`);
+    assert.match(r.stderr, /inside the repository/);
+  }
 });
