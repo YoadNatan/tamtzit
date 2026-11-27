@@ -27,6 +27,13 @@ export const MODELS_FAIL: Readonly<Record<string, string>> = {
   "bad route": "הסוג הזה לא מוכר.",
   "bad model": "המודל הזה לא מוכר.",
   "bad provider": "את הספק הזה אי אפשר לאשר מכאן.",
+  // Why a model cannot take a kind of work (server/study/routes.ts's routeRefusal, the route action).
+  "unverified price": "המחיר של המודל הזה עוד לא נבדק מול הספק, ולכן אי אפשר להעביר אליו עבודה.",
+  "not for this kind": "המודל הזה לא יכול לקבל את הסוג הזה.",
+  "not configured": "לספק של המודל הזה עוד אין מפתח בשרת.",
+  "not allowed": "עוד לא אושרה שליחה לספק הזה.",
+  "no vision": "המודל הזה לא קורא תמונות, והסוג הזה שולח תמונות.",
+  expensive: "המודל הזה יקר בערך פי שניים. צריך לאשר שוב.",
 };
 
 export const MODELS_FAIL_CODES: readonly string[] = Object.keys(MODELS_FAIL);

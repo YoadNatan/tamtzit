@@ -36,3 +36,11 @@ test("the words: impersonal, no model's name; the rest falls through to failText
   assert.equal(modelsFail("off"), "השוואות כבויות כרגע.");
   assert.equal(modelsFail("not the creator"), "רק מי שפתחו את הקבוצה יכולים לעשות את זה.");
 });
+
+test("the server's route refusals (routes.ts's routeRefusal) have words", () => {
+  const src = readFileSync(join(process.cwd(), "server", "study", "routes.ts"), "utf8");
+  const type = /export type RouteRefusal = ([^;]+);/.exec(src)?.[1] ?? "";
+  const codes = [...type.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(codes.length >= 8, codes.join(", "));
+  for (const c of codes) assert.ok(MODELS_FAIL_CODES.includes(c), `${c} is worded here`);
+});
