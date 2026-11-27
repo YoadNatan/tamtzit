@@ -37,7 +37,7 @@ const FLAGS = [
   "QUESTIONS", "PRACTICE", "QUIZ", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "ASK", "RECORDINGS", "PDF", "ACCOUNT",
   "PROGRESS", "MARATHONS", "EXAMS", "MEETING", "ANCHOR", "VAR", "WALL", "TODAY", "GUESS", "NEEDS_ME", "PULSE",
   "MUSEUM", "BOSS", "GROUP_PLAN", "TRAPS", "BLANK_TABLE", "QUIZ_ROUNDS", "EVE", "GUIDE", "QTYPES", "COURSES", "INSTALL",
-  "NOTIFY", "MAKE", "SETS", "SHEETS", "SHEETS_FORMS",
+  "NOTIFY", "MAKE", "SETS", "SHEETS", "SHEETS_FORMS", "SIMILAR",
 ];
 for (const f of FLAGS) {
   if (flagsOff) delete process.env[`VITE_STUDY_${f}`];
@@ -66,7 +66,7 @@ const SLOT = {
   sheets: "O", // uploaded sheets: the upload, the wide review, the landing card (docs/study/sheets.md)
 };
 /** A style sheet named otherwise than its package's slot. */
-const STYLE = { sets: "QS" };
+const STYLE = { sets: "QS", similar: "O" };
 const COMPONENT = {
   Q: ["PracticeHome", "LecturePractice", "PracticeSession", "PracticeQuestion", "PracticeCreate", "PracticeBank", "PracticeRound", "FlagSheet", "FixSheet", "Exams"],
   Z: ["QuizSetup", "Quiz", "QuizParts", "QuizBanner", "QuizQuestion"],
@@ -88,7 +88,7 @@ const COMPONENT = {
   L: ["InstallScreen", "InstallParts"],
   R: ["NotifyScreen", "InboxScreen", "NotifyParts"],
   QS: ["MakeScreen", "MakeParts", "MakeProgress", "MakeEntry", "SetPage", "SetsShelf", "SetsScreen", "SetStats", "SetCard", "SetJoinNote", "SetsEntries"],
-  O: ["SheetUpload", "PageView", "DeepLinkCard", "SheetText", "SheetAnswer", "SheetEdit", "SheetSolution", "SheetsLecture"],
+  O: ["SheetUpload", "PageView", "DeepLinkCard", "SheetText", "SheetAnswer", "SheetEdit", "SheetSolution", "SheetsLecture", "SimilarSheet"],
 };
 const LIB = {
   W: ["generate", "writing", "transcript", "transcribe", "transcribe.worker", "pdf-export"],
@@ -103,7 +103,7 @@ const LIB = {
   L: ["install", "installPrompt", "installCopy", "installLazy"],
   R: ["notify", "notices", "notifyText"],
   QS: ["make", "setsCopy", "sets"],
-  O: ["sheets", "sheetForms", "sheetPure", "similarCopy"],
+  O: ["sheets", "sheetForms", "sheetPure", "similarCopy", "similar"],
 };
 const SHARED = {
   C: ["cloze", "fsrs"], K: ["edits"], T: ["today"], G: ["lane"], E: ["blankTable", "extras"], A: ["estimates", "plan", "agenda"], U: ["pulse"], S: ["batch"],

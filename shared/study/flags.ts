@@ -103,6 +103,11 @@ export function flagsFrom(e: Record<string, unknown>) {
     // forms in practice, the edit sheet, add and retire, answers and worked
     // solutions, open-add, the budget pause, the lecture page's row. Section O 2.
     sheetForms: practice && on(e.VITE_STUDY_COURSES) && on(e.VITE_STUDY_EXAMS) && on(e.VITE_STUDY_SHEETS) && on(e.VITE_STUDY_SHEETS_FORMS),
+    // Uploaded sheets, release B (docs/study/sheets.md): "עוד שאלות כמוה" after
+    // a wrong answer, "שאלות דומות לכל הדף", the twins in the sheet's practice
+    // set. Release A1 and practice sets' shelf; section O 3 with L 1.
+    similar:
+      practice && on(e.VITE_STUDY_COURSES) && on(e.VITE_STUDY_EXAMS) && on(e.VITE_STUDY_SHEETS) && on(e.VITE_STUDY_SHEETS_FORMS) && on(e.VITE_STUDY_MAKE) && on(e.VITE_STUDY_SETS) && on(e.VITE_STUDY_SIMILAR),
   } as const;
 }
 
@@ -194,5 +199,7 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     ...(f.sheets ? { O: 1 } : {}),
     // Release A1: the sheet reader's forms, edits and solutions.
     ...(f.sheetForms ? { O: 2 } : {}),
+    // Release B: the twins, the runs and the sheet's set (L).
+    ...(f.similar ? { O: 3, L: 1 } : {}),
   };
 }

@@ -62,7 +62,9 @@ const PINNED: Array<[string, Record<string, unknown>, number, Surface, string, s
   ["set_solved", { title: "משתנים · 10 שאלות", k: 1 }, 1, "inbox", "הסט ״משתנים · 10 שאלות״ נפתר פעם אחת", "אפשר לראות את המספרים של הקבוצה"],
   ["set_solved", { title: "משתנים · 10 שאלות", k: 3 }, 3, "inbox", "הסט ״משתנים · 10 שאלות״ נפתר 3 פעמים", "אפשר לראות את המספרים של הקבוצה"],
   ["set_solved", { title: "משתנים · 10 שאלות", k: 2 }, 2, "lock", "הסט נפתר 2 פעמים", "אפשר לראות את המספרים של הקבוצה"],
-  ["similar_ready", { title: "כותרת בדויה" }, 1, "lock", FALLBACK_TITLE, ""],
+  ["similar_ready", { k: 14, kind: "sheet", course: "קורס בדוי" }, 1, "lock", "השאלות הדומות מוכנות", "קורס בדוי · 14 שאלות · אפשר לפתור מ״סטים של הקבוצה״"],
+  ["similar_ready", { k: 1, kind: "sheet" }, 1, "inbox", "השאלות הדומות מוכנות", "שאלה אחת · אפשר לפתור מ״סטים של הקבוצה״"],
+  ["similar_ready", { title: "כותרת בדויה" }, 1, "lock", "השאלות הדומות מוכנות", "אפשר לפתור מ״סטים של הקבוצה״"],
   ["summary_ready", { lecture: "הרצאה בדויה על Invented Kinetics" }, 1, "lock", "הסיכום מוכן", `הרצאה בדויה על ${FSI}Invented Kinetics${PDI}`],
   ["meeting_soon", { lecture: "Invented Kinetics", at: "2026-07-01T15:00:00Z" }, 1, "lock", "הפגישה מתחילה בעוד 15 דקות", `${FSI}Invented Kinetics${PDI} · 18:00`],
 ];
@@ -88,7 +90,7 @@ test("the lock screen never shows a quiz's title or a name", () => {
     }
   }
   // A kind this build does not know (a later package's, wired before its words ship): the title, never its args.
-  for (const kind of ["similar_ready", "lab_new", "mystery"]) assert.deepEqual(render(kind, secret, 1, "lock", NOW), { title: FALLBACK_TITLE, body: "" }, kind);
+  for (const kind of ["lab_new", "mystery"]) assert.deepEqual(render(kind, secret, 1, "lock", NOW), { title: FALLBACK_TITLE, body: "" }, kind);
   // The inbox, inside the app, may show them.
   assert.match(render("quiz_open", secret, 1, "inbox", NOW).body, /כותרת סודית · שם סודי ועוד 4 בפנים/);
   // A shared set (OD10): neither the lecture nor the author's name on the lock screen, at any count.
@@ -183,8 +185,9 @@ test("the copy covers the kinds section R registers, in the same categories", ()
   const rows = [...block.matchAll(/\('([a-z_]+)',\s*'([a-z]+)'/g)].map((m) => [m[1], m[2]] as const);
   assert.equal(rows.length, 25, "R 1 and R 2's kinds, and the three reserved");
   // Reserved for packages not built yet: their packages add their words
-  // (set_shared was reserved for practice sets, which have them now).
-  const reserved = new Set(["similar_ready", "lab_new"]);
+  // (set_shared was reserved for practice sets, similar_ready for uploaded
+  // sheets' release B, which have them now).
+  const reserved = new Set(["lab_new"]);
   for (const [kind, cat] of rows) {
     if (reserved.has(kind)) {
       assert.equal(catOf(kind), "inapp", `${kind}: no words until its package`);

@@ -901,3 +901,19 @@ test("VITE_STUDY_SHEETS_FORMS: uploaded sheets' release A1 on release A0, with s
   assert.equal(flagsFrom({ ...base, VITE_STUDY_SHEETS: "", VITE_STUDY_SHEETS_FORMS: "1" }).sheetForms, false, "it needs release A0");
   assert.deepEqual(tabLinks(on), tabLinks(off), "no tab of its own");
 });
+
+test("VITE_STUDY_SIMILAR: uploaded sheets' release B on release A1 and practice sets, with section O 3 and L 1", () => {
+  const base = {
+    VITE_STUDY_QUESTIONS: "1", VITE_STUDY_PRACTICE: "1", VITE_STUDY_COURSES: "1", VITE_STUDY_EXAMS: "1", VITE_STUDY_SHEETS: "1",
+    VITE_STUDY_SHEETS_FORMS: "1", VITE_STUDY_MAKE: "1", VITE_STUDY_SETS: "1",
+  };
+  const off = flagsFrom(base);
+  const on = flagsFrom({ ...base, VITE_STUDY_SIMILAR: "1" });
+  assert.equal(off.similar, false);
+  assert.equal(on.similar, true);
+  assert.deepEqual({ ...on, similar: false }, off, "it changes nothing else");
+  assert.deepEqual(requiredSchema(on), { ...requiredSchema(off), O: 3, L: 1 }, "section O 3, and L 1 for the sheet's set");
+  assert.equal(flagsFrom({ ...base, VITE_STUDY_SHEETS_FORMS: "", VITE_STUDY_SIMILAR: "1" }).similar, false, "it needs release A1");
+  assert.equal(flagsFrom({ ...base, VITE_STUDY_SETS: "", VITE_STUDY_SIMILAR: "1" }).similar, false, "and practice sets' shelf");
+  assert.deepEqual(tabLinks(on), tabLinks(off), "no tab of its own");
+});

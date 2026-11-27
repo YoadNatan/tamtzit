@@ -195,6 +195,20 @@ export const KINDS: Record<string, Kind> = {
     },
   },
 
+  /* ── O: similar questions (docs/study/sheets.md, release B; registered by
+   * sections R and O 3) ── similar_ready: the requester of a whole sheet's
+   * run that made some, to the sheet's set ("?v=sets&k="). The lock screen
+   * shows the course, as a sheet's exam_ready does; never the sheet's title
+   * (it may be a file's name) or a name. */
+  similar_ready: {
+    cat: "mine",
+    title: () => "השאלות הדומות מוכנות",
+    body: ({ a }) => {
+      const k = num(a, "k");
+      return join(str(a, "course"), k === 1 ? "שאלה אחת" : k > 1 && `${k} שאלות`, SETS_SHELF);
+    },
+  },
+
   /* ── R: the daily reminder (off by default) ── */
   digest: {
     cat: "digest",
