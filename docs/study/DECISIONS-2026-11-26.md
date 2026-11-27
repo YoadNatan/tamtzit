@@ -897,9 +897,9 @@ Also decided for this build:
   `reading` with error `budget`. "להמשיך" and "לסיים בלי תשובות מוצעות" go
   through the op (`study_sheet_resume`, the worker's key with the member's
   token), which checks the held units' worst case against the sheets line and
-  the headroom first. Known gap: S's "לנסות שוב" (`study_exam_retry`) also puts
-  failed units back without that check; each unit still reserves within the
-  80% line.
+  the headroom first. (The gap that S's "לנסות שוב" put held units back
+  without that check is closed by the reviews' fixes: `study_exam_retry`
+  refuses a held sheet, `paused`.)
 - **Open-add (OD15)** is `study_sheet_open_add` through the op (dry for the
   price): once an upload, on the pages of the read units that skipped open
   questions; `skipped_open` is net of what it copied (`range.copied`), so the
@@ -1071,7 +1071,7 @@ Also decided for this build:
   (§13.2); `similar_ready`'s lock screen shows the course only, never the
   sheet's title (it may be a file's name).
 - **Not built:** the design's "נשאר החודש לשאלות דומות: $…" (members cannot
-  read the similar line; a tap over it is refused in words). **Known gap:** a
+  read the similar line; a tap over it is refused in words). **Known gap (closed by the reviews' fixes, `study_qset_answer_value`):** a
   numeric twin answered in its set's round is not stamped with the set's
   attempt (`study_answer_value` takes none), so the set's score counts its
   choice twins only, as with a sheet's numeric items in O 2.
@@ -1087,3 +1087,56 @@ Also decided for this build:
 - **Bundle:** the entry chunk is 405,754 B of 410,000 with every flag on
   (4,246 B free; at least 1,500 kept for the models package); O's own share
   stays 1,167 B of 1,500: release B's screens and words load lazily.
+
+### Uploaded sheets, the reviews' fixes, built on 27 November 2026
+
+Three reviews (correctness; security, privacy and cost; UX) of `4b9b832..3793e68`.
+Every "must" and "should" is fixed; the nits too but one. Details:
+[`sheets.md`](sheets.md) ("The reviews' fixes").
+
+- **The sheets line holds what is in flight** (security's must, correctness'
+  should): each sheet holds its worst case (`study_private.sheet_holds`,
+  `study_sheet_hold` under the group's budget lock); the line counts the
+  month's cost plus what is left of the holds that count. OD3/OD21's "both
+  sub-caps checked before spending" now holds for sheets started together.
+- **The start holds a realistic worst case** (S4): the read and key units at
+  their worst, the usual item count solved at its worst; **the real item
+  count is checked again before solving** (O 2's `exam_advance`); a sheet
+  that does not fit then waits (D23) and keeps its copy. Under a fresh $6
+  line: up to 19 pages without answers, 36 with them marked (was 9 and 24).
+  OD13's 40 pages stays the bound of the size.
+- **A sheet never spends past its hold by more than one unit** (S3): the
+  claim holds a sheet's units once the hold is spent (paid retries, pages
+  read again). A page's PDF lines go to the reader cut at 4,000 characters.
+- **"לנסות שוב" on a held sheet is refused** (`paused`, S2); the switch
+  `sheets` is checked there too.
+- **A numeric answer in a set's round is stamped** (`study_qset_answer_value`,
+  C1). A similar job claimed again writes only roots without their twins
+  (`done_roots`, C5). A late writing call keeps its numeric twins and retries
+  (C6 a). Once a day counts a run that is making, made something or **paid
+  for calls** (C6 b and S6 together: a run that charged and made nothing
+  still used the day, so a sheet whose twins keep failing cannot spend the
+  similar line in an afternoon; the review's "made > 0 only" is not taken).
+- **A ready sheet whose held units are open-add's stays ready** (C4); builds
+  without the flags read no sheet item (C7).
+- **A sheet's hiding stays; style examples are past exams' only** (S5);
+  **"locked" replaces "marked"** (S7). `.env.example` names
+  `STUDY_SIMILAR_MONTHLY_USD`, `VITE_STUDY_SHEETS_FORMS`, `VITE_STUDY_SIMILAR`
+  and the parts (S9).
+- **The screens** (UX): every finding is built (the list in sheets.md). Two
+  choices: J / K are the review's keys everywhere, the arrows only inside the
+  list; "לתקן טקסט" is the one verb (with release A1 it opens the edit sheet).
+  The roving tabindex is built for the upload's kind and the review's
+  filter (the app's other radiogroups are as before).
+- **Not taken** (S8, a nit): a twin of numbers only stays checked by
+  recomputing its own formula (`recalc`) at the twin's confidence; a blind
+  solve would cost a call a twin for a check of the same arithmetic.
+- **The A1 e2e's box drawing** (C2) passes: the edit sheet survives a change
+  of the window's height (checked in the script), and the script waits for
+  the drawn box before its screenshot (a viewport one now).
+- **SQL:** parts 11 and 12 only; the release steps are unchanged (parts 1 to
+  12 in order). Section O's version stays 3.
+- **A test that fails at night:** study.sql's M11 (and SR4-2) fail between
+  00:00 and 04:00 Israel time on any commit (the study day starts at 04:00);
+  every SQL run of these checks was after 04:00.
+

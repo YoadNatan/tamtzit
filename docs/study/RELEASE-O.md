@@ -40,6 +40,22 @@ start to finish" below. The app's part adds no SQL: part 12 is the same.
   `study_schema() ->> 'O'` is `3`. Tested on a copy of production's schema
   (`eed179e`), then parts 1 to 12 twice, and on `4b9b832`'s with twin rows in
   the database before parts 1 to 12 ran twice again.
+- **Since the reviews' fixes (27 Nov 2026)** parts 11 and 12 changed again
+  (a sheet's hold on the $6 line, the retry of a held sheet, a numeric
+  answer in a set's round, similar jobs claimed again): nothing to do
+  differently, every SQL step still runs **parts 1 to 12 in order**, and
+  `study_schema() ->> 'O'` is still `3`. Tested on a copy of production's
+  schema (`eed179e`) with parts 1 to 12 twice, and from `4b9b832` and
+  `baed964`. If parts 1 to 12 were already run from an older `dev`, running
+  **11 and 12** again is enough for the fixes.
+- **What a sheet may start with** (the reviews' fixes): each sheet holds its
+  worst case on the $6 line while it is read, so several sheets started
+  together cannot pass the line between them. Under a fresh month that is a
+  sheet of up to **19 pages without answers** or **36 with them marked**;
+  longer ones are refused ("התקציב לדפי תרגילים נגמר החודש") until the line
+  is raised (`STUDY_SHEETS_MONTHLY_USD`). A sheet whose questions turn out
+  many may wait before its suggested answers ("נעצר", "להמשיך" next month or
+  "לסיים בלי תשובות מוצעות"); its copied questions are kept.
 - **Money:** release point 1 spends nothing. Reading a sheet spends the
   group's budget like a past exam (about $0.05 a page), within the sheets line
   ($6 a month) from release point 2.
@@ -160,7 +176,15 @@ select to_char(date_trunc('month', created_at at time zone 'Asia/Jerusalem'), 'Y
 The sheets and similar lines assume the rest of a month stays under about
 $15; if it is above, tell Claude and the two lines go down.
 
-**3. (Optional, for the unit sizes of release A1)** the model's output speed
+**3. (Any time after release A0, read only)** what the sheets line holds now:
+
+```sql
+select e.title, e.status, h.hold_usd, h.base_usd, h.cap_usd, h.at
+  from study_private.sheet_holds h join public.study_exams e on e.id = h.exam_id
+ order by h.at desc limit 5;
+```
+
+**4. (Optional, for the unit sizes of release A1)** the model's output speed
 from the ledger: the query in [`sheets.md`](sheets.md) ("How long a unit
 takes"). Send Claude the rows.
 

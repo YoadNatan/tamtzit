@@ -31,6 +31,7 @@ path, queue, lease, worker, review screen and ledger kind `exam` as past exams
 | A1 (O7, O8) | The client: the forms in practice, the edit sheet, add and retire, answers and worked solutions, open-add, the paused state, the lecture page's row; its e2e (`e2e/study/sheets-forms.cjs`, flag set `o`) | `VITE_STUDY_SHEETS_FORMS` | O 2 | Built |
 | B (O9, O10) | The SQL (O 3: twins, runs and their jobs, the sheet's set in section L, R's `similar_ready`; E and F in place) and the server (the similar job, op `similar`, `/api/study/work {similar}`, the $5 line) | `VITE_STUDY_SIMILAR` (the client's, O11) | O 3 | Built (part 12; parts 1, 7 and 10 changed in place) |
 | B (O11, O12) | The client: "עוד שאלות כמוה" after a wrong answer, "שאלות דומות לכל הדף" at the end of a sheet and in the review's "⋯", the twins in the sheet's set, the twin's chip, the words of `similar_ready`; its e2e (`e2e/study/similar.cjs`, flag set `os`) | `VITE_STUDY_SIMILAR` | O 3 (and L 1) | Built |
+| Fixes (27 Nov) | The three reviews' fixes: a sheet's hold on the $6 line, the second check before solving, the retry, a numeric twin in a set's round, a similar job claimed again, the screens' findings ("The reviews' fixes" below) | the same three | O 1, O 2, O 3 (parts 11 and 12) | Built |
 
 ## The fixture (O0)
 
@@ -419,8 +420,8 @@ with no answers never passes the $6 line, as the design's §11.2 says).
 `study_sheet_room(p_group)` (O 1) gives the op what a member cannot read:
 the switch, what this month's units of the group's sheets cost
 (`exam_jobs.cost_usd`, sheets deleted since included), and the month's
-spend. Known gap, as the design accepted: two sheets started minutes apart
-can both pass, since a unit's cost is known when it finishes.
+spend. (Since the reviews' fixes the line also counts what sheets still
+reading may spend: each holds its worst case, "The reviews' fixes" below.)
 
 **The course page** (`CourseScreen.tsx`): one segment "מבחנים ותרגילים",
 "העלאת מבחן או דף תרגילים" first, then "מבחנים קודמים" and "דפי תרגילים"
@@ -611,7 +612,8 @@ the answer is kept at confidence 1, so it counts in no score.
   (`sheetReaderWorstUsd`: every unit at all of its max_tokens, 8 items a page
   solved without answers, 2 with them: 6 pages without answers $3.65, with
   answers $1.40-1.57; under a fresh $6 line at most 9 pages without answers
-  and 24 with them, against release A0's 24 and 40) must fit the sheets line
+  and 24 with them, against release A0's 24 and 40; since the reviews' fixes
+  the start holds less, `sheetHoldUsd`: 19 and 36 pages) must fit the sheets line
   and the room under the 80% line, as release A0's; then
   `study_sheet_pages_done`. 503 schema without O 2.
 - `action: "open_add"` (OD15): `dry: true` gives `{units, pages, skipped,
@@ -1108,11 +1110,8 @@ package); O's own share is unchanged at 1,167 B of its 1,500: everything of
 release B loads lazily (the flag's row is the shell's).
 
 **Known gaps, accepted:**
-- A **numeric twin answered in its set's round** counts in the member's
-  answers and mistakes (`study_answer_value`) but not in the set's attempt
-  (L's wrappers stamp choice answers only; `study_answer_value` takes no
-  attempt), as a numeric item of a sheet already did in O 2. A set made of
-  similar questions scores its choice twins.
+- ~~A numeric twin answered in its set's round is not stamped on the set's
+  attempt~~: fixed by the reviews (`study_qset_answer_value`).
 - The design's "נשאר החודש לשאלות דומות: $…" (under $2 left) is not shown:
   members have no read of the similar line; a tap over it is refused with
   "התקציב לשאלות דומות נגמר החודש".
@@ -1157,6 +1156,117 @@ the edit sheet not found after the drag) **at the commit before O11 too**
 (`1d12f57`, the same build and script), a timing-dependent failure O10's
 first run also met; not changed here.
 
+## The reviews' fixes (27 Nov 2026)
+
+Three reviews (correctness; security, privacy and cost; UX) read `dev` from
+`4b9b832` to `3793e68`. What changed, by finding; the decisions are in
+[`DECISIONS-2026-11-26.md`](DECISIONS-2026-11-26.md) ("Uploaded sheets, the
+reviews' fixes"). Only parts 11 and 12 changed (section O): the release steps
+are the same ("parts 1 to 12 in order").
+
+### The hold: the $6 line counts what sheets still reading may spend
+
+Before, `study_sheet_room` summed `exam_jobs.cost_usd`, which a unit writes
+when it finishes: every sheet started before the first one's units finished
+saw the line nearly empty, so three 15-page sheets could each pass a line of
+$6 with about $4 each at worst. Now:
+
+- **A sheet holds its worst case** (`study_private.sheet_holds`, O 1). The op
+  `exam_read` takes it through `study_sheet_hold` (the worker's key and the
+  member's token) after the bounds and before the start, **under the group's
+  budget lock** (`study_budget:<group>`, the lock `study_reserve` and
+  `study_similar_begin` take), so two starts at the same instant never both
+  pass (`supabase/tests/sheet-hold-concurrency.sh`: three $4 sheets at once,
+  one holds, two get `sheets_cap`, 10 rounds of 10). A start that fails after
+  the hold drops it; one that never starts stops counting after 30 minutes.
+- **What counts on the line** (`study_private.sheets_used`): this month's
+  cost of every sheet's units, plus what is left of each hold that still
+  counts (its worst case less what the sheet spent since; only while the
+  sheet has a unit that will run, or is uploading). A sheet held by the
+  budget (D23), finished, failed or deleted counts only what it cost.
+- **The start's hold** (`sheetHoldUsd`, shared/study/sheetPrice.ts): the read
+  and key units at their worst case (every unit at all of `max_tokens`, every
+  page as full as a page gets) and the **usual** item count solved at its
+  worst (3 items a page without answers, 0.75 with them: the price's count).
+  The full worst case assumed 8 items a page and refused any sheet without
+  answers over 9 pages (the review's S4).
+- **The second check, before solving** (O 2's `exam_advance`): when reading
+  is done and the solve units are queued, their worst case with the **real**
+  item count (`ceil(items / 4)` units × one unit's worst case, the hold's
+  `solve_sheet` / `solve_exam`, `solveUnitWorstUsd`) is checked against the
+  line again, under the same lock. It fits: it is the sheet's hold now. It
+  does not: the solve units wait as the budget would hold them (D23): the
+  sheet says "נעצר: נגמר התקציב החודשי.", "לסיים בלי תשובות מוצעות" keeps the
+  copy without suggested answers, "להמשיך" checks the line once more.
+- **A sheet never spends past its hold by more than one unit**: O 2's claim
+  takes no unit of a sheet that spent its hold (a unit paid twice, a retry
+  of a truncated unit, a page read again); its units wait (D23) and
+  "להמשיך" takes a new hold first (`heldWorstUsd`).
+- **"לנסות שוב"** (`study_exam_retry`, redefined in O 2): a sheet's units the
+  budget holds are not restarted (`paused`: the phone offers "להמשיך"), the
+  switch `sheets` is checked, and what a retry spends stays within the hold.
+- **A page's PDF lines** sent to the reader are cut at 4,000 characters
+  (`capPageLines`, the worst case's page; the exactness check still has
+  them all), for both readers of a sheet (a past exam's pages as before).
+
+What fits under $6 now, on the current default model (the hold; the full
+worst case for comparison; the usual price on the button):
+
+| Sheet (sheet reader) | Hold | Full worst case | Usual |
+|---|---|---|---|
+| 5 pages, no answers | $1.58 | $3.13 | $0.58 |
+| 10 pages, no answers | $3.20 | $6.30 (was refused) | $1.18 |
+| 18 pages, no answers | $5.42 | $11.02 | $2.11 |
+| 20 pages, no answers | $6.10 (refused on a fresh month) | $12.34 | $2.35 |
+| 40 pages, answers marked | $6.64 (refused) | $9.74 | $2.77 |
+
+So a fresh month takes a sheet of up to **19 pages without answers** or **36
+with them marked**; one solve unit's worst case is $0.25 (the exam reader's
+20 items: $0.39). A sheet of many items that passed the start may wait before
+its solving (the second check); the copy is never lost.
+
+### The other findings
+
+- **A numeric twin in a set's round** (C1): `study_qset_answer_value` (O 3,
+  guarded on L) checks the attempt (L's `qset_attempt_open`), answers as
+  `study_answer_value` does and stamps the row (L's `qset_stamp`), so the
+  set's score and its group numbers count it. `PracticeSession` passes the
+  round's attempt to `SheetAnswer` and starts a new one on "attempt finished"
+  as for a choice. e2e: `similar.cjs` answers the set's numeric twin.
+- **A similar job claimed again** (C5): `similar_jobs.done_roots` holds the
+  roots its save went in for; a claim after a lost finish sends only the
+  others, and a job whose roots are all done is done. A writing call that
+  stopped early, or too little time for the check (45 s), keeps the numeric
+  twins and retries the job (C6 a).
+- **Once a day** (C6 b, S6): a run of the whole sheet uses up the day while
+  it makes, or once it made something or paid for a call
+  (`study_private.similar_today`).
+- **A ready sheet** whose only held units are open-add's stays ready (C4).
+- **Without the flags** (C7, the rollback): a course session leaves sheets
+  out (`groupExams` reads the kind), and a set's or the mistakes' round
+  leaves out open, numeric and twin rows a build cannot answer.
+- **Hiding and the style** (S5): `study_exam_hide` refuses a sheet (it stays
+  out of the profile); `study_course_style_items` takes past exams only.
+- **"locked"** (S7) replaces the review's `marked`: one flag, answered or
+  self-marked, so the group never learns who opened an open solution.
+- **The screens** (the UX review): the "N בלי תשובה" line counts by form; the
+  edit sheet's options on their own line on a phone; J / K move between
+  items (the arrows only inside the list); one verb "לתקן טקסט" (the edit
+  sheet with release A1; "לתקן את השאלה" is gone); the decimal pad with "−"
+  and "×10ⁿ"; "→ לדף" back from a sheet's practice; "שאלה 3ב" at a round's
+  end; the paused card while the line is spent ("להמשיך" disabled, "אפשר
+  להמשיך מ-1 בחודש", a held unit "נעצר" with no "לנסות שוב"); a camera's file
+  name is no sheet's name; page 1 drawn in a PDF's tile; "עמודים" for pages;
+  the alertdialogs take the focus, as does a field the button found wrong;
+  44 px controls on the new screens; a Latin title joined with a maqaf; the
+  member's share in its own words; the same file not added twice; two
+  sheets of one name told apart by their day; the kind and filter radios
+  move with the arrows (roving tabindex).
+- **Not changed** (S8): a twin whose parts are all numbers is checked by
+  recomputing its own formula on its own inputs (`recalc`), not solved blind
+  again: the arithmetic is what goes wrong in such a twin, and a blind solve
+  would cost a call each. It is saved like the others.
+
 ## Stopping and rolling back (releases A0 to B)
 
 | Switch off (`update study_private.features set enabled = false, changed_at = now() where name = '…'`) | Stops at once |
@@ -1164,6 +1274,10 @@ first run also met; not changed here.
 | `sheets` | new sheets (`study_sheet_create` is `off`); the op `exam_read`'s sheet starts (403 `off`) |
 | `exams` | everything of past exams and sheets |
 | `similar` (O 3) | new runs (`study_similar_begin` and the op: `off`), every reservation of kind `similar` (`kind_on`), and the claims of jobs; the sweeper then stops every waiting run (`stopped`, its reservation let go). A model call already running ends (≤ 200 s) and its job stops |
+
+A build without the flags reads no sheet item: the course's sessions leave
+sheets out, and sets' and mistakes' rounds leave out what the build cannot
+answer (open, numeric, similar questions).
 
 Rolling back, in order: the switch `sheets` off; hide the sheets
 (`update public.study_exams set deleted_at = now() where kind = 'sheet' and deleted_at is null`,
