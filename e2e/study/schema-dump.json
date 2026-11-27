@@ -484,6 +484,15 @@
     "required": 1
    }
   ],
+  "study_claim_similar": [
+   {
+    "args": [
+     "p_run",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
   "study_code_finish": [
    {
     "args": [],
@@ -1110,6 +1119,18 @@
      "p_status",
      "p_error",
      "p_cost",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_finish_similar_job": [
+   {
+    "args": [
+     "p_job",
+     "p_lease",
+     "p_status",
+     "p_error",
      "p_key"
     ],
     "required": 3
@@ -3255,6 +3276,69 @@
     "required": 3
    }
   ],
+  "study_similar_begin": [
+   {
+    "args": [
+     "p_exam",
+     "p_items",
+     "p_scope",
+     "p_per",
+     "p_reserve",
+     "p_worst",
+     "p_cap",
+     "p_urls",
+     "p_until",
+     "p_key"
+    ],
+    "required": 7
+   }
+  ],
+  "study_similar_charge": [
+   {
+    "args": [
+     "p_job",
+     "p_lease",
+     "p_model",
+     "p_usage",
+     "p_cost",
+     "p_next_worst",
+     "p_key"
+    ],
+    "required": 5
+   }
+  ],
+  "study_similar_of": [
+   {
+    "args": [
+     "p_question"
+    ],
+    "required": 1
+   }
+  ],
+  "study_similar_plan": [
+   {
+    "args": [
+     "p_exam",
+     "p_question",
+     "p_scope"
+    ],
+    "required": 1
+   }
+  ],
+  "study_similar_save": [
+   {
+    "args": [
+     "p_job",
+     "p_lease",
+     "p_twins",
+     "p_dropped",
+     "p_skipped",
+     "p_model",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
   "study_slide_flag": [
    {
     "args": [
@@ -4412,7 +4496,9 @@
    "no_label",
    "no_key",
    "figures",
-   "exact"
+   "exact",
+   "from_exam",
+   "twin_check"
   ],
   "study_quiz_answers": [
    "round_id",
@@ -4561,6 +4647,26 @@
    "writer",
    "rev",
    "gen"
+  ],
+  "study_similar_runs": [
+   "id",
+   "group_id",
+   "exam_id",
+   "scope",
+   "items",
+   "per",
+   "status",
+   "made",
+   "dropped",
+   "skipped_figs",
+   "error",
+   "reserve_id",
+   "reserved_usd",
+   "charged_usd",
+   "set_id",
+   "created_by",
+   "created_at",
+   "updated_at"
   ],
   "study_slide_flags": [
    "id",
@@ -5136,6 +5242,11 @@
    "delete": true
   },
   "study_sections": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_similar_runs": {
    "insert": [],
    "update": [],
    "delete": false

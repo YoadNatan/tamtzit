@@ -103,7 +103,7 @@ const LIB = {
   L: ["install", "installPrompt", "installCopy", "installLazy"],
   R: ["notify", "notices", "notifyText"],
   QS: ["make", "setsCopy", "sets"],
-  O: ["sheets", "sheetForms", "sheetPure"],
+  O: ["sheets", "sheetForms", "sheetPure", "similarCopy"],
 };
 const SHARED = {
   C: ["cloze", "fsrs"], K: ["edits"], T: ["today"], G: ["lane"], E: ["blankTable", "extras"], A: ["estimates", "plan", "agenda"], U: ["pulse"], S: ["batch"],

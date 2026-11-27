@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { BOSS_NOT_COUNTED, failCode, failShort, failText, hasText, INTERNAL_CODES, isInternal, type Area } from "./failText";
 import { SET_FAIL_CODES } from "./setsCopy";
+import { SIMILAR_FAIL_CODES } from "./similarCopy";
 
 /** Practice sets' own codes: worded in setsCopy.ts (setFail, a lazy chunk), shown only by the set screens. */
 const SET_WORDED = new Set(SET_FAIL_CODES);
+/** Similar questions' own codes (section O 3): worded in similarCopy.ts (similarFail, a lazy chunk). */
+const SIMILAR_WORDED = new Set(SIMILAR_FAIL_CODES);
 
 /* F-13 (review FE-19; §12.2.7, §12.7.4): every exception the SQL can raise
  * reaches a screen as words. Each `raise exception '…'` of §3's SQL
@@ -86,7 +89,7 @@ const auth = packageCodes(
 test("every exception the SQL raises has words, or is listed as internal (F-13, §12.2.7)", () => {
   const codes = raisedIn(SQL);
   assert.ok(codes.size > 150, `${codes.size} codes found in §3's and §12's SQL`);
-  const missing = [...codes].filter((c) => !hasText(c) && !quiz.codes.has(c) && !auth.codes.has(c) && !isInternal(c) && !SET_WORDED.has(c));
+  const missing = [...codes].filter((c) => !hasText(c) && !quiz.codes.has(c) && !auth.codes.has(c) && !isInternal(c) && !SET_WORDED.has(c) && !SIMILAR_WORDED.has(c));
   assert.deepEqual(missing, [], `codes with no Hebrew (quiz codes from ${quiz.from}, auth codes from ${auth.from})`);
 });
 
