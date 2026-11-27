@@ -102,9 +102,13 @@ const withoutFallback = (b: Record<string, unknown>) => {
   return rest;
 };
 
-test("the comparable kinds of this package: the answer-key kinds, none differing from production", () => {
-  assert.deepEqual([...LAB_ROUTES], ["solver", "fix_check", "exam_read", "sheet_read"]);
-  for (const r of LAB_ROUTES) assert.equal(DIFFERS[r], "", r);
+test("the comparable kinds: the answer-key kinds, none differing from production; then the rated kinds, with their codes", () => {
+  assert.deepEqual([...LAB_ROUTES], ["solver", "fix_check", "exam_read", "sheet_read", "practice", "set_write", "points", "cards", "ask", "part"]);
+  for (const r of ["solver", "fix_check", "exam_read", "sheet_read"] as const) assert.equal(DIFFERS[r], "", r);
+  assert.deepEqual(
+    { practice: DIFFERS.practice, set_write: DIFFERS.set_write, points: DIFFERS.points, cards: DIFFERS.cards, ask: DIFFERS.ask, part: DIFFERS.part },
+    { practice: "count", set_write: "count", points: "", cards: "count", ask: "no threads", part: "max_tokens" },
+  );
   assert.deepEqual(POLICY.lab, { share: 0.8, memberShare: null, daily: null }, "kind lab: the group's 80% line, nobody's share (OD5)");
 });
 

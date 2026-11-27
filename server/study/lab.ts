@@ -10,6 +10,7 @@ import { sheetCall } from "./sheets.js";
 import { judgeItems, solverCall, SolverAnswerIn, withTwins, type SolverAnswer, type SolverItem } from "./solver.js";
 import { LAB_UNVERIFIED_FACTOR } from "./limits.js";
 import { providerReady } from "./llm/index.js";
+import { RATED_DIFFERS, RATED_NAMES, RATED_ROUTES, ratedChecks, type RatedKey } from "./labRated.js";
 import type { Lecture } from "./study.js";
 
 /* ── "השוואת מודלים" on the server: frozen requests, estimates, checks
@@ -32,11 +33,25 @@ import type { Lecture } from "./study.js";
  * Everything here is pure; ops/lab.ts reads the material and runs the slots.
  */
 
-export const LAB_ROUTES = ["solver", "fix_check", "exam_read", "sheet_read"] as const satisfies readonly RouteKey[];
+/** The answer-key kinds (slice 2): the key is the result. */
+export const KEYED_ROUTES = ["solver", "fix_check", "exam_read", "sheet_read"] as const satisfies readonly RouteKey[];
+/** Every kind a comparison takes: the answer-key kinds, then the short kinds members rate (labRated.ts, WP8). */
+export const LAB_ROUTES = [...KEYED_ROUTES, ...RATED_ROUTES] as const satisfies readonly RouteKey[];
 export type LabRoute = (typeof LAB_ROUTES)[number];
 export const isLabRoute = (r: unknown): r is LabRoute => typeof r === "string" && (LAB_ROUTES as readonly string[]).includes(r);
 /** The routes whose requests send pictures (a model without vision cannot take them). */
-export const LAB_PICTURES: Readonly<Record<LabRoute, boolean>> = { solver: false, fix_check: false, exam_read: true, sheet_read: true };
+export const LAB_PICTURES: Readonly<Record<LabRoute, boolean>> = {
+  solver: false,
+  fix_check: false,
+  exam_read: true,
+  sheet_read: true,
+  practice: false,
+  set_write: false,
+  points: false,
+  cards: false,
+  ask: false,
+  part: true,
+};
 
 /** A picture of a frozen request: its storage path behind this prefix, signed per call. */
 export const PATH_URL = "study-path:";
@@ -50,7 +65,8 @@ export type RefItem = { id: string; question: string; options: number; figure: b
 export type LabKey =
   | { route: "solver"; items: Array<{ answer: number | null; seq: number[] | null; options: number; image: boolean; without: boolean }>; asked: number }
   | { route: "fix_check"; expected: boolean; decision: "applied" | "withdrawn" }
-  | { route: "exam_read" | "sheet_read"; items: RefItem[] };
+  | { route: "exam_read" | "sheet_read"; items: RefItem[] }
+  | RatedKey;
 
 /** The frozen request, as study_lab_runs.request keeps it. */
 export type Frozen = {
@@ -63,6 +79,8 @@ export type Frozen = {
   effort: Effort;
   maxTokens: number;
   format?: Format;
+  /** "לשאול": top-level automatic caching of the conversation, as production sends it. */
+  cacheTail?: boolean;
   /** The pictures' tokens at their stored size, for the estimate. */
   imageTokens: number;
   /** What the phone may show ("החומר"): never a key. */
@@ -70,9 +88,10 @@ export type Frozen = {
   key: LabKey;
 };
 
-/** How a frozen request of this package differs from production: in nothing
- *  (D15's smaller caps are for the long kinds of WP8). */
-export const DIFFERS: Readonly<Record<LabRoute, string>> = { solver: "", fix_check: "", exam_read: "", sheet_read: "" };
+/** How a frozen request differs from production: the answer-key kinds in
+ *  nothing; the rated kinds by the codes of labRated.ts (count, max_tokens,
+ *  no threads), which the phone words. */
+export const DIFFERS: Readonly<Record<LabRoute, string>> = { solver: "", fix_check: "", exam_read: "", sheet_read: "", ...RATED_DIFFERS };
 
 /** The run's title: the kind's one Hebrew name (design-models §9.1) and its material. */
 export const LAB_NAMES: Readonly<Record<LabRoute, string>> = {
@@ -80,6 +99,7 @@ export const LAB_NAMES: Readonly<Record<LabRoute, string>> = {
   fix_check: "בדיקת תיקון",
   exam_read: "קריאת מבחן",
   sheet_read: "קריאת דף תרגילים",
+  ...RATED_NAMES,
 };
 
 /** May `model` answer a comparison of `route`? null: yes. Unlike a
@@ -137,7 +157,7 @@ function toPaths(messages: Message[], pathOfUrl: ReadonlyMap<string, string>): M
 
 /** The request as a call sends it: each path signed (`urls`, path → URL).
  *  Null when a picture has no URL (the slot fails as "pictures"). */
-export function thaw(f: Frozen, urls: ReadonlyMap<string, string>): Pick<Frozen, "system" | "messages" | "effort" | "maxTokens" | "format"> | null {
+export function thaw(f: Frozen, urls: ReadonlyMap<string, string>): Pick<Frozen, "system" | "messages" | "effort" | "maxTokens" | "format" | "cacheTail"> | null {
   let missing = false;
   const messages = f.messages.map((m): Message =>
     Array.isArray(m.content)
@@ -153,7 +173,7 @@ export function thaw(f: Frozen, urls: ReadonlyMap<string, string>): Pick<Frozen,
       : m,
   );
   if (missing) return null;
-  return { system: f.system, messages, effort: f.effort, maxTokens: f.maxTokens, ...(f.format ? { format: f.format } : {}) };
+  return { system: f.system, messages, effort: f.effort, maxTokens: f.maxTokens, ...(f.format ? { format: f.format } : {}), ...(f.cacheTail ? { cacheTail: true } : {}) };
 }
 
 /** The hash a run keeps of its request (study_lab_runs.request_hash): the parts a model reads. */
@@ -392,6 +412,13 @@ export const COPY_SIMILAR = 0.9;
  *  stopped early (cut, timed out), so an item it did not reach is not judged. */
 export function checksFor(key: LabKey, text: string, complete: boolean): Checks {
   switch (key.route) {
+    case "practice":
+    case "set_write":
+    case "points":
+    case "cards":
+    case "ask":
+    case "part":
+      return ratedChecks(key, text, complete);
     case "solver": {
       const doc = parseJson(text) as { answers?: unknown } | null;
       const answers: SolverAnswer[] = [];

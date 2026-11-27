@@ -112,3 +112,15 @@ export const LAB_SOLVER_MAX = 20;
  *  production calls do (30 minutes), for another provider for 120 s (D18). */
 export const LAB_SIGN_SECONDS = 1800;
 export const LAB_SIGN_SECONDS_OTHER = 120;
+/** The short kinds members rate (WP8): practice and a set's batch write this
+ *  many questions, cards this many cards (production writes more: the rating
+ *  stays short); a summary part's answer is capped at this many tokens
+ *  (D15: 16k instead of 48k, so the run's cap is real); "לשאול"'s typed
+ *  question is at most this long. */
+export const LAB_PRACTICE_COUNT = 3;
+export const LAB_CARDS_COUNT = 6;
+export const LAB_PART_TOKENS = 16_000;
+export const LAB_ASK_CHARS = 500;
+/** The AI score (OD12): its call's output cap, a base and per answer. */
+export const LAB_JUDGE_TOKENS = 1_500;
+export const LAB_JUDGE_TOKENS_EACH = 900;
