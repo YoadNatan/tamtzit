@@ -143,6 +143,10 @@
   gap: var(--sp-3);
   min-width: 0;
 }
+/* C43: where a model is processed, on its own line under its name. */
+.md-check-note {
+  flex-basis: 100%;
+}
 .md-check-usd,
 .md-radio-usd {
   font-variant-numeric: tabular-nums;

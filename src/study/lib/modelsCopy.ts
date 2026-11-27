@@ -148,6 +148,8 @@ export const MC = {
   tagUnverified: "מחיר לא נבדק",
   tagNoVision: "בלי תמונות",
   tagExpensive: "יקר",
+  /** C43: a model only its maker serves, from China (OD22). */
+  chinaLine: (host: string) => `המעבד של ${host} נמצא בסין.`,
   moreModels: (n: number) => `עוד ${n} מודלים`,
   fewerModels: "פחות מודלים",
   otherProviders: "ספקים נוספים: ב״מי כותב מה״",
@@ -386,7 +388,7 @@ export const MC = {
   keyLimit: {
     openai: "אצל OpenAI: קרדיט מראש של $5, והטעינה האוטומטית כבויה (Settings ← Billing).",
     google: "אצל Google: מפתח מפרויקט שהחיוב (Billing) פעיל בו, כי בשימוש בחינם Google עשויה להשתמש בחומר, ומכסה יומית נמוכה של בקשות ב-Google Cloud (Quotas), כי תקציב שם רק שולח התראה.",
-    openrouter: "אצל OpenRouter: קרדיט מראש של $5, הטעינה האוטומטית כבויה, ובהגדרות הפרטיות חסימה של ספקים ששומרים את המידע או מתאמנים עליו.",
+    openrouter: "אצל OpenRouter: קרדיט מראש של $5, הטעינה האוטומטית כבויה, ובהגדרות חסימה של ספקים ששומרים את המידע או מתאמנים עליו ושל ספקים שנמצאים בסין.",
   } as Readonly<Record<string, string>>,
   keyPrices: "המחירים של המודלים שלו עוד לא נבדקו מול הדף של הספק: בהשוואות הם מוערכים פי 1.5, ואי אפשר להעביר אליהם סוג עבודה עד שהם נבדקים.",
   pricesChecked: (d: string) => `המחירים נבדקו ב-${d}`,

@@ -227,6 +227,7 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
                       {m.id === today ? <span className="a-chip ok">{MC.tagToday}</span> : null}
                       {!m.verified ? <span className="a-chip warn">{MC.tagUnverified}</span> : null}
                       {m.expensive ? <span className="a-chip warn">{MC.tagExpensive}</span> : null}
+                      {m.china && m.host ? <span className="md-check-note a-small a-muted">{MC.chinaLine(m.host)}</span> : null}
                     </span>
                     <span className="md-check-usd a-small">{est !== undefined ? <bdi dir="ltr">≈{usd(est)}</bdi> : quote ? "" : "…"}</span>
                   </label>

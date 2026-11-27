@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_MODEL, MODELS, modelInfo, ROUTE_KEYS } from "../../../shared/study/models";
+import { ALL_MODELS, DEFAULT_MODEL, MODELS, modelInfo, ROUTE_KEYS } from "../../../shared/study/models";
 import { KNOWN_KEYS, MC, ROUTE_NAMES, routeName, usd } from "./modelsCopy";
 import { MODELS_HELP, providersLine } from "./helpCopy";
 import {
@@ -287,8 +287,14 @@ test("providers (WP9): every provider's key sheet names its limit first; approvi
   for (const p of PROVIDERS) assert.ok(MC.keyLimit[p.id]?.includes(p.name), `${p.id}: its limit`);
   assert.ok(MC.keyLimit.openai.includes("$5") && MC.keyLimit.openai.includes("כבויה"), "OpenAI: $5 prepaid, auto-recharge off (OD18)");
   assert.ok(MC.keyLimit.google.includes("Billing") && MC.keyLimit.google.includes("מכסה יומית"), "Google: a billing project and a daily quota (OD18)");
+  assert.ok(MC.keyLimit.openrouter.includes("$5") && MC.keyLimit.openrouter.includes("בסין"), "OpenRouter: $5 prepaid, the account blocks retaining and Chinese hosts (OD18, OD22)");
   assert.ok(MC.approveText("OpenAI").includes("גם תמונות"), "scope all, the default: everything but names");
   assert.ok(MC.approveText("Google", "text").includes("רק טקסט") && !MC.approveText("Google", "text").includes("גם תמונות"), "scope text");
   assert.ok([MC.approveText("X"), MC.approveText("X", "text")].every((l) => l.includes("בלי שמות של חברי הקבוצה")), "never members' names");
 });
 
+test("C43: a model only its maker serves from China says where it is processed (OD22)", () => {
+  assert.equal(MC.chinaLine("Alibaba Cloud"), "המעבד של Alibaba Cloud נמצא בסין.");
+  const china = ALL_MODELS.filter((m) => m.china);
+  assert.ok(china.length >= 1 && china.every((m) => m.provider === "openrouter" && m.host), "each through OpenRouter, with who processes it");
+});
