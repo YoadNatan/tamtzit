@@ -17,8 +17,10 @@
 // and lists each package's static share of the entry chunk (budget: 8 kB a
 // package; F's shell and the libraries have none). A package of the wave has
 // a hard cap of its own (notifications, R: 1,200 B; practice sets, QS:
-// 2,000 B, design-practice §10 and OD2) and only its slot module in the
-// entry: every other module of it must load lazily. Practice sets did not
+// 2,000 B, design-practice §10 and OD2; uploaded sheets, O: 1,500 B; the
+// models package, Y, "השוואת מודלים": 1,500 B, the workflow's room for it in
+// the 410 kB limit) and only its slot module in the entry: every other
+// module of it must load lazily. Practice sets did not
 // move entry code to lazy chunks first (the design's WP1 "6 kB"): under the
 // 410 kB limit the wave fits without it (docs/study/sets.md has the numbers).
 //
@@ -37,7 +39,7 @@ const FLAGS = [
   "QUESTIONS", "PRACTICE", "QUIZ", "CARDS", "CARDS_REVIEW", "CORRECTIONS", "ASK", "RECORDINGS", "PDF", "ACCOUNT",
   "PROGRESS", "MARATHONS", "EXAMS", "MEETING", "ANCHOR", "VAR", "WALL", "TODAY", "GUESS", "NEEDS_ME", "PULSE",
   "MUSEUM", "BOSS", "GROUP_PLAN", "TRAPS", "BLANK_TABLE", "QUIZ_ROUNDS", "EVE", "GUIDE", "QTYPES", "COURSES", "INSTALL",
-  "NOTIFY", "MAKE", "SETS", "SHEETS", "SHEETS_FORMS", "SIMILAR",
+  "NOTIFY", "MAKE", "SETS", "SHEETS", "SHEETS_FORMS", "SIMILAR", "MODELS",
 ];
 for (const f of FLAGS) {
   if (flagsOff) delete process.env[`VITE_STUDY_${f}`];
@@ -47,9 +49,9 @@ for (const f of FLAGS) {
 const LIMIT = 410_000;
 const PACKAGE_BUDGET = 8_000;
 /** A package's hard cap on its static share, where it has one (failing the check). */
-const PACKAGE_CAP = { R: 1_200, QS: 2_000, O: 1_500 };
+const PACKAGE_CAP = { R: 1_200, QS: 2_000, O: 1_500, Y: 1_500 };
 /** Packages whose only module in the entry may be their slot (features/<slot>.tsx). */
-const SLOT_ONLY = ["R", "QS", "O"];
+const SLOT_ONLY = ["R", "QS", "O", "Y"];
 const FORBIDDEN = ["מבחן חי", "תחרותי", "נקודות על תשובה נכונה ומהירה"];
 /** A package's screen: never in the entry chunk. */
 const SCREEN = /^src\/study\/components\/(?:\w+Screen|Catchup|Museum|Pulse|Wall|Boss)\.tsx$/;
@@ -64,6 +66,7 @@ const SLOT = {
   notify: "R", // notifications: the bell, the inbox, pushes (section R)
   qsets: "QS", // practice sets: "סט חדש", the shelf, the set page (docs/study/sets.md)
   sheets: "O", // uploaded sheets: the upload, the wide review, the landing card (docs/study/sheets.md)
+  models: "Y", // "השוואת מודלים": routes, the comparison, blind rating (section Y, design-models)
 };
 /** A style sheet named otherwise than its package's slot. */
 const STYLE = { sets: "QS", similar: "O" };
@@ -89,6 +92,7 @@ const COMPONENT = {
   R: ["NotifyScreen", "InboxScreen", "NotifyParts"],
   QS: ["MakeScreen", "MakeParts", "MakeProgress", "MakeEntry", "SetPage", "SetsShelf", "SetsScreen", "SetStats", "SetCard", "SetJoinNote", "SetsEntries"],
   O: ["SheetUpload", "PageView", "DeepLinkCard", "SheetText", "SheetAnswer", "SheetEdit", "SheetSolution", "SheetsLecture", "SimilarSheet"],
+  Y: ["ModelsScreen", "ModelsNewScreen", "ModelsRunScreen", "ModelsParts", "ModelsRows"],
 };
 const LIB = {
   W: ["generate", "writing", "transcript", "transcribe", "transcribe.worker", "pdf-export"],
@@ -104,11 +108,13 @@ const LIB = {
   R: ["notify", "notices", "notifyText"],
   QS: ["make", "setsCopy", "sets"],
   O: ["sheets", "sheetForms", "sheetPure", "similarCopy", "similar"],
+  Y: ["models", "modelsCopy"],
 };
 const SHARED = {
   C: ["cloze", "fsrs"], K: ["edits"], T: ["today"], G: ["lane"], E: ["blankTable", "extras"], A: ["estimates", "plan", "agenda"], U: ["pulse"], S: ["batch"],
   R: ["notifyCopy", "notifyRoute", "notifyQuiet", "b64url", "bidiText"],
   O: ["sheetPrice", "coverage"],
+  Y: ["models", "estimate"],
 };
 const byName = (table) => Object.fromEntries(Object.entries(table).flatMap(([pkg, names]) => names.map((n) => [n, pkg])));
 const COMPONENT_OF = byName(COMPONENT);
@@ -179,7 +185,7 @@ for (const [id, m] of Object.entries(entry.modules)) {
 for (const [who, cap] of Object.entries(PACKAGE_CAP)) {
   if (!flagsOff && (share[who] ?? 0) > cap) problems.push(`package ${who}'s share of the study entry chunk is ${share[who]} B (its cap: ${cap.toLocaleString("en")} B)`);
 }
-const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "S", "L", "R", "QS", "O", "libraries", "other"];
+const ORDER = ["F", "W", "Q", "Z", "C", "K", "A", "M", "N", "V", "T", "U", "J", "H", "B", "G", "E", "D", "S", "L", "R", "QS", "O", "Y", "libraries", "other"];
 const lines = [...ORDER, ...Object.keys(share).filter((k) => !ORDER.includes(k))]
   .filter((k) => k in share || k in PACKAGE_CAP) // a capped package shows its 0 too
   .map((k) => {
