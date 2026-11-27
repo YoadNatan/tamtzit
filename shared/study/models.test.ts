@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_MODEL, labelOf, modelInfo, MODELS, priceOf, priceRowOn, providerOf, type ModelInfo } from "./models.js";
+import { DEFAULT_MODEL, labelOf, modelInfo, MODELS, priceOf, priceRowOn, providerOf, ROUTE_KEYS, ROUTE_RULES, scopeAllows, type ModelInfo } from "./models.js";
 import { ANTHROPIC_PRICES, anthropicId, CHARS_PER_TOKEN, priceOf as phonePriceOf, rateOf, UNKNOWN_PRICE } from "./prices.js";
 
 /* The model registry and the phone's price rows (design-models §7.2, §12.1;
@@ -23,7 +23,17 @@ test("every row is complete, ids unique and namespaced, the default listed and v
   }
   const def = modelInfo(DEFAULT_MODEL);
   assert.ok(def && def.verified && def.provider === "anthropic" && !def.expensive, "the default is listed, verified, Anthropic's");
-  assert.deepEqual(ids, ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"], "slice 0: Claude only");
+  // Every current Claude API model (Anthropic's model list, checked 2026-11-27).
+  assert.deepEqual(
+    ids,
+    [
+      "claude-fable-5-2", "claude-mythos-5-2", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5",
+      "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
+      "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-5-5", "claude-haiku-4-5",
+    ],
+    "Claude only, every current model",
+  );
+  for (const m of MODELS) assert.ok(m.context >= 200_000 && m.maxOut <= 128_000, `${m.id}: context, maxOut`);
 });
 
 test("dated rows are in order: the first has no date, each later one starts after the one before", () => {
@@ -36,7 +46,7 @@ test("dated rows are in order: the first has no date, each later one starts afte
     }
   }
   // The switch on a date, on a made-up row pair (no listed model has one yet).
-  const promo: ModelInfo = { ...MODELS[1], id: "claude-test-1", prices: [{ in: 1, out: 2, w5m: 1.25, w1h: 2, hit: 0.1 }, { from: "2027-01-01", in: 3, out: 6, w5m: 3.75, w1h: 6, hit: 0.3 }] };
+  const promo: ModelInfo = { ...modelInfo(DEFAULT_MODEL)!, id: "claude-test-1", prices: [{ in: 1, out: 2, w5m: 1.25, w1h: 2, hit: 0.1 }, { from: "2027-01-01", in: 3, out: 6, w5m: 3.75, w1h: 6, hit: 0.3 }] };
   assert.equal(priceRowOn(promo, "2026-12-31").in, 1);
   assert.equal(priceRowOn(promo, "2027-01-01").in, 3);
   assert.equal(priceRowOn(promo, "2027-06-01").in, 3);
@@ -85,13 +95,16 @@ test("ids: a dated id is its model; anything else is unknown, at the dearest rat
   for (const m of ["claude-someday-9", "openai:gpt-x", "", null, undefined]) assert.deepEqual(priceOf(m), UNKNOWN_PRICE, String(m));
   assert.deepEqual(UNKNOWN_PRICE, { in: 10, out: 50, w5m: 12.5, w1h: 20, hit: 1 });
   assert.equal(modelInfo("claude-opus-5-5-20260101")?.id, "claude-opus-5-5");
-  assert.equal(modelInfo("claude-sonnet-5"), null, "pricing only, not a model to route to");
+  assert.equal(modelInfo("claude-sonnet-5")?.id, "claude-sonnet-5");
+  assert.equal(modelInfo("claude-sonnet-4-5"), null, "pricing only (deprecated), not a model to route to");
+  assert.deepEqual(priceOf("claude-sonnet-4-5"), { in: 3, out: 15, w5m: 3.75, w1h: 6, hit: 0.3 });
   assert.equal(CHARS_PER_TOKEN, 2.5);
 });
 
 test("labels and providers", () => {
   assert.equal(labelOf("claude-haiku-5-5"), "Claude Haiku 5.5");
-  assert.equal(labelOf("claude-sonnet-5"), "claude-sonnet-5", "an unlisted id is its own label");
+  assert.equal(labelOf("claude-sonnet-5"), "Claude Sonnet 5");
+  assert.equal(labelOf("claude-opus-4-5"), "claude-opus-4-5", "an unlisted id is its own label");
   assert.equal(providerOf("claude-opus-5-5"), "anthropic");
   assert.equal(providerOf("claude-haiku-4-5-20251001"), "anthropic");
   assert.equal(providerOf("openai:gpt-x"), "openai");
@@ -108,4 +121,43 @@ test("Haiku 5.5's capabilities: no server-side fallback, thinking inside max_tok
   assert.equal(h.charsPerToken, 1.9);
   assert.equal(modelInfo("claude-fable-5-2")!.expensive, true);
   for (const id of ["claude-opus-5-5", "claude-sonnet-5-5"]) assert.equal(modelInfo(id)!.serverFallback, true, id);
+});
+
+test("every current Claude model's prices, capabilities and limits as Anthropic's notes give them", () => {
+  const io = (id: string) => [priceOf(id).in, priceOf(id).out];
+  assert.deepEqual(io("claude-mythos-5-2"), [8, 40]);
+  assert.deepEqual(io("claude-fable-5-1"), [10, 50]);
+  assert.deepEqual(io("claude-fable-5"), [10, 50]);
+  assert.equal(priceOf("claude-fable-5").hit, 1);
+  assert.equal(priceOf("claude-mythos-5").hit, 1);
+  for (const id of ["claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"]) assert.deepEqual(io(id), [5, 25], id);
+  assert.deepEqual(io("claude-sonnet-5"), [2, 10]);
+  assert.deepEqual(io("claude-sonnet-4-6"), [3, 15]);
+  assert.deepEqual(io("claude-haiku-4-5"), [1, 5]);
+  // Server-side fallback: Fable and Mythos 5.2 and 5.1, Opus 5.5 and 5, Sonnet 5.5 only.
+  const fallback = MODELS.filter((m) => m.serverFallback).map((m) => m.id);
+  assert.deepEqual(fallback, ["claude-fable-5-2", "claude-mythos-5-2", "claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"]);
+  // Mythos: verified organizations only; never the default.
+  assert.deepEqual(MODELS.filter((m) => m.verifiedOrgsOnly).map((m) => m.id), ["claude-mythos-5-2", "claude-mythos-5-1", "claude-mythos-5"]);
+  // Twice the default's price or more: a production route needs a second confirmation (OD14).
+  assert.deepEqual(MODELS.filter((m) => m.expensive).map((m) => m.id), ["claude-fable-5-2", "claude-mythos-5-2", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5"]);
+  for (const m of MODELS.filter((x) => x.expensive)) assert.ok(priceOf(m.id).out >= 2 * priceOf(DEFAULT_MODEL).out, m.id);
+  const h45 = modelInfo("claude-haiku-4-5")!;
+  assert.equal(h45.context, 200_000);
+  assert.equal(h45.maxOut, 64_000);
+  assert.equal(h45.effort, null, "no effort control");
+  assert.equal(modelInfo("claude-opus-4-6")!.effort !== null, true);
+});
+
+test("route keys: every key has its rules", () => {
+  assert.equal(new Set(ROUTE_KEYS).size, ROUTE_KEYS.length);
+  for (const k of ROUTE_KEYS) assert.match(k, /^[a-z][a-z_]{1,23}$/, k);
+  assert.deepEqual(Object.keys(ROUTE_RULES).sort(), [...ROUTE_KEYS].sort());
+  // Uploaded sheets and similar questions (section O) and the practice-set generator have keys of their own.
+  for (const k of ["sheet_read", "sheet_key", "sheet_solve", "similar", "set_write"] as const) assert.ok(ROUTE_KEYS.includes(k), k);
+  // The outline and the ask route are not made through run() (D5).
+  assert.deepEqual(ROUTE_KEYS.filter((k) => ROUTE_RULES[k].anthropicOnly), ["outline", "ask_route"]);
+  // Scope "text" takes only keys without pictures, members' wording, or exam and sheet pages; "all" takes every key.
+  assert.deepEqual(ROUTE_KEYS.filter((k) => scopeAllows("text", k)), ["outline", "notes", "points", "cards", "judge"]);
+  assert.ok(ROUTE_KEYS.every((k) => scopeAllows("all", k)));
 });

@@ -7,7 +7,8 @@
  * one place. Only Anthropic rows: the full registry (models.ts) stays out of
  * any static client import.
  *
- * Checked on 2026-11-26 against Anthropic's model and pricing notes
+ * Checked on 2026-11-26, and again on 2026-11-27 for every current model,
+ * against Anthropic's model and pricing notes
  * (https://platform.claude.com/docs/en/about-claude/pricing). Cache hits are
  * 0.1 × input except where a model's notes say otherwise (Fable and Mythos
  * 5.1 and 5.2 at 0.025 ×, Opus 5.5 and Sonnet 5.5 at 0.05 ×, Fable and
