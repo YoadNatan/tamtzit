@@ -1292,7 +1292,8 @@ every other row is the recommended default.
   1, so health's `schemaOk` asks for it with the flag). `?v=models` with `x`
   (`new`, `board`, `routes`), `r` (a run) and `k` (a route key); without the
   flag the address goes home with no notice. R's `lab_new` links to
-  `{v: "models", r}` and is seen there (`lab:<run>`).
+  `{v: "models"}` (the list to rate, obj `labs`) since the reviews of 27
+  Nov 2026; a run's own `lab:<run>` is kept for older notices.
 - **The entry chunk:** package Y's share is **267 B** of its 1,500 (only the
   slot `features/models.tsx`); the entry chunk is 406,989 B of 410,000 with
   every flag on. The screens, the words (`modelsCopy.ts`, the fail texts
@@ -1428,7 +1429,7 @@ every other row is the recommended default.
   (`ignore`), so an open model runs on a host outside China. "Where
   available": a model only its maker serves (Qwen4 Max) is marked `china`
   and goes without the exclusion, still with zero data retention; the new
-  comparison says "המעבד של Alibaba Cloud נמצא בסין." (C43). Where no host
+  comparison says "הבקשות למודל הזה מעובדות בסין (Alibaba Cloud)." (C43). Where no host
   meets the preferences, OpenRouter refuses before anything is generated
   ($0). No direct endpoint (DeepSeek, DashScope, Moonshot, Z.ai) is listed
   or has a key; section Y 1's `study_model_provider_set` still accepts only
@@ -1456,3 +1457,111 @@ every other row is the recommended default.
   was made up.
 - **Vision** only for Kimi K3 (its page calls it multimodal); the others are
   refused for kinds with pictures until their pages say otherwise.
+
+### Models: the reviews' fixes, built on 27 November 2026
+
+Three reviews (correctness; security, privacy and cost; UX) of dev from
+1bcad51 to cd184ce. Every "must" and "should" was checked against the code;
+what was real is fixed, what was not is said here.
+
+**Money and consent (server and section Y):**
+- **A retry and the paid steps stay within the run's cap** (security must).
+  `study_lab_claim` refuses `run_cap` for parts retry, solve and judge when
+  the run's ledger rows (reserved or settled) and this claim pass the run's
+  cap ($1.50); a refused claim changes nothing. `retry` maps it to 402.
+- **A run's answers are claimed together** (`study_lab_claim_slots`, one
+  transaction): the reservations commit at once, so the group's spend never
+  shows one label's estimate on its own. The run's first claim (strict)
+  checks the month's line and the group's 80% line for every slot together;
+  refused, nothing is reserved and **the empty run is dropped**, so it uses
+  none of the day's 3 runs (correctness nit). A retry reserves **the run's
+  dearest model's worst case**, whichever label it is. `study_models` gives
+  `spent_usd` to the cent (was 4 places). What stays: `study_spent`
+  (section F, the group's month total, which members may call) still
+  changes when an answer settles; with the claims together and the retry at
+  the dearest, a settle tells at most an answer's own cost after it ends.
+  Accepted (6 members, the owner runs every comparison) and recorded here.
+- **Consent again after a run began** (D17; correctness should, security
+  should). `resume` checks each waiting slot's model against the group's
+  providers as they are now (key, "לאשר שליחה", scope, pictures) and ends a
+  refused slot with its reason; `retry` answers 400 with the reason and
+  sends nothing. The paid steps' models (the solver's check, the AI score)
+  are decided as production's `modelFor` decides: the switch `routes` off,
+  an unverified price, a withdrawn consent or a narrowed scope give the
+  default (`stepModel`); a recorded judge that is no longer allowed is
+  refused ("not allowed").
+- **An unverified price settles × 1.5 too** (security should): a model with
+  `verified: false` and no cost reported by the provider settles at the
+  registry's figure × 1.5, as it was reserved. OpenRouter's reported
+  `usage.cost` still wins when the provider reports it.
+- **Scope "text" and cards** (security should): cards read members'
+  corrections (`study_edits`), so `ROUTE_RULES.cards` is `memberText`: a
+  provider approved for "רק טקסט" no longer takes cards (nor a cards
+  comparison). **`notes` stays a text kind** (decided here): its input is the
+  recording's transcript, the lecturer's words, not members' wording.
+- **The judge's answers are fenced with a per-call nonce** (security nit):
+  `<answer label="א" id="…">`, the nonce taken out of the answers' text, so
+  an answer cannot forge another label's section.
+- **Owner-only runs stay the owner's** (security nit, correctness nit):
+  `study_lab_run` and `study_lab_source` give a member only what
+  `study_lab_list` shows a member (a kind members rate, done, 2 answers or
+  more); a member's skip of a run members do not rate is refused (`not rated
+  here`), so it never reveals names and costs.
+- **The results' cost counts a failed try** (security nit): the board's mean
+  and median per answer come from the ledger (the answer's and its retry's
+  rows), not the output's last cost.
+- **Provider calls** (security nit, correctness nit): `redirect: "error"`
+  (a redirect would carry Gemini's `x-goog-api-key`); a loop left early
+  aborts the connection; an abort or a timeout after the request went out
+  but before its headers settles at the reservation (D4), not at $0.
+- **Practice sets' price** (correctness nit): the plan, the sets screen and
+  the headroom checks price at `set_write`'s (or `practice`'s) routed model,
+  as the batches reserve.
+- **`lab_admins` is global on purpose** (security nit, not changed): one
+  deployment serves one group; an admin is still checked as a member first.
+- **The OpenRouter slugs** (security should): could not be checked (openrouter.ai
+  is outside the session's network). `RELEASE-Y2.md` now makes the account's
+  "Ignored providers" the primary block, asks the owner to check the slugs
+  and Qwen4 Max's host before adding the key, and to leave Qwen4 Max
+  unticked until then.
+
+**The screens (UX review):**
+- `.md-screen` has `align-content: start` (the stretched tabs, rows and
+  headers on iPad and desktop are gone).
+- The answer switcher's buttons are named ("תשובה ב · עוד לא דורגה"); "לתשובה
+  ב ›" moves focus to the next answer's heading.
+- The recommendation and "להשתמש בו" offer only models production may take
+  (`routable`); any other card says why instead ("המחיר עוד לא נבדק, אי אפשר
+  להעביר אליו עבודה"); the route sheet ignores a preset it cannot offer.
+- OD10's one-tap undo: the toast after החלפה or חזרה לברירת המחדל has "ביטול",
+  which puts back the model the kind had.
+- "ההשוואה הזאת דולגה" only on a rated kind; an amount under $0.001 is
+  `<$0.001` left to right; the folds have a chevron; the recommendation is
+  no longer the lecturer's pink callout; the price warning text reads at
+  4.5:1 or more; a phone's rating scrolls the page (no box in a box); an
+  answer-key answer shows in words, its JSON in a fold; the route sheet
+  points to "עזרה", its last line; the scope sheet says what "רק טקסט"
+  sends.
+- A new comparison lists Claude first (today's model, the ticked ones, the
+  rest, the expensive last) and each provider in its own fold, the
+  unverified note once a group; a model's price reads "עד $x"; תוצאות picks
+  the kind in one select.
+- Copy: "אין עוד היום", "…אחרי ״הצגת השמות והעלות״", "הבקשות למודל הזה
+  מעובדות בסין (…)", "דורגה"/"דולגה" on a member's run, "4.0/5 · 3
+  השוואות"; model names do not break; the empty run's bar moves with
+  "בדרך כלל עד 2-3 דקות".
+- The notice `lab_new` opens the list of runs to rate (obj `labs`), so one
+  notice for several runs and the list agree.
+- The e2e mock's board computes the group's score; `models-rate.cjs` checks
+  it on the member's results.
+
+**Rejected or left:**
+- "Help's line shows a raw id for OpenAI and Gemini": not so, the stored ids
+  carry their provider (`openai:…`, `google:…`). The line now asks the
+  registry anyway (`routedProviders`), which also covers an id without a
+  prefix.
+- The owner's tabs and the kind chips' arrow keys (UX nit): left; the tabs
+  are buttons that work with Tab and Enter, and תוצאות's kinds are a select
+  now.
+- An empty owner home's two primary buttons (UX nit): left; the sticky
+  "השוואה חדשה" is the screen's action everywhere else.

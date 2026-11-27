@@ -116,7 +116,8 @@ skipped), `study_lab_judgements`.
 | `study_lab_plan(group, lecture, route, title, source, request, hash, differs, models, judge, estimate, cap, key)` | owner + key | Raises in order `off`, `not the creator`, `bad slots`, `run_cap`, `daily_runs`, `lab_budget`, `reserve`; returns `{run, labels}`, never a model map |
 | `study_lab_slot(run, label, key)` | owner + key | The server's read of a slot: its model, status, the frozen request |
 | `study_lab_judge_input(run, key)` | owner + key | Each finished answer by label |
-| `study_lab_claim(run, label, part, estimate, cap, key)` | worker only | Atomic: `answer` (waiting, run running), `retry` (timeout or error, once), `solve` (a finished answer's paid check), `judge` (label `j`, run done). `off`, `closed`, `not waiting`, `lab_budget`, then `study_reserve`'s. Ref `run:<run>:<slot>:<part>` or `run:<run>:j:judge`. Returns the reservation |
+| `study_lab_claim(run, label, part, estimate, cap, key)` | worker only | Atomic: `answer` (waiting, run running), `retry` (timeout or error, once), `solve` (a finished answer's paid check), `judge` (label `j`, run done). `off`, `closed`, `not waiting`, `run_cap` (retry, solve and judge: the run's ledger rows so far and this claim past the run's cap), `lab_budget`, then `study_reserve`'s. Ref `run:<run>:<slot>:<part>` or `run:<run>:j:judge`. Returns the reservation |
+| `study_lab_claim_slots(run, slots, cap, strict, key)` | worker only | A run's answers claimed in one transaction (`slots` `[{label, estimate}]`), so the reservations commit together (D12). `strict` (the run's first claim): the month's line and the 80% line for every slot together; refused, nothing reserved and the empty run dropped (no daily run used): `{claimed: {}, error, dropped}`. Otherwise each slot alone: a refused one ends `error` with its reason, one claimed already is `not waiting`. Returns `{claimed: {label: reservation}, refused, error}` |
 | `study_lab_status(run, key)` | worker | For the 10 s cancel poll |
 | `study_lab_output_save(output, status, reason, text, usage, cost, latency, first, served_by, checks, check_status, key)` | worker | Writes a claimed answer once (false otherwise); the last one closes the run |
 | `study_lab_check_save(output, checks, status, key)` | worker | A paid check's result, merged |
@@ -149,8 +150,9 @@ server's own.
 
 When a run of a rated kind closes with at least 2 answers, every member but
 the owner who ran it gets one notice of kind **`lab_new`** (R's reserved row:
-cat `inapp`, never pushed; coalesced; route `{v: "models", r: <run>}`, obj
-`lab:<run>`; it ends after `todo_days`). Without section R nothing is sent.
+cat `inapp`, never pushed; coalesced; route `{v: "models"}`, the list of
+runs to rate, obj `labs`, so one notice for several runs opens them all and
+is seen there; it ends after `todo_days`). Without section R nothing is sent.
 Y registers the kind only when R's row is missing and never changes it, so:
 
 ```sql
@@ -311,11 +313,15 @@ group's "לאשר שליחה" and a scope that takes the kind; pictures need vis
 an unverified price is allowed, × 1.5; an expensive model is allowed), the
 worst case (the sum of each model's, which must be under the run's cap
 before anything is planned), then `study_lab_plan`. Before the stream, each
-label's model is read (`study_lab_slot`) and claimed on the worker's path
-(`study_lab_claim`, its estimate reserved with no user). A first claim that
-is refused is the request's status (402 `lab_budget`, `reserve`, `budget`;
-403 `off`; 409 `closed`), every slot ending with that reason
-(`study_lab_skip`); a later one ends only its own slot. The claimed slots run
+label's model is read (`study_lab_slot`) and every slot is claimed in one
+call on the worker's path (`study_lab_claim_slots`, each estimate reserved
+with no user, all committed together). When the month's line or the 80%
+line cannot take the whole run, that is the request's status (402
+`lab_budget`, `reserve`; 403 `off`) and the empty run is dropped; a slot
+refused on its own ends with its reason. `resume` and `retry` check each
+model's provider again (its key, "לאשר שליחה", its scope, pictures: D17)
+before anything is claimed; a retry reserves the run's dearest model's
+worst case and is refused past the run's cap (402 `run_cap`). The claimed slots run
 in one detached invocation (`detachedStream` + `waitUntil`; the phone may
 lock or leave), in parallel, each stopping 270 s after the function started
 or 25 s before its deadline; the run's status is read every 10 s and
@@ -373,8 +379,8 @@ switch `lab`, the owner's gate, the line and the caps.
 **The route** `?v=models` (`src/study/lib/route.ts`): `x` = `new` | `board`
 | `routes`, `r` = a run, `k` = a route key (with `new` or `board`). Without
 the flag it goes home with no notice (a stale notice's link). A notice's
-`{v: "models", r}` is written by `shared/study/notifyRoute.ts` and sees
-`lab:<run>`. Tab: "שלי" (a run and a new comparison have a back arrow, "→
+`{v: "models"}` (the list to rate) sees `labs` in `shared/study/notifyRoute.ts`
+(a run's own `lab:<run>` stays for a notice made before 27 Nov 2026). Tab: "שלי" (a run and a new comparison have a back arrow, "→
 להשוואות").
 
 **The entry chunk:** only `src/study/features/models.tsx` (one lazy
@@ -617,9 +623,12 @@ is generated: the call costs $0 and fails (in a comparison "משהו השתבש"
 production D8 reruns it on Opus). A model only its maker serves is marked
 `china: true` with its `host` (today Qwen4 Max, Alibaba Cloud): it goes
 without the exclusion, still with zero data retention, and a new comparison
-says **"המעבד של Alibaba Cloud נמצא בסין."** under it (C43). The owner's
-OpenRouter account blocks the same providers in its settings, as a second
-layer (`RELEASE-Y2.md`).
+says **"הבקשות למודל הזה מעובדות בסין (Alibaba Cloud)."** under it (C43).
+**The slugs and Qwen4 Max's host are unverified** (written from memory;
+openrouter.ai could not be loaded from the build or the review sessions):
+until the owner checks them against OpenRouter's providers list, **the
+account's "Ignored providers" setting is the primary block** and the
+request's `ignore` list a second layer (`RELEASE-Y2.md`, step 2).
 
 **Money (D16).** `fee: 1.055` (OpenRouter's 5.5% on the credits its prices
 are paid in) is reserved by `estimateUsd` and charged on settling: a call

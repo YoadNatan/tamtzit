@@ -128,7 +128,7 @@ makers' own endpoints. Every request the app sends asks OpenRouter for
 in China**, so an open model (DeepSeek, Qwen3.8, Kimi K3, GLM) runs on a host
 elsewhere. One model only its maker serves, **Qwen4 Max (Alibaba Cloud)**,
 goes without that exclusion (still zero retention), and a new comparison
-says under it **"המעבד של Alibaba Cloud נמצא בסין."**; leave it unticked if
+says under it **"הבקשות למודל הזה מעובדות בסין (Alibaba Cloud)."**; leave it unticked if
 that is not wanted. Where no host meets these terms, OpenRouter refuses
 before anything is written: the slot shows "משהו השתבש" and costs $0.
 
@@ -144,6 +144,15 @@ before anything is written: the slot shows "משהו השתבש" and costs $0.
    StepFun, Tencent, Xiaomi, ByteDance, Baichuan (the same list the app
    sends, `CHINA_HOSTS` in `server/study/llm/compat.ts`). This blocks Qwen4
    Max too, which is fine: it then fails at $0.
+   **This account setting is the primary block.** The app's list of slugs
+   was written without access to openrouter.ai and is not verified: before
+   adding the key, open OpenRouter's providers list
+   (`https://openrouter.ai/api/v1/providers`, or the Ignored providers
+   picker), check that every provider based in China is ignored there, and
+   send any slug that differs from `CHINA_HOSTS` so the list can be fixed
+   (with the date and the page, in `models.md`). Qwen4 Max being served only
+   from China is also unverified: leave it unticked until its page says
+   where it is processed.
 3. Create an **API key** for this app only (Settings → Keys; a key's own
    credit limit, e.g. $5, is a third layer).
 4. **Vercel:** `OPENROUTER_API_KEY`, **Production only**, Sensitive, then

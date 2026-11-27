@@ -470,10 +470,28 @@ checked chip); the models of a new comparison are labelled checkboxes in an
 (`.md-radio`). `styles/models.css` holds these (tokens only) and loads with
 the lazy screens.
 
+The reviews of 27 Nov 2026 settled these: `.md-screen` keeps
+`align-content: start` (main is at least a screen tall, as notify.css); the
+recommendation is `a-callout md-rec` (an ok line on `--surface-2`), never
+the kit's `.a-callout.rec`, which is the lecturer's pink; the folds
+(`.md-fold`) draw their own chevron, since a flex `summary` loses the
+disclosure triangle; warning text on the surface (`.md-stale`) uses
+`--md-warn-text`, `--warn-line` mixed 60% into `--ink` (about 6.5:1 in
+light), because `--warn-line` itself is a 3:1 line colour; a model's name
+(`.md-name`) never breaks inside itself; on תוצאות the kind is one
+`<select>` (`.md-kind-pick`), so the cards start above the fold; a new
+comparison lists Claude first and each approved provider in its own fold
+(`.md-prov`), its unverified note said once on the fold; while no answer is
+in, the run's bar moves (`.md-wait`, only without reduced motion); a
+phone's rating scrolls the page, and only side by side (768 px and up)
+does a long answer scroll in its column.
+
 **The blind rating** (`ModelsRunScreen.tsx`'s `RateFlow`, WP8). On a phone
 one answer at a time (`.md-rate-panel.on`), switched by a row of buttons
-with `aria-pressed` (the label's circle, ✓ once scored) and a last button
-for the best pick; each answer ends with "לתשובה ב ›". From 768 px every
+with `aria-pressed` and a name ("תשובה א · דורגה" / "· עוד לא דורגה"; the
+circle and the ✓ are hidden from screen readers) and a last button
+for the best pick; each answer ends with "לתשובה ב ›", which moves focus
+to the next answer's heading (or the best pick's legend). From 768 px every
 answer sits side by side in two columns, each with its score box, and the
 last step under them (the switcher and the "next" buttons hide). The score
 box (`.md-scorebox`) is a `fieldset` whose `legend` asks "כמה טובה תשובה
