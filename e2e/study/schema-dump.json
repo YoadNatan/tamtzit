@@ -1432,6 +1432,15 @@
     "required": 1
    }
   ],
+  "study_lecture_made": [
+   {
+    "args": [
+     "p_lecture",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
   "study_lecture_making": [
    {
     "args": [
@@ -1794,6 +1803,14 @@
      "p_scope"
     ],
     "required": 3
+   }
+  ],
+  "study_model_routed": [
+   {
+    "args": [
+     "p_key"
+    ],
+    "required": 0
    }
   ],
   "study_model_set": [

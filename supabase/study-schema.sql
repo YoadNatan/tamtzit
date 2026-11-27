@@ -24451,6 +24451,17 @@ begin
 end;
 $$;
 
+-- Every model a key is routed to in any group, for /api/study/health's
+-- stalePrices (a routed model whose price was checked long ago). The
+-- worker's, with the key; ids only.
+create or replace function public.study_model_routed(p_key text default null)
+returns text[] language plpgsql stable security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  return coalesce((select array_agg(distinct r.model order by r.model) from public.study_model_routes r), '{}'::text[]);
+end;
+$$;
+
 -- The owner sets a key's model (null: back to the default), through the
 -- server, which checked the model against the registry and the providers.
 create or replace function public.study_model_set(p_group uuid, p_route text, p_model text, p_note text default '', p_key text default null)
@@ -25035,7 +25046,7 @@ end;
 $$;
 
 revoke all on function public.study_lab_owner(uuid), public.study_models(uuid, text), public.study_model_at(uuid, text, timestamptz, text),
-  public.study_lecture_made(uuid, text),
+  public.study_lecture_made(uuid, text), public.study_model_routed(text),
   public.study_model_set(uuid, text, text, text, text), public.study_model_provider_set(uuid, text, boolean, text),
   public.study_lab_plan(uuid, uuid, text, text, jsonb, jsonb, text, text, jsonb, text, numeric, numeric, text),
   public.study_lab_slot(uuid, text, text), public.study_lab_judge_input(uuid, text),
@@ -25056,7 +25067,7 @@ grant execute on function public.study_model_set(uuid, text, text, text, text),
   public.study_lab_slot(uuid, text, text), public.study_lab_judge_input(uuid, text) to authenticated;
 -- A member's read, or the worker's with the key; the worker's alone (the key inside; the claim refuses a signed-in caller).
 grant execute on function public.study_models(uuid, text), public.study_model_at(uuid, text, timestamptz, text),
-  public.study_lecture_made(uuid, text),
+  public.study_lecture_made(uuid, text), public.study_model_routed(text),
   public.study_lab_claim(uuid, text, text, numeric, numeric, text), public.study_lab_status(uuid, text),
   public.study_lab_output_save(uuid, text, text, text, jsonb, numeric, int, int, text, jsonb, text, text),
   public.study_lab_check_save(uuid, jsonb, text, text), public.study_lab_judged(uuid, text, jsonb, numeric, text)

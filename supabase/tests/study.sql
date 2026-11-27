@@ -402,7 +402,7 @@ select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, 
                          -- section Y (models, the comparison): the worker's claim, status poll and saves (the claim refuses
                          -- a signed-in caller), the model of a moment, and the routes read (each refusing without the key)
                          'study_lab_claim', 'study_lab_status', 'study_lab_output_save', 'study_lab_check_save', 'study_lab_judged',
-                         'study_model_at', 'study_models', 'study_lecture_made');
+                         'study_model_at', 'study_models', 'study_lecture_made', 'study_model_routed');
 
 -- F28 (review of F0, SEC-1): the slide pictures stay with their lecture. The
 -- app of before F0 deletes a lecture's files first and then its row, which
@@ -12295,6 +12295,10 @@ select pg_temp.yok('Y4-route', :'y_set1' = 'null' and :'y_set2' = 'null'
   and pg_temp.yas('', format('select public.study_model_at(%L, %L, %L::timestamptz, %L)', :'yg', 'solver', :'y_before', :'ykey')) = 'null'
   and pg_temp.yas(:'ya', format('select public.study_model_at(%L, %L, now())', :'yg', 'solver')) = 'error: forbidden',
   'the owner routes the question check to Haiku and a sheet''s read to Sonnet; members see it; the model at a moment (null before: the default); the worker''s only');
+select pg_temp.yok('Y4-routed', pg_temp.yas('', format('select public.study_model_routed(%L)::text', :'ykey')) = '{claude-haiku-5-5,claude-sonnet-5-5}'
+  and pg_temp.yas('', 'select public.study_model_routed()') = 'error: forbidden'
+  and pg_temp.yas(:'ya', 'select public.study_model_routed()') = 'error: forbidden',
+  'the routed models of every group, for health: the worker''s only');
 select pg_temp.yas(:'ya', format('select public.study_model_set(%L, %L, null, %L, %L)', :'yg', 'solver', '', :'ykey')) as y_unset \gset
 select pg_temp.yok('Y4-unset', not exists (select 1 from public.study_model_routes where group_id = :'yg' and route = 'solver')
   and (select string_agg(coalesce(model, 'default'), ',' order by id) from public.study_model_route_log where group_id = :'yg' and route = 'solver') = 'claude-haiku-5-5,default'
