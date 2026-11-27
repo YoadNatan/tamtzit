@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { numericValue } from "../../../server/study/questions";
 import {
   appendQueue,
+  insertNext,
+  orderFor,
   answerArgs,
   answered,
   autopsyOrder,
@@ -648,6 +650,31 @@ test("an uploaded item keeps its printed order after the answer (uploaded sheets
   assert.equal(keepPrinted({ source: "exam" }, false), false, "without VITE_STUDY_SHEETS: the autopsy order, as before");
   assert.equal(keepPrinted({ source: "ai" }, true), false, "a lecture's question: the chosen and the right option first");
   assert.equal(keepPrinted({ source: "member" }, true), false);
+  // A similar question (release B) keeps its source's way too: shown and after the answer as printed.
+  assert.equal(keepPrinted({ source: "twin" }, true), true);
+  assert.deepEqual(orderFor({ source: "twin", form: "one", options: ["א", "ב", "ג", "ד"] }, () => 0.99), [0, 1, 2, 3]);
   assert.deepEqual(printedOrder(5), [0, 1, 2, 3, 4]);
   assert.deepEqual(printedOrder(0), []);
+});
+
+test("similar questions found or made after a wrong answer are asked right after it (release B)", () => {
+  let s = startSession({ key: "e." + SET, timed: false, queue: [q("a"), q("b"), q("c")], now: 0, random: seeded(5) });
+  s = recordAnswer(s, 0, { answer: 1, explanations: [], takeaway: "", correct: false }, 10);
+  const s1 = insertNext(s, [q("t1", { source: "twin" }), q("t2", { source: "twin" }), q("b")], { now: 20 });
+  assert.deepEqual(s1.ids, ["a", "t1", "t2", "b", "c"], "right after the question on screen; b is already in the round");
+  assert.equal(s1.orders.length, 5);
+  assert.equal(s1.seconds.length, 5);
+  assert.deepEqual(s1.orders[1], [0, 1, 2, 3, 4], "a twin in its printed order");
+  assert.equal(s1.i, 0, "the question on screen stays");
+  assert.equal(insertNext(s1, [q("t1")], { now: 30 }), s1, "nothing new: the same state");
+  const s2 = next(s1, 40);
+  assert.equal(currentId(s2), "t1");
+  // A round that was over asks them now.
+  let t = startSession({ key: "e." + SET, timed: false, queue: [q("a")], now: 0 });
+  t = recordAnswer(t, 0, { answer: 1, explanations: [], takeaway: "", correct: false }, 10);
+  t = next(t, 11);
+  assert.ok(isOver(t));
+  const t2 = insertNext(t, [q("t1", { source: "twin" })], { now: 50 });
+  assert.equal(currentId(t2), "t1");
+  assert.equal(t2.shownAt, 50);
 });

@@ -30,7 +30,7 @@ export type PublicQuestion = {
   exam_id: string | null;
   exam_no: number | null;
   ref_lecture: string | null;
-  source: "ai" | "exam" | "member"; // member: a member's own trap (section E)
+  source: "ai" | "exam" | "member" | "twin"; // member: a member's own trap (section E); twin: a similar question (section O 3)
   part_idx: number | null;
   kind: "mcq" | "case";
   difficulty: 1 | 2 | 3;
@@ -59,6 +59,8 @@ export type PublicQuestion = {
   style: string | null;
   /** Q's end: a picture of the lecture the question is about ("fig:N-K", "" none). */
   figure?: string;
+  /** A similar question's sheet (section O 3, read with VITE_STUDY_SIMILAR): its figure's page is that sheet's. */
+  from_exam?: string | null;
   /** Question types (selected only with the flag; absent means a plain one-answer question). */
   form?: SheetForm;
   layout?: Layout | null;

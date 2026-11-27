@@ -362,7 +362,8 @@ export function orderFor(q: Pick<SessionQuestion, "options" | "form"> & Partial<
   // A past exam's item is shown as the exam printed it: its options may name
   // each other ("א+ב נכונות", "כל התשובות נכונות"), so a new order would make
   // them wrong (sources.md B5, practiceSession's orderFor for source 'exam').
-  if (q.source === "exam") return q.options.map((_, i) => i);
+  // A similar question (a twin, release B) keeps its source's printed way (design D10).
+  if (q.source === "exam" || q.source === "twin") return q.options.map((_, i) => i);
   // A tap item's options are its pin numbers, in pin order. Every other form is shuffled for each
   // showing, set questions too (tf's statements, match's answers, order's steps), so a question
   // that comes back is not answered by remembering where things were (review QT-11).
@@ -422,7 +423,7 @@ export function autopsyOrder(count: number, chosen: number | null | undefined, a
  *  after the answer (uploaded sheets, design D10, with VITE_STUDY_SHEETS): "א+ב
  *  נכונות" and the letters the member saw on paper stay where they were, and
  *  the verdict marks the chosen and the right option in place. */
-export const keepPrinted = (q: { source?: string | null }, on: boolean): boolean => on && q.source === "exam";
+export const keepPrinted = (q: { source?: string | null }, on: boolean): boolean => on && (q.source === "exam" || q.source === "twin");
 /** The options in their printed order. */
 export const printedOrder = (count: number): number[] => Array.from({ length: Math.max(0, count) }, (_, i) => i);
 
@@ -520,6 +521,29 @@ export function appendQueue(
     orders: [...s.orders, ...add.map((q) => orderFor(q, o.random))],
     seconds: [...s.seconds, ...add.map((q) => (s.timed ? examSeconds(q, o.setting ?? EXAM_SETTING_SECONDS) : 0))],
     ...(wasOver ? { shownAt: o.now } : {}),
+  };
+}
+
+/** Questions asked right after the one on screen (similar questions made or
+ *  found after a wrong answer, release B): the ones the round has already are
+ *  skipped; a round that is over asks them now. */
+export function insertNext(
+  s: SessionState,
+  queue: Array<Pick<SessionQuestion, "id" | "vignette" | "question" | "options"> & Partial<Pick<SessionQuestion, "form" | "figure" | "layout" | "source">>>,
+  o: { now: number; setting?: number; random?: () => number },
+): SessionState {
+  const have = new Set(s.ids);
+  const add = queue.filter((q) => !have.has(q.id) && (have.add(q.id), true));
+  if (!add.length) return s;
+  const wasOver = isOver(s);
+  const at = Math.min(s.ids.length, s.i + 1);
+  const put = <T,>(xs: T[], ys: T[]) => [...xs.slice(0, at), ...ys, ...xs.slice(at)];
+  return {
+    ...s,
+    ids: put(s.ids, add.map((q) => q.id)),
+    orders: put(s.orders, add.map((q) => orderFor(q, o.random))),
+    seconds: put(s.seconds, add.map((q) => (s.timed ? examSeconds(q, o.setting ?? EXAM_SETTING_SECONDS) : 0))),
+    ...(wasOver ? { i: at, shownAt: o.now } : {}),
   };
 }
 

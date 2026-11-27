@@ -118,17 +118,21 @@ export async function sheetInfo(examIds: string[]): Promise<{
   origins: Map<string, { origin: "exam" | "sheet" | "solved" | "member" | null; conf: number | null }>;
   titles: Record<string, string>;
   extras: Record<string, { label: string; unit: string | null }>;
+  /** Each upload's kind (a sheet's items may have similar questions, release B). */
+  kinds: Record<string, "exam" | "sheet">;
 }> {
   const origins = new Map<string, { origin: "exam" | "sheet" | "solved" | "member" | null; conf: number | null }>();
   const titles: Record<string, string> = {};
   const extras: Record<string, { label: string; unit: string | null }> = {};
+  const kinds: Record<string, "exam" | "sheet"> = {};
   for (const id of [...new Set(examIds)].slice(0, 12)) {
     const r = await sheetReview(id);
     titles[id] = r.exam.title;
+    kinds[id] = r.kind === "sheet" ? "sheet" : "exam";
     for (const q of r.items) {
       origins.set(q.id, { origin: q.origin, conf: q.conf });
       extras[q.id] = { label: q.label ?? String(q.no), unit: q.num_unit ?? null };
     }
   }
-  return { origins, titles, extras };
+  return { origins, titles, extras, kinds };
 }
