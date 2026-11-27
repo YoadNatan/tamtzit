@@ -52,6 +52,11 @@ const ROUTES: Route[] = [
   { v: "sets" },
   { v: "sets", k: Q },
   { v: "sets", l: L },
+  { v: "models" },
+  { v: "models", r: Q },
+  { v: "models", x: "board", k: "solver" },
+  { v: "models", x: "new", k: "fix_check" },
+  { v: "models", x: "routes" },
 ];
 
 test("routeQuery writes exactly what routeUrl writes, for every kind of screen", () => {
@@ -83,7 +88,8 @@ test("the hooks' routes in study-schema.sql are all kinds routeQuery knows", () 
   // Section R's own hooks, and section L's (set_shared and set_solved: {v:"sets"[,k]}).
   const r =
     sql.slice(sql.indexOf("-- ════ BEGIN SECTION R "), sql.indexOf("-- ════ END SECTION R ════")) +
-    sql.slice(sql.indexOf("-- ════ BEGIN SECTION L "), sql.indexOf("-- ════ END SECTION L ════"));
+    sql.slice(sql.indexOf("-- ════ BEGIN SECTION L "), sql.indexOf("-- ════ END SECTION L ════")) +
+    sql.slice(sql.indexOf("-- ════ BEGIN SECTION Y "), sql.indexOf("-- ════ END SECTION Y ════"));
   const kinds = new Set([...r.matchAll(/jsonb_build_object\('v', '([a-z]+)'/g)].map((m) => m[1]));
   assert.ok(kinds.size >= 3, [...kinds].join(","));
   for (const v of kinds) assert.notEqual(parseRoute(new URL(routeQuery({ v, l: L, q: Q }), "https://x.test").search).v, undefined, v);
@@ -123,6 +129,8 @@ test("objOf: what each screen sees", () => {
   assert.equal(objOf({ v: "sets" }), "qsets", "the group's shelf sees set_shared");
   assert.equal(objOf({ v: "sets", l: L }), null, "a lecture's sets are not the whole shelf");
   assert.equal(objOf({ v: "sets", k: "x" }), null);
+  assert.equal(objOf({ v: "models", r: Q }), `lab:${Q}`, "a comparison's run sees its lab_new");
+  assert.equal(objOf({ v: "models" }), null);
   for (const r of [{ v: "today" }, { v: "me" }, { v: "library" }, { v: "quiz" }, { v: "quiz", isNew: true }, { v: "exams" }, { v: "lecture", l: "x" }, null, "lec"])
     assert.equal(objOf(r), null, JSON.stringify(r));
 });
@@ -138,4 +146,8 @@ test("objOf agrees with the obj section R's hooks store", () => {
   const l = sql.slice(sql.indexOf("-- ════ BEGIN SECTION L "));
   assert.match(l, /jsonb_build_object\('v', 'sets', 'k', s\.id\), 'qset:' \|\| s\.id::text/);
   assert.match(l, /'set_shared',[\s\S]{0,300}'qsets', v_dedupe/);
+  // Section Y: a comparison waiting for ratings links to its run and is seen there.
+  const y = sql.slice(sql.indexOf("-- ════ BEGIN SECTION Y "));
+  assert.match(y, /jsonb_build_object\('v', 'models', 'r', r\.id\), 'lab:' \|\| r\.id/);
+  assert.equal(objOf({ v: "models", r: Q }), `lab:${Q}`);
 });

@@ -421,6 +421,19 @@ the notice; `e2e/study/similar.cjs` (O12) asserts them on screen.
 file's question, the exactness line, the landing card, the refusals), so a
 change to one of them changes the script too.
 
+### "השוואת מודלים" (docs/study/models.md; `VITE_STUDY_MODELS`, section Y)
+
+One name for the feature, **השוואת מודלים** (never "מעבדה"); one for the
+owner, **מי שפתחו את הקבוצה**; **מודל** is the plain word, and a model's
+own name is never translated (it sits in `<bdi dir="ltr">`). Each kind of
+work has exactly one Hebrew name (`ROUTE_NAMES` in
+`src/study/lib/modelsCopy.ts`, below), the same in the kind chips, the
+results' picker, "מי כותב מה" and every sheet.
+
+| Where | Now |
+|---|---|
+| Back to the comparisons | → להשוואות |
+
 ### Kept, on purpose
 
 - **״על בטוח״, ״נראה לי״, ״ניחוש״** (how sure an answer is): plain Hebrew, and Yoad's own

@@ -73,9 +73,10 @@ const VALID: Record<string, (x: string, v: string) => boolean> = {
   preset: (x) => ["end", "coffee", "stop"].includes(x),
   pf: (x) => /^\d{1,3}$/.test(x) && Number(x) <= 199,
   pt: (x) => /^\d{1,3}$/.test(x) && Number(x) <= 199,
-  x: (x, v) => (v === "wall" ? ["drafts", "post", "moment"].includes(x) : v === "practice" ? ["new", "example", "bank", "round", "review"].includes(x) : v === "notify" ? x === "set" : x === "danger"),
+  x: (x, v) =>
+    v === "wall" ? ["drafts", "post", "moment"].includes(x) : v === "practice" ? ["new", "example", "bank", "round", "review"].includes(x) : v === "notify" ? x === "set" : v === "models" ? ["new", "board", "routes"].includes(x) : x === "danger",
   r: UUID,
-  k: UUID,
+  k: (x, v) => (v === "models" ? /^[a-z][a-z_]{1,23}$/.test(x) : UUID(x)),
   from: (x) => x === "m",
   lane: (x) => ["group", "mine"].includes(x),
   d: (x, v) => (v === "wall" ? x.length <= 60 : v === "plan" ? /^\d{4}-\d{2}-\d{2}$/.test(x) : UUID(x)),
@@ -107,6 +108,7 @@ const PARAMS: Record<string, string[]> = {
   trap: ["l", "at", "d"],
   notify: ["x"],
   sets: ["k", "l"],
+  models: ["x", "r", "k"],
 };
 
 /** The plain copy pass (docs/study/COPY.md) rewords some of the spec's sentences:
@@ -223,6 +225,11 @@ const ALL_ROUTES: Route[] = [
   { v: "sets", l: ID }, // the sets on a lecture
   { v: "sets", k: ID2 }, // a set: being made, then its page
   { v: "practice", s: `k.${ID2}` }, // solving a set
+  { v: "models" }, // "השוואת מודלים" (flags.models): the comparisons
+  { v: "models", x: "new", k: "solver" }, // a new one, its kind chosen
+  { v: "models", x: "board", k: "fix_check" }, // a kind's results
+  { v: "models", x: "routes" }, // "מי כותב מה"
+  { v: "models", r: ID }, // one run
 ];
 
 test("routeUrl writes every route of §5.2 and §12.2.1 so parseRoute reads it back exactly", () => {
@@ -355,6 +362,11 @@ test("tabOf: the spec's four tabs, Today's set, and immersive screens with none"
     [{ v: "sets", l: ID }, "practice", "today"],
     [{ v: "sets", k: ID2 }, null, null], // a set's page: a back arrow
     [{ v: "practice", s: `k.${ID2}` }, null, null],
+    [{ v: "models" }, "me", "me"], // "השוואת מודלים" opens from "שלי"
+    [{ v: "models", x: "routes" }, "me", "me"],
+    [{ v: "models", x: "board", k: "solver" }, "me", "me"],
+    [{ v: "models", x: "new" }, null, null], // a new comparison: a back arrow
+    [{ v: "models", r: ID }, null, null], // a run: a back arrow
   ];
   for (const [r, without, withToday] of cases) {
     assert.equal(tabOf(r, off), without, `${routeUrl(r)} without Today`);
@@ -813,6 +825,36 @@ test("?v=notify: the inbox and its settings with the flag; without it, the home,
   assert.equal(routeUrl({ v: "notify", x: "set" }), "/?v=notify&x=set");
   assert.equal(BACK_LABEL.notify, "→ להתראות");
   assert.equal(tabOf({ v: "notify" }, on), null, "a screen with a back arrow");
+});
+
+test("VITE_STUDY_MODELS: its own flag, which needs section Y at 1 and changes nothing else", () => {
+  const base = { VITE_STUDY_GUIDE: "1", VITE_STUDY_INSTALL: "1", VITE_STUDY_NOTIFY: "1" };
+  const off = flagsFrom(base);
+  const on = flagsFrom({ ...base, VITE_STUDY_MODELS: "1" });
+  assert.equal(off.models, false);
+  assert.equal(on.models, true);
+  assert.deepEqual({ ...on, models: false }, off, "it changes nothing else");
+  assert.deepEqual(requiredSchema(on), { ...requiredSchema(off), Y: 1 }, "section Y 1");
+  assert.equal(requiredSchema(off).Y, undefined);
+  assert.deepEqual(tabLinks(on), tabLinks(off), "no tab of its own");
+});
+
+test("?v=models: the owner's tabs, a run and a kind with the flag; without it, the home, with no notice", () => {
+  const on = flagsFrom({ VITE_STUDY_TODAY: "1", VITE_STUDY_MODELS: "1" });
+  const offToday = flagsFrom({ VITE_STUDY_TODAY: "1" });
+  const offNone = flagsFrom({});
+  for (const r of [{ v: "models" }, { v: "models", r: ID }, { v: "models", x: "routes" }, { v: "models", x: "new", k: "solver" }] as Route[]) {
+    assert.deepEqual(allowed(r, on), { route: r });
+    assert.deepEqual(allowed(r, offToday), { route: { v: "today" } }, "Today is the home");
+    assert.deepEqual(allowed(r, offNone), { route: { v: "library" } }, "the library is the home until Today");
+  }
+  assert.deepEqual(parseRoute(`?v=models&r=${ID}&x=new&k=solver`), { v: "models", r: ID }, "a run is its own screen");
+  assert.deepEqual(parseRoute("?v=models&x=other"), { v: "models" });
+  assert.deepEqual(parseRoute("?v=models&x=board&k=Bad-Key"), { v: "models", x: "board" }, "a kind is a route key");
+  assert.deepEqual(parseRoute("?v=models&x=routes&k=part"), { v: "models", x: "routes" }, "the routes tab takes no kind");
+  assert.deepEqual(parseRoute("?v=models&r=nope"), { v: "models" }, "a run's id is an id");
+  assert.equal(routeUrl({ v: "models", x: "board", k: "solver" }), "/?v=models&x=board&k=solver");
+  assert.equal(BACK_LABEL.models, "→ להשוואות");
 });
 
 test("VITE_STUDY_MAKE: practice sets' generator, on practice, with no SQL section of its own", () => {

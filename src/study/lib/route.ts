@@ -62,9 +62,18 @@ export type Route =
   | { v: "try"; s?: "b" } // the guide's sandbox (s=b: a question with a bet); nothing in it is saved
   | { v: "install" } // adding the app to the home screen (docs/study/install.md), its steps for this device
   | { v: "notify"; x?: "set" } // notifications (section R): the inbox; x=set its settings
-  | { v: "sets"; k?: string; l?: string }; // practice sets (flags.sets): the shelf (l: the sets on a lecture); k: a set (being made, then its page)
+  | { v: "sets"; k?: string; l?: string } // practice sets (flags.sets): the shelf (l: the sets on a lecture); k: a set (being made, then its page)
+  | { v: "models"; x?: ModelsTab; r?: string; k?: string }; // "השוואת מודלים" (flags.models): the owner's tabs (x), a run (r), a kind (k: a route key)
 
 export type Tab = "today" | "library" | "practice" | "group" | "me";
+
+/** "השוואת מודלים"'s screens (docs/study/models.md): a new comparison, the
+ *  results of a kind, "מי כותב מה"; none: the comparisons (the owner's home,
+ *  a member's list to rate). */
+export const MODELS_TABS = ["new", "board", "routes"] as const;
+export type ModelsTab = (typeof MODELS_TABS)[number];
+/** A route key (shared/study/models.ts's ROUTE_KEYS; the screen checks it is one). */
+const ROUTE_KEY = /^[a-z][a-z_]{1,23}$/;
 
 /** The course page's segments (sources.md): its past exams, its lectures, what the group made. */
 export const COURSE_SEGS = ["exams", "lectures", "made"] as const;
@@ -260,6 +269,13 @@ export function parseRoute(search: string, _hash?: string): Route {
       const k = id(g("k"));
       return clean({ v: "sets" as const, k, l: k ? undefined : id(g("l")) });
     }
+    case "models": {
+      // A run (r) is its own screen; a kind (k) goes with a new comparison or the results.
+      const r = id(g("r"));
+      const x = r ? undefined : oneOf(g("x"), MODELS_TABS);
+      const k = g("k");
+      return clean({ v: "models" as const, x, r, k: x === "new" || x === "board" ? (k && ROUTE_KEY.test(k) ? k : undefined) : undefined });
+    }
     case null: {
       const l = id(g("l"));
       return l ? lecture(l, q) : { ...HOME };
@@ -425,6 +441,12 @@ export function routeUrl(r: Route): string {
       put("k", r.k);
       put("l", r.l);
       break;
+    case "models":
+      put("v", r.v);
+      put("x", r.x);
+      put("r", r.r);
+      put("k", r.k);
+      break;
     default:
       put("v", r.v);
   }
@@ -478,6 +500,9 @@ export function tabOf(r: Route, f: Flags): Tab | null {
     case "help":
     case "install":
       return "me";
+    case "models":
+      // The comparisons, the results and "מי כותב מה" sit under "שלי"; a run and a new one have a back arrow.
+      return r.r || r.x === "new" ? null : "me";
     default:
       return null;
   }
@@ -599,6 +624,9 @@ export function allowed(r: Route, f: Flags): { route: Route; notice?: string } {
     case "sets":
       // Practice sets' shelf and set page (flags.sets): without them, the practice hub, else the lecture's or the library.
       return f.sets ? ok : off(practiceOf(r.l));
+    case "models":
+      // Without its flag a notice's or a shared link goes home, with no notice (as notify's).
+      return f.models ? ok : { route: f.today ? { v: "today" } : { v: "library" } };
     default:
       return ok;
   }
@@ -673,4 +701,5 @@ export const BACK_LABEL: Record<string, string> = {
   me: "→ שלי",
   notify: "→ להתראות",
   sets: "→ סטים של הקבוצה",
+  models: "→ להשוואות",
 };

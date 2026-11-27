@@ -108,6 +108,11 @@ export function flagsFrom(e: Record<string, unknown>) {
     // set. Release A1 and practice sets' shelf; section O 3 with L 1.
     similar:
       practice && on(e.VITE_STUDY_COURSES) && on(e.VITE_STUDY_EXAMS) && on(e.VITE_STUDY_SHEETS) && on(e.VITE_STUDY_SHEETS_FORMS) && on(e.VITE_STUDY_MAKE) && on(e.VITE_STUDY_SETS) && on(e.VITE_STUDY_SIMILAR),
+    // "השוואת מודלים" (docs/study/models.md): the owner's comparisons, the
+    // results and "מי כותב מה" (each kind of work's model), and the members'
+    // row of comparisons to rate. Section Y at 1; what may run is decided on
+    // the server (the switches `lab` and `routes`, the owner's gate).
+    models: on(e.VITE_STUDY_MODELS),
   } as const;
 }
 
@@ -201,5 +206,7 @@ export function requiredSchema(f: Flags, ends: Ends = ENDS): Record<string, numb
     ...(f.sheetForms ? { O: 2 } : {}),
     // Release B: the twins, the runs and the sheet's set (L).
     ...(f.similar ? { O: 3, L: 1 } : {}),
+    // "השוואת מודלים": routes, providers and the comparison (section Y 1).
+    ...(f.models ? { Y: 1 } : {}),
   };
 }
