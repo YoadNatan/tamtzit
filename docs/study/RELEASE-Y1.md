@@ -9,14 +9,16 @@ notice `lab_new` in the inbox) are in
 comparison". Built on `dev`; each release point below works on its own and
 rolls back on its own.
 
-**What this release holds (slices 1 and 2 of the design):** the routing seam
+**What this release holds (slices 1 to 3 of the design):** the routing seam
 (with nothing set, every call is today's, on Claude Opus 5.5), section Y 1,
 the op `lab` for the kinds with an answer key (the question check, a
-correction's check, a past exam's or a sheet's read), and the owner's
-screens: "השוואות", "תוצאות" and "מי כותב מה" under "שלי". Members' blind
-rating of the short kinds (practice, "לשאול", points, cards), the AI score and
-the other providers' adapters come with later packages of this wave; until
-then a member's list says "אין כרגע השוואות לדירוג.".
+correction's check, a past exam's or a sheet's read) and for the kinds rated
+by people (practice questions, a set's questions, points, cards, "לשאול", a
+summary part), the owner's screens ("השוואות", "תוצאות" and "מי כותב מה"
+under "שלי"), the members' blind rating, the solver's paid check of practice
+answers, the AI score (off by default), the share to the group's WhatsApp
+and R's notice `lab_new`. The other providers' adapters come with a later
+package of this wave.
 
 ## Rules for all of it
 
@@ -102,6 +104,36 @@ then a member's list says "אין כרגע השוואות לדירוג.".
    ```sql
    update study_private.notice_kinds set cat = 'mine', push = true where kind = 'lab_new';
    ```
+
+## Release point 3: the blind rating (no SQL beyond parts 1 to 12)
+
+Nothing new to run: the rating's functions are section Y 1's. With the flag
+and the switch `lab` on:
+
+1. **A rated comparison.** "שלי" → "השוואת מודלים" → "השוואה חדשה" → under
+   "הקבוצה מדרגת", "שאלות תרגול" (Opus against Sonnet are ticked; "להריץ (עד
+   $…)" includes the solver's check of each answer, about $0.004 an answer).
+   "לשאול" asks for a question first (at most 500 characters). The AI score
+   is under "עוד אפשרויות", off; ticked, its worst case joins the button's.
+   A typical practice run costs about $0.25-0.40; a summary part about $0.35
+   (each under the $1.50 cap, checked before anything is reserved).
+2. **Rate it, blind.** When it is done the owner rates too (blind, counted,
+   OD3): one score 1-5 an answer, "יש כאן טעות עובדתית" when there is one,
+   then the best answer and "שמירה והצגת השמות". Only then the names, times
+   and costs show.
+3. **Send it to the group:** "לשלוח לקבוצה לדירוג" → "לשלוח בוואטסאפ" (the
+   message: "יש השוואה חדשה לדירוג בתמצית (בערך 2 דקות): {link}"). Members
+   also see "השוואות לדירוג · {n} מחכות" on "שלי" and the notice in the bell
+   (inbox only; to push it too, the line under release point 2).
+4. **Members** open the row (it goes straight to the oldest waiting run),
+   rate or skip; their scores count from their own reveal. A summary part's
+   run is the owner's to rate alone.
+5. **"לבדוק עכשיו"** shows on a run whose solver's check could not run in
+   time; it runs the checks left (claimed once, never paid twice).
+
+The help screen gains the row "השוואת מודלים" and, in its footer, one line on
+the companies the group's material is sent to (Anthropic until a provider is
+approved; then the WhatsApp message of "Other providers" below).
 
 ## Stopping it, one line each (SQL Editor)
 

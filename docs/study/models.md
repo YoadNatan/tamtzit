@@ -13,10 +13,12 @@ rate the short answers blind (labels א-ד), then see names, time and cost.
 
 This file grows with the package. Built so far: the registry (WP1), the
 bundle room (WP2), the SQL (WP3), the routing seam (WP4), the op `lab`
-for the kinds with an answer key (WP5), and the owner's screens with their
+for the kinds with an answer key (WP5), the owner's screens with their
 e2e (WP6, WP7; flag `VITE_STUDY_MODELS`, Yoad's steps in
-[`RELEASE-Y1.md`](RELEASE-Y1.md)). The adapters, the blind rating of the
-short kinds, its paid check and the AI score (WP8 to WP10) come next.
+[`RELEASE-Y1.md`](RELEASE-Y1.md)), and the kinds rated by people with the
+blind rating, the paid check, the AI score, the share and R's notice (WP8,
+WP11: "The kinds rated by people", below). The other providers' adapters
+(WP9, WP10) come next.
 
 ## The registry (`shared/study/models.ts`, `prices.ts`, `estimate.ts`)
 
@@ -272,7 +274,8 @@ works without Y.
 | `route` | `group, route, model \| null, note?, confirmExpensive?` | `{route, model}` |
 | `price` | `group, route, models?, source?` | `{route, title, source, pictures, models: {id: {usd} \| {refused}}, runCap}`: the material as `run` would read it and each model's worst case on it (× 1.5 unverified); nothing planned, reserved or called (the new comparison's screen) |
 | `cancel` | `run` | `{cancelled: true}` |
-| `check`, `judge` | | 501 `not built` (WP8: practice's paid check, the AI score) |
+| `check` | `run` | NDJSON `{t:"check", pending}`, `{t:"done"}`: a done run's paid checks still pending ("לבדוק עכשיו"), each claimed again (WP8) |
+| `judge` | `run` | NDJSON, the same: the run's AI score, once, if the run asked for it (409 `not waiting` otherwise) |
 
 **The kinds compared (slice 2, those with an answer key):**
 
@@ -382,7 +385,7 @@ which Me loads lazily), `lib/models.ts` (reads and the op), `lib/modelsPure.ts`
 | A run (`r=`) | While it runs: "k מתוך n תשובות מוכנות", its progressbar, "אפשר לצאת מהמסך…", "לעצור את ההשוואה" (confirm C47); never a label, model, time or cost. Re-opened after a minute with answers still waiting and no stream in the tab: `resume`, once. Done: each answer under its label with its status (C20) and checks (C29), the answer folded (JSON indented); "לנסות שוב" once for a timeout or error; "החומר" (the frozen material: questions with options, the correction before and after, the pages). The owner of a kind members do not rate: "הצגת השמות והעלות" (`study_lab_reveal`), then the names, time, cost and tokens, each model's month at this rate, **quality against price side by side** with "זול פי k" against Opus, and "לתוצאות של ״…״" |
 | תוצאות (`x=board&k=`) | The kind's chips; a card per model over the runs the owner revealed: **quality** (the match with the key, with n) **beside the month's price** (`projection`, below), the price a call, refusals, false rejects (the question check), runs, time; "בסיס קטן" and "עוד מעט השוואות… מוקדם להחליט" under 20 checked items; the recommendation (C34b, below) and "להשתמש בו ל״…״"; from 768 px two columns |
 | מי כותב מה (`x=routes`) | Every kind members know (סיכומים, שאלות תרגול, שאלות בסט חדש, נקודות שצריך לדעת, כרטיסיות, לשאול, הבדיקה של השאלות, קריאת מבחן, קריאת דף תרגילים, שאלות דומות, אסוציאציות), then "בדיקות ופעולות פנימיות" folded: its model, "ברירת מחדל" or "שונה ב-…", "≈$x בחודש". A row opens the route sheet: the models the key may take (verified price, vision for picture kinds, Claude only for outline and ask_route, an approved provider within its scope) each with its month; C36 for the one picked, C36b next month's price, C38 for the summaries, C38b and a second confirmation for an expensive model, "חזרה לברירת המחדל". The switch `routes` off: C59. "ספקים": "כרגע רק Claude" until health says a key is set; each provider's key (a missing one opens the key sheet, C42b), "לאשר שליחה" (C42, scope `all`) and when its prices were checked |
-| A member (`?v=models`) | The runs waiting for the member's rating, then "דורגו"; empty: C51. No tabs, no "השוואה חדשה", no "מי כותב מה" (OD7). The rating itself comes with WP8 |
+| A member (`?v=models`) | The runs waiting for the member's rating, then "דורגו"; empty: C51. No tabs, no "השוואה חדשה", no "מי כותב מה" (OD7). A run opens the blind rating (below); `x=board&k=` is a kind's results, read only (no route, no month) |
 
 **The monthly projection** (`lib/modelsPure.ts`'s `projection`, design
 §6.6): `today30` (the key's ledger kinds over 30 days, `study_lab_board`'s
@@ -421,3 +424,104 @@ sheet and back to the default, an expensive model's second confirmation,
 the switch `routes` off, a member's list, the refusals C15, C16, C18, and
 320 to 1440 px light and dark with the a11y check; on the set `os` it sees
 nothing and calls nothing.
+
+## The kinds rated by people (WP8, WP11)
+
+**The kinds** (`server/study/labRated.ts`; the op reads their material in
+`server/study/ops/labRated.ts`, with the owner's token, as production reads
+it): the group's newest lecture with a written part (or `source.lecture`),
+its first written part (or `source.part`).
+
+| Route | Frozen by | Differs from production (`differs`) | Members rate? | $0 checks (C29) |
+|---|---|---|---|---|
+| `practice` | `questionsCall` (a release-1 round: the part, the lecture's questions as "already asked", the course's style, the part's corrections), 3 questions | `count` | yes | `checkQuestion` on each (`ok`/`items`); then the paid check |
+| `set_write` | the same with a set's batch: styles case, mechanism, compare at the exam's difficulty, no points | `count` | yes | the same |
+| `points` | `pieceCall` of the part's first piece | none | yes | `checkPoint`, red flags |
+| `cards` | `cardsCall`, 6 cards (the lecture's cards as known, the part's figures, corrections and paragraphs) | `count` | yes | `checkCard` |
+| `ask` | `askSystem(lecture, [], null, summary, null)` + the owner's typed question (at most 500 characters; `source.question`), `cacheTail` as production | `no threads` (OD9: no threads, no corrections; no recording's notes either) | yes | slide tags, none unknown |
+| `part` | `partRequest` with no corrections, its figures as paths (signed per call), max_tokens 16,000 (D15) | `max_tokens` | no: the owner alone | tags in the part's range, unknown tags, numbers with units kept from the slides, words |
+
+`lab_settings.member_kinds` decides `member_rate` when a run is planned
+(default practice, set_write, ask, points, cards). The owner rates every
+kind's run too (OD3: blind, and the owner's ratings count).
+
+**The paid steps after the answers** (one detached invocation; the answers
+stop at 200 s so the steps have time, the steps at 270 s or 25 s before the
+deadline; each step claimed on the worker's path, `study_lab_claim`, so a
+second tab or a later "check" pays nothing twice):
+
+- **The solver's check** (practice, set_write): an answer with a checked
+  one-answer question is saved with `check_status: pending`; the solver (the
+  route `solver`'s model, Opus by default) answers its questions without
+  their keys, and `solved`, `solver_agrees`, `solver_differs` are merged into
+  its checks ("הבדיקה ענתה אחרת ב-{n}"). One that cannot start by 60 s before
+  the stop stays pending, for "לבדוק עכשיו" (`check`).
+- **The AI score** (OD12): off by default, under "עוד אפשרויות" on the new
+  comparison, only for these kinds (never for an answer-key kind). The run
+  records the judge's model (the route `judge`'s, Opus by default); after
+  the answers one call reads the slides' text only (no pictures, also for a
+  summary) and every finished answer under its label, in a random order
+  (kept with each score as `order`), and scores each 1-5 (overall, accuracy,
+  Hebrew, structure) with its factual errors (`LAB_JUDGE_SYSTEM`,
+  `server/study/prompts/lab.ts`). Saved per answer (`study_lab_judged`); a
+  reply that cannot be read marks it failed. Shown only after the caller's
+  reveal, as "ציון AI: {z}/5", never mixed into the group's score (D13).
+- **The worst case before a run** holds both: the op's `price` returns
+  `steps: {check, judge: [by the number of answers]}` and the button's "עד
+  $x" adds them; the run's estimate (and so its $1.50 cap) includes them.
+
+**The blind rating** (`ModelsRunScreen.tsx`, design §5.5). A done run of
+these kinds, with 2 answers or more, opens the rating for anyone who may
+rate it (`can_rate`) and has not revealed: one answer at a time (from 768 px
+side by side), its checks and its text as the app shows it; one score 1-5,
+"יש כאן טעות עובדתית" with an optional note, and for the owner the folded
+"דירוג מפורט" (accuracy, Hebrew, structure). Each tap is saved at once
+(`study_lab_rate`) and kept in a draft on the device (`localStorage`, wrapped
+in try/catch; it survives a reload); taps made offline wait (C56) and are
+sent when the connection returns. The last step: "איזו תשובה הכי טובה?" (a
+label or "אין הבדל") and "שמירה והצגת השמות", disabled with "חסר דירוג
+לתשובה {ב}" until every answer has a score and a pick; or "לדלג על ההשוואה
+הזאת" (confirm C28: the caller's scores go, `study_lab_reveal` with skip).
+Nothing on the page names a model, a time or a cost before the caller's own
+reveal, the owner's included (D12); after it, each answer says "הדירוג שלי
+{x} · הקבוצה {y} ({n} דירגו) · ציון AI: {z}/5", its time and cost, and the
+side-by-side bars put the group's score against the price.
+
+**The owner's steps** on a done run of a kind members rate: "לשלוח לקבוצה
+לדירוג" opens a sheet with C49's message and the run's link (WhatsApp's own
+send page, the phone's share sheet, or a copy); "לבדוק עכשיו" when a paid
+check is pending.
+
+**Members.** "שלי"'s row "השוואות לדירוג · {n} מחכות" (runs of the rated
+kinds, done with 2 answers or more, younger than `todo_days`, neither rated
+nor skipped) opens the oldest waiting run directly. After the reveal,
+"לתוצאות של ״{kind}״" opens the kind's results read only (quality, checks,
+cost a call; no month, no route).
+
+**R's notice (WP11).** When a run of a kind members rate closes with 2
+answers or more, section Y sends `lab_new` (built with section Y 1; see
+"The notice" above): the inbox on, the push off by default (one SQL line
+turns it on), never a model's name. The owner's WhatsApp share is the other
+way.
+
+**Help.** The row "השוואת מודלים" (`MODELS_HELP`: who runs, who rates
+blind, the $3.30 line) and, with the flag, one line in help's footer on the
+companies the group's material is sent to (OD21, informational, not a
+gate): Anthropic, the providers some kind is routed to, and those approved
+for comparisons (`providersLine`, from `study_models`).
+
+**Not built here:** similar questions (section O 3) as a comparison kind:
+its material (a sheet's items with their keys and pages) is read only by
+the worker's claim, so it needs a read of its own in section Y; it stays
+routable (`similar`) like every key.
+
+**Tests:** `server/study/labRated.test.ts` (each frozen request against
+production's builder, the checks by kind, the paid check never sends a key,
+the judge's request names no model and keeps the order, its scores within
+1-5, the estimates); `server/study/labop.test.ts` (a practice run with the
+AI score: the answers, then a solver's check of each and the judge, all
+claimed on the worker's path, the response counts only; `check` runs only
+what is pending; `price`'s steps; "לשאול" needs its question);
+`src/study/lib/models.test.ts` (the kinds and their candidate, the steps in
+the total, an answer as shown, the draft, the words, help's line);
+`e2e/study/models-rate.cjs` (design §12.3 scenarios 4-6 on the flag set `y`).

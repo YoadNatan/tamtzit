@@ -1333,3 +1333,47 @@ every other row is the recommended default.
   to WhatsApp (WP8), help's row and the privacy line naming the approved
   providers (C58, C60; with the providers' package), scenario 9
   (providers' consent end to end, with the adapters).
+
+### The blind rating and the other kinds (WP8, WP11), built on 27 November 2026
+
+- **The kinds rated by people** (`server/study/labRated.ts`, the op's
+  material in `server/study/ops/labRated.ts`): practice (3 questions of a
+  release-1 round), a practice set's batch (`set_write`: 3 questions in the
+  styles case, mechanism, compare, at the exam's difficulty), points (the
+  part's first piece), cards (6), "לשאול" (the owner's typed question, at
+  most 500 characters, without the group's threads and corrections, OD9, and
+  without a recording's notes) and a summary part (max_tokens 16,000, D15).
+  Each frozen request is production's builder's output; how it differs is
+  the run's `differs` (`count`, `max_tokens`, `no threads`), worded on the
+  run. Members rate practice, a set's questions, points, cards and "לשאול"
+  (`member_kinds`, OD6); a summary part is the owner's to rate alone. The
+  candidate ticked beside today's model is Sonnet 5.5 for all of them (OD11).
+  No SQL change: section Y 1 already had the rating's functions.
+- **The solver's paid check** of practice answers runs after the answers in
+  the same invocation (the answers stop at 200 s); a check that cannot start
+  in time stays pending for "לבדוק עכשיו" (`check`). Its worst case is in the
+  run's estimate.
+- **The AI score** (OD12): off by default, under "עוד אפשרויות", only for
+  the rated kinds; judged by the route `judge`'s model (Opus 5.5 by default)
+  over the slides' text only, the answers under their labels in a random
+  order; "ציון AI" on its own line after the reveal, never in the group's
+  score (D13). `judge` runs it once if the run asked for it.
+- **The blind rating** (§5.5): one score 1-5 an answer, the error tick and
+  its note, the owner's detail folded, the best pick, save or skip; each tap
+  saved at once and kept on the device (offline taps go when the connection
+  returns). Nothing names a model, a time or a cost before the caller's own
+  reveal, the owner's included (OD3).
+- **Share (OD8 as Yoad changed it):** the owner's "לשלוח לקבוצה לדירוג" (a
+  sheet with the message, WhatsApp's send page, the phone's share sheet or a
+  copy) besides R's `lab_new` (inbox on, push off by default; built with
+  section Y 1 and kept as it was). "שלי"'s row opens the oldest waiting run.
+- **Help (OD21 as Yoad changed it):** the row "השוואת מודלים" and one
+  informational line in help's footer naming where the material goes
+  (Anthropic, the routed providers, those approved for comparisons). The
+  words avoid "לאן החומר הולך": the privacy note removed on 19 November stays
+  removed.
+- **Not built:** similar questions (section O 3) as a comparison kind. Its
+  material (a sheet's items with their keys and pages) is read only through
+  the worker's claim (`study_claim_similar`); comparing it needs a read of
+  its own in section Y (like `study_lab_bank`). It stays a route key, so
+  "מי כותב מה" can still move it.

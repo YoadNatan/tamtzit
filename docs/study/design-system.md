@@ -470,6 +470,34 @@ checked chip); the models of a new comparison are labelled checkboxes in an
 (`.md-radio`). `styles/models.css` holds these (tokens only) and loads with
 the lazy screens.
 
+**The blind rating** (`ModelsRunScreen.tsx`'s `RateFlow`, WP8). On a phone
+one answer at a time (`.md-rate-panel.on`), switched by a row of buttons
+with `aria-pressed` (the label's circle, ✓ once scored) and a last button
+for the best pick; each answer ends with "לתשובה ב ›". From 768 px every
+answer sits side by side in two columns, each with its score box, and the
+last step under them (the switcher and the "next" buttons hide). The score
+box (`.md-scorebox`) is a `fieldset` whose `legend` asks "כמה טובה תשובה
+א?", five 44 px circles that are visually labelled 1-5 and carry
+`aria-label` "1 · לא שמיש" … "5 · מצוין" (the native radio fills the
+circle, invisible, so the keyboard and the screen reader get a real
+radiogroup; `:focus-within` draws the ring), the ends' words under them,
+the error tick (a 44 px label with its checkbox) and, when ticked, the
+note's field; the owner's detail folds under "דירוג מפורט". The best pick is
+its own `fieldset` of chip radios (`.md-best-pick`). An answer is shown as
+the app shows its kind (`ShownAnswer`): questions with their options and
+the right one chipped, points with a red-flag chip, cards' two sides,
+"לשאול" and a summary as text.
+
+```tsx
+<fieldset className="md-score">
+  <legend>כמה טובה תשובה א?</legend>
+  <div className="md-score-row">
+    <label className="md-score-n on"><input type="radio" name="overall-<id>" aria-label="4 · טוב" checked /><span aria-hidden="true">4</span></label>
+  </div>
+</fieldset>
+<label className="md-error-tick"><input type="checkbox" />יש כאן טעות עובדתית</label>
+```
+
 ### Progress
 
 ```tsx
