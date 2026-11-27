@@ -12,9 +12,11 @@ same frozen request to 2-4 models side by side under a hard cap, and members
 rate the short answers blind (labels א-ד), then see names, time and cost.
 
 This file grows with the package. Built so far: the registry (WP1), the
-bundle room (WP2), the SQL (WP3), the routing seam (WP4) and the op `lab`
-for the kinds with an answer key (WP5). The adapters, the screens, the
-blind rating's paid check and AI score (WP8) come next.
+bundle room (WP2), the SQL (WP3), the routing seam (WP4), the op `lab`
+for the kinds with an answer key (WP5), and the owner's screens with their
+e2e (WP6, WP7; flag `VITE_STUDY_MODELS`, Yoad's steps in
+[`RELEASE-Y1.md`](RELEASE-Y1.md)). The adapters, the blind rating of the
+short kinds, its paid check and the AI score (WP8 to WP10) come next.
 
 ## The registry (`shared/study/models.ts`, `prices.ts`, `estimate.ts`)
 
@@ -268,6 +270,7 @@ works without Y.
 | `resume` | `run` | NDJSON: the slots still waiting, claimed and run |
 | `retry` | `run, label` | NDJSON: one slot that timed out or failed, once |
 | `route` | `group, route, model \| null, note?, confirmExpensive?` | `{route, model}` |
+| `price` | `group, route, models?, source?` | `{route, title, source, pictures, models: {id: {usd} \| {refused}}, runCap}`: the material as `run` would read it and each model's worst case on it (× 1.5 unverified); nothing planned, reserved or called (the new comparison's screen) |
 | `cancel` | `run` | `{cancelled: true}` |
 | `check`, `judge` | | 501 `not built` (WP8: practice's paid check, the AI score) |
 
@@ -347,3 +350,74 @@ and the worker claims and saves, the refusals before the plan, a first and
 a later refused claim, retry once, resume, route, cancel);
 `server/study/ai.test.ts` (Y 1 for op lab only); `supabase/tests/study.sql`
 Y19-Y20 (`study_lab_bank`, `study_lab_skip`).
+
+## The owner's screens (WP6, WP7; `VITE_STUDY_MODELS`)
+
+The flag `VITE_STUDY_MODELS` (`flags.models`, alone: it needs no other
+flag) shows the screens and asks for section Y 1 (`requiredSchema`, so
+health's `schemaOk` with the flag). What may run is still the server's: the
+switch `lab`, the owner's gate, the line and the caps.
+
+**The route** `?v=models` (`src/study/lib/route.ts`): `x` = `new` | `board`
+| `routes`, `r` = a run, `k` = a route key (with `new` or `board`). Without
+the flag it goes home with no notice (a stale notice's link). A notice's
+`{v: "models", r}` is written by `shared/study/notifyRoute.ts` and sees
+`lab:<run>`. Tab: "שלי" (a run and a new comparison have a back arrow, "→
+להשוואות").
+
+**The entry chunk:** only `src/study/features/models.tsx` (one lazy
+`ModelsRoute`), the `case "models"` in `StudyApp.tsx`, the route and the
+flag: **267 B** of package Y's 1,500 (the entry chunk 406,989 B of 410,000
+with every flag on). Everything else is lazy: `components/ModelsScreen.tsx`
+(the router, the owner's tabs, a member's list), `ModelsNewScreen.tsx`,
+`ModelsRunScreen.tsx`, `ModelsParts.tsx` (shared parts and the "שלי" rows,
+which Me loads lazily), `lib/models.ts` (reads and the op), `lib/modelsPure.ts`
+(the pure rules), `lib/modelsCopy.ts` (every word), `styles/models.css`.
+
+| Screen | What it shows |
+|---|---|
+| "שלי" | The owner: "השוואת מודלים · איזה מודל כותב כל דבר, ובכמה". Anyone while runs wait: "השוואות לדירוג · {n} מחכות" (no badge, no dot) |
+| השוואות (`?v=models`, the owner) | The month's line with its bar ("השוואות החודש: $x מתוך $3.30 · עוד n היום"); the runs (title, models, date, "נבדק מול המפתח", the count while it runs, the cost once seen); empty: C5 and "השוואה ראשונה מומלצת" (the question check on 10 bank questions, Opus against Haiku, its price from the op, else a decided correction); "השוואה חדשה" in the foot. The switch off: C18 and no primary |
+| השוואה חדשה (`x=new&k=`) | 1 the kind (chips: the question check, a correction's check, a past exam's read, a sheet's read; one with no material says why, C55); 2 the material, read by the op's `price` ("שאלות אחרות" picks the bank's questions again); 3 2-4 models: the newest four first (Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5), the rest folded, each "≈$x" (its worst case on this material), tags היום / מחיר לא נבדק / יקר; today's model and the kind's candidate ticked (OD11: Haiku for the answer-key checks, Sonnet for reading), the choice kept on the device. The button "להריץ (עד $x)"; disabled with its reason: over the run's cap (C14), the month's line used (C15) or short (what is left), the day's runs used (C16), the switch off (C18), offline (C57) |
+| A run (`r=`) | While it runs: "k מתוך n תשובות מוכנות", its progressbar, "אפשר לצאת מהמסך…", "לעצור את ההשוואה" (confirm C47); never a label, model, time or cost. Re-opened after a minute with answers still waiting and no stream in the tab: `resume`, once. Done: each answer under its label with its status (C20) and checks (C29), the answer folded (JSON indented); "לנסות שוב" once for a timeout or error; "החומר" (the frozen material: questions with options, the correction before and after, the pages). The owner of a kind members do not rate: "הצגת השמות והעלות" (`study_lab_reveal`), then the names, time, cost and tokens, each model's month at this rate, **quality against price side by side** with "זול פי k" against Opus, and "לתוצאות של ״…״" |
+| תוצאות (`x=board&k=`) | The kind's chips; a card per model over the runs the owner revealed: **quality** (the match with the key, with n) **beside the month's price** (`projection`, below), the price a call, refusals, false rejects (the question check), runs, time; "בסיס קטן" and "עוד מעט השוואות… מוקדם להחליט" under 20 checked items; the recommendation (C34b, below) and "להשתמש בו ל״…״"; from 768 px two columns |
+| מי כותב מה (`x=routes`) | Every kind members know (סיכומים, שאלות תרגול, שאלות בסט חדש, נקודות שצריך לדעת, כרטיסיות, לשאול, הבדיקה של השאלות, קריאת מבחן, קריאת דף תרגילים, שאלות דומות, אסוציאציות), then "בדיקות ופעולות פנימיות" folded: its model, "ברירת מחדל" or "שונה ב-…", "≈$x בחודש". A row opens the route sheet: the models the key may take (verified price, vision for picture kinds, Claude only for outline and ask_route, an approved provider within its scope) each with its month; C36 for the one picked, C36b next month's price, C38 for the summaries, C38b and a second confirmation for an expensive model, "חזרה לברירת המחדל". The switch `routes` off: C59. "ספקים": "כרגע רק Claude" until health says a key is set; each provider's key (a missing one opens the key sheet, C42b), "לאשר שליחה" (C42, scope `all`) and when its prices were checked |
+| A member (`?v=models`) | The runs waiting for the member's rating, then "דורגו"; empty: C51. No tabs, no "השוואה חדשה", no "מי כותב מה" (OD7). The rating itself comes with WP8 |
+
+**The monthly projection** (`lib/modelsPure.ts`'s `projection`, design
+§6.6): `today30` (the key's ledger kinds over 30 days, `study_lab_board`'s
+`usage30`, the owner's only) × (the model's mean cost a call ÷ today's
+model's, over the revealed runs) + its refusal rate × calls × the cost a
+call (the D8 rerun on Opus) + for the question check its false-reject rate
+× calls × $0.20 (practice's rewrite). With no comparison of both: today30 ×
+the ratio of a typical call's price (20k characters in, 3k tokens out),
+marked "הערכה גסה". Keys that share a ledger kind (practice and set_write;
+the exam's and the sheet's keys; ask and ask_route) see the whole kind and
+are marked "הערכה גסה" too.
+
+**The recommendation** (`recommend`, §6.5): a model at least 20% cheaper a
+month that holds: for the answer-key kinds 20 checked items for both, its
+match rate at most 2 points under today's and no more false rejects a
+question (C34b, "בסיס קטן" under 50 items); for the rated kinds (WP8) 5
+shared runs, "same or better" in 80% and no more flagged errors (C34,
+"בסיס קטן" under 10).
+
+**Words:** `src/study/lib/modelsCopy.ts` (`ROUTE_NAMES`: one Hebrew name a
+route key; `MC`: every line; `MODELS_FAIL`: the refusals), listed in
+[`COPY.md`](COPY.md). A model's name in a Hebrew line is isolated
+(U+2068…U+2069) or in `<bdi dir="ltr">`.
+
+**Tests:** `src/study/lib/models.test.ts` (one name a key, impersonal words,
+dollars, what a comparison offers and preselects, `routable`, the month by
+ledger kind, the projection, both recommendation rules, stale prices);
+`route.test.ts` and `shared/study/notifyRoute.test.ts` (the route, the
+flag, the notice's link); `server/study/labop.test.ts` (`price`);
+`e2e/study/models.cjs` with `e2e/study/mocks/lab.cjs` on the flag set `y`
+(`os` with `VITE_STUDY_MODELS`): the owner's empty home and first card, the
+price over the cap, no material and offline, a run blind while running and
+after, left and finished without the phone, resume once, retry once,
+cancel with its confirm, the results and the recommendation, the route
+sheet and back to the default, an expensive model's second confirmation,
+the switch `routes` off, a member's list, the refusals C15, C16, C18, and
+320 to 1440 px light and dark with the a11y check; on the set `os` it sees
+nothing and calls nothing.

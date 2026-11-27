@@ -229,8 +229,9 @@ Part 12 is section O going on at its version 3 (similar questions; with part
 O 3" line); it stops with a message when part 11 has not run, and O 3 also
 edits section E (part 7) and `kind_on` (parts 1 and 10) in place. Part 12 also
 holds section Y after O 3 (models: routes, providers and "השוואת מודלים", the
-switch `lab` inserted off, [`docs/study/models.md`](docs/study/models.md));
-nothing else needs it. After editing the schema, run `npm run sql:parts`; a unit test
+switch `lab` inserted off, [`docs/study/models.md`](docs/study/models.md);
+its release steps, with the flag `VITE_STUDY_MODELS`, are
+[`docs/study/RELEASE-Y1.md`](docs/study/RELEASE-Y1.md)); nothing else needs it. After editing the schema, run `npm run sql:parts`; a unit test
 fails while the parts are stale, or while one is over 170 KB (the SQL Editor's
 limit). Run the SQL **before** the code that needs
 it deploys: until then `/api/study/health` says `"schemaOk":false`.

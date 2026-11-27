@@ -438,6 +438,38 @@ visually hidden "חדש"; times sit in `<bdi dir="ltr">`.
 `styles/notify.css` holds these (tokens only) and loads with the lazy parts,
 never in the entry CSS.
 
+### "השוואת מודלים": labels, quality against price, a model's card (`models.md`)
+
+A blind answer's label (א-ד) is a 30 px accent circle (`.md-dot`,
+`aria-hidden`; the card's `aria-label` says "תשובה א"). Quality and price
+sit side by side in one row (`.md-qp`): two `a-bar`s, quality in the ok
+colour (`--ok-pop`, its width the match with the key) and price in the
+group's (`--group-pop`, its width against the dearest one shown), each with
+its figure under it and `role="img"` with the words. A model's name is never
+translated and sits in `<bdi dir="ltr">` (`ModelName`); inside a sentence it
+is isolated (U+2068…U+2069). Cards with facts hold one column as wide as they
+are (`grid-template-columns: minmax(0, 1fr)`), so a row of facts wraps
+instead of widening the card; from 768 px the answers and the model cards sit
+in two columns.
+
+```tsx
+<article className="a-card md-model today" aria-label="Claude Opus 5.5">
+  <header className="a-row between"><h3 className="md-model-name"><bdi dir="ltr">Claude Opus 5.5</bdi></h3><span className="a-chip ok">היום</span></header>
+  <div className="md-qp">
+    <div className="md-qp-cell"><span className="a-small a-muted">איכות</span><div className="a-bar md-q" role="img" aria-label="איכות: 100% · 30 שאלות"><i style={{ width: "100%" }} /></div><b className="md-qp-n">100% · 30 שאלות</b></div>
+    <div className="md-qp-cell"><span className="a-small a-muted">מחיר</span><div className="a-bar md-p" role="img" aria-label="מחיר: $2.70 בחודש"><i style={{ width: "100%" }} /></div><b className="md-qp-n">$2.70 בחודש</b></div>
+  </div>
+  <dl className="md-facts a-small"><div><dt>לקריאה</dt><dd>$0.03</dd></div><div><dt>סירובים</dt><dd>0/3</dd></div></dl>
+</article>
+<h3 className="md-answer-name"><span className="md-dot" aria-hidden="true">א</span>תשובה א</h3>
+```
+
+The kind picker is a row of `a-chip` buttons with `role="radio"` (the kit's
+checked chip); the models of a new comparison are labelled checkboxes in an
+`a-list` (`.md-check`), the route sheet's a fieldset of labelled radios
+(`.md-radio`). `styles/models.css` holds these (tokens only) and loads with
+the lazy screens.
+
 ### Progress
 
 ```tsx

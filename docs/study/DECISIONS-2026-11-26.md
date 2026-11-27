@@ -1285,3 +1285,51 @@ every other row is the recommended default.
 - **Offline eval:** `tools/evals/lab.mjs` (`--print`, `--check`), synthetic
   material in `e2e/study/fixtures/lab/lab.json`; it refuses a folder inside
   the repository.
+
+### The owner's screens (WP6, WP7), built on 27 November 2026
+
+- **Flag `VITE_STUDY_MODELS`** (`flags.models`, on its own; needs section Y
+  1, so health's `schemaOk` asks for it with the flag). `?v=models` with `x`
+  (`new`, `board`, `routes`), `r` (a run) and `k` (a route key); without the
+  flag the address goes home with no notice. R's `lab_new` links to
+  `{v: "models", r}` and is seen there (`lab:<run>`).
+- **The entry chunk:** package Y's share is **267 B** of its 1,500 (only the
+  slot `features/models.tsx`); the entry chunk is 406,989 B of 410,000 with
+  every flag on. The screens, the words (`modelsCopy.ts`, the fail texts
+  included), the reads (`lib/models.ts`) and the rules (`lib/modelsPure.ts`)
+  load lazily; "שלי"'s rows come from `ModelsParts.tsx`, which Me (already
+  lazy) loads itself.
+- **The op `lab` gains `price`** (the owner; nothing planned, reserved or
+  called): the material as `run` reads it and each model's worst case on
+  it. The new comparison's "≈$x" and the first card's "עד $x" are the
+  server's numbers, not a guess on the phone; a kind with no material says
+  so (C55). A question check's price keeps the lecture and the count only
+  (its questions are picked again for the run).
+- **Owner only, as OD7:** the tabs (השוואות, תוצאות, מי כותב מה) show to the
+  owner (`study_lab_owner`); a member's `?v=models` is the list to rate
+  (empty until WP8's kinds run: "אין כרגע השוואות לדירוג.").
+- **Blind for the owner too (OD3, D12):** a run's screen shows one count
+  while it runs and the answers by label once done; for the answer-key kinds
+  the owner reveals with "הצגת השמות והעלות" (no rating needed: the key is
+  the result), and only then sees names, times, costs, tokens, each model's
+  month and quality against price side by side.
+- **The month (design §6.6) on the phone,** from `study_lab_board`'s
+  `usage30` (by ledger kind): keys that share a kind (practice and
+  set_write; the exam's and the sheet's keys; ask and ask_route) see the
+  whole kind and say "הערכה גסה", as does any model with no comparison
+  beside today's (then the ratio of a typical call's price). No SQL change.
+- **The recommendation (§6.5)** shows only at 20 checked items for both
+  models, within 2 points of today's match rate, no more false rejects and
+  20% cheaper a month; "בסיס קטן" under 50 items. "להשתמש בו" opens the
+  route sheet (C36); an expensive model asks again (C38b, `confirmExpensive`,
+  OD14); "חזרה לברירת המחדל" on the same sheet.
+- **Providers in "מי כותב מה":** "כרגע רק Claude" until health says a key is
+  set; then each provider's key, "לאשר שליחה" (scope `all`, OD19) and its
+  prices' date. The adapters themselves are a later package.
+- **e2e:** flag set `y` (`os` with `VITE_STUDY_MODELS`), `e2e/study/models.cjs`
+  with `mocks/lab.cjs` (scenarios 1-3, 7-8, 10-11 of design §12.3); on `os`
+  it sees nothing and calls nothing; the other sets' scripts are unchanged.
+- **Not in this package:** the blind rating of the short kinds and the share
+  to WhatsApp (WP8), help's row and the privacy line naming the approved
+  providers (C58, C60; with the providers' package), scenario 9
+  (providers' consent end to end, with the adapters).
