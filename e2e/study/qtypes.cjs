@@ -387,7 +387,9 @@ const norm = (s) => String(s).replace(/[‎‏⁦-⁩]/g, "").replace(/\s+/g, " 
       await page.goto(`${mock.base}/?v=practice&s=m.${L}&n=all`);
       await page.locator(".pq").first().waitFor({ timeout: 15000 });
       // The round's order is the session's own: skip another mistake ("לא יודעים") until the tf one is on screen.
-      for (let i = 0; i < 6 && !(await page.locator(".qt-tf").count()) && (await page.locator(".pq-dont-know").count()); i++) {
+      // A set question's own screen loads lazily: wait for it first, or a "לא יודעים" of the loading frame is pressed.
+      await page.locator(".qt-tf").first().waitFor({ timeout: 6000 }).catch(() => undefined);
+      for (let i = 0; i < 15 && !(await page.locator(".qt-tf").count()) && (await page.locator(".pq-dont-know").count()); i++) {
         await page.locator(".pq-dont-know").first().click();
         await page.locator(".pq-next").waitFor({ timeout: 10000 });
         await page.locator(".pq-next").click();
