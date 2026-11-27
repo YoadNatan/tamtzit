@@ -325,6 +325,14 @@ const DESK = { width: 1440, height: 900 };
       await page.waitForTimeout(1200);
       expect(norm(await page.locator("main").innerText()).includes("שאלות דומות · תרגיל 3 · פרמקוקינטיקה"), "on סטים של הקבוצה");
       await shot("similar-shelf");
+      // The requester's inbox: similar_ready in R's words (the course, never the sheet's title).
+      if (flags.notify) {
+        await page.goto(`${mock.base}/?v=notify`);
+        await page.locator("main.notify-inbox").waitFor({ timeout: 15000 });
+        await page.getByText("השאלות הדומות מוכנות").first().waitFor({ timeout: 10000 });
+        expect(true, "the inbox: השאלות הדומות מוכנות");
+        await shot("similar-inbox");
+      }
 
       /* ── 5b. solving the set: the twin's chip, more after a wrong answer ── */
       await page.goto(`${mock.base}/?v=practice&s=k.${set.id}&n=all`);

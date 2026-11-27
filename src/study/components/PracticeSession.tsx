@@ -194,12 +194,12 @@ async function scopeQuestions(scope: S.Scope, groupId: string): Promise<PublicQu
   }
 }
 
-/** A build without the question types never asks an exam's true/false or match item (it would read as one-answer);
- *  one without release A1 never an open or numeric one (it has no way to answer it). */
 /** A set's or the mistakes' questions in a build without the sheets' flags (a rollback, sheets.md):
  *  no open or numeric item without release A1, no similar question without release B. */
 const sheetSafe = (qs: PublicQuestion[]): PublicQuestion[] =>
   qs.filter((q) => (flags.sheetForms || isChoiceForm(q.form ?? "one")) && (flags.similar || q.source !== "twin"));
+/** A build without the question types never asks an exam's true/false or match item (it would read as one-answer);
+ *  one without release A1 never an open or numeric one (it has no way to answer it). */
 const examItems = (qs: PublicQuestion[]): PublicQuestion[] => {
   const drawable = flags.sheetForms ? qs : qs.filter((q) => isChoiceForm(q.form ?? "one"));
   return flags.qtypes ? drawable : drawable.filter((q) => (q.form ?? "one") === "one");
