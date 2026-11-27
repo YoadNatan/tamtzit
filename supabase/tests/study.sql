@@ -398,7 +398,11 @@ select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, 
                          'study_code_redeem',
                          -- section R: the push worker's claim and report (refusing without the key), and
                          -- /api/study/health's four booleans (wired, on, pilot, stuck)
-                         'study_notify_claim', 'study_notify_done', 'study_notify_ok');
+                         'study_notify_claim', 'study_notify_done', 'study_notify_ok',
+                         -- section Y (models, the comparison): the worker's claim, status poll and saves (the claim refuses
+                         -- a signed-in caller), the model of a moment, and the routes read (each refusing without the key)
+                         'study_lab_claim', 'study_lab_status', 'study_lab_output_save', 'study_lab_check_save', 'study_lab_judged',
+                         'study_model_at', 'study_models');
 
 -- F28 (review of F0, SEC-1): the slide pictures stay with their lecture. The
 -- app of before F0 deletes a lecture's files first and then its row, which
@@ -12156,3 +12160,539 @@ select pg_temp.ook('O3-end', not exists (select 1 from public.study_similar_runs
   and not exists (select 1 from study_private.similar_jobs where group_id = :'sg'),
   'the fixtures are gone');
 -- ════ END SECTION O ════
+
+-- ════ BEGIN SECTION Y ════ (checks for supabase/tests/study.sql)
+-- Models: routes, providers and the comparison (Y 1, design-models §12.2
+-- with Yoad's decisions of 27 November 2026): the owner's gate, blindness
+-- for the owner and a member, who rates what, the plan's refusals in their
+-- order, claims (one paid call a claim; the parallel case is
+-- lab-concurrency.sh), the line of $3.30 and the 15% ceiling, the ledger
+-- rows with no user, the sweep, the notice through section R, the revoke.
+-- On fixtures of their own, removed at the end; every title is invented.
+\set ON_ERROR_STOP 1
+reset role;
+set request.jwt.claim.sub = '';
+\set ykey 'k-0123456789abcdef0123456789abcdef'
+\set ya '0f000000-0000-4000-8000-000000000001'
+\set yb '0f000000-0000-4000-8000-000000000002'
+\set yc '0f000000-0000-4000-8000-000000000003'
+\set yz '0f000000-0000-4000-8000-000000000009'
+\set yg '0f000000-0000-4000-8000-0000000000a1'
+\set yzg '0f000000-0000-4000-8000-0000000000a2'
+\set yl '0f000000-0000-4000-8000-0000000000b1'
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', :'ykey')
+on conflict (name) do update set decrypted_secret = excluded.decrypted_secret;
+insert into auth.users (id, raw_user_meta_data) values
+ (:'ya', '{"app":"study","full_name":"אורי"}'), (:'yb', '{"app":"study","full_name":"בר"}'),
+ (:'yc', '{"app":"study","full_name":"גל"}'), (:'yz', '{"app":"study","full_name":"זוהר"}');
+insert into public.study_groups (id, name, join_code, created_by) values (:'yg', 'קבוצת ההשוואות', 'YLAB01', :'ya'), (:'yzg', 'קבוצה זרה', 'YLAB02', :'yz');
+insert into public.study_members (group_id, user_id, name) values (:'yg', :'ya', 'אורי'), (:'yg', :'yb', 'בר'), (:'yg', :'yc', 'גל'), (:'yzg', :'yz', 'זוהר');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'yl', :'yg', 'קורס בדוי', 'הרצאה בדויה', 'pptx', '[]', 'ready', :'ya');
+-- As a user ('' for the worker's anon client), the result's text or its error ('error: …').
+create or replace function pg_temp.yas(p_user text, p_sql text) returns text language plpgsql as $$
+declare r text;
+begin
+  perform set_config('request.jwt.claim.sub', p_user, true);
+  execute p_sql into r;
+  return coalesce(nullif(r, ''), 'null');   -- a void result reads 'null' too
+exception when others then
+  return 'error: ' || sqlerrm;
+end $$;
+create or replace function pg_temp.yok(p_label text, p_ok boolean, p_what text) returns text language sql as $$
+  select p_label || case when coalesce(p_ok, false) then '. ok: ' else '. FAIL: ' end || p_what $$;
+-- A plan as the owner, through the server: the run's id, or the error.
+create or replace function pg_temp.yplan(p_user text, p_route text, p_models text[], p_est numeric, p_cap numeric default 33, p_judge text default null)
+returns text language plpgsql as $$
+declare r text;
+begin
+  perform set_config('request.jwt.claim.sub', p_user, true);
+  select public.study_lab_plan('0f000000-0000-4000-8000-0000000000a1', '0f000000-0000-4000-8000-0000000000b1', p_route,
+           'השוואה בדויה', '{"items":["q1","q2"]}'::jsonb, '{"material":{"slides":[{"n":1,"text":"שקף בדוי"}]},"system":"…"}'::jsonb,
+           'hash-0123456789', 'max_tokens',
+           (select jsonb_agg(jsonb_build_object('model', m, 'provider', 'anthropic')) from unnest(p_models) m),
+           p_judge, p_est, p_cap, 'k-0123456789abcdef0123456789abcdef') ->> 'run' into r;
+  return r;
+exception when others then
+  return 'error: ' || sqlerrm;
+end $$;
+-- The worker claims every waiting answer of a run and saves it with the
+-- statuses given in label order (א, ב, …).
+create or replace function pg_temp.yfinish(p_run uuid, p_statuses text[]) returns void language plpgsql as $$
+declare o record; i int := 0;
+begin
+  perform set_config('request.jwt.claim.sub', '', true);
+  for o in select * from public.study_lab_outputs where run_id = p_run and status = 'waiting' order by label loop
+    i := i + 1;
+    perform public.study_lab_claim(p_run, o.label, 'answer', 0.05, 33, 'k-0123456789abcdef0123456789abcdef');
+    perform public.study_lab_output_save(o.id, p_statuses[i], null, 'תשובה בדויה ' || o.label, '{"output_tokens": 10}'::jsonb, 0.01, 1200, 300,
+              o.model, '{"pass": true, "items": 10, "match": 9, "false_rejects": 1}'::jsonb, null, 'k-0123456789abcdef0123456789abcdef');
+  end loop;
+end $$;
+\pset tuples_only on
+
+-- ── The registry, the switch, the tables closed to members ──
+select pg_temp.yok('Y1-reg', (public.study_schema() ->> 'Y')::int = 1
+  and exists (select 1 from study_private.features where name = 'lab' and not enabled)
+  and not exists (select 1 from study_private.features where name = 'routes')
+  and study_private.feature_on('routes'),
+  'section Y at 1; the switch lab inserted off; routes has no row (on)');
+do $$
+declare t text; bad text := '';
+begin
+  foreach t in array array['study_model_routes', 'study_model_route_log', 'study_model_providers', 'study_model_provider_log',
+                           'study_lab_runs', 'study_lab_outputs', 'study_lab_ratings', 'study_lab_seen', 'study_lab_judgements'] loop
+    begin
+      execute 'set local role authenticated';
+      execute format('select count(*) from public.%I', t);
+      bad := bad || t || ' ';
+    exception when insufficient_privilege then null;
+    end;
+    reset role;
+    if not (select relrowsecurity from pg_class where oid = ('public.' || t)::regclass) then bad := bad || t || '(rls) '; end if;
+  end loop;
+  raise notice '%', pg_temp.yok('Y1-revoke', bad = '', 'a member''s select on every Y table fails with 42501, and each has row level security: ' || bad);
+end $$;
+
+-- ── The owner: the creator, or a lab admin ──
+select pg_temp.yok('Y2-owner', pg_temp.yas(:'ya', format('select public.study_lab_owner(%L)', :'yg')) = 'true'
+  and pg_temp.yas(:'yb', format('select public.study_lab_owner(%L)', :'yg')) = 'false'
+  and pg_temp.yas(:'yz', format('select public.study_lab_owner(%L)', :'yg')) = 'false'
+  and pg_temp.yas('', format('select public.study_lab_owner(%L)', :'yg')) = 'false',
+  'the creator is the owner; a member, an outsider and the anon client are not');
+insert into study_private.lab_admins (user_id) values (:'yc');
+select pg_temp.yok('Y2-admin', pg_temp.yas(:'yc', format('select public.study_lab_owner(%L)', :'yg')) = 'true',
+  'a member in lab_admins is an owner too');
+insert into study_private.lab_admins (user_id) values (:'yz') on conflict do nothing;
+select pg_temp.yok('Y2-admin2', pg_temp.yas(:'yz', format('select public.study_lab_owner(%L)', :'yg')) = 'false',
+  'a lab admin who is not a member of the group is not its owner');
+delete from study_private.lab_admins where user_id = :'yz';
+
+-- ── study_models: a member's read, or the worker's ──
+select pg_temp.yas(:'yb', format('select public.study_models(%L)::text', :'yg')) as y_models \gset
+select pg_temp.yok('Y3-models', (:'y_models')::jsonb -> 'routes' = '{}'::jsonb
+  and (:'y_models')::jsonb -> 'switches' = '{"lab": false, "routes": true}'::jsonb
+  and (:'y_models')::jsonb #>> '{lab,line_usd}' = '3.30' and (:'y_models')::jsonb #>> '{lab,run_cap}' = '1.50'
+  and (:'y_models')::jsonb #>> '{lab,daily_runs}' = '3'
+  and pg_temp.yas('', format('select public.study_models(%L, %L) ->> %L', :'yg', :'ykey', 'switches')) is not null
+  and pg_temp.yas('', format('select public.study_models(%L)', :'yg')) = 'error: forbidden'
+  and pg_temp.yas(:'yz', format('select public.study_models(%L)', :'yg')) = 'error: forbidden',
+  'no routes; lab off, routes on; the line $3.30, $1.50 a run, 3 a day; the worker with the key reads it; anon without it and an outsider cannot');
+
+-- ── Routes: the owner sets, the log keeps every change, the moment's model ──
+select pg_temp.yok('Y4-route-gate', pg_temp.yas(:'yb', format('select public.study_model_set(%L, %L, %L, %L, %L)', :'yg', 'solver', 'claude-haiku-5-5', '', :'ykey')) = 'error: not the creator'
+  and pg_temp.yas(:'ya', format('select public.study_model_set(%L, %L, %L, %L, %L)', :'yg', 'solver', 'claude-haiku-5-5', '', 'wrong')) = 'error: forbidden'
+  and pg_temp.yas(:'ya', format('select public.study_model_set(%L, %L, %L, %L, %L)', :'yg', 'nonsense', 'claude-haiku-5-5', '', :'ykey')) = 'error: bad route'
+  and pg_temp.yas(:'ya', format('select public.study_model_set(%L, %L, %L, %L, %L)', :'yg', 'solver', 'x', '', :'ykey')) = 'error: bad model',
+  'a member cannot set a route; nor without the key; an unknown key, a model id too short: refused');
+select now() - interval '1 second' as y_before \gset
+select pg_temp.yas(:'ya', format('select public.study_model_set(%L, %L, %L, %L, %L)', :'yg', 'solver', 'claude-haiku-5-5', 'השוואה 25.11', :'ykey')) as y_set1 \gset
+select pg_temp.yas(:'ya', format('select public.study_model_set(%L, %L, %L, %L, %L)', :'yg', 'sheet_read', 'claude-sonnet-5-5', '', :'ykey')) as y_set2 \gset
+select pg_temp.yok('Y4-route', :'y_set1' = 'null' and :'y_set2' = 'null'
+  and (select model || ' ' || (set_by = :'ya')::text from public.study_model_routes where group_id = :'yg' and route = 'solver') = 'claude-haiku-5-5 true'
+  and pg_temp.yas(:'yb', format('select public.study_models(%L) #>> %L', :'yg', '{routes,solver,model}')) = 'claude-haiku-5-5'
+  and pg_temp.yas('', format('select public.study_model_at(%L, %L, now(), %L)', :'yg', 'solver', :'ykey')) = 'claude-haiku-5-5'
+  and pg_temp.yas('', format('select public.study_model_at(%L, %L, %L::timestamptz, %L)', :'yg', 'solver', :'y_before', :'ykey')) = 'null'
+  and pg_temp.yas(:'ya', format('select public.study_model_at(%L, %L, now())', :'yg', 'solver')) = 'error: forbidden',
+  'the owner routes the question check to Haiku and a sheet''s read to Sonnet; members see it; the model at a moment (null before: the default); the worker''s only');
+select pg_temp.yas(:'ya', format('select public.study_model_set(%L, %L, null, %L, %L)', :'yg', 'solver', '', :'ykey')) as y_unset \gset
+select pg_temp.yok('Y4-unset', not exists (select 1 from public.study_model_routes where group_id = :'yg' and route = 'solver')
+  and (select string_agg(coalesce(model, 'default'), ',' order by id) from public.study_model_route_log where group_id = :'yg' and route = 'solver') = 'claude-haiku-5-5,default'
+  and pg_temp.yas('', format('select public.study_model_at(%L, %L, now(), %L)', :'yg', 'solver', :'ykey')) = 'null',
+  'back to the default: the row goes, the log keeps a null, the moment''s model is the default again');
+
+-- ── Providers: the owner's consent, scope all unless text is asked ──
+select pg_temp.yas(:'yb', format('select public.study_model_provider_set(%L, %L, true)', :'yg', 'openai')) as y5_provider_1 \gset
+select pg_temp.yas(:'ya', format('select public.study_model_provider_set(%L, %L, true)', :'yg', 'deepseek')) as y5_provider_2 \gset
+select pg_temp.yas(:'ya', format('select public.study_model_provider_set(%L, %L, true)', :'yg', 'anthropic')) as y5_provider_3 \gset
+select pg_temp.yas(:'ya', format('select public.study_model_provider_set(%L, %L, true, %L)', :'yg', 'openai', 'some')) as y5_provider_4 \gset
+select pg_temp.yas(:'ya', format('select public.study_model_provider_set(%L, %L, true)', :'yg', 'openai')) as y5_provider_5 \gset
+select pg_temp.yas(:'ya', format('select public.study_model_provider_set(%L, %L, true, %L)', :'yg', 'google', 'text')) as y5_provider_6 \gset
+select pg_temp.yas(:'ya', format('select public.study_model_provider_set(%L, %L, true)', :'yg', 'openrouter')) as y5_provider_7 \gset
+select pg_temp.yas(:'ya', format('select public.study_model_provider_set(%L, %L, false)', :'yg', 'openrouter')) as y5_provider_8 \gset
+select pg_temp.yas(:'yb', format('select public.study_models(%L) #>> %L', :'yg', '{providers,openai,scope}')) as y5_provider_9 \gset
+select pg_temp.yok('Y5-provider', :'y5_provider_1' = 'error: not the creator'
+  and :'y5_provider_2' = 'error: bad provider'
+  and :'y5_provider_3' = 'error: bad provider'
+  and :'y5_provider_4' = 'error: bad provider'
+  and :'y5_provider_5' = 'null'
+  and :'y5_provider_6' = 'null'
+  and :'y5_provider_7' = 'null'
+  and :'y5_provider_8' = 'null'
+  and (select string_agg(provider || ':' || allowed || ':' || scope, ',' order by provider) from public.study_model_providers where group_id = :'yg')
+      = 'google:true:text,openai:true:all,openrouter:false:all'
+  and (select count(*) from public.study_model_provider_log where group_id = :'yg' and set_by = :'ya') = 4
+  and :'y5_provider_9' = 'all',
+  'a member cannot approve; a direct Chinese endpoint and Anthropic are not approved in the app; approved, the scope is all (text when asked); undone; each recorded');
+
+-- ── Planning: the refusals in their order, and no model map ──
+select pg_temp.yok('Y6-off', pg_temp.yplan(:'yb', 'solver', array['claude-opus-5-5'], 2.00) = 'error: off'
+  and pg_temp.yplan(:'ya', 'solver', array['claude-opus-5-5', 'claude-haiku-5-5'], 0.10) = 'error: off',
+  'with lab off nothing is planned, before any other check');
+update study_private.features set enabled = true where name = 'lab';
+select pg_temp.yok('Y6-order', pg_temp.yplan(:'yb', 'solver', array['claude-opus-5-5'], 2.00) = 'error: not the creator'
+  and pg_temp.yplan(:'ya', 'solver', array['claude-opus-5-5'], 2.00) = 'error: bad slots'
+  and pg_temp.yplan(:'ya', 'solver', array['claude-opus-5-5', 'claude-opus-5-5'], 0.10) = 'error: bad slots'
+  and pg_temp.yplan(:'ya', 'solver', array['claude-opus-5-5', 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5'], 0.10) = 'error: bad slots'
+  and pg_temp.yplan(:'ya', 'nonsense', array['claude-opus-5-5', 'claude-haiku-5-5'], 0.10) = 'error: bad slots'
+  and pg_temp.yplan(:'ya', 'solver', array['claude-opus-5-5', 'claude-haiku-5-5'], 1.51) = 'error: run_cap',
+  'not the creator, then bad slots (one model, the same twice, five, an unknown key), then over $1.50 a run');
+-- The comparison line: $3.30 this month (a ledger row of kind lab of $3.00 leaves room for $0.30).
+insert into public.study_usage (group_id, kind, ref, cost_usd, settled_at) values (:'yg', 'lab', 'seed', 3.00, now()) returning id as y_seed \gset
+select pg_temp.yok('Y6-line', pg_temp.yplan(:'ya', 'solver', array['claude-opus-5-5', 'claude-haiku-5-5'], 0.31) = 'error: lab_budget'
+  and pg_temp.yplan(:'ya', 'solver', array['claude-opus-5-5', 'claude-haiku-5-5'], 1.51) = 'error: run_cap'
+  and study_private.lab_line(:'yg', 33) = 3.30,
+  'the month''s comparison spend and the run past $3.30: lab_budget (and run_cap comes first)');
+update public.study_usage set cost_usd = 0 where id = :y_seed;
+-- The group's 80% line: other spend at $26.30 leaves $0.10.
+insert into public.study_usage (group_id, kind, ref, cost_usd, settled_at) values (:'yg', 'part', 'seed', 26.30, now()) returning id as y_seed2 \gset
+select pg_temp.yok('Y6-reserve', pg_temp.yplan(:'ya', 'solver', array['claude-opus-5-5', 'claude-haiku-5-5'], 0.20) = 'error: reserve',
+  'the group past 80% of the cap with this run: reserve (the summaries keep their 20%)');
+update public.study_usage set cost_usd = 0 where id = :y_seed2;
+-- The line is a fixed amount (no drop by date), at most 15% of the cap.
+insert into study_private.lab_settings (group_id, lab_usd) values (:'yg', 10) on conflict (group_id) do update set lab_usd = excluded.lab_usd;
+select study_private.lab_line(:'yg', 33) as y_l1, study_private.lab_line(:'yg', 10) as y_l2 \gset
+delete from study_private.lab_settings where group_id = :'yg';
+do $$ begin
+  insert into study_private.lab_settings (group_id, lab_usd) values ('0f000000-0000-4000-8000-0000000000a1', 11);
+  raise notice '%', pg_temp.yok('Y6-check', false, 'a line above $10 was stored');
+exception when check_violation then raise notice '%', pg_temp.yok('Y6-check', true, 'the table refuses a line above $10');
+end $$;
+select pg_temp.yok('Y6-ceiling', :'y_l1' = '4.95' and :'y_l2' = '1.50' and study_private.lab_line(:'yg', 33) = 3.30
+  and study_private.lab_line(:'yzg', 40) = 3.30,
+  'a line of $10 is used up to 15% of the cap ($4.95 of $33, $1.50 of $10); without a row, $3.30 whatever the cap or the date');
+
+select pg_temp.yplan(:'ya', 'practice', array['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], 0.80) as yr1 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_plan(%L, null, %L, %L, %L, %L, %L, %L, %L, null, 0.10, 33, %L)::text', :'yg', 'solver',
+  'הבדיקה של השאלות · 10 שאלות', '{"items":10}', '{"material":{}}', 'hash-abcdefgh', '',
+  '[{"model":"claude-opus-5-5","provider":"anthropic"},{"model":"claude-haiku-5-5","provider":"anthropic"}]', :'ykey')) as y_plan2 \gset
+select (:'y_plan2')::jsonb ->> 'run' as yr2 \gset
+select pg_temp.yok('Y6-plan', :'yr1' ~ '^[0-9a-f-]{36}$'
+  and (select array_agg(k order by k) from jsonb_object_keys((:'y_plan2')::jsonb) k) = array['labels', 'run']
+  and (:'y_plan2')::jsonb -> 'labels' = '["א", "ב"]'::jsonb
+  and position('claude' in :'y_plan2') = 0
+  and (select string_agg(label, '' order by label) from public.study_lab_outputs where run_id = :'yr1') = 'אבג'
+  and (select count(distinct model) from public.study_lab_outputs where run_id = :'yr1') = 3
+  and (select member_rate from public.study_lab_runs where id = :'yr1') and not (select member_rate from public.study_lab_runs where id = :'yr2')
+  and (select created_by from public.study_lab_runs where id = :'yr1') = :'ya',
+  'a practice run of three models and a question check of two: the result is {run, labels} with no model; each slot its own label; practice members rate, the question check not');
+-- Labels are shuffled: over 30 plans of four models the first slot is not always א.
+do $$
+declare i int; seen text := ''; v_run uuid;
+begin
+  for i in 1 .. 30 loop
+    perform set_config('request.jwt.claim.sub', '0f000000-0000-4000-8000-000000000001', true);
+    v_run := (public.study_lab_plan('0f000000-0000-4000-8000-0000000000a1', null, 'points', 'ערבוב', '{}', null, 'hash-shuffle', '',
+        '[{"model":"m-one","provider":"anthropic"},{"model":"m-two","provider":"anthropic"},{"model":"m-three","provider":"anthropic"},{"model":"m-four","provider":"anthropic"}]',
+        null, 0.01, 1000, 'k-0123456789abcdef0123456789abcdef') ->> 'run')::uuid;
+    seen := seen || (select o.label from public.study_lab_outputs o where o.slot = 0 and o.run_id = v_run);
+    -- (moved to an earlier day, so the day's limit is not part of this check)
+    update public.study_lab_runs set created_at = now() - interval '2 days' where title = 'ערבוב';
+  end loop;
+  raise notice '%', pg_temp.yok('Y6-shuffle', seen ~ 'ב|ג|ד' and seen ~ 'א', 'the first slot''s label varies between runs: ' || left(seen, 30));
+  delete from public.study_lab_runs where title = 'ערבוב';
+end $$;
+-- Three runs a day (Israel time): yr1 and yr2 are two; a third passes, the fourth is refused.
+select pg_temp.yplan(:'ya', 'cards', array['claude-opus-5-5', 'claude-sonnet-5-5'], 0.10) as yr3 \gset
+select pg_temp.yok('Y6-daily', :'yr3' ~ '^[0-9a-f-]{36}$'
+  and pg_temp.yplan(:'ya', 'cards', array['claude-opus-5-5', 'claude-sonnet-5-5'], 0.10) = 'error: daily_runs'
+  and pg_temp.yplan(:'ya', 'cards', array['claude-opus-5-5', 'claude-sonnet-5-5'], 1.60) = 'error: run_cap',
+  'three runs today: a fourth is refused daily_runs (run_cap before it)');
+
+-- ── The server's read of a slot (owner's token and the key) ──
+select pg_temp.yok('Y7-slot', pg_temp.yas(:'yb', format('select public.study_lab_slot(%L, %L, %L)', :'yr1', 'א', :'ykey')) = 'error: not the creator'
+  and pg_temp.yas(:'ya', format('select public.study_lab_slot(%L, %L, %L)', :'yr1', 'א', 'wrong')) = 'error: forbidden'
+  and pg_temp.yas(:'ya', format('select public.study_lab_slot(%L, %L, %L) ->> %L', :'yr1', 'א', :'ykey', 'model'))
+      = (select model from public.study_lab_outputs where run_id = :'yr1' and label = 'א')
+  and pg_temp.yas(:'ya', format('select public.study_lab_slot(%L, %L, %L) #>> %L', :'yr1', 'א', :'ykey', '{request,system}')) = '…'
+  and pg_temp.yas(:'ya', format('select public.study_lab_slot(%L, %L, %L)', :'yr1', 'ד', :'ykey')) = 'error: not waiting',
+  'only the owner, with the key, reads which model a label is and the frozen request');
+
+-- ── Blind while running, for the owner and a member ──
+select pg_temp.yas(:'ya', format('select public.study_lab_run(%L)::text', :'yr1')) as y_run_a \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_run(%L)::text', :'yr1')) as y_run_b \gset
+select pg_temp.yok('Y8-blind', (:'y_run_a')::jsonb -> 'outputs' = '[{"label": "א"}, {"label": "ב"}, {"label": "ג"}]'::jsonb
+  and (:'y_run_b')::jsonb -> 'outputs' = (:'y_run_a')::jsonb -> 'outputs'
+  and position('claude' in :'y_run_a') = 0 and position('claude' in :'y_run_b') = 0
+  and (:'y_run_a')::jsonb ->> 'ready' = '0' and (:'y_run_a')::jsonb ->> 'total' = '3'
+  and not ((:'y_run_b')::jsonb ? 'request') and (:'y_run_b')::jsonb -> 'estimate_usd' = 'null'::jsonb
+  and pg_temp.yas(:'yz', format('select public.study_lab_run(%L)', :'yr1')) = 'error: forbidden',
+  'while it runs: labels only (no status, no model) to the owner and to a member, the ready count, never the request; an outsider nothing');
+
+-- ── Claims: the worker's, atomic, reserved with no user ──
+select pg_temp.yas(:'ya', format('select public.study_my_spent(%L)', :'yg')) as y_mine_before \gset
+select id as yo1a from public.study_lab_outputs where run_id = :'yr1' and label = 'א' \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.30, 33, %L)', :'yr1', 'א', 'answer', :'ykey')) as y_c1 \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.30, 33, %L)', :'yr1', 'א', 'answer', :'ykey')) as y9_claim_1 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_claim(%L, %L, %L, 0.30, 33, %L)', :'yr1', 'ב', 'answer', :'ykey')) as y9_claim_2 \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.30, 33, %L)', :'yr1', 'ב', 'answer', 'wrong')) as y9_claim_3 \gset
+select pg_temp.yok('Y9-claim', :'y_c1' ~ '^[0-9]+$'
+  and :'y9_claim_1' = 'error: not waiting'
+  and :'y9_claim_2' = 'error: forbidden'
+  and :'y9_claim_3' = 'error: forbidden'
+  and (select status from public.study_lab_outputs where id = :'yo1a') = 'running'
+  and (select reservation from public.study_lab_outputs where id = :'yo1a') = :'y_c1'::bigint
+  and (select kind || ' ' || coalesce(user_id::text, 'no user') || ' ' || ref || ' ' || cost_usd from public.study_usage where id = :'y_c1'::bigint)
+      = 'lab no user run:' || :'yr1' || ':' || (select slot from public.study_lab_outputs where id = :'yo1a') || ':answer 0.30000'
+  and (select count(*) from public.study_usage where group_id = :'yg' and kind = 'lab' and ref like 'run:' || :'yr1' || ':%') = 1,
+  'a claim reserves once, with no user and ref run:<run>:<slot>:answer; a second claim of the slot is not waiting; signed in or without the key: forbidden');
+select pg_temp.yok('Y9-mine', pg_temp.yas(:'ya', format('select public.study_my_spent(%L)', :'yg')) = :'y_mine_before'
+  and :'y_mine_before' ~ '^[0-9.]+$',
+  'the owner''s own spend ("נוצל על ידך החודש") does not count comparisons');
+-- The line holds at each claim: $3.00 of earlier comparisons and $0.30 reserved leave nothing for another $0.10.
+update public.study_usage set cost_usd = 3.00 where id = :y_seed;
+select pg_temp.yok('Y9-line', pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.10, 33, %L)', :'yr1', 'ב', 'answer', :'ykey')) = 'error: lab_budget'
+  and (select status from public.study_lab_outputs where run_id = :'yr1' and label = 'ב') = 'waiting',
+  'a claim past the month''s line is refused lab_budget, and the claim is rolled back (still waiting)');
+update public.study_usage set cost_usd = 0 where id = :y_seed;
+-- With lab off, a planned run cannot claim (nor can anyone rate).
+update study_private.features set enabled = false where name = 'lab';
+select pg_temp.yok('Y9-off', pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.10, 33, %L)', :'yr1', 'ב', 'answer', :'ykey')) = 'error: off',
+  'the switch off stops a run that was planned already');
+update study_private.features set enabled = true where name = 'lab';
+
+-- ── The answers come in; the run closes; the group hears of it (section R) ──
+select pg_temp.yas('', format('select public.study_lab_output_save(%L, %L, null, %L, %L, 0.21, 41000, 900, %L, %L, null, %L)', :'yo1a', 'done', 'תשובה א בדויה',
+  '{"output_tokens": 6120}', 'claude-opus-5-5', '{"pass": true}', :'ykey')) as y_s1 \gset
+select pg_temp.yok('Y10-save', :'y_s1' = 'true'
+  and pg_temp.yas('', format('select public.study_lab_output_save(%L, %L, null, %L, null, 0, 0, 0, null, null, null, %L)', :'yo1a', 'done', 'שוב', :'ykey')) = 'false'
+  and pg_temp.yas('', format('select public.study_lab_output_save(%L, %L, null, %L, null, 0, 0, 0, null, null, null, %L)', :'yo1a', 'nonsense', 'שוב', :'ykey')) = 'error: bad status'
+  and (select status from public.study_lab_runs where id = :'yr1') = 'running'
+  and (pg_temp.yas(:'yb', format('select public.study_lab_run(%L)::text', :'yr1')))::jsonb ->> 'ready' = '1',
+  'an answer saved once (a second save of it changes nothing); the run goes on while others run');
+select pg_temp.yfinish(:'yr1', array['done', 'refused']);
+select pg_temp.yas(:'yb', format('select public.study_lab_run(%L)::text', :'yr1')) as y_run_b2 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_run(%L)::text', :'yr1')) as y_run_a2 \gset
+select pg_temp.yok('Y10-done', (select status from public.study_lab_runs where id = :'yr1') = 'done'
+  and (:'y_run_b2')::jsonb ->> 'status' = 'done'
+  and (select count(*) from jsonb_array_elements((:'y_run_b2')::jsonb -> 'outputs') o where o ? 'status' and o ? 'text') = 3
+  and (select count(*) from jsonb_array_elements((:'y_run_b2')::jsonb -> 'outputs') o
+        where o -> 'model' = 'null'::jsonb and o -> 'cost_usd' = 'null'::jsonb and o -> 'latency_ms' = 'null'::jsonb) = 3
+  and (select count(*) from jsonb_array_elements((:'y_run_a2')::jsonb -> 'outputs') o
+        where o -> 'model' = 'null'::jsonb and o -> 'cost_usd' = 'null'::jsonb and o -> 'served_by' = 'null'::jsonb) = 3
+  and position('claude' in :'y_run_a2') = 0 and position('claude' in :'y_run_b2') = 0
+  and (:'y_run_b2')::jsonb ->> 'can_rate' = 'true',
+  'done: every answer''s status, text and checks; model, cost and time still hidden from the member and the owner');
+select pg_temp.yok('Y10-notice', (select count(*) from public.study_notices where kind = 'lab_new' and group_id = :'yg') = 2
+  and not exists (select 1 from public.study_notices where kind = 'lab_new' and user_id = :'ya')
+  and (select route ->> 'v' || ' ' || (route ->> 'r' = :'yr1')::text || ' ' || cat || ' ' || (obj = 'lab:' || :'yr1')::text
+         from public.study_notices where kind = 'lab_new' and user_id = :'yb') = 'models true inapp true'
+  and not exists (select 1 from study_private.notify_outbox where kind = 'lab_new')
+  and (select push from study_private.notice_kinds where kind = 'lab_new') = false
+  and (select notified_at is not null from public.study_lab_runs where id = :'yr1'),
+  'a run waiting for ratings: a notice in the inbox of every member but the owner who ran it, to the run, never pushed');
+
+-- ── Blind rating ──
+select id as yo1b from public.study_lab_outputs where run_id = :'yr1' and label = 'ב' \gset
+select id as yo1c from public.study_lab_outputs where run_id = :'yr1' and label = 'ג' \gset
+select (select string_agg(label, '' order by label) from public.study_lab_outputs where run_id = :'yr1' and status = 'done') as y_done_labels \gset
+select id as yo_ref from public.study_lab_outputs where run_id = :'yr1' and status = 'refused' \gset
+select id as yo_d1 from public.study_lab_outputs where run_id = :'yr1' and status = 'done' order by label limit 1 \gset
+select id as yo_d2 from public.study_lab_outputs where run_id = :'yr1' and status = 'done' order by label desc limit 1 \gset
+select label as yl_d1 from public.study_lab_outputs where id = :'yo_d1' \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_rate(%L, 4, 5, 5, 5, false, %L)', :'yo_d1', '')) as y11_rate_1 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_rate(%L, 4)', :'yo_ref')) as y11_rate_2 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_rate(%L, 6)', :'yo_d2')) as y11_rate_3 \gset
+select pg_temp.yas(:'yz', format('select public.study_lab_rate(%L, 3)', :'yo_d2')) as y11_rate_4 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_reveal(%L, %L)', :'yr1', :'yl_d1')) as y11_rate_5 \gset
+select pg_temp.yok('Y11-rate', :'y11_rate_1' = 'null'
+  and (select overall || ' ' || coalesce(accuracy::text, '-') from public.study_lab_ratings where output_id = :'yo_d1' and user_id = :'yb') = '4 -'
+  and :'y11_rate_2' = 'error: not done'
+  and :'y11_rate_3' = 'error: bad rating'
+  and :'y11_rate_4' = 'error: forbidden'
+  and :'y11_rate_5' = 'error: not rated',
+  'a member''s score is saved (the detail kept for the owner only); a refused answer has nothing to rate; 6 is not a score; the reveal waits for every answer');
+select pg_temp.yas(:'yb', format('select public.study_lab_rate(%L, 2, null, null, null, true, %L)', :'yo_d2', 'מספר שגוי')) as y_r2 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_reveal(%L, %L)', :'yr1', 'ד')) as y11_reveal_1 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_reveal(%L, %L)', :'yr1', :'yl_d1')) as y11_reveal_2 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_rate(%L, 5)', :'yo_d2')) as y11_reveal_3 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_reveal(%L, %L)', :'yr1', :'yl_d1')) as y11_reveal_4 \gset
+select pg_temp.yok('Y11-reveal', :'y_r2' = 'null'
+  and :'y11_reveal_1' = 'error: bad rating'
+  and :'y11_reveal_2' = 'null'
+  and (select rated::text || ' ' || best_label from public.study_lab_seen where run_id = :'yr1' and user_id = :'yb') = 'true ' || :'yl_d1'
+  and :'y11_reveal_3' = 'error: seen'
+  and :'y11_reveal_4' = 'error: seen',
+  'rated every finished answer: the best pick (a label of the run, or =) and the reveal; after it the ratings lock');
+select pg_temp.yas(:'yb', format('select public.study_lab_run(%L)::text', :'yr1')) as y_run_b3 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_run(%L)::text', :'yr1')) as y_run_a3 \gset
+select pg_temp.yok('Y11-names', (select count(*) from jsonb_array_elements((:'y_run_b3')::jsonb -> 'outputs') o where o ->> 'model' like 'claude-%' and o ? 'cost_usd') = 3
+  and (select o #>> '{group,n}' from jsonb_array_elements((:'y_run_b3')::jsonb -> 'outputs') o where o ->> 'id' = :'yo_d2') = '1'
+  and (select count(*) from jsonb_array_elements((:'y_run_b3')::jsonb -> 'outputs') o where o -> 'usage' <> 'null'::jsonb) = 0
+  and (select count(*) from jsonb_array_elements((:'y_run_a3')::jsonb -> 'outputs') o where o -> 'model' = 'null'::jsonb) = 3,
+  'after the member''s reveal the member sees names, cost and time (not the tokens); the owner, who has not revealed, still does not');
+-- The owner rates too, with the detail; then skips: the ratings go, the names show.
+select pg_temp.yas(:'ya', format('select public.study_lab_rate(%L, 3, 4, 2, 5, false, %L)', :'yo_d1', '')) as y11_owner_1 \gset
+select (select overall || ' ' || accuracy || ' ' || hebrew || ' ' || structure from public.study_lab_ratings where output_id = :'yo_d1' and user_id = :'ya') as y11_owner_0 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_reveal(%L, null, true)', :'yr1')) as y11_owner_2 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_run(%L)::text', :'yr1')) as y11_owner_3 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_run(%L)::text', :'yr1')) as y11_owner_4 \gset
+select pg_temp.yok('Y11-owner', :'y11_owner_1' = 'null'
+  and :'y11_owner_0' = '3 4 2 5'
+  and :'y11_owner_2' = 'null'
+  and not exists (select 1 from public.study_lab_ratings x join public.study_lab_outputs o on o.id = x.output_id where o.run_id = :'yr1' and x.user_id = :'ya')
+  and (select rated from public.study_lab_seen where run_id = :'yr1' and user_id = :'ya') = false
+  and ((:'y11_owner_3')::jsonb -> 'outputs' -> 0 ->> 'model') like 'claude-%'
+  and ((:'y11_owner_4')::jsonb -> 'outputs' -> 0 -> 'usage') <> 'null'::jsonb,
+  'the owner''s score keeps its detail; a skip deletes the caller''s ratings on the run and shows the names (and, to the owner, the tokens)');
+
+-- ── A kind members do not rate (the question check) ──
+select pg_temp.yfinish(:'yr2', array['done', 'done']);
+select id as yo2 from public.study_lab_outputs where run_id = :'yr2' order by label limit 1 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_rate(%L, 4)', :'yo2')) as y12_kinds_1 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_reveal(%L, %L)', :'yr2', '=')) as y12_kinds_2 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_reveal(%L)', :'yr2')) as y12_kinds_3 \gset
+select pg_temp.yok('Y12-kinds', :'y12_kinds_1' = 'error: not rated here'
+  and :'y12_kinds_2' = 'error: not rated here'
+  and not exists (select 1 from public.study_notices where kind = 'lab_new' and obj = 'lab:' || :'yr2')
+  and :'y12_kinds_3' = 'null'
+  and (select rated from public.study_lab_seen where run_id = :'yr2' and user_id = :'ya') = false,
+  'the question check: a member neither rates nor reveals it, nobody is told; the owner reveals it without ratings');
+
+-- ── The lists and the count on שלי ──
+select pg_temp.yas(:'yc', format('select public.study_lab_todo(%L)', :'yg')) as y_todo_c \gset
+select pg_temp.yas(:'yc', format('select count(*) from public.study_lab_list(%L)', :'yg')) as y_list_c \gset
+select pg_temp.yas(:'ya', format('select count(*) from public.study_lab_list(%L)', :'yg')) as y_list_a \gset
+select pg_temp.yok('Y13-lists', :'y_todo_c' = '1' and pg_temp.yas(:'yb', format('select public.study_lab_todo(%L)', :'yg')) = '0'
+  and :'y_list_c' = '3' and :'y_list_a' = '3'
+  and pg_temp.yas(:'yb', format('select string_agg(mine, %L) from public.study_lab_list(%L) where id = %L', ',', :'yg', :'yr1')) = 'rated'
+  and pg_temp.yas(:'yb', format('select count(*) from public.study_lab_list(%L) where id = %L', :'yg', :'yr2')) = '0'
+  and pg_temp.yas(:'yb', format('select (cost_usd > 0)::text from public.study_lab_list(%L) where id = %L', :'yg', :'yr1')) = 'true'
+  and pg_temp.yas(:'yc', format('select coalesce(cost_usd::text, %L) || %L || mine from public.study_lab_list(%L) where id = %L', 'hidden', ' ', :'yg', :'yr1')) = 'hidden todo'
+  and pg_temp.yas(:'yz', format('select public.study_lab_todo(%L)', :'yg')) = 'error: forbidden',
+  'one run waits for the member who has not rated it; the member''s list has the rated kinds only, the owner''s every run; cost only once seen');
+select pg_temp.yas(:'yc', format('select public.study_lab_reveal(%L, null, true)', :'yr1')) as y_skip_c \gset
+select pg_temp.yok('Y13-skip', :'y_skip_c' = 'null' and pg_temp.yas(:'yc', format('select public.study_lab_todo(%L)', :'yg')) = '0'
+  and pg_temp.yas(:'yc', format('select mine from public.study_lab_list(%L) where id = %L', :'yg', :'yr1')) = 'skipped',
+  'a skip: the count drops, the run reads skipped');
+update public.study_lab_runs set created_at = now() - interval '8 days' where id = :'yr1';
+delete from public.study_lab_seen where run_id = :'yr1' and user_id = :'yc';
+select pg_temp.yok('Y13-old', pg_temp.yas(:'yc', format('select public.study_lab_todo(%L)', :'yg')) = '0'
+  and pg_temp.yas(:'yc', format('select mine from public.study_lab_list(%L) where id = %L', :'yg', :'yr1')) = 'old',
+  'after 7 days a run no longer counts as waiting');
+update public.study_lab_runs set created_at = now() where id = :'yr1';
+
+-- ── The results table: only runs the caller has revealed ──
+select pg_temp.yas(:'yb', format('select public.study_lab_board(%L, %L)::text', :'yg', 'practice')) as y_board_b \gset
+select pg_temp.yas(:'yc', format('select public.study_lab_board(%L, %L)::text', :'yg', 'practice')) as y_board_c \gset
+select pg_temp.yok('Y14-board', jsonb_array_length((:'y_board_b')::jsonb -> 'models') = 3
+  and (:'y_board_c')::jsonb -> 'models' = '[]'::jsonb
+  and (select count(*) from jsonb_array_elements((:'y_board_b')::jsonb -> 'models') m where (m ->> 'refused')::int = 1) = 1
+  and (select (m ->> 'score')::numeric from jsonb_array_elements((:'y_board_b')::jsonb -> 'models') m
+        where m ->> 'model' = (select model from public.study_lab_outputs where id = :'yo_d2')) = 2
+  and (select sum((m ->> 'best')::int) from jsonb_array_elements((:'y_board_b')::jsonb -> 'models') m) = 1
+  and (:'y_board_b')::jsonb -> 'usage30' = 'null'::jsonb
+  and (pg_temp.yas(:'ya', format('select public.study_lab_board(%L, %L)::text', :'yg', 'practice')))::jsonb -> 'usage30' <> 'null'::jsonb
+  and (:'y_board_b')::jsonb ->> 'today' = 'claude-opus-5-5'
+  and pg_temp.yas(:'yb', format('select public.study_lab_board(%L, %L)', :'yg', 'nope')) = 'error: bad route',
+  'per model over revealed runs (none for a member who has not revealed): refusals, the score (one flagged rater: capped at 2.5), the best picks; usage30 for the owner only');
+
+-- ── Retry once; the AI score once; cancel ──
+update public.study_lab_outputs set status = 'timeout' where id = :'yo_ref';
+select label as yl_ref from public.study_lab_outputs where id = :'yo_ref' \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.05, 33, %L)', :'yr1', :'yl_ref', 'retry', :'ykey')) as y_rt1 \gset
+select (select status || ' ' || tries from public.study_lab_outputs where id = :'yo_ref') || ' ' || (select status from public.study_lab_runs where id = :'yr1') as y15_retry_0 \gset
+select pg_temp.yas('', format('select public.study_lab_output_save(%L, %L, null, null, null, 0.01, 1, 1, null, null, null, %L)', :'yo_ref', 'error', :'ykey')) as y15_retry_1 \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.05, 33, %L)', :'yr1', :'yl_ref', 'retry', :'ykey')) as y15_retry_2 \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.05, 33, %L)', :'yr1', :'yl_d1', 'retry', :'ykey')) as y15_retry_3 \gset
+select pg_temp.yok('Y15-retry', :'y_rt1' ~ '^[0-9]+$'
+  and :'y15_retry_0' = 'running 1 running'
+  and :'y15_retry_1' = 'true'
+  and (select status from public.study_lab_runs where id = :'yr1') = 'done'
+  and :'y15_retry_2' = 'error: not waiting'
+  and :'y15_retry_3' = 'error: not waiting',
+  'a timed-out answer is tried again once (the run runs again until it ends); a second retry, or a retry of a finished answer: not waiting');
+update public.study_lab_runs set judge_model = 'claude-opus-5-5' where id = :'yr1';
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.20, 33, %L)', :'yr1', 'j', 'judge', :'ykey')) as y_j1 \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.20, 33, %L)', :'yr1', 'j', 'judge', :'ykey')) as y15_judge_1 \gset
+select pg_temp.yas('', format('select public.study_lab_judged(%L, %L, %L, 0.05, %L)', :'yo_d1', 'claude-opus-5-5', '{"overall": 4}', :'ykey')) as y15_judge_2 \gset
+select judge_status as y15_judge_mid from public.study_lab_runs where id = :'yr1' \gset
+select pg_temp.yas('', format('select public.study_lab_judged(%L, %L, %L, 0.05, %L)', :'yo_d2', 'claude-opus-5-5', '{"overall": 3}', :'ykey')) as y15_judge_3 \gset
+select pg_temp.yok('Y15-judge', :'y_j1' ~ '^[0-9]+$'
+  and :'y15_judge_1' = 'error: not waiting'
+  and (select ref from public.study_usage where id = :'y_j1'::bigint) = 'run:' || :'yr1' || ':j:judge'
+  and :'y15_judge_2' = 'true'
+  and :'y15_judge_mid' = 'running'
+  and :'y15_judge_3' = 'true'
+  and (select judge_status from public.study_lab_runs where id = :'yr1') = 'done',
+  'the AI score is claimed once (ref run:<run>:j:judge); done when every finished answer has one');
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.02, 33, %L)', :'yr1', :'yl_d1', 'solve', :'ykey')) as y_sv1 \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.02, 33, %L)', :'yr1', :'yl_d1', 'solve', :'ykey')) as y15_solve_1 \gset
+select pg_temp.yas('', format('select public.study_lab_check_save(%L, %L, %L, %L)', :'yo_d1', '{"solver_agree": 4}', 'done', :'ykey')) as y15_solve_2 \gset
+select pg_temp.yok('Y15-solve', :'y_sv1' ~ '^[0-9]+$'
+  and :'y15_solve_1' = 'error: not waiting'
+  and :'y15_solve_2' = 'true'
+  and (select checks ->> 'solver_agree' || ' ' || (checks ->> 'pass') || ' ' || check_status from public.study_lab_outputs where id = :'yo_d1') = '4 true done',
+  'a paid check is claimed once and merged into the answer''s checks');
+select pg_temp.yplan(:'ya', 'ask', array['claude-opus-5-5', 'claude-haiku-5-5'], 0.10) as yr4 \gset
+select pg_temp.yok('Y15-cancel', :'yr4' = 'error: daily_runs', 'three runs today already');
+update public.study_lab_runs set created_at = now() - interval '2 days' where id in (:'yr2', :'yr3');
+select pg_temp.yplan(:'ya', 'ask', array['claude-opus-5-5', 'claude-haiku-5-5'], 0.10) as yr4 \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.05, 33, %L)', :'yr4', 'א', 'answer', :'ykey')) as y_c4 \gset
+select pg_temp.yas(:'yb', format('select public.study_lab_cancel(%L)', :'yr4')) as y15_cancel2_1 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_cancel(%L)', :'yr4')) as y15_cancel2_2 \gset
+select (select status from public.study_lab_outputs where run_id = :'yr4' and label = 'א') as y15_cancel2_0 \gset
+select pg_temp.yas('', format('select public.study_lab_status(%L, %L)', :'yr4', :'ykey')) as y15_cancel2_3 \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.05, 33, %L)', :'yr4', 'ב', 'retry', :'ykey')) as y15_cancel2_4 \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_cancel(%L)', :'yr4')) as y15_cancel2_5 \gset
+select pg_temp.yas('', format('select public.study_lab_output_save((select id from public.study_lab_outputs where run_id = %L and label = %L), %L, %L, null, null, 0.01, 1, 1, null, null, null, %L)', :'yr4', 'א', 'error', 'cancelled', :'ykey')) as y15_cancel2_6 \gset
+select pg_temp.yok('Y15-cancel2', :'y15_cancel2_1' = 'error: not the creator'
+  and :'y15_cancel2_2' = 'null'
+  and (select status from public.study_lab_runs where id = :'yr4') = 'cancelled'
+  and (select status || ' ' || reason from public.study_lab_outputs where run_id = :'yr4' and label = 'ב') = 'error cancelled'
+  and :'y15_cancel2_0' = 'running'
+  and :'y15_cancel2_3' = 'cancelled'
+  and :'y15_cancel2_4' = 'error: closed'
+  and :'y15_cancel2_5' = 'error: closed'
+  and :'y15_cancel2_6' = 'true'
+  and (select status from public.study_lab_runs where id = :'yr4') = 'cancelled',
+  'the owner stops a run: waiting answers end cancelled, the running one settles when it stops; nothing more is claimed; a stopped run stays stopped');
+
+-- ── The sweep ──
+select pg_temp.yplan(:'ya', 'points', array['claude-opus-5-5', 'claude-haiku-5-5'], 0.10) as yr5 \gset
+select pg_temp.yas('', format('select public.study_lab_claim(%L, %L, %L, 0.05, 33, %L)', :'yr5', 'א', 'answer', :'ykey')) as y_c5 \gset
+update public.study_lab_runs set created_at = now() - interval '16 minutes' where id = :'yr5';
+update public.study_lab_outputs set claimed_at = now() - interval '11 minutes' where run_id = :'yr5' and label = 'א';
+select study_private.lab_sweep() as y_swept \gset
+select pg_temp.yok('Y16-sweep', :'y_swept'::int >= 1
+  and (select status || ' ' || coalesce(reason, '-') from public.study_lab_outputs where run_id = :'yr5' and label = 'ב') = 'error not started'
+  and (select status from public.study_lab_outputs where run_id = :'yr5' and label = 'א') = 'timeout'
+  and (select status from public.study_lab_runs where id = :'yr5') = 'done'
+  and (select settled_at is null and cost_usd = 0.05 from public.study_usage where id = :'y_c5'::bigint)
+  and not exists (select 1 from public.study_notices where kind = 'lab_new' and obj = 'lab:' || :'yr5')
+  and exists (select 1 from cron.job where jobname = 'study-lab-sweep' and schedule = '7,22,37,52 * * * *'),
+  'never claimed in 15 minutes: not started; running 10 minutes: timed out (its reservation keeps its estimate); the run closes, nobody told (no answer to rate); pg_cron every 15 minutes');
+update public.study_lab_runs set created_at = now() - interval '61 days' where id = :'yr5';
+select study_private.lab_sweep() as y_swept2 \gset
+select pg_temp.yok('Y16-keep', (select request is null from public.study_lab_runs where id = :'yr5')
+  and (select request is not null from public.study_lab_runs where id = :'yr1')
+  and (pg_temp.yas(:'yb', format('select public.study_lab_source(%L)::text', :'yr1')))::jsonb #>> '{material,slides,0,text}' = 'שקף בדוי'
+  and (pg_temp.yas(:'yb', format('select public.study_lab_source(%L)::text', :'yr5')))::jsonb ->> 'kept' = 'false',
+  'after 60 days the frozen request is blanked; the material shows until then');
+
+-- ── Lab rows in the ledger: no user; my spend unchanged ──
+select pg_temp.yok('Y17-ledger', not exists (select 1 from public.study_usage where group_id = :'yg' and kind = 'lab' and user_id is not null)
+  and (select count(*) from public.study_usage where group_id = :'yg' and kind = 'lab' and ref like 'run:%') >= 8,
+  'every comparison call is a ledger row of kind lab with no user');
+
+-- ── Loading section Y again keeps everything ──
+select pg_temp.yok('Y18-grants', not has_function_privilege('anon', 'public.study_lab_rate(uuid, int, int, int, int, boolean, text)', 'execute')
+  and not has_function_privilege('anon', 'public.study_lab_plan(uuid, uuid, text, text, jsonb, jsonb, text, text, jsonb, text, numeric, numeric, text)', 'execute')
+  and has_function_privilege('anon', 'public.study_lab_claim(uuid, text, text, numeric, numeric, text)', 'execute')
+  and not has_function_privilege('authenticated', 'study_private.lab_sweep()', 'execute')
+  and has_function_privilege('authenticated', 'public.study_lab_run(uuid)', 'execute'),
+  'members'' functions to authenticated only; the worker''s to anon (the key inside); the sweep to nobody');
+
+-- ── The fixtures go ──
+reset role;
+set request.jwt.claim.sub = '';
+update study_private.features set enabled = false where name = 'lab';
+delete from study_private.lab_admins where user_id = :'yc';
+delete from public.study_notices where group_id = :'yg';
+delete from public.study_usage where group_id in (:'yg', :'yzg');
+delete from public.study_groups where id in (:'yg', :'yzg');
+delete from auth.users where id in (:'ya', :'yb', :'yc', :'yz');
+select pg_temp.yok('Y-end', not exists (select 1 from public.study_lab_runs where group_id = :'yg')
+  and not exists (select 1 from public.study_model_route_log where group_id = :'yg'),
+  'the fixtures are gone');
+-- ════ END SECTION Y ════

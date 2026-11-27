@@ -1231,6 +1231,191 @@
     "required": 2
    }
   ],
+  "study_lab_board": [
+   {
+    "args": [
+     "p_group",
+     "p_route"
+    ],
+    "required": 2
+   }
+  ],
+  "study_lab_cancel": [
+   {
+    "args": [
+     "p_run"
+    ],
+    "required": 1
+   }
+  ],
+  "study_lab_check_save": [
+   {
+    "args": [
+     "p_output",
+     "p_checks",
+     "p_status",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_lab_claim": [
+   {
+    "args": [
+     "p_run",
+     "p_label",
+     "p_part",
+     "p_estimate",
+     "p_cap",
+     "p_key"
+    ],
+    "required": 5
+   }
+  ],
+  "study_lab_judge_input": [
+   {
+    "args": [
+     "p_run",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_lab_judged": [
+   {
+    "args": [
+     "p_output",
+     "p_judge",
+     "p_scores",
+     "p_cost",
+     "p_key"
+    ],
+    "required": 4
+   }
+  ],
+  "study_lab_list": [
+   {
+    "args": [
+     "p_group",
+     "p_limit"
+    ],
+    "required": 1
+   }
+  ],
+  "study_lab_output_save": [
+   {
+    "args": [
+     "p_output",
+     "p_status",
+     "p_reason",
+     "p_text",
+     "p_usage",
+     "p_cost",
+     "p_latency",
+     "p_first",
+     "p_served_by",
+     "p_checks",
+     "p_check_status",
+     "p_key"
+    ],
+    "required": 11
+   }
+  ],
+  "study_lab_owner": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
+  "study_lab_plan": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture",
+     "p_route",
+     "p_title",
+     "p_source",
+     "p_request",
+     "p_hash",
+     "p_differs",
+     "p_models",
+     "p_judge",
+     "p_estimate",
+     "p_cap",
+     "p_key"
+    ],
+    "required": 12
+   }
+  ],
+  "study_lab_rate": [
+   {
+    "args": [
+     "p_output",
+     "p_overall",
+     "p_accuracy",
+     "p_hebrew",
+     "p_structure",
+     "p_error",
+     "p_note"
+    ],
+    "required": 2
+   }
+  ],
+  "study_lab_reveal": [
+   {
+    "args": [
+     "p_run",
+     "p_best",
+     "p_skip"
+    ],
+    "required": 1
+   }
+  ],
+  "study_lab_run": [
+   {
+    "args": [
+     "p_run"
+    ],
+    "required": 1
+   }
+  ],
+  "study_lab_slot": [
+   {
+    "args": [
+     "p_run",
+     "p_label",
+     "p_key"
+    ],
+    "required": 2
+   }
+  ],
+  "study_lab_source": [
+   {
+    "args": [
+     "p_run"
+    ],
+    "required": 1
+   }
+  ],
+  "study_lab_status": [
+   {
+    "args": [
+     "p_run",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
+  "study_lab_todo": [
+   {
+    "args": [
+     "p_group"
+    ],
+    "required": 1
+   }
+  ],
   "study_lecture_group": [
    {
     "args": [
@@ -1585,6 +1770,49 @@
    {
     "args": [
      "p_mock"
+    ],
+    "required": 1
+   }
+  ],
+  "study_model_at": [
+   {
+    "args": [
+     "p_group",
+     "p_route",
+     "p_at",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_model_provider_set": [
+   {
+    "args": [
+     "p_group",
+     "p_provider",
+     "p_allowed",
+     "p_scope"
+    ],
+    "required": 3
+   }
+  ],
+  "study_model_set": [
+   {
+    "args": [
+     "p_group",
+     "p_route",
+     "p_model",
+     "p_note",
+     "p_key"
+    ],
+    "required": 3
+   }
+  ],
+  "study_models": [
+   {
+    "args": [
+     "p_group",
+     "p_key"
     ],
     "required": 1
    }
@@ -3937,6 +4165,77 @@
    "created_by",
    "created_at"
   ],
+  "study_lab_judgements": [
+   "output_id",
+   "judge_model",
+   "scores",
+   "cost_usd",
+   "created_at"
+  ],
+  "study_lab_outputs": [
+   "id",
+   "run_id",
+   "slot",
+   "label",
+   "model",
+   "provider",
+   "status",
+   "reason",
+   "tries",
+   "text",
+   "served_by",
+   "usage",
+   "cost_usd",
+   "latency_ms",
+   "first_ms",
+   "checks",
+   "check_status",
+   "check_at",
+   "reservation",
+   "check_reservation",
+   "claimed_at",
+   "finished_at"
+  ],
+  "study_lab_ratings": [
+   "output_id",
+   "user_id",
+   "overall",
+   "accuracy",
+   "hebrew",
+   "structure",
+   "error_flag",
+   "note",
+   "created_at"
+  ],
+  "study_lab_runs": [
+   "id",
+   "group_id",
+   "lecture_id",
+   "route",
+   "title",
+   "source",
+   "request",
+   "request_hash",
+   "differs",
+   "member_rate",
+   "judge_model",
+   "judge_status",
+   "judge_at",
+   "judge_reservation",
+   "estimate_usd",
+   "status",
+   "notified_at",
+   "created_by",
+   "created_at",
+   "closed_at"
+  ],
+  "study_lab_seen": [
+   "run_id",
+   "user_id",
+   "rated",
+   "best_label",
+   "seen_at"
+  ],
   "study_lectures": [
    "id",
    "group_id",
@@ -4107,6 +4406,39 @@
    "spec",
    "created_by",
    "created_at"
+  ],
+  "study_model_provider_log": [
+   "id",
+   "group_id",
+   "provider",
+   "allowed",
+   "scope",
+   "set_by",
+   "set_at"
+  ],
+  "study_model_providers": [
+   "group_id",
+   "provider",
+   "allowed",
+   "scope",
+   "set_by",
+   "set_at"
+  ],
+  "study_model_route_log": [
+   "id",
+   "group_id",
+   "route",
+   "model",
+   "set_by",
+   "set_at"
+  ],
+  "study_model_routes": [
+   "group_id",
+   "route",
+   "model",
+   "set_by",
+   "set_at",
+   "note"
   ],
   "study_my_card_reviews": [
    "id",
@@ -4952,6 +5284,31 @@
    ],
    "delete": false
   },
+  "study_lab_judgements": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_lab_outputs": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_lab_ratings": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_lab_runs": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_lab_seen": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
   "study_lectures": {
    "insert": [
     "id",
@@ -5041,6 +5398,26 @@
    "delete": false
   },
   "study_mocks": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_model_provider_log": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_model_providers": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_model_route_log": {
+   "insert": [],
+   "update": [],
+   "delete": false
+  },
+  "study_model_routes": {
    "insert": [],
    "update": [],
    "delete": false

@@ -24102,3 +24102,965 @@ end $$;
 insert into study_private.schema_sections (section, version) values ('O', 3)
 on conflict (section) do update set version = excluded.version, loaded_at = now();
 -- ════ END SECTION O ════
+
+-- ════ BEGIN SECTION Y · models: routes and the comparison, "השוואת מודלים" (package Y) ════
+-- design-models (revision 2), §6, with Yoad's decisions of 27 November 2026
+-- (docs/study/DECISIONS-2026-11-26.md, "Models and the comparison").
+--
+--  Routes. Which model writes each kind of work (a route key, the list in
+--  study_private.route_key_ok, the same as shared/study/models.ts's
+--  ROUTE_KEYS). No row: the default model. Only the group's owner (its
+--  creator, or a user in study_private.lab_admins) sets one, through the
+--  server; every change is logged. The switch 'routes' (no row: on) sends
+--  every key back to the default at once:
+--      insert into study_private.features (name, enabled) values ('routes', false)
+--        on conflict (name) do update set enabled = false, changed_at = now();
+--
+--  Providers. A provider besides Anthropic needs its key in Vercel
+--  (Production only) and the owner's "לאשר שליחה" here, recorded with who
+--  and when (D17). Approved, its scope is 'all' (Yoad's change of OD19,
+--  OD20 and OD24: lectures with pictures, past exams, sheets and members'
+--  wording may go); 'text' stays an option. In the app only openai, google
+--  and openrouter; the Chinese models go through OpenRouter (OD22), and a
+--  direct endpoint (deepseek, dashscope, moonshot, zai) only by a row
+--  written in the SQL editor.
+--
+--  The comparison ("lab"). The owner plans a run of 2-4 models on one frozen
+--  request; the server claims each slot here before its call (one claim, one
+--  reservation: a double tap pays once), writes each answer, and members
+--  rate the short kinds blind. The server alone knows which label is which
+--  model; every value that gives a model away (its name, cost, tokens, time)
+--  reaches a caller only after that caller's own reveal, the owner included.
+--  Money (Yoad's change of OD4): the comparison line is a fixed $3.30 a
+--  month (10% of $33), with no drop later, never above 15% of the cap;
+--  $1.50 a run worst case; 3 runs a day. Comparison calls are reserved with
+--  no user (the worker's path, OD5): they count in the group's total and
+--  stop at its 80% line, so the summaries keep their last 20%, and they are
+--  in nobody's own share. The sub-lines of sets, sheets and similar
+--  questions count other kinds and are unchanged. One SQL line changes the
+--  line (it applies from the next run):
+--      insert into study_private.lab_settings (group_id, lab_usd) values ('<group>', 2.00)
+--        on conflict (group_id) do update set lab_usd = excluded.lab_usd;
+--  The switch 'lab' (inserted off) stops planning, claims (so a planned run
+--  stops too) and rating:
+--      update study_private.features set enabled = true, changed_at = now() where name = 'lab';
+--
+--  A run waiting for ratings is a notice through section R (kind lab_new,
+--  R's reserved row: the inbox only; no push), when R is loaded. To push it
+--  too, one SQL line (and members' "שלי" category decides):
+--      update study_private.notice_kinds set cat = 'mine', push = true where kind = 'lab_new';
+--
+--  Optional for every other path (D22): nothing outside this section reads
+--  its tables, and the server's routing treats a missing section Y as "no
+--  routes". Needs sections F (ledger, switches, worker key) and W
+--  (server_on is not used). Re-runnable throughout; records ('Y', 1) last.
+
+-- ── Who may run comparisons and set routes besides the group's creator ──
+-- (the SQL editor only: insert into study_private.lab_admins values ('<user id>');)
+create table if not exists study_private.lab_admins (
+  user_id uuid primary key references auth.users (id) on delete cascade
+);
+
+-- ── The comparison's settings, per group (the SQL editor only; no row: the defaults) ──
+create table if not exists study_private.lab_settings (
+  group_id     uuid    primary key references public.study_groups (id) on delete cascade,
+  lab_usd      numeric not null default 3.30 check (lab_usd between 0 and 10),   -- the month's line; used up to 15% of the cap
+  run_cap      numeric not null default 1.50 check (run_cap between 0.1 and 2),  -- a run's worst case
+  daily_runs   int     not null default 3    check (daily_runs between 0 and 10),-- runs a day, Israel time
+  member_kinds text[]  not null default '{practice,set_write,ask,points,cards}',  -- what members rate (OD6)
+  todo_days    int     not null default 7    check (todo_days between 1 and 60), -- "השוואות לדירוג" counts runs this young
+  keep_days    int     not null default 60   check (keep_days between 7 and 365) -- the frozen request is blanked after (OD13)
+);
+
+-- ── Routes and their log ──
+create table if not exists public.study_model_routes (
+  group_id uuid        not null references public.study_groups (id) on delete cascade,
+  route    text        not null check (route ~ '^[a-z][a-z_]{1,23}$'),
+  model    text        not null check (char_length(model) between 3 and 80),
+  set_by   uuid        references auth.users (id) on delete set null,
+  set_at   timestamptz not null default now(),
+  note     text        not null default '' check (char_length(note) <= 200),
+  primary key (group_id, route)
+);
+create table if not exists public.study_model_route_log (
+  id       bigint      generated always as identity primary key,
+  group_id uuid        not null references public.study_groups (id) on delete cascade,
+  route    text        not null,
+  model    text,                                   -- null: back to the default
+  set_by   uuid        references auth.users (id) on delete set null,
+  set_at   timestamptz not null default now()
+);
+create index if not exists study_model_route_log_at on public.study_model_route_log (group_id, route, set_at desc);
+
+-- ── Providers: the owner's consent, per group (D17) ──
+create table if not exists public.study_model_providers (
+  group_id uuid        not null references public.study_groups (id) on delete cascade,
+  provider text        not null check (provider ~ '^[a-z]{2,20}$'),
+  allowed  boolean     not null default false,
+  scope    text        not null default 'all' check (scope in ('text', 'all')),
+  set_by   uuid        references auth.users (id) on delete set null,
+  set_at   timestamptz not null default now(),
+  primary key (group_id, provider)
+);
+create table if not exists public.study_model_provider_log (
+  id       bigint      generated always as identity primary key,
+  group_id uuid        not null references public.study_groups (id) on delete cascade,
+  provider text        not null,
+  allowed  boolean     not null,
+  scope    text        not null,
+  set_by   uuid        references auth.users (id) on delete set null,
+  set_at   timestamptz not null default now()
+);
+
+-- ── A comparison run, its answers (one a slot), ratings, reveals, AI scores ──
+create table if not exists public.study_lab_runs (
+  id                 uuid          primary key default gen_random_uuid(),
+  group_id           uuid          not null references public.study_groups (id) on delete cascade,
+  lecture_id         uuid          references public.study_lectures (id) on delete set null,
+  route              text          not null check (route ~ '^[a-z][a-z_]{1,23}$'),
+  title              text          not null check (char_length(title) between 1 and 160),
+  source             jsonb         not null,            -- ids and params only, never material
+  request            jsonb,                             -- the frozen request; blanked after keep_days
+  request_hash       text          not null check (char_length(request_hash) between 8 and 128),
+  differs            text          not null default '' check (char_length(differs) <= 200),  -- "max_tokens", "no threads"
+  member_rate        boolean       not null,            -- the route was in member_kinds when planned
+  judge_model        text          check (char_length(judge_model) <= 80),
+  judge_status       text          not null default 'none' check (judge_status in ('none', 'running', 'done', 'error')),
+  judge_at           timestamptz,
+  judge_reservation  bigint,
+  estimate_usd       numeric(10,5) not null check (estimate_usd >= 0),
+  status             text          not null default 'running' check (status in ('running', 'done', 'cancelled')),
+  notified_at        timestamptz,
+  created_by         uuid          not null default auth.uid() references auth.users (id) on delete cascade,
+  created_at         timestamptz   not null default now(),
+  closed_at          timestamptz
+);
+create index if not exists study_lab_runs_group on public.study_lab_runs (group_id, created_at desc);
+
+create table if not exists public.study_lab_outputs (
+  id                uuid          primary key default gen_random_uuid(),
+  run_id            uuid          not null references public.study_lab_runs (id) on delete cascade,
+  slot              smallint      not null check (slot between 0 and 3),
+  label             text          not null check (label in ('א', 'ב', 'ג', 'ד')),   -- shuffled per run
+  model             text          not null check (char_length(model) between 3 and 80),
+  provider          text          not null check (provider ~ '^[a-z]{2,20}$'),
+  status            text          not null default 'waiting'
+                    check (status in ('waiting', 'running', 'done', 'truncated', 'refused', 'timeout', 'error')),
+  reason            text          check (char_length(reason) <= 40),   -- 'not started', 'budget', 'cancelled'
+  tries             smallint      not null default 0 check (tries between 0 and 2),
+  text              text          check (char_length(text) <= 200000),
+  served_by         text          check (char_length(served_by) <= 80),
+  usage             jsonb,
+  cost_usd          numeric(10,5),
+  latency_ms        int,
+  first_ms          int,
+  checks            jsonb         not null default '{}'::jsonb,
+  check_status      text          not null default 'none' check (check_status in ('none', 'pending', 'running', 'done', 'error')),
+  check_at          timestamptz,
+  reservation       bigint,
+  check_reservation bigint,
+  claimed_at        timestamptz,
+  finished_at       timestamptz,
+  unique (run_id, slot),
+  unique (run_id, label)
+);
+
+create table if not exists public.study_lab_ratings (
+  output_id  uuid        not null references public.study_lab_outputs (id) on delete cascade,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  overall    smallint    not null check (overall between 1 and 5),
+  accuracy   smallint    check (accuracy between 1 and 5),      -- the owner's optional detail
+  hebrew     smallint    check (hebrew between 1 and 5),
+  structure  smallint    check (structure between 1 and 5),
+  error_flag boolean     not null default false,
+  note       text        not null default '' check (char_length(note) <= 300),
+  created_at timestamptz not null default now(),
+  primary key (output_id, user_id)
+);
+
+create table if not exists public.study_lab_seen (            -- revealed: rated, or skipped
+  run_id     uuid        not null references public.study_lab_runs (id) on delete cascade,
+  user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  rated      boolean     not null,
+  best_label text        check (best_label in ('א', 'ב', 'ג', 'ד', '=')),   -- '=': no difference
+  seen_at    timestamptz not null default now(),
+  primary key (run_id, user_id)
+);
+
+create table if not exists public.study_lab_judgements (
+  output_id   uuid          primary key references public.study_lab_outputs (id) on delete cascade,
+  judge_model text          not null check (char_length(judge_model) <= 80),
+  scores      jsonb         not null,     -- {overall, accuracy, hebrew, structure, errors:[{quote, why}], order}
+  cost_usd    numeric(10,5) not null default 0,
+  created_at  timestamptz   not null default now()
+);
+
+-- No member reads these tables: every read and write goes through the functions below.
+do $$
+declare t text;
+begin
+  foreach t in array array['study_model_routes', 'study_model_route_log', 'study_model_providers', 'study_model_provider_log',
+                           'study_lab_runs', 'study_lab_outputs', 'study_lab_ratings', 'study_lab_seen', 'study_lab_judgements'] loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('revoke all on public.%I from anon, authenticated', t);
+  end loop;
+end $$;
+revoke all on study_private.lab_admins, study_private.lab_settings from public;
+
+-- The switch: comparisons start off (Yoad turns 'lab' on at release). 'routes' has no row: on.
+insert into study_private.features (name, enabled) values ('lab', false) on conflict (name) do nothing;
+
+-- ── Inside helpers ──
+
+-- The route keys, exactly shared/study/models.ts's ROUTE_KEYS (models.test.ts compares them).
+create or replace function study_private.route_key_ok(p_route text)
+returns boolean language sql immutable as $$
+  select coalesce(p_route = any (array['part', 'outline', 'notes', 'practice', 'set_write', 'solver', 'reword', 'style', 'points', 'cards',
+                                       'ask', 'ask_route', 'mnemonic', 'wall_check', 'fix_check', 'var', 'trap_check',
+                                       'exam_read', 'exam_key', 'exam_solve', 'sheet_read', 'sheet_key', 'sheet_solve', 'similar', 'judge']), false)
+$$;
+
+-- The caller is a member and the group's owner: its creator, or a lab admin (D9).
+create or replace function study_private.lab_owner(p_group uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null
+     and coalesce(public.study_is_member(p_group), false)
+     and (exists (select 1 from public.study_groups g where g.id = p_group and g.created_by = auth.uid())
+          or exists (select 1 from study_private.lab_admins a where a.user_id = auth.uid()))
+$$;
+
+-- The group's settings, its row or the defaults.
+create or replace function study_private.lab_settings_of(p_group uuid)
+returns study_private.lab_settings language plpgsql stable security definer set search_path = public as $$
+declare s study_private.lab_settings;
+begin
+  select * into s from study_private.lab_settings where group_id = p_group;
+  if not found then
+    s := row(p_group, 3.30, 1.50, 3, '{practice,set_write,ask,points,cards}'::text[], 7, 60)::study_private.lab_settings;
+  end if;
+  return s;
+end;
+$$;
+
+-- The month's comparison line in USD: the group's lab_usd, never above 15% of the cap.
+create or replace function study_private.lab_line(p_group uuid, p_cap numeric)
+returns numeric language sql stable security definer set search_path = public as $$
+  select least((study_private.lab_settings_of(p_group)).lab_usd, 0.15 * greatest(coalesce(p_cap, 0), 0))
+$$;
+
+-- What comparisons spent this calendar month (UTC), as the ledger has it.
+create or replace function study_private.lab_spent(p_group uuid)
+returns numeric language sql stable security definer set search_path = public as $$
+  select coalesce(sum(u.cost_usd), 0) from public.study_usage u
+   where u.group_id = p_group and u.kind = 'lab'
+     and u.created_at >= (date_trunc('month', now() at time zone 'utc') at time zone 'utc')
+$$;
+
+-- An answer that came back (rated, checked, compared).
+create or replace function study_private.lab_finished(p_status text)
+returns boolean language sql immutable as $$ select p_status in ('done', 'truncated') $$;
+
+-- Closes a run whose every answer is in, and tells the group once when it
+-- waits for ratings (section R, if loaded; never fails the caller).
+create or replace function study_private.lab_close(p_run uuid)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare
+  r      public.study_lab_runs;
+  v_done int;
+begin
+  select * into r from public.study_lab_runs where id = p_run for update;
+  if not found or r.status <> 'running' then return false; end if;
+  if exists (select 1 from public.study_lab_outputs o where o.run_id = p_run and o.status in ('waiting', 'running')) then
+    return false;
+  end if;
+  update public.study_lab_runs set status = 'done', closed_at = now() where id = p_run;
+  select count(*) into v_done from public.study_lab_outputs o where o.run_id = p_run and study_private.lab_finished(o.status);
+  if r.member_rate and v_done >= 2 and r.notified_at is null then
+    update public.study_lab_runs set notified_at = now() where id = p_run;
+    if to_regprocedure('study_private.notice_group(uuid,uuid,text,jsonb,jsonb,text,text,uuid,timestamptz)') is not null then
+      perform study_private.notice_group(r.group_id, r.created_by, 'lab_new', jsonb_build_object('route', r.route),
+        jsonb_build_object('v', 'models', 'r', r.id), 'lab:' || r.id, 'lab_new', null,
+        now() + make_interval(days => (study_private.lab_settings_of(r.group_id)).todo_days));
+    end if;
+  end if;
+  return true;
+end;
+$$;
+
+revoke all on function study_private.route_key_ok(text), study_private.lab_owner(uuid), study_private.lab_settings_of(uuid),
+  study_private.lab_line(uuid, numeric), study_private.lab_spent(uuid), study_private.lab_finished(text),
+  study_private.lab_close(uuid) from public;
+
+-- ── Routes and providers ──
+
+-- Which buttons show (the server checks again).
+create or replace function public.study_lab_owner(p_group uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select study_private.lab_owner(p_group)
+$$;
+
+-- The group's routes, providers and switches; for a member, or the worker
+-- with the server key (modelFor, the privacy line).
+create or replace function public.study_models(p_group uuid, p_key text default null)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare s study_private.lab_settings := study_private.lab_settings_of(p_group);
+begin
+  if not (study_private.is_worker(p_key) or coalesce(public.study_is_member(p_group), false)) then raise exception 'forbidden'; end if;
+  return jsonb_build_object(
+    'routes', coalesce((select jsonb_object_agg(r.route, jsonb_build_object('model', r.model, 'set_at', r.set_at))
+                          from public.study_model_routes r where r.group_id = p_group), '{}'::jsonb),
+    'providers', coalesce((select jsonb_object_agg(p.provider, jsonb_build_object('allowed', p.allowed, 'scope', p.scope, 'set_at', p.set_at))
+                             from public.study_model_providers p where p.group_id = p_group), '{}'::jsonb),
+    'switches', jsonb_build_object('lab', study_private.feature_on('lab'), 'routes', study_private.feature_on('routes')),
+    'lab', jsonb_build_object('line_usd', s.lab_usd, 'run_cap', s.run_cap, 'daily_runs', s.daily_runs,
+                              'member_kinds', to_jsonb(s.member_kinds), 'todo_days', s.todo_days,
+                              -- the month's comparison spend and today's runs (totals only: no run's split by model)
+                              'spent_usd', round(study_private.lab_spent(p_group), 4),
+                              'runs_today', (select count(*) from public.study_lab_runs r where r.group_id = p_group
+                                               and r.created_at >= (date_trunc('day', now() at time zone 'Asia/Jerusalem') at time zone 'Asia/Jerusalem'))));
+end;
+$$;
+
+-- The model a key had at a moment (the log's last row at or before it; null:
+-- the default). The worker's, for summaries begun within 48 hours (D7).
+create or replace function public.study_model_at(p_group uuid, p_route text, p_at timestamptz, p_key text default null)
+returns text language plpgsql stable security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  return (select l.model from public.study_model_route_log l
+           where l.group_id = p_group and l.route = p_route and l.set_at <= p_at
+           order by l.set_at desc, l.id desc limit 1);
+end;
+$$;
+
+-- The owner sets a key's model (null: back to the default), through the
+-- server, which checked the model against the registry and the providers.
+create or replace function public.study_model_set(p_group uuid, p_route text, p_model text, p_note text default '', p_key text default null)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare v_model text := nullif(btrim(coalesce(p_model, '')), '');
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if not study_private.lab_owner(p_group) then raise exception 'not the creator'; end if;
+  if not study_private.route_key_ok(p_route) then raise exception 'bad route'; end if;
+  if v_model is not null and char_length(v_model) not between 3 and 80 then raise exception 'bad model'; end if;
+  if v_model is null then
+    delete from public.study_model_routes where group_id = p_group and route = p_route;
+  else
+    insert into public.study_model_routes (group_id, route, model, set_by, set_at, note)
+    values (p_group, p_route, v_model, auth.uid(), now(), left(coalesce(p_note, ''), 200))
+    on conflict (group_id, route) do update set model = excluded.model, set_by = excluded.set_by, set_at = excluded.set_at, note = excluded.note;
+  end if;
+  insert into public.study_model_route_log (group_id, route, model, set_by) values (p_group, p_route, v_model, auth.uid());
+end;
+$$;
+
+-- The owner's "לאשר שליחה" (or its undo) for a provider, recorded (D17).
+-- Approved, the scope is 'all' unless 'text' is asked for.
+create or replace function public.study_model_provider_set(p_group uuid, p_provider text, p_allowed boolean, p_scope text default 'all')
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare v_scope text := coalesce(p_scope, 'all');
+begin
+  if not study_private.lab_owner(p_group) then raise exception 'not the creator'; end if;
+  if p_provider is null or p_provider not in ('openai', 'google', 'openrouter') then raise exception 'bad provider'; end if;
+  if v_scope not in ('text', 'all') or p_allowed is null then raise exception 'bad provider'; end if;
+  insert into public.study_model_providers (group_id, provider, allowed, scope, set_by, set_at)
+  values (p_group, p_provider, p_allowed, v_scope, auth.uid(), now())
+  on conflict (group_id, provider) do update set allowed = excluded.allowed, scope = excluded.scope, set_by = excluded.set_by, set_at = excluded.set_at;
+  insert into public.study_model_provider_log (group_id, provider, allowed, scope, set_by) values (p_group, p_provider, p_allowed, v_scope, auth.uid());
+end;
+$$;
+
+-- ── Planning a run (the owner, through the server) ──
+-- p_models: [{model, provider}, …], 2-4 distinct models, in the order the
+-- owner picked; each gets a label in a shuffled order. Raises, in order:
+-- off, not the creator, bad slots, run_cap, daily_runs, lab_budget,
+-- reserve (the group's spend and this run past 80% of the cap). Returns
+-- {run, labels} and never which label is which model (D12).
+create or replace function public.study_lab_plan(p_group uuid, p_lecture uuid, p_route text, p_title text, p_source jsonb, p_request jsonb,
+  p_hash text, p_differs text, p_models jsonb, p_judge text, p_estimate numeric, p_cap numeric, p_key text default null)
+returns jsonb language plpgsql volatile security definer set search_path = public as $$
+declare
+  s        study_private.lab_settings := study_private.lab_settings_of(p_group);
+  v_n      int;
+  v_est    numeric := round(greatest(coalesce(p_estimate, 0), 0), 5);
+  v_run    uuid;
+  v_labels text[];
+  v_spent  numeric;
+  i        int;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if not study_private.feature_on('lab') then raise exception 'off'; end if;
+  if not study_private.lab_owner(p_group) then raise exception 'not the creator'; end if;
+  if p_lecture is not null and not exists (select 1 from public.study_lectures l where l.id = p_lecture and l.group_id = p_group) then
+    raise exception 'forbidden';
+  end if;
+  if not study_private.route_key_ok(p_route) or p_title is null or char_length(btrim(p_title)) not between 1 and 160
+     or p_source is null or p_hash is null or char_length(p_hash) not between 8 and 128 then
+    raise exception 'bad slots';
+  end if;
+  if p_models is null or jsonb_typeof(p_models) <> 'array' then raise exception 'bad slots'; end if;
+  v_n := jsonb_array_length(p_models);
+  if v_n not between 2 and 4
+     or (select count(distinct m ->> 'model') from jsonb_array_elements(p_models) m) <> v_n
+     or exists (select 1 from jsonb_array_elements(p_models) m
+                 where coalesce(char_length(m ->> 'model'), 0) not between 3 and 80
+                    or coalesce(m ->> 'provider', '') !~ '^[a-z]{2,20}$') then
+    raise exception 'bad slots';
+  end if;
+  if v_est > s.run_cap then raise exception 'run_cap'; end if;
+  -- One budget decision at a time per group (the same lock as study_reserve).
+  perform pg_advisory_xact_lock(hashtext('study_budget:' || p_group::text));
+  if (select count(*) from public.study_lab_runs r
+       where r.group_id = p_group
+         and r.created_at >= (date_trunc('day', now() at time zone 'Asia/Jerusalem') at time zone 'Asia/Jerusalem')) >= s.daily_runs then
+    raise exception 'daily_runs';
+  end if;
+  if study_private.lab_spent(p_group) + v_est > study_private.lab_line(p_group, p_cap) then raise exception 'lab_budget'; end if;
+  select coalesce(sum(u.cost_usd), 0) into v_spent from public.study_usage u
+   where u.group_id = p_group and u.created_at >= (date_trunc('month', now() at time zone 'utc') at time zone 'utc');
+  if coalesce(p_cap, 0) <= 0 or v_spent + v_est > 0.8 * p_cap then raise exception 'reserve'; end if;
+  insert into public.study_lab_runs (group_id, lecture_id, route, title, source, request, request_hash, differs, member_rate,
+                                     judge_model, estimate_usd, created_by)
+  values (p_group, p_lecture, p_route, btrim(p_title), p_source, p_request, p_hash, left(coalesce(p_differs, ''), 200),
+          p_route = any (s.member_kinds), nullif(btrim(coalesce(p_judge, '')), ''), v_est, auth.uid())
+  returning id into v_run;
+  v_labels := array(select l from unnest((array['א', 'ב', 'ג', 'ד'])[1:v_n]) l order by random());
+  for i in 0 .. v_n - 1 loop
+    insert into public.study_lab_outputs (run_id, slot, label, model, provider)
+    values (v_run, i, v_labels[i + 1], p_models -> i ->> 'model', p_models -> i ->> 'provider');
+  end loop;
+  return jsonb_build_object('run', v_run, 'labels', to_jsonb((array['א', 'ב', 'ג', 'ד'])[1:v_n]));
+end;
+$$;
+
+-- The server's read of one slot, with the owner's token and the key.
+create or replace function public.study_lab_slot(p_run uuid, p_label text, p_key text default null)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  r public.study_lab_runs;
+  o public.study_lab_outputs;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  select * into r from public.study_lab_runs where id = p_run;
+  if not found or not study_private.lab_owner(r.group_id) then raise exception 'not the creator'; end if;
+  select * into o from public.study_lab_outputs where run_id = p_run and label = p_label;
+  if not found then raise exception 'not waiting'; end if;
+  return jsonb_build_object('slot', o.slot, 'model', o.model, 'provider', o.provider, 'status', o.status, 'reason', o.reason,
+    'tries', o.tries, 'check_status', o.check_status, 'output', o.id, 'run_status', r.status, 'route', r.route,
+    'group', r.group_id, 'lecture', r.lecture_id, 'request', r.request, 'source', r.source, 'judge_model', r.judge_model);
+end;
+$$;
+
+-- The AI score's input: each finished answer by its label (the same checks).
+create or replace function public.study_lab_judge_input(p_run uuid, p_key text default null)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare r public.study_lab_runs;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  select * into r from public.study_lab_runs where id = p_run;
+  if not found or not study_private.lab_owner(r.group_id) then raise exception 'not the creator'; end if;
+  return jsonb_build_object('route', r.route, 'source', r.source, 'judge_model', r.judge_model,
+    'outputs', coalesce((select jsonb_agg(jsonb_build_object('label', o.label, 'output', o.id, 'text', o.text) order by o.label)
+                           from public.study_lab_outputs o where o.run_id = p_run and study_private.lab_finished(o.status)), '[]'::jsonb));
+end;
+$$;
+
+-- ── Claims: one paid call a claim, atomic (the worker: the server's anon
+-- client and the key, so the reservation has no user, OD5) ──
+-- p_part: 'answer' (a slot still waiting, while the run runs), 'retry' (a
+-- slot that timed out or failed, once), 'solve' (the paid check of a
+-- finished answer), 'judge' (the run's AI score, label 'j'). Under the
+-- group's budget lock: off, closed, not waiting (nothing to claim: a second
+-- tap), lab_budget, then study_reserve's own (budget, reserve). A refusal
+-- rolls the claim back. Returns the reservation's id.
+create or replace function public.study_lab_claim(p_run uuid, p_label text, p_part text, p_estimate numeric, p_cap numeric, p_key text default null)
+returns bigint language plpgsql volatile security definer set search_path = public as $$
+declare
+  r      public.study_lab_runs;
+  o      public.study_lab_outputs;
+  v_est  numeric := round(greatest(coalesce(p_estimate, 0), 0), 5);
+  v_ref  text;
+  v_id   bigint;
+begin
+  if not study_private.is_worker(p_key) or auth.uid() is not null then raise exception 'forbidden'; end if;
+  if p_part is null or p_part not in ('answer', 'retry', 'solve', 'judge') then raise exception 'not waiting'; end if;
+  select * into r from public.study_lab_runs where id = p_run;
+  if not found then raise exception 'not waiting'; end if;
+  perform pg_advisory_xact_lock(hashtext('study_budget:' || r.group_id::text));
+  if not study_private.feature_on('lab') then raise exception 'off'; end if;
+  select * into r from public.study_lab_runs where id = p_run for update;
+  if r.status = 'cancelled' or (p_part = 'answer' and r.status <> 'running') then raise exception 'closed'; end if;
+  if p_part = 'judge' then
+    update public.study_lab_runs set judge_status = 'running', judge_at = now()
+     where id = p_run and judge_status = 'none' and judge_model is not null and status = 'done';
+    if not found then raise exception 'not waiting'; end if;
+    v_ref := 'run:' || p_run || ':j:judge';
+  else
+    if p_part = 'answer' then
+      update public.study_lab_outputs set status = 'running', claimed_at = now()
+       where run_id = p_run and label = p_label and status = 'waiting'
+      returning * into o;
+    elsif p_part = 'retry' then
+      update public.study_lab_outputs
+         set status = 'running', tries = tries + 1, claimed_at = now(), reason = null, text = null, usage = null,
+             cost_usd = null, latency_ms = null, first_ms = null, served_by = null, finished_at = null,
+             checks = '{}'::jsonb, check_status = 'none', check_at = null
+       where run_id = p_run and label = p_label and status in ('timeout', 'error') and tries < 1
+      returning * into o;
+      if found and r.status <> 'running' then
+        update public.study_lab_runs set status = 'running', closed_at = null where id = p_run;
+      end if;
+    else
+      update public.study_lab_outputs set check_status = 'running', check_at = now()
+       where run_id = p_run and label = p_label and check_status in ('none', 'pending') and study_private.lab_finished(status)
+      returning * into o;
+    end if;
+    if o.id is null then raise exception 'not waiting'; end if;
+    v_ref := 'run:' || p_run || ':' || o.slot || ':' || p_part;
+  end if;
+  if study_private.lab_spent(r.group_id) + v_est > study_private.lab_line(r.group_id, p_cap) then raise exception 'lab_budget'; end if;
+  select public.study_reserve(r.group_id, r.lecture_id, 'lab', v_ref, v_est, p_cap, 0.8, null, null, null, p_key) into v_id;
+  if p_part = 'judge' then
+    update public.study_lab_runs set judge_reservation = v_id where id = p_run;
+  elsif p_part = 'solve' then
+    update public.study_lab_outputs set check_reservation = v_id where id = o.id;
+  else
+    update public.study_lab_outputs set reservation = v_id where id = o.id;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- The run's status, for the server's 10 s cancel poll.
+create or replace function public.study_lab_status(p_run uuid, p_key text default null)
+returns text language plpgsql stable security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  return (select status from public.study_lab_runs where id = p_run);
+end;
+$$;
+
+-- An answer as it ended (the worker). Only a claimed answer is written
+-- (false otherwise: swept, or saved already); the last one closes the run.
+create or replace function public.study_lab_output_save(p_output uuid, p_status text, p_reason text, p_text text, p_usage jsonb,
+  p_cost numeric, p_latency int, p_first int, p_served_by text, p_checks jsonb, p_check_status text, p_key text default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare v_run uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if p_status is null or p_status not in ('done', 'truncated', 'refused', 'timeout', 'error') then raise exception 'bad status'; end if;
+  if p_check_status is not null and p_check_status not in ('none', 'pending', 'done', 'error') then raise exception 'bad status'; end if;
+  update public.study_lab_outputs
+     set status = p_status, reason = left(p_reason, 40), text = left(p_text, 200000), usage = p_usage,
+         cost_usd = round(least(greatest(coalesce(p_cost, 0), 0), 99.99999), 5), latency_ms = p_latency, first_ms = p_first,
+         served_by = left(p_served_by, 80), checks = coalesce(p_checks, '{}'::jsonb),
+         check_status = coalesce(p_check_status, 'none'), finished_at = now()
+   where id = p_output and status = 'running'
+  returning run_id into v_run;
+  if v_run is null then return false; end if;
+  perform study_private.lab_close(v_run);
+  return true;
+end;
+$$;
+
+-- A paid check's result (the worker): merged into the answer's checks.
+create or replace function public.study_lab_check_save(p_output uuid, p_checks jsonb, p_status text, p_key text default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if p_status is null or p_status not in ('done', 'error', 'pending') then raise exception 'bad status'; end if;
+  update public.study_lab_outputs set checks = checks || coalesce(p_checks, '{}'::jsonb), check_status = p_status, check_at = now()
+   where id = p_output and check_status = 'running';
+  return found;
+end;
+$$;
+
+-- An AI score (the worker); p_scores null marks the judge failed. When
+-- every finished answer has one, the run's AI score is done.
+create or replace function public.study_lab_judged(p_output uuid, p_judge text, p_scores jsonb, p_cost numeric, p_key text default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare v_run uuid;
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  select o.run_id into v_run from public.study_lab_outputs o join public.study_lab_runs r on r.id = o.run_id
+   where o.id = p_output and r.judge_status = 'running';
+  if v_run is null then return false; end if;
+  if p_scores is null then
+    update public.study_lab_runs set judge_status = 'error' where id = v_run;
+    return true;
+  end if;
+  insert into public.study_lab_judgements (output_id, judge_model, scores, cost_usd)
+  values (p_output, left(coalesce(p_judge, ''), 80), p_scores, round(least(greatest(coalesce(p_cost, 0), 0), 99.99999), 5))
+  on conflict (output_id) do update set judge_model = excluded.judge_model, scores = excluded.scores, cost_usd = excluded.cost_usd, created_at = now();
+  if not exists (select 1 from public.study_lab_outputs o
+                  where o.run_id = v_run and study_private.lab_finished(o.status)
+                    and not exists (select 1 from public.study_lab_judgements j where j.output_id = o.id)) then
+    update public.study_lab_runs set judge_status = 'done' where id = v_run;
+  end if;
+  return true;
+end;
+$$;
+
+-- ── Rating, blind (members; the owner too) ──
+-- One overall score 1-5 an answer and "יש כאן טעות עובדתית"; the detail
+-- (accuracy, Hebrew, structure) is kept for the owner only. Raises off,
+-- forbidden, not rated here (a member on a kind members do not rate), seen
+-- (the caller revealed already), not done, bad rating.
+create or replace function public.study_lab_rate(p_output uuid, p_overall int, p_accuracy int default null, p_hebrew int default null,
+  p_structure int default null, p_error boolean default false, p_note text default '')
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  o     public.study_lab_outputs;
+  r     public.study_lab_runs;
+  v_own boolean;
+begin
+  if not study_private.feature_on('lab') then raise exception 'off'; end if;
+  select * into o from public.study_lab_outputs where id = p_output;
+  if not found then raise exception 'forbidden'; end if;
+  select * into r from public.study_lab_runs where id = o.run_id;
+  if auth.uid() is null or not coalesce(public.study_is_member(r.group_id), false) then raise exception 'forbidden'; end if;
+  v_own := study_private.lab_owner(r.group_id);
+  if not r.member_rate and not v_own then raise exception 'not rated here'; end if;
+  if exists (select 1 from public.study_lab_seen s where s.run_id = r.id and s.user_id = auth.uid()) then raise exception 'seen'; end if;
+  if r.status <> 'done' or not study_private.lab_finished(o.status) then raise exception 'not done'; end if;
+  if p_overall is null or p_overall not between 1 and 5
+     or (v_own and ((p_accuracy is not null and p_accuracy not between 1 and 5) or (p_hebrew is not null and p_hebrew not between 1 and 5)
+                    or (p_structure is not null and p_structure not between 1 and 5))) then
+    raise exception 'bad rating';
+  end if;
+  insert into public.study_lab_ratings (output_id, user_id, overall, accuracy, hebrew, structure, error_flag, note)
+  values (p_output, auth.uid(), p_overall,
+          case when v_own then p_accuracy end, case when v_own then p_hebrew end, case when v_own then p_structure end,
+          coalesce(p_error, false), left(coalesce(p_note, ''), 300))
+  on conflict (output_id, user_id) do update set overall = excluded.overall, accuracy = excluded.accuracy, hebrew = excluded.hebrew,
+    structure = excluded.structure, error_flag = excluded.error_flag, note = excluded.note, created_at = now();
+end;
+$$;
+
+-- The caller's reveal: after rating every finished answer (with the best
+-- pick: a label of the run or '='), or a skip (the caller's ratings on the
+-- run go). Either way the names, time and cost show to this caller only,
+-- and the ratings lock. A kind members do not rate: the owner may reveal
+-- without ratings.
+create or replace function public.study_lab_reveal(p_run uuid, p_best text default null, p_skip boolean default false)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare
+  r      public.study_lab_runs;
+  v_mine int;
+  v_all  int;
+begin
+  select * into r from public.study_lab_runs where id = p_run;
+  if not found or auth.uid() is null or not coalesce(public.study_is_member(r.group_id), false) then raise exception 'forbidden'; end if;
+  if exists (select 1 from public.study_lab_seen s where s.run_id = p_run and s.user_id = auth.uid()) then raise exception 'seen'; end if;
+  if coalesce(p_skip, false) then
+    delete from public.study_lab_ratings x using public.study_lab_outputs o
+     where x.output_id = o.id and o.run_id = p_run and x.user_id = auth.uid();
+    insert into public.study_lab_seen (run_id, user_id, rated) values (p_run, auth.uid(), false);
+    return;
+  end if;
+  if r.status <> 'done' then raise exception 'not done'; end if;
+  if not r.member_rate and not study_private.lab_owner(r.group_id) then raise exception 'not rated here'; end if;
+  select count(*) filter (where exists (select 1 from public.study_lab_ratings x where x.output_id = o.id and x.user_id = auth.uid())),
+         count(*)
+    into v_mine, v_all
+    from public.study_lab_outputs o where o.run_id = p_run and study_private.lab_finished(o.status);
+  if v_mine < v_all and (v_mine > 0 or r.member_rate) then raise exception 'not rated'; end if;
+  if p_best is not null and p_best <> '=' and not exists (select 1 from public.study_lab_outputs o
+                                                          where o.run_id = p_run and o.label = p_best and study_private.lab_finished(o.status)) then
+    raise exception 'bad rating';
+  end if;
+  insert into public.study_lab_seen (run_id, user_id, rated, best_label) values (p_run, auth.uid(), v_mine > 0, case when v_mine > 0 then p_best end);
+end;
+$$;
+
+-- ── Reading (members) ──
+
+-- One run, as the caller may see it: labels only while it runs (no
+-- per-label status, D12); every answer's status, text and checks once it is
+-- done; model, provider, cost, tokens and time, the AI score and the
+-- group's ratings only after the caller's own reveal (the owner too). Never
+-- the request.
+create or replace function public.study_lab_run(p_run uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  r      public.study_lab_runs;
+  v_seen public.study_lab_seen;
+  v_own  boolean;
+  v_open boolean;
+  v_ready int;
+  v_total int;
+begin
+  select * into r from public.study_lab_runs where id = p_run;
+  if not found or auth.uid() is null or not coalesce(public.study_is_member(r.group_id), false) then raise exception 'forbidden'; end if;
+  select * into v_seen from public.study_lab_seen s where s.run_id = p_run and s.user_id = auth.uid();
+  v_own := study_private.lab_owner(r.group_id);
+  v_open := r.status <> 'running';
+  select count(*) filter (where o.status not in ('waiting', 'running')), count(*) into v_ready, v_total
+    from public.study_lab_outputs o where o.run_id = p_run;
+  return jsonb_build_object(
+    'id', r.id, 'title', r.title, 'route', r.route, 'status', r.status, 'ready', v_ready, 'total', v_total,
+    'source', r.source, 'differs', r.differs, 'member_rate', r.member_rate, 'created_at', r.created_at,
+    'estimate_usd', case when v_own then r.estimate_usd end,
+    'owner', v_own, 'can_rate', r.status = 'done' and (r.member_rate or v_own) and v_seen.run_id is null,
+    'judge', case when v_seen.run_id is not null then r.judge_status end,
+    'mine', case when v_seen.run_id is null then null else jsonb_build_object('rated', v_seen.rated, 'best', v_seen.best_label) end,
+    'outputs', coalesce((select jsonb_agg(
+        case when not v_open then jsonb_build_object('label', o.label)
+        else jsonb_build_object(
+          'id', o.id, 'label', o.label, 'status', o.status, 'reason', o.reason, 'tries', o.tries,
+          'text', o.text, 'checks', o.checks, 'check_status', o.check_status,
+          'my', (select jsonb_build_object('overall', x.overall, 'accuracy', x.accuracy, 'hebrew', x.hebrew, 'structure', x.structure,
+                                           'error', x.error_flag, 'note', x.note)
+                   from public.study_lab_ratings x where x.output_id = o.id and x.user_id = auth.uid()),
+          'model', case when v_seen.run_id is not null then o.model end,
+          'provider', case when v_seen.run_id is not null then o.provider end,
+          'cost_usd', case when v_seen.run_id is not null then o.cost_usd end,
+          'usage', case when v_seen.run_id is not null and v_own then o.usage end,
+          'latency_ms', case when v_seen.run_id is not null then o.latency_ms end,
+          'first_ms', case when v_seen.run_id is not null then o.first_ms end,
+          'served_by', case when v_seen.run_id is not null then o.served_by end,
+          'ai', case when v_seen.run_id is not null then (select j.scores from public.study_lab_judgements j where j.output_id = o.id) end,
+          'group', case when v_seen.run_id is not null then
+                     (select jsonb_build_object('n', count(*), 'mean', round(avg(x.overall), 2), 'errors', count(*) filter (where x.error_flag))
+                        from public.study_lab_ratings x where x.output_id = o.id) end)
+        end order by o.label)
+      from public.study_lab_outputs o where o.run_id = p_run), '[]'::jsonb));
+end;
+$$;
+
+-- The material the run was given, for "החומר": its source and the frozen
+-- request's "material" (the part the server marks as showable: slide
+-- numbers, text and figure paths). Never the rest of the request.
+create or replace function public.study_lab_source(p_run uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare r public.study_lab_runs;
+begin
+  select * into r from public.study_lab_runs where id = p_run;
+  if not found or auth.uid() is null or not coalesce(public.study_is_member(r.group_id), false) then raise exception 'forbidden'; end if;
+  return jsonb_build_object('source', r.source, 'material', r.request -> 'material', 'kept', r.request is not null);
+end;
+$$;
+
+-- The runs: the owner sees every run; a member, the runs of the kinds
+-- members rate that are done with at least 2 answers. mine: todo (not
+-- rated nor skipped, within todo_days), rated, skipped, old (too old to
+-- count); null on a kind the caller does not rate. Cost only once seen.
+create or replace function public.study_lab_list(p_group uuid, p_limit int default 50)
+returns table (id uuid, route text, title text, status text, created_at timestamptz, ready int, total int, member_rate boolean,
+               mine text, cost_usd numeric)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  v_own  boolean;
+  v_days int := (study_private.lab_settings_of(p_group)).todo_days;
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  v_own := study_private.lab_owner(p_group);
+  return query
+  select r.id, r.route, r.title, r.status, r.created_at,
+         (select count(*)::int from public.study_lab_outputs o where o.run_id = r.id and o.status not in ('waiting', 'running')),
+         (select count(*)::int from public.study_lab_outputs o where o.run_id = r.id),
+         r.member_rate,
+         case when s.run_id is not null then case when s.rated then 'rated' else 'skipped' end
+              when not (r.member_rate or v_own) or r.status <> 'done' then null
+              when r.created_at >= now() - make_interval(days => v_days) then 'todo'
+              else 'old' end,
+         case when s.run_id is not null then
+           (select coalesce(sum(u.cost_usd), 0) from public.study_usage u
+             where u.group_id = p_group and u.kind = 'lab' and u.ref like 'run:' || r.id::text || ':%') end
+    from public.study_lab_runs r
+    left join public.study_lab_seen s on s.run_id = r.id and s.user_id = auth.uid()
+   where r.group_id = p_group
+     and (v_own or (r.member_rate and r.status = 'done'
+                    and (select count(*) from public.study_lab_outputs o where o.run_id = r.id and study_private.lab_finished(o.status)) >= 2))
+   order by r.created_at desc
+   limit least(greatest(coalesce(p_limit, 50), 1), 200);
+end;
+$$;
+
+-- "השוואות לדירוג · {n} מחכות" on שלי: runs of a kind members rate, done with
+-- at least 2 answers, within todo_days, not rated nor skipped by the caller.
+create or replace function public.study_lab_todo(p_group uuid)
+returns int language plpgsql stable security definer set search_path = public as $$
+declare v_days int := (study_private.lab_settings_of(p_group)).todo_days;
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  return (select count(*)::int from public.study_lab_runs r
+           where r.group_id = p_group and r.member_rate and r.status = 'done'
+             and r.created_at >= now() - make_interval(days => v_days)
+             and not exists (select 1 from public.study_lab_seen s where s.run_id = r.id and s.user_id = auth.uid())
+             and (select count(*) from public.study_lab_outputs o where o.run_id = r.id and study_private.lab_finished(o.status)) >= 2);
+end;
+$$;
+
+-- The results of one key, per model, over the done runs the caller has
+-- revealed (so the table gives nothing away either). An answer's group
+-- score is the mean overall of its raters, at most 2.5 when more than a
+-- third of them flagged an error (§6.4). The automatic checks' keys are the
+-- server's: pass (boolean), items, match, false_rejects (numbers).
+-- "same_or_better": runs where the model's score is at least today's
+-- model's less 0.25, both rated by 2 people or more. The owner also gets
+-- usage30: the ledger's last 30 days by kind (calls and USD), for the
+-- monthly projection the server and the screen compute (§6.6).
+create or replace function public.study_lab_board(p_group uuid, p_route text)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  v_own   boolean;
+  v_today text;
+  v_out   jsonb;
+begin
+  if auth.uid() is null or not coalesce(public.study_is_member(p_group), false) then raise exception 'forbidden'; end if;
+  if not study_private.route_key_ok(p_route) then raise exception 'bad route'; end if;
+  v_own := study_private.lab_owner(p_group);
+  v_today := coalesce((select m.model from public.study_model_routes m where m.group_id = p_group and m.route = p_route), 'claude-opus-5-5');
+  with runs as (
+    select r.id from public.study_lab_runs r
+      join public.study_lab_seen s on s.run_id = r.id and s.user_id = auth.uid()
+     where r.group_id = p_group and r.route = p_route and r.status = 'done'
+  ), outs as (
+    select o.*, (select count(*) from public.study_lab_ratings x where x.output_id = o.id) as raters,
+           (select case when count(*) = 0 then null
+                        when count(*) filter (where x.error_flag) * 3 > count(*) then least(avg(x.overall), 2.5)
+                        else avg(x.overall) end
+              from public.study_lab_ratings x where x.output_id = o.id) as score,
+           (select count(*) from public.study_lab_ratings x where x.output_id = o.id and x.error_flag) as flags,
+           (select (j.scores ->> 'overall')::numeric from public.study_lab_judgements j
+             where j.output_id = o.id and jsonb_typeof(j.scores -> 'overall') = 'number') as ai
+      from public.study_lab_outputs o where o.run_id in (select id from runs)
+  ), best as (
+    select o.model, count(*) as picks from public.study_lab_seen s
+      join outs o on o.run_id = s.run_id and o.label = s.best_label
+     where s.rated group by o.model
+  ), pair as (
+    select c.model, count(*) as shared,
+           count(*) filter (where c.score >= t.score - 0.25) as same_or_better
+      from outs c join outs t on t.run_id = c.run_id and t.model = v_today and c.model <> v_today
+     where c.raters >= 2 and t.raters >= 2 and c.score is not null and t.score is not null
+     group by c.model
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'model', m.model, 'today', m.model = v_today, 'runs', m.runs, 'answers', m.answers,
+      'score', m.score, 'rated', m.rated, 'flags', m.flags, 'ai', m.ai, 'ai_n', m.ai_n,
+      'best', coalesce(b.picks, 0), 'shared', coalesce(p.shared, 0), 'same_or_better', coalesce(p.same_or_better, 0),
+      'refused', m.refused, 'truncated', m.truncated, 'failed', m.failed,
+      'checked', m.checked, 'passed', m.passed, 'items', m.items, 'match', m.match, 'false_rejects', m.false_rejects,
+      'mean_usd', m.mean_usd, 'median_usd', m.median_usd, 'p50_ms', m.p50_ms) order by m.model), '[]'::jsonb)
+    into v_out
+    from (select o.model, count(distinct o.run_id) as runs, count(*) as answers,
+                 round(avg(o.score), 2) as score, count(o.score) as rated, coalesce(sum(o.flags), 0) as flags,
+                 round(avg(o.ai), 2) as ai, count(o.ai) as ai_n,
+                 count(*) filter (where o.status = 'refused') as refused,
+                 count(*) filter (where o.status = 'truncated') as truncated,
+                 count(*) filter (where o.status in ('timeout', 'error')) as failed,
+                 count(*) filter (where o.checks ? 'pass') as checked,
+                 count(*) filter (where o.checks ->> 'pass' = 'true') as passed,
+                 coalesce(sum(case when jsonb_typeof(o.checks -> 'items') = 'number' then (o.checks ->> 'items')::numeric end), 0) as items,
+                 coalesce(sum(case when jsonb_typeof(o.checks -> 'match') = 'number' then (o.checks ->> 'match')::numeric end), 0) as match,
+                 coalesce(sum(case when jsonb_typeof(o.checks -> 'false_rejects') = 'number' then (o.checks ->> 'false_rejects')::numeric end), 0) as false_rejects,
+                 round(avg(o.cost_usd), 5) as mean_usd,
+                 round((percentile_cont(0.5) within group (order by o.cost_usd))::numeric, 5) as median_usd,
+                 round((percentile_cont(0.5) within group (order by o.latency_ms))::numeric) as p50_ms
+            from outs o group by o.model) m
+    left join best b on b.model = m.model
+    left join pair p on p.model = m.model;
+  return jsonb_build_object('route', p_route, 'today', v_today, 'models', v_out,
+    'usage30', case when v_own then
+      (select coalesce(jsonb_object_agg(k.kind, jsonb_build_object('calls', k.calls, 'usd', k.usd)), '{}'::jsonb)
+         from (select u.kind, count(*) as calls, round(sum(u.cost_usd), 4) as usd from public.study_usage u
+                where u.group_id = p_group and u.created_at >= now() - interval '30 days' and u.kind <> 'lab'
+                group by u.kind) k) end);
+end;
+$$;
+
+-- The owner stops a run: answers still waiting end with reason 'cancelled';
+-- running ones stop within the server's 10 s poll and settle as they end.
+create or replace function public.study_lab_cancel(p_run uuid)
+returns void language plpgsql volatile security definer set search_path = public as $$
+declare r public.study_lab_runs;
+begin
+  select * into r from public.study_lab_runs where id = p_run for update;
+  if not found or not study_private.lab_owner(r.group_id) then raise exception 'not the creator'; end if;
+  if r.status <> 'running' then raise exception 'closed'; end if;
+  update public.study_lab_runs set status = 'cancelled', closed_at = now() where id = p_run;
+  update public.study_lab_outputs set status = 'error', reason = 'cancelled', finished_at = now() where run_id = p_run and status = 'waiting';
+end;
+$$;
+
+-- ── The sweep (pg_cron, every 15 minutes, UTC minutes only) ──
+-- An answer never claimed for 15 minutes ends 'not started'; one running
+-- for 10 minutes times out (its reservation keeps its estimate); a paid
+-- check or AI score running for 10 minutes fails; runs whose answers are
+-- all in close; a frozen request older than keep_days is blanked.
+create or replace function study_private.lab_sweep()
+returns int language plpgsql volatile security definer set search_path = public as $$
+declare
+  v_run uuid;
+  n     int := 0;
+begin
+  update public.study_lab_outputs o set status = 'error', reason = 'not started', finished_at = now()
+    from public.study_lab_runs r
+   where r.id = o.run_id and o.status = 'waiting' and r.created_at < now() - interval '15 minutes';
+  update public.study_lab_outputs set status = 'timeout', finished_at = now()
+   where status = 'running' and claimed_at < now() - interval '10 minutes';
+  update public.study_lab_outputs set check_status = 'error'
+   where check_status = 'running' and check_at < now() - interval '10 minutes';
+  update public.study_lab_runs set judge_status = 'error'
+   where judge_status = 'running' and judge_at < now() - interval '10 minutes';
+  for v_run in select r.id from public.study_lab_runs r where r.status = 'running' loop
+    if study_private.lab_close(v_run) then n := n + 1; end if;
+  end loop;
+  update public.study_lab_runs r set request = null
+   where r.request is not null
+     and r.created_at < now() - make_interval(days => (study_private.lab_settings_of(r.group_id)).keep_days);
+  return n;
+end;
+$$;
+
+revoke all on function public.study_lab_owner(uuid), public.study_models(uuid, text), public.study_model_at(uuid, text, timestamptz, text),
+  public.study_model_set(uuid, text, text, text, text), public.study_model_provider_set(uuid, text, boolean, text),
+  public.study_lab_plan(uuid, uuid, text, text, jsonb, jsonb, text, text, jsonb, text, numeric, numeric, text),
+  public.study_lab_slot(uuid, text, text), public.study_lab_judge_input(uuid, text),
+  public.study_lab_claim(uuid, text, text, numeric, numeric, text), public.study_lab_status(uuid, text),
+  public.study_lab_output_save(uuid, text, text, text, jsonb, numeric, int, int, text, jsonb, text, text),
+  public.study_lab_check_save(uuid, jsonb, text, text), public.study_lab_judged(uuid, text, jsonb, numeric, text),
+  public.study_lab_rate(uuid, int, int, int, int, boolean, text), public.study_lab_reveal(uuid, text, boolean),
+  public.study_lab_run(uuid), public.study_lab_source(uuid), public.study_lab_list(uuid, int), public.study_lab_todo(uuid),
+  public.study_lab_board(uuid, text), public.study_lab_cancel(uuid), study_private.lab_sweep() from public, anon;
+-- Members' and the owner's (the owner checked inside).
+grant execute on function public.study_lab_owner(uuid), public.study_model_provider_set(uuid, text, boolean, text),
+  public.study_lab_rate(uuid, int, int, int, int, boolean, text), public.study_lab_reveal(uuid, text, boolean),
+  public.study_lab_run(uuid), public.study_lab_source(uuid), public.study_lab_list(uuid, int), public.study_lab_todo(uuid),
+  public.study_lab_board(uuid, text), public.study_lab_cancel(uuid) to authenticated;
+-- The server's, with the owner's token and the key inside.
+grant execute on function public.study_model_set(uuid, text, text, text, text),
+  public.study_lab_plan(uuid, uuid, text, text, jsonb, jsonb, text, text, jsonb, text, numeric, numeric, text),
+  public.study_lab_slot(uuid, text, text), public.study_lab_judge_input(uuid, text) to authenticated;
+-- A member's read, or the worker's with the key; the worker's alone (the key inside; the claim refuses a signed-in caller).
+grant execute on function public.study_models(uuid, text), public.study_model_at(uuid, text, timestamptz, text),
+  public.study_lab_claim(uuid, text, text, numeric, numeric, text), public.study_lab_status(uuid, text),
+  public.study_lab_output_save(uuid, text, text, text, jsonb, numeric, int, int, text, jsonb, text, text),
+  public.study_lab_check_save(uuid, jsonb, text, text), public.study_lab_judged(uuid, text, jsonb, numeric, text)
+  to anon, authenticated;
+
+-- The sweep: every 15 minutes at 7, 22, 37 and 52 past the hour (only with pg_cron).
+do $$
+begin
+  if to_regnamespace('cron') is not null then
+    perform cron.schedule('study-lab-sweep', '7,22,37,52 * * * *', 'select study_private.lab_sweep()');
+  end if;
+end $$;
+
+-- Section R's kind for a run waiting for ratings: R reserved it (the inbox
+-- only, never pushed); registered here too in case R's row is missing, and
+-- never changed here, so a push the owner turned on stays on.
+do $$
+begin
+  if to_regclass('study_private.notice_kinds') is not null then
+    insert into study_private.notice_kinds (kind, cat, ttl, delay, push) values ('lab_new', 'inapp', '7 days', '0', false)
+    on conflict (kind) do nothing;
+  end if;
+end $$;
+
+insert into study_private.schema_sections (section, version) values ('Y', 1)
+on conflict (section) do update set version = excluded.version, loaded_at = now();
+-- ════ END SECTION Y ════

@@ -43,10 +43,15 @@ test("every part is at most 170 KB", async () => {
   assert.match(parts[10], /^-- ═══ study-schema\.sql, part 11 of 12 \(section O\) ═══/);
   // Part 12: section O goes on at O 3 (similar questions), which would take
   // part 11 past 170 KB; the cut is O's own "SECTION O CONTINUES · O 3" line.
-  assert.match(parts[11], /^-- ═══ study-schema\.sql, part 12 of 12 \(section O, continued: O 3\) ═══/);
+  // Section Y (models: routes and the comparison) follows O 3 in part 12, which stays under 170 KB with it.
+  assert.match(parts[11], /^-- ═══ study-schema\.sql, part 12 of 12 \(section O, continued: O 3; section Y\) ═══/);
   assert.match(parts[11], /^-- ════ SECTION O CONTINUES · O 3 /m);
   assert.match(parts[11], /insert into study_private\.schema_sections \(section, version\) values \('O', 3\)/);
   assert.match(parts[11], /^-- ════ END SECTION O ════$/m);
+  const y = parts[11].indexOf("-- ════ BEGIN SECTION Y ");
+  assert.ok(y > parts[11].indexOf("-- ════ END SECTION O ════"), "Y after O 3");
+  assert.match(parts[11].slice(y), /insert into study_private\.schema_sections \(section, version\) values \('Y', 1\)\non conflict[^\n]*\n-- ════ END SECTION Y ════\n$/);
+  for (const k of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) assert.ok(!parts[k].includes("BEGIN SECTION Y"), `section Y only in part 12, not ${k + 1}`);
 });
 
 // Section L (practice sets, OD14) redefines study_private.kind_on so the

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { DEFAULT_MODEL, labelOf, modelInfo, MODELS, priceOf, priceRowOn, providerOf, ROUTE_KEYS, ROUTE_RULES, scopeAllows, type ModelInfo } from "./models.js";
 import { ANTHROPIC_PRICES, anthropicId, CHARS_PER_TOKEN, priceOf as phonePriceOf, rateOf, UNKNOWN_PRICE } from "./prices.js";
 
@@ -149,7 +151,7 @@ test("every current Claude model's prices, capabilities and limits as Anthropic'
   assert.equal(modelInfo("claude-opus-4-6")!.effort !== null, true);
 });
 
-test("route keys: every key has its rules", () => {
+test("route keys: every key has its rules, and section Y accepts exactly these keys", () => {
   assert.equal(new Set(ROUTE_KEYS).size, ROUTE_KEYS.length);
   for (const k of ROUTE_KEYS) assert.match(k, /^[a-z][a-z_]{1,23}$/, k);
   assert.deepEqual(Object.keys(ROUTE_RULES).sort(), [...ROUTE_KEYS].sort());
@@ -160,4 +162,8 @@ test("route keys: every key has its rules", () => {
   // Scope "text" takes only keys without pictures, members' wording, or exam and sheet pages; "all" takes every key.
   assert.deepEqual(ROUTE_KEYS.filter((k) => scopeAllows("text", k)), ["outline", "notes", "points", "cards", "judge"]);
   assert.ok(ROUTE_KEYS.every((k) => scopeAllows("all", k)));
+  const sql = readFileSync(join(process.cwd(), "supabase", "study-schema.sql"), "utf8");
+  const y = sql.slice(sql.indexOf("-- ════ BEGIN SECTION Y "));
+  const list = /create or replace function study_private\.route_key_ok\(p_route text\)[\s\S]*?array\[([^\]]+)\]/.exec(y)?.[1] ?? "";
+  assert.deepEqual([...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), [...ROUTE_KEYS], "section Y's list of route keys");
 });
