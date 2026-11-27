@@ -1,0 +1,61 @@
+/* Uploaded sheets, release B (docs/study/sheets.md; design-exams §5.10,
+   §5.11): similar questions after a wrong answer, for the whole sheet, and a
+   twin's chip with its peek. Tokens and kit classes only (tokens.css,
+   kit.css). */
+
+.sim-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+  min-width: 0;
+}
+.sim-row > p {
+  flex: 1 1 100%;
+  margin: 0;
+}
+.sim-row > .sim-result:empty {
+  display: none;
+}
+.sim-row .a-btn.small,
+.sim-row .a-link,
+.sim-sheet-offer .a-link {
+  min-height: 44px;
+}
+.sim-sheet-offer {
+  gap: var(--sp-2);
+}
+.sim-sheet-offer > p {
+  margin: 0;
+}
+.sim-sheet-offer > .sim-result:empty {
+  display: none;
+}
+.sim-sheet-body,
+.sim-peek .a-stack {
+  padding-block-end: var(--sp-2);
+}
+.sim-twin {
+  max-width: 100%;
+  white-space: normal;
+  text-align: start;
+}
+.sim-peek-text {
+  margin: 0;
+  white-space: pre-line;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.sim-peek-options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp-2);
+}
+.sim-peek-options li {
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--b) solid var(--line);
+  border-radius: var(--r-sm);
+  overflow-wrap: anywhere;
+}

@@ -49,6 +49,10 @@ import SlideSheet from "./SlideSheet";
  * question, and an uploaded item's exact text, load with the first that needs them. */
 const SheetAnswer = lazy(() => import("./SheetAnswer"));
 const SheetText = lazy(() => import("./SheetText"));
+/* Release B (VITE_STUDY_SIMILAR): similar questions after a wrong answer, for the whole sheet, and a twin's chip. */
+const SimilarOffer = lazy(() => import("./SimilarSheet"));
+const SheetSimilar = lazy(() => import("./SimilarSheet").then((m) => ({ default: m.SheetSimilar })));
+const TwinChip = lazy(() => import("./SimilarSheet").then((m) => ({ default: m.TwinChip })));
 /** An open or a numeric question (section O 2): answered in SheetAnswer, not by choosing. */
 const sheetForm = (q: Pick<PublicQuestion, "form"> | undefined): boolean => Boolean(flags.sheetForms && q && (q.form === "open" || q.form === "numeric"));
 
@@ -89,6 +93,8 @@ type Data = {
   examTitles?: Record<string, string>;
   /** Uploaded sheets' items (release A1): each one's printed label and a numeric item's unit. */
   sheetExtras?: Record<string, { label: string; unit: string | null }>;
+  /** Each upload's kind (release B: a sheet's items may have similar questions). */
+  examKinds?: Record<string, "exam" | "sheet">;
 };
 const NO_AGAIN = { again: [] as S.Again[], danger: new Set<string>() };
 
@@ -178,15 +184,15 @@ const examItems = (qs: PublicQuestion[]): PublicQuestion[] => {
 };
 
 /** Past exams' items of a session: their keys' origins and their exams' titles (the review's). */
-async function examInfo(byId: Record<string, PublicQuestion>): Promise<Pick<Data, "origins" | "examTitles" | "sheetExtras">> {
+async function examInfo(byId: Record<string, PublicQuestion>): Promise<Pick<Data, "origins" | "examTitles" | "sheetExtras" | "examKinds">> {
   if (!flags.exams) return {};
   const exams = [...new Set(Object.values(byId).filter((q) => q.source === "exam" && q.exam_id).map((q) => q.exam_id as string))];
   if (!exams.length) return {};
   if (flags.sheetForms) {
     // Release A1: the review with the sheet reader's fields (the labels, a numeric item's unit).
     const { sheetInfo } = await import("../lib/sheetForms");
-    const r = await sheetInfo(exams).catch(() => ({ origins: new Map(), titles: {}, extras: {} }));
-    return { origins: r.origins, examTitles: r.titles, sheetExtras: r.extras };
+    const r = await sheetInfo(exams).catch(() => ({ origins: new Map(), titles: {}, extras: {}, kinds: {} }));
+    return { origins: r.origins, examTitles: r.titles, sheetExtras: r.extras, examKinds: r.kinds };
   }
   const { origins, titles } = await keyOrigins(exams).catch(() => ({ origins: new Map(), titles: {} }));
   return { origins, examTitles: titles };
@@ -230,7 +236,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
   const sRef = useRef(s);
   sRef.current = s;
   /** A practice set (s=k.<set>): its title and lecture, whether it is still being made, the round's end. */
-  const [setInfo, setSetInfo] = useState<{ title: string; lecture: string | null; making: boolean; size: number } | null>(null);
+  const [setInfo, setSetInfo] = useState<{ title: string; lecture: string | null; making: boolean; size: number; kind?: string } | null>(null);
   const [finish, setFinish] = useState<Finish | null>(null);
   const [endStats, setEndStats] = useState<Stats | null>(null);
   const [askName, setAskName] = useState(false);
@@ -379,7 +385,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     if (!setId) return;
     let alive = true;
     openSet(setId)
-      .then((d) => alive && setSetInfo({ title: d.set.title, lecture: d.set.lecture_id, making: d.set.state !== "ready", size: d.set.size }))
+      .then((d) => alive && setSetInfo({ title: d.set.title, lecture: d.set.lecture_id, making: d.set.state !== "ready", size: d.set.size, kind: d.set.kind }))
       .catch(() => undefined);
     return () => {
       alive = false;
@@ -410,6 +416,23 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     save(next);
     return next.ids.length - now.ids.length;
   }, [setId, save]);
+  /** Release B: similar questions found or made after a wrong answer, asked right after it. */
+  const addNext = useCallback(
+    async (ids: string[]) => {
+      const cur = sRef.current;
+      if (!cur) return 0;
+      const fresh = ids.filter((x) => !cur.ids.includes(x));
+      if (!fresh.length) return 0;
+      const qs = (await listQuestionsByIds(fresh)).filter(isActive);
+      const now = sRef.current ?? cur;
+      const next = S.insertNext(now, qs, { now: Date.now() });
+      if (next === now) return 0;
+      setData((x) => (x ? { ...x, byId: { ...x.byId, ...Object.fromEntries(qs.map((q) => [q.id, q])) }, candidates: [...x.candidates, ...qs] } : x));
+      save(next);
+      return next.ids.length - now.ids.length;
+    },
+    [save],
+  );
   useEffect(() => {
     // Only while the round goes on: once it is over the attempt is finished (the end screen stays).
     if (!setId || !making || phase !== "ready" || over) return;
@@ -770,7 +793,15 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     const partNow = flags.sheetForms && qq.series && qq.step ? Object.values(data.byId).filter((x) => x.series === qq.series).length : 0;
     const partText = partNow > 1 ? `סעיף ${"אבגדהוזחטיכל"[(qq.step ?? 1) - 1] ?? qq.step}׳ מתוך ${partNow}` : "";
     const labelChip = flags.sheetForms && extra && scope?.kind === "exam" ? <span className="a-chip pq-label-chip">שאלה {extra.label}</span> : null;
-    const crop = qq.source === "exam" && qq.exam_id && (qq.figure ?? "").startsWith("pg:") ? <PageCrop groupId={ctx.group.id} examId={qq.exam_id} figure={qq.figure} /> : undefined;
+    // A twin that reuses its source's figure draws it from its sheet's page (from_exam, release B).
+    const cropExam = qq.source === "exam" ? qq.exam_id : qq.source === "twin" && flags.similar ? (qq.from_exam ?? null) : null;
+    const crop = cropExam && (qq.figure ?? "").startsWith("pg:") ? <PageCrop groupId={ctx.group.id} examId={cropExam} figure={qq.figure} /> : undefined;
+    const twinChip =
+      flags.similar && qq.source === "twin" ? (
+        <Suspense fallback={null}>
+          <TwinChip questionId={qq.id} />
+        </Suspense>
+      ) : null;
     if (sheetForm(qq)) {
       return (
         <Suspense key={qq.id} fallback={<Loading />}>
@@ -785,6 +816,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
               <>
                 {labelChip}
                 {sourceChip}
+                {twinChip}
               </>
             }
             media={crop}
@@ -840,6 +872,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
             {labelChip}
             {partText ? <span className="a-chip pq-step">{partText}</span> : null}
             {sourceChip}
+            {twinChip}
             {data.origins?.get(qq.id)?.origin === "solved" ? <span className="a-chip warn pq-suggested">תשובה מוצעת · לא נבדקה</span> : null}
             {/* E: a member's trap ("שאלה של מישהו מהקבוצה"), named once a live quiz unmasked it. */}
             <TrapChip ctx={ctx} questionId={qq.id} source={qq.source} />
@@ -1067,6 +1100,12 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
               </button>
             </p>
           ) : null}
+          {flags.similar && scope?.kind === "exam" && data.examKinds?.[scope.exam] === "sheet" ? (
+            // Release B (design §5.11, OD12): the whole sheet's offer at the end of practising it.
+            <Suspense fallback={null}>
+              <SheetSimilar ctx={ctx} examId={scope.exam} />
+            </Suspense>
+          ) : null}
           {wrong.length ? (
             <>
               <div className="a-sec">
@@ -1130,6 +1169,18 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
   /* ── A question, then its autopsy ── */
   const shownFb = q && !s.timed ? S.visibleFeedback(s, q.id, q.form) : null;
   const last = s.i >= total - 1;
+  // Release B (design §5.10): after a wrong answer to a sheet's item or a twin, similar questions.
+  // In a set's round only the sheet's own set, where new twins go (an answer elsewhere is "not in set").
+  const qResult = q ? s.results.find((r) => r.id === q.id) : undefined;
+  const simFor =
+    flags.similar &&
+    q &&
+    shownFb &&
+    qResult &&
+    !qResult.correct &&
+    !s.feedback[q.id]?.personal &&
+    (q.source === "twin" || (q.source === "exam" && q.exam_id && data.examKinds?.[q.exam_id] === "sheet")) &&
+    (scope?.kind !== "set" || setInfo?.kind === "sheet");
   return (
     <main className={`practice-session${shownFb ? " has-feedback" : ""}`}>
       <Head back={back} title={title}>
@@ -1150,6 +1201,11 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         <i style={{ width: `${Math.round((100 * (s.i + (shownFb ? 1 : 0))) / Math.max(1, total))}%` }} />
       </div>
       {q ? showQuestion(q, s.i, false) : <Loading />}
+      {simFor && q ? (
+        <Suspense fallback={null}>
+          <SimilarOffer key={q.id} ctx={ctx} questionId={q.id} examId={q.source === "exam" ? q.exam_id : null} inRound={s.ids} onAdd={addNext} onNext={goNext} />
+        </Suspense>
+      ) : null}
       {q && sheetForm(q) && !shownFb ? (
         sheetAct ? (
           <StickyActions>

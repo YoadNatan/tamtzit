@@ -42,7 +42,7 @@ import { parsePageBox } from "../lib/exams";
 import type { ScreenProps } from "../features/types";
 import { drives, holdScreen, PageCrop, setDrive } from "./ExamParts";
 import PageView from "./PageView";
-import { BackLink, Head, Loading, RouteLink } from "./Shell";
+import { BackLink, Head, Loading, RouteLink, Sheet } from "./Shell";
 import "../styles/exams.css";
 import "../styles/sheets.css";
 
@@ -50,6 +50,8 @@ import "../styles/sheets.css";
 const SheetText = lazy(() => import("./SheetText"));
 const EditSheet = lazy(() => import("./SheetEdit"));
 const AnswerEdit = lazy(() => import("./SheetEdit").then((m) => ({ default: m.AnswerEdit })));
+/* Release B (VITE_STUDY_SIMILAR): the review's "⋯" holds "שאלות דומות לכל הדף" (OD12: never at the top of the review). */
+const SheetSimilar = lazy(() => import("./SimilarSheet").then((m) => ({ default: m.SheetSimilar })));
 /** The review: with release A1, study_sheet_review (S's and the sheet reader's fields). */
 const reviewOf = (examId: string) => (flags.sheetForms ? sheetReview(examId) : examReview(examId));
 /** An item's printed label ("3א"); before release A1, its number. */
@@ -113,6 +115,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
   const [review, setReview] = useState<Review | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState(false);
   const driving = useRef(false);
   const groupId = ctx.group.id;
   // Section O 1's kind (with the flag only: a build without it never asks for the column).
@@ -231,7 +234,25 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
       ) : null}
     </p>
   );
-  const head = <Head back={back} title={<bdi>{status.title}</bdi>} />;
+  // A ready sheet's "⋯" (release B): the whole sheet's similar questions, in a bottom sheet.
+  const more =
+    flags.similar && sheet && status.status === "ready" ? (
+      <button type="button" className="a-btn ghost icon ss-head-more" aria-label="עוד פעולות לדף" aria-haspopup="dialog" onClick={() => setMenu(true)}>
+        ⋯
+      </button>
+    ) : null;
+  const head = (
+    <Head back={back} title={<bdi>{status.title}</bdi>}>
+      {more}
+    </Head>
+  );
+  const menuSheet = menu ? (
+    <Sheet label="עוד פעולות לדף" head={<h2 dir="auto">{status.title}</h2>} className="ss-menu-sheet" onClose={() => setMenu(false)}>
+      <Suspense fallback={<Loading />}>
+        <SheetSimilar ctx={ctx} examId={examId} />
+      </Suspense>
+    </Sheet>
+  ) : null;
 
   if (status.status === "uploading" || status.status === "new") {
     return (
@@ -386,6 +407,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
       retry={retryAll}
       busy={busy}
       sheet={sheet}
+      menu={menuSheet}
     />
   );
 }
@@ -406,6 +428,8 @@ function ExamReviewBody(p: {
   retry: (pages: number[] | null) => Promise<void>;
   busy: boolean;
   sheet: boolean;
+  /** Release B: the "⋯" sheet of the head, when open. */
+  menu?: React.ReactNode;
 }) {
   const { ctx, review, status } = p;
   // The copy against its page's PDF text (uploaded sheets, D9): items whose copy is not there are to check too.
@@ -541,6 +565,7 @@ function ExamReviewBody(p: {
   return (
     <main className={`exam-review${wide ? " is-wide" : ""}`}>
       {p.head}
+      {p.menu}
       {p.sub}
       <section className="a-card r-sum" aria-label="מה נמצא">
         {/* Pages that were not read: said first, not only as a muted row under the summary (P3). */}
