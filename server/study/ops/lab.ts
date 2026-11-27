@@ -28,10 +28,12 @@ import {
   type ReadUnit,
   type RefItem,
 } from "../lab.js";
-import { LAB_ANSWER_MS, LAB_POLL_MS, LAB_RUN_CAP_USD, LAB_SAVE_MS, LAB_SIGN_SECONDS, LAB_SIGN_SECONDS_OTHER, LAB_SOLVER_ITEMS, LAB_SOLVER_MAX } from "../limits.js";
+import { CHECKED_ROUTES, isRatedRoute } from "../labRated.js";
+import { LAB_ANSWER_MS, LAB_CHECKED_ANSWER_MS, LAB_POLL_MS, LAB_RUN_CAP_USD, LAB_SAVE_MS, LAB_SIGN_SECONDS, LAB_SIGN_SECONDS_OTHER, LAB_SOLVER_ITEMS, LAB_SOLVER_MAX } from "../limits.js";
 import { resetRoutes, routeRefusal, type ModelsState } from "../routes.js";
 import { anthropic, detachedStream, errorText, HttpError, json, keyed, loadLecture, memberClient, serverClient, type Lecture } from "../study.js";
 import { citedSlidesText } from "./fixcheck.js";
+import { needsCheck, ratedMaterial, runCheck, runJudge, stepModel, stepsEstimate } from "./labRated.js";
 import type { AiBody, Op } from "./types.js";
 
 /* ── Op "lab": "השוואת מודלים" on the server (design-models §7.5, D10,
@@ -43,7 +45,12 @@ import type { AiBody, Op } from "./types.js";
  *   {op:"lab", action:"route", group, route, model|null, note?, confirmExpensive?} → {route, model}
  *   {op:"lab", action:"cancel", run}                                → {cancelled: true}
  *   {op:"lab", action:"price", group, route, source?, models?}       → the material and each model's worst case
- *   (check and judge, the paid check and the AI score, come with WP8: 501.)
+ *   {op:"lab", action:"check", run}                                 → NDJSON: the paid checks left pending
+ *   {op:"lab", action:"judge", run}                                 → NDJSON: the AI score, once
+ * The short kinds members rate (practice, a set's batch, points, cards,
+ * "לשאול", a summary part; WP8) read their material in ./labRated.ts; after
+ * their answers, the same invocation runs their paid steps (the solver's
+ * check of practice questions, the AI score when asked for: `judge: true`).
  *
  * Only the group's owner (its creator, or a lab admin) runs comparisons
  * and sets routes; section Y checks it again in every function.
@@ -121,7 +128,7 @@ function modelsOf(v: unknown): string[] {
 
 /* ── The material, read with the owner's token ── */
 
-type Material = { frozen: Frozen; lectureId: string | null; title: string; source: Record<string, unknown> };
+type Material = { frozen: Frozen; lectureId: string | null; title: string; source: Record<string, unknown>; lecture?: Lecture };
 const title = (route: LabRoute, what: string) => `${LAB_NAMES[route]} · ${what}`.slice(0, 160);
 
 /** Signs storage paths for a call; a path that cannot be signed is left out. */
@@ -241,7 +248,8 @@ async function readMaterial(sb: SupabaseClient, group: string, route: "exam_read
   return { frozen, lectureId: exam.lecture_id ?? null, title: title(route, `${exam.title} · ${range}`), source: { exam: exam.id, pages: unit.map((p) => p.n) } };
 }
 
-function material(sb: SupabaseClient, group: string, route: LabRoute, source: Record<string, unknown>): Promise<Material> {
+function material(sb: SupabaseClient, group: string, route: LabRoute, source: Record<string, unknown>, forPrice = false): Promise<Material> {
+  if (isRatedRoute(route)) return ratedMaterial(sb, group, route, source, forPrice);
   if (route === "solver") return bankMaterial(sb, group, source);
   if (route === "fix_check") return proposalMaterial(sb, group, source);
   return readMaterial(sb, group, route, source);
@@ -249,7 +257,21 @@ function material(sb: SupabaseClient, group: string, route: LabRoute, source: Re
 
 /* ── Slots: read, claimed, run ── */
 
-type Slot = { label: string; slot: number; output: string; model: string; provider: string; status: string; tries: number; run_status: string; request: Frozen | null; group: string };
+type Slot = {
+  label: string;
+  slot: number;
+  output: string;
+  model: string;
+  provider: string;
+  status: string;
+  tries: number;
+  run_status: string;
+  request: Frozen | null;
+  group: string;
+  lecture?: string | null;
+  check_status?: string;
+  judge_model?: string | null;
+};
 type Claimed = Slot & { reservation: number; estimate: number; part: "answer" | "retry" };
 
 async function readSlot(sb: SupabaseClient, runId: string, label: string): Promise<Slot> {
@@ -303,10 +325,18 @@ async function claimAll(
 
 const line = (o: unknown) => JSON.stringify(o) + "\n";
 
-/** The run's slots in one detached invocation (see the file's head). */
-function runSlots(o: { sb: SupabaseClient; worker: SupabaseClient; client: Anthropic; runId: string; frozen: Frozen; slots: Claimed[]; total: number; ready: number; started: number }): Response {
+/** What a slot's call left: its status and text (the paid steps after the answers read them). */
+type Ended = { slot: Claimed; status: string; text: string };
+/** The paid steps after the answers (./labRated.ts), with the same stop and cancel. */
+type After = (o: { ended: Ended[]; stopAt: number; signal: AbortSignal }) => Promise<void>;
+
+/** The run's slots in one detached invocation (see the file's head). With
+ *  paid steps after them (`after`), the answers stop at 200 s so the steps
+ *  have time; the steps stop at 270 s (or 25 s before the deadline). */
+function runSlots(o: { sb: SupabaseClient; worker: SupabaseClient; client: Anthropic; runId: string; frozen: Frozen; slots: Claimed[]; total: number; ready: number; started: number; after?: After }): Response {
   const deadline = getDeadline()?.getTime() ?? o.started + 300_000;
-  const stopAt = Math.min(o.started + LAB_ANSWER_MS, deadline - LAB_SAVE_MS);
+  const stepsAt = Math.min(o.started + LAB_ANSWER_MS, deadline - LAB_SAVE_MS);
+  const stopAt = o.after ? Math.min(o.started + LAB_CHECKED_ANSWER_MS, stepsAt) : stepsAt;
   return detachedStream(async (write) => {
     let ready = o.ready;
     write(line({ t: "run", run: o.runId, total: o.total }));
@@ -327,28 +357,37 @@ function runSlots(o: { sb: SupabaseClient; worker: SupabaseClient; client: Anthr
       })();
     }, LAB_POLL_MS);
     try {
-      await Promise.all(
+      const ended = await Promise.all(
         o.slots.map(async (s) => {
-          await runSlot({ ...o, slot: s, stopAt, signal: stop.signal, cancelled: () => cancelled });
+          const e = await runSlot({ ...o, slot: s, stopAt, signal: stop.signal, cancelled: () => cancelled });
           ready += 1;
           write(line({ t: "progress", ready, total: o.total }));
+          return e;
         }),
       );
+      // The answers are in: the phone may show them while the paid steps go on.
+      write(line({ t: "done" }));
+      if (o.after && !cancelled) {
+        try {
+          await o.after({ ended, stopAt: stepsAt, signal: stop.signal });
+        } catch (e) {
+          console.error(`lab steps ${o.runId}: ${errorText(e).slice(0, 200)}`);
+        }
+      }
     } finally {
       clearInterval(poll);
     }
-    write(line({ t: "done" }));
   }, waitUntil);
 }
 
 /** One answer: its pictures signed for this call, the model with no
  *  fallback, its checks, the worker's save. Never throws. */
-async function runSlot(o: { sb: SupabaseClient; worker: SupabaseClient; client: Anthropic; runId: string; frozen: Frozen; slot: Claimed; stopAt: number; signal: AbortSignal; cancelled: () => boolean }): Promise<void> {
+async function runSlot(o: { sb: SupabaseClient; worker: SupabaseClient; client: Anthropic; runId: string; frozen: Frozen; slot: Claimed; stopAt: number; signal: AbortSignal; cancelled: () => boolean }): Promise<Ended> {
   const s = o.slot;
   const ref = `run:${o.runId}:${s.slot}:${s.part}`;
   const settle = settleFor(o.worker, s.reservation);
   const info = modelInfo(s.model);
-  const save = async (r: { status: string; reason: string | null; text: string; spend: Spend | null; latency: number; first: number | null; servedBy: string | null; checks: Record<string, unknown> }) => {
+  const save = async (r: { status: string; reason: string | null; text: string; spend: Spend | null; latency: number; first: number | null; servedBy: string | null; checks: Record<string, unknown>; checkStatus?: "pending" }) => {
     try {
       const { error } = await o.worker.rpc(
         "study_lab_output_save",
@@ -363,7 +402,7 @@ async function runSlot(o: { sb: SupabaseClient; worker: SupabaseClient; client: 
           p_first: r.first,
           p_served_by: r.servedBy,
           p_checks: r.checks,
-          p_check_status: null,
+          p_check_status: r.checkStatus ?? null,
         }),
       );
       if (error) console.error(`lab save ${o.runId}: ${error.message}`); // the sweep ends it
@@ -376,7 +415,7 @@ async function runSlot(o: { sb: SupabaseClient; worker: SupabaseClient; client: 
   if (!req) {
     await settle({ kind: "lab", ref, model: s.model, usage: null, costUsd: 0, estimated: false }).catch(() => undefined);
     await save({ status: "error", reason: info ? "pictures" : "bad model", text: "", spend: null, latency: 0, first: null, servedBy: null, checks: {} });
-    return;
+    return { slot: s, status: "error", text: "" };
   }
   const t0 = Date.now();
   let text = "";
@@ -394,6 +433,7 @@ async function runSlot(o: { sb: SupabaseClient; worker: SupabaseClient; client: 
       effort: req.effort,
       maxTokens: req.maxTokens,
       ...(req.format ? { format: req.format } : {}),
+      ...(req.cacheTail ? { cacheTail: true } : {}),
       stopAt: o.stopAt,
       fallbacks: false,
       appFallback: false,
@@ -422,7 +462,36 @@ async function runSlot(o: { sb: SupabaseClient; worker: SupabaseClient; client: 
     first,
     servedBy: res?.model ?? (spend as Spend | null)?.model ?? null,
     checks: finished ? checksFor(o.frozen.key, text, status === "done") : {},
+    ...(finished && needsCheck(o.frozen, text) ? { checkStatus: "pending" as const } : {}),
   });
+  return { slot: s, status, text };
+}
+
+/* ── The paid steps after the answers (./labRated.ts) ── */
+
+/** A worker's claim of a paid step (solve, judge): its reservation, or the refusal's code. */
+const stepClaim = (worker: SupabaseClient, runId: string) => async (label: string, part: "solve" | "judge", estimate: number) => {
+  const { data, error } = await worker.rpc("study_lab_claim", keyed({ p_run: runId, p_label: label, p_part: part, p_estimate: estimate, p_cap: monthlyCap() }));
+  if (error) return error.message;
+  const id = Number(data);
+  return Number.isSafeInteger(id) && id > 0 ? id : "no reservation";
+};
+
+/** The steps of a run: the solver's check of each finished answer that waits
+ *  for it, then the AI score if the run asked for one. */
+function stepsOf(o: { sb: SupabaseClient; worker: SupabaseClient; client: Anthropic; runId: string; frozen: Frozen; lecture: Lecture; solver: string; judge: string | null }): After | undefined {
+  const checked = CHECKED_ROUTES.has(o.frozen.route);
+  if (!checked && !o.judge) return undefined;
+  return async ({ ended, stopAt, signal }) => {
+    const ctx = { sb: o.sb, worker: o.worker, client: o.client, runId: o.runId, frozen: o.frozen, lecture: o.lecture, stopAt, signal, claim: stepClaim(o.worker, o.runId) };
+    if (checked)
+      await Promise.all(
+        ended
+          .filter((e) => (e.status === "done" || e.status === "truncated") && needsCheck(o.frozen, e.text))
+          .map((e) => runCheck({ ...ctx, label: e.slot.label, slot: e.slot.slot, output: e.slot.output, text: e.text, model: o.solver })),
+      );
+    if (o.judge) await runJudge({ ...ctx, model: o.judge });
+  };
 }
 
 /* ── The actions ── */
@@ -444,7 +513,11 @@ async function runAction(req: Request, body: AiBody, started: number): Promise<R
     const why = labRefusal(id, route, { providers: state.providers, pictures });
     if (why) throw refusal(why);
   }
-  const { total } = runEstimate(m.frozen, models);
+  // The paid steps of a rated kind: the solver's check (practice), the AI score when asked for (OD12, off by default).
+  const judge = body.judge === true && isRatedRoute(route) && m.lecture ? stepModel(state.routes, "judge") : null;
+  const solver = stepModel(state.routes, "solver");
+  const steps = m.lecture ? stepsEstimate({ frozen: m.frozen, lecture: m.lecture, models: models.length, solver, judge }) : { check: 0, judge: 0 };
+  const total = runEstimate(m.frozen, models).total + steps.check + steps.judge;
   const cap = Number(state.lab?.run_cap ?? LAB_RUN_CAP_USD);
   if (total > (Number.isFinite(cap) ? cap : LAB_RUN_CAP_USD)) throw new HttpError(402, "run_cap");
   const { data: plan, error } = await sb.rpc(
@@ -459,7 +532,7 @@ async function runAction(req: Request, body: AiBody, started: number): Promise<R
       p_hash: await requestHash(m.frozen),
       p_differs: DIFFERS[route],
       p_models: models.map((id) => ({ model: id, provider: modelInfo(id)!.provider })),
-      p_judge: null,
+      p_judge: judge,
       p_estimate: Number(total.toFixed(5)),
       p_cap: monthlyCap(),
     }),
@@ -469,7 +542,16 @@ async function runAction(req: Request, body: AiBody, started: number): Promise<R
   const worker = serverClient();
   const slots = await Promise.all(p.labels.map((l) => readSlot(sb, p.run, l)));
   const claimed = await claimAll(worker, p.run, slots, m.frozen, "answer", true);
-  return runSlots({ sb, worker, client: anthropic(), runId: p.run, frozen: m.frozen, slots: claimed, total: slots.length, ready: slots.length - claimed.length, started });
+  const client = anthropic();
+  const after = m.lecture ? stepsOf({ sb, worker, client, runId: p.run, frozen: m.frozen, lecture: m.lecture, solver, judge }) : undefined;
+  return runSlots({ sb, worker, client, runId: p.run, frozen: m.frozen, slots: claimed, total: slots.length, ready: slots.length - claimed.length, started, after });
+}
+
+/** The steps of a run read back (resume, retry, check, judge): its lecture, the solver's model, the AI score's model if asked. */
+async function stepsFor(sb: SupabaseClient, worker: SupabaseClient, client: Anthropic, runId: string, slot: Slot & { lecture?: string | null; judge_model?: string | null }): Promise<After | undefined> {
+  if (!slot.request || !isRatedRoute(slot.request.route) || !slot.lecture) return undefined;
+  const [lecture, state] = await Promise.all([loadLecture(sb, slot.lecture), readModels(sb, slot.group)]);
+  return stepsOf({ sb, worker, client, runId, frozen: slot.request, lecture, solver: stepModel(state.routes, "solver"), judge: slot.judge_model ?? null });
 }
 
 /** The run as the owner reads it (study_lab_run): its labels, status and counts. */
@@ -491,7 +573,9 @@ async function resumeAction(req: Request, body: AiBody, started: number): Promis
   const frozen = slots[0]?.request ?? null;
   const worker = serverClient();
   const claimed = frozen ? await claimAll(worker, runId, slots, frozen, "answer", false) : [];
-  return runSlots({ sb, worker, client: anthropic(), runId, frozen: frozen as Frozen, slots: claimed, total: r.total, ready: r.total - slots.length, started });
+  const client = anthropic();
+  const after = slots[0] ? await stepsFor(sb, worker, client, runId, slots[0]) : undefined;
+  return runSlots({ sb, worker, client, runId, frozen: frozen as Frozen, slots: claimed, total: r.total, ready: r.total - slots.length, started, after });
 }
 
 async function retryAction(req: Request, body: AiBody, started: number): Promise<Response> {
@@ -506,7 +590,47 @@ async function retryAction(req: Request, body: AiBody, started: number): Promise
   const worker = serverClient();
   const claimed = await claimAll(worker, runId, [slot], slot.request, "retry", true);
   if (!claimed.length) throw new HttpError(409, "not waiting");
-  return runSlots({ sb, worker, client: anthropic(), runId, frozen: slot.request, slots: claimed, total: r.total, ready: r.total - 1, started });
+  const client = anthropic();
+  const after = await stepsFor(sb, worker, client, runId, slot);
+  return runSlots({ sb, worker, client, runId, frozen: slot.request, slots: claimed, total: r.total, ready: r.total - 1, started, after });
+}
+
+/** "לבדוק עכשיו" (check) and the AI score (judge), after the run: what is
+ *  left of its paid steps, in its own detached invocation. Each step is
+ *  claimed again (study_lab_claim), so a second tap or a step that already
+ *  ran pays nothing. NDJSON: {t:"check", pending}, then {t:"done"}. */
+async function stepsAction(req: Request, body: AiBody, started: number, which: "check" | "judge"): Promise<Response> {
+  const runId = uuidOf(body.run);
+  if (!runId) throw new HttpError(403, "forbidden");
+  const { sb } = await memberClient(req);
+  const r = await readRun(sb, runId);
+  if (r.status !== "done") throw new HttpError(409, r.status === "running" ? "not done" : "closed");
+  const slots = await Promise.all(r.labels.map((l) => readSlot(sb, runId, l)));
+  const first = slots[0];
+  if (!first?.request || !isRatedRoute(first.request.route) || !first.lecture) throw new HttpError(400, "bad route");
+  if (which === "judge" && !first.judge_model) throw new HttpError(409, "not waiting");
+  const pending = which === "check" ? slots.filter((s) => s.check_status === "pending") : [];
+  const worker = serverClient();
+  const client = anthropic();
+  const [lecture, state] = await Promise.all([loadLecture(sb, first.lecture), readModels(sb, first.group)]);
+  const frozen = first.request;
+  const texts = new Map<string, string>();
+  if (pending.length) {
+    const { data, error } = await sb.rpc("study_lab_judge_input", keyed({ p_run: runId }));
+    if (error) throw rpcFail(error);
+    for (const x of (data as { outputs?: Array<{ label: string; text: string | null }> } | null)?.outputs ?? []) texts.set(x.label, x.text ?? "");
+  }
+  const deadline = getDeadline()?.getTime() ?? started + 300_000;
+  const stopAt = Math.min(started + LAB_ANSWER_MS, deadline - LAB_SAVE_MS);
+  return detachedStream(async (write) => {
+    write(line({ t: "check", pending: pending.length + (which === "judge" ? 1 : 0) }));
+    const ctx = { sb, worker, client, runId, frozen, lecture, stopAt, claim: stepClaim(worker, runId) };
+    if (which === "check") {
+      const solver = stepModel(state.routes, "solver");
+      await Promise.all(pending.map((s) => runCheck({ ...ctx, label: s.label, slot: s.slot, output: s.output, text: texts.get(s.label) ?? "", model: solver })));
+    } else await runJudge({ ...ctx, model: first.judge_model! });
+    write(line({ t: "done" }));
+  }, waitUntil);
 }
 
 async function routeAction(req: Request, body: AiBody): Promise<Response> {
@@ -556,7 +680,7 @@ async function priceAction(req: Request, body: AiBody): Promise<Response> {
   await assertOwner(sb, group);
   const state = await readModels(sb, group);
   const source = body.source && typeof body.source === "object" && !Array.isArray(body.source) ? (body.source as Record<string, unknown>) : {};
-  const m = await material(sb, group, route, source);
+  const m = await material(sb, group, route, source, true);
   const pictures = picturePaths(m.frozen).length > 0;
   const asked = Array.isArray(body.models) ? body.models.filter((x): x is string => typeof x === "string").slice(0, MODELS.length) : MODELS.map((x) => x.id);
   const models: Record<string, { usd: number } | { refused: string }> = {};
@@ -569,7 +693,14 @@ async function priceAction(req: Request, body: AiBody): Promise<Response> {
   const cap = Number(state.lab?.run_cap ?? LAB_RUN_CAP_USD);
   // A solver run picks its questions at random again: the price's source keeps the lecture and the count only.
   const again = route === "solver" ? { lecture: m.source.lecture, n: Array.isArray(m.source.questions) ? m.source.questions.length : undefined } : m.source;
-  return json(200, { route, title: m.title, source: again, pictures, models, runCap: Number.isFinite(cap) ? cap : LAB_RUN_CAP_USD });
+  // The paid steps (rated kinds): the solver's check of each answer (practice), the AI score by the number of answers (index 0-4).
+  const steps = m.lecture
+    ? {
+        check: Number(stepsEstimate({ frozen: m.frozen, lecture: m.lecture, models: 1, solver: stepModel(state.routes, "solver"), judge: null }).check.toFixed(5)),
+        judge: [0, 1, 2, 3, 4].map((n) => (n < 2 ? 0 : Number(stepsEstimate({ frozen: m.frozen, lecture: m.lecture!, models: n, solver: null, judge: stepModel(state.routes, "judge") }).judge.toFixed(5)))),
+      }
+    : null;
+  return json(200, { route, title: m.title, source: again, pictures, models, runCap: Number.isFinite(cap) ? cap : LAB_RUN_CAP_USD, ...(steps ? { steps } : {}) });
 }
 
 /** POST /api/study/ai {op:"lab", action, …} */
@@ -588,8 +719,9 @@ export const labOp: Op = async (req, body, started) => {
     case "price":
       return priceAction(req, body);
     case "check":
+      return stepsAction(req, body, started, "check");
     case "judge":
-      throw new HttpError(501, "not built"); // the paid check and the AI score: WP8
+      return stepsAction(req, body, started, "judge");
     default:
       throw new HttpError(400, "bad action");
   }

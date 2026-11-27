@@ -638,7 +638,7 @@ type SectionRow = { idx: number; slide_from: number; slide_to: number; status: s
  *  covered list), the pictures the ready summary parts captioned in the range
  *  (only ids the lecture has, which study_save_card would refuse otherwise),
  *  and the part's current corrections. */
-async function readInputs(
+export async function readInputs(
   sb: SupabaseClient,
   lecture: Lecture,
   claim: Claim,

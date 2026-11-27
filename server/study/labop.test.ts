@@ -47,6 +47,23 @@ const bank = [
   { id: "q3", vignette: "", question: "מה מעכב המשתן הבדוי?", options: ["NKCC2", "NCC", "ENaC"], form: "one", prompts: [], style: null, figure: "", answer: 0, seq: null },
 ];
 
+/** A practice question that passes checkQuestion (questions.test.ts's PART1[0], an invented drug). */
+const opt = (t: string, why: string, correct = false) => ({ text: t, correct, why, when: "", tag: "", left: "" });
+const QUESTION = {
+  topic: "Examplomycin", aspect: "mechanism", style: "mechanism", points: [], difficulty: 2, case: false, vignette: "",
+  takeaway: "הרגישות של אורגניזם ל-Examplomycin תואמת את פעילות ה-XRD שלו. [ש' 5]",
+  question: "מה קובע את מידת הרגישות של אורגניזם ל-Examplomycin?",
+  options: [
+    opt("פעילות האנזים XRD שלו", "Examplomycin משופעלת בתא על ידי חיזור, והרגישות של אורגניזם לתרופה תואמת את פעילות ה-XRD שלו. [ש' 5]", true),
+    opt("פעילות האנזים FHR שלו", "FHR הוא המטרה של Shamtrexate, ולא קשור להפעלת Examplomycin. [ש' 31-32]"),
+    opt("כמות ה-Q-tubulin שלו", "Q-tubulin הוא המטרה של ה-Mockazoles, שנקשרות אליו וגורמות לאובדן microtubules בתולעים. [ש' 35]"),
+    opt("כמות ה-fictosterol בממברנה שלו", "ל-fictosterol נקשרת Placebrin ויוצרת נקבוביות בממברנה של Fakeomonas. [ש' 13]"),
+    opt("פעילות האנזים examplothione reductase שלו", "את examplothione reductase מעכבת Stubamide, וזו מטרה של התרופות נגד Fakeomonas. [ש' 17]"),
+  ],
+  slides: [5, 13, 17, 31, 32, 35], para: 0, teaser: "", figure: "", resolved: "", stages: [],
+};
+const lecture38 = { ...lecture, course: "", slides: Array.from({ length: 38 }, (_, i) => ({ n: i + 1, title: `שקף בדוי ${i + 1}`, lines: ["טקסט בדוי"], tables: [], notes: "", figures: [] })) };
+
 /* ── Supabase, as section Y and its neighbours answer ── */
 type Logged = { path: string; body: any; auth: string | null; query: string };
 let log: Logged[] = [];
@@ -58,6 +75,11 @@ let slotOf: Record<string, { model: string; status: string; tries: number }> = {
 let planned: any = null;
 let labels = ["א", "ב"];
 let runStatus = "running";
+/** The rated kinds' lecture (38 slides, so the stand-in question's tags are real) and what the judge reads. */
+let lectureRow: any = null;
+let checkOf: Record<string, string> = {};
+let texts: Record<string, string> = {};
+const SECTION = { idx: 0, title: "חלק בדוי", slide_from: 5, slide_to: 7, status: "ready", gen: 1, error: null, markdown: "## חלק בדוי\n\nExamplomycin משופעלת בתא על ידי חיזור [ש' 5].\n\nהמינון 500 mg [ש' 6]." };
 const calls = (name: string) => log.filter((l) => l.path === `/rest/v1/rpc/${name}`);
 const send = (res: ServerResponse, status: number, body: unknown) => {
   res.writeHead(status, { "content-type": "application/json" });
@@ -102,13 +124,23 @@ const rest = createServer(async (req, res) => {
     case "/rest/v1/rpc/study_lab_bank":
       return send(res, 200, { lecture: LECTURE, items: bank });
     case "/rest/v1/study_lectures":
-      return send(res, 200, [lecture]);
+      return send(res, 200, [lectureRow ?? lecture]);
+    case "/rest/v1/study_sections":
+      return send(res, 200, [SECTION]);
+    case "/rest/v1/study_edits":
+    case "/rest/v1/rpc/study_course_style_items":
+      return send(res, 200, []);
+    case "/rest/v1/rpc/study_lab_judge_input":
+      return send(res, 200, { route: planned?.p_route, outputs: labels.map((l, i) => ({ label: l, output: `out-${i}`, text: texts[`out-${i}`] ?? "" })) });
+    case "/rest/v1/rpc/study_lab_check_save":
+    case "/rest/v1/rpc/study_lab_judged":
+      return send(res, 200, true);
     case "/rest/v1/study_exams":
       return send(res, 200, [{ id: EXAM, group_id: GROUP, title: "מועד א׳ בדוי", key_source: "separate", kind: "exam", lecture_id: null, course: "" }]);
     case "/rest/v1/study_exam_pages":
       return send(res, 200, [1, 2, 3, 4, 5, 6].map(page));
     case "/rest/v1/study_questions":
-      return send(res, 200, examItems);
+      return send(res, 200, url.search.includes("lecture_id") ? [] : examItems);
     case "/storage/v1/object/sign/study": {
       const paths = (body?.paths ?? []) as string[];
       return send(res, 200, paths.map((p) => ({ path: p, signedURL: `/object/sign/study/${p}?token=${jwt(Number(body?.expiresIn) || 60)}`, error: null })));
@@ -125,6 +157,8 @@ const rest = createServer(async (req, res) => {
         provider: "anthropic",
         status: s.status,
         tries: s.tries,
+        check_status: checkOf[body.p_label] ?? "none",
+        judge_model: planned?.p_judge ?? null,
         output: `out-${labels.indexOf(body.p_label)}`,
         run_status: runStatus,
         route: planned?.p_route ?? "solver",
@@ -137,9 +171,11 @@ const rest = createServer(async (req, res) => {
     case "/rest/v1/rpc/study_lab_claim":
       if (claimFail[body.p_label]) return send(res, 400, pgError(claimFail[body.p_label]));
       return send(res, 200, 500 + labels.indexOf(body.p_label));
+    case "/rest/v1/rpc/study_lab_output_save":
+      texts[body.p_output] = body.p_text ?? "";
+      return send(res, 200, true);
     case "/rest/v1/rpc/study_lab_skip":
     case "/rest/v1/rpc/study_settle":
-    case "/rest/v1/rpc/study_lab_output_save":
       return send(res, 200, true);
     case "/rest/v1/rpc/study_lab_status":
       return send(res, 200, runStatus);
@@ -159,9 +195,14 @@ const anthropicServer = createServer(async (req, res) => {
   const body = JSON.parse(await readAll(req));
   sent.push(body);
   res.writeHead(200, { "content-type": "text/event-stream" });
-  const exam = String(body.system?.[0]?.text ?? "").includes("exam");
+  const schema = JSON.stringify(body.output_config?.format?.schema ?? {});
+  const exam = !schema.includes("takeaway") && !schema.includes('"outputs"') && String(body.system?.[0]?.text ?? "").includes("exam");
   const solver = { answers: [{ id: "q1", choice: 1, ambiguous: false, seq: [] }, { id: "q2", choice: body.model === "claude-haiku-5-5" ? 2 : 0, ambiguous: false, seq: [] }, { id: "q3", choice: 0, ambiguous: false, seq: [] }] };
-  const text = JSON.stringify(exam ? EXAM12.units[0].reply : solver);
+  const text = schema.includes("takeaway")
+    ? JSON.stringify({ questions: [QUESTION] })
+    : schema.includes('"outputs"')
+      ? JSON.stringify({ outputs: labels.map((label, i) => ({ label, overall: 4 - i, accuracy: 4, hebrew: 5, structure: 4, errors: [] })) })
+      : JSON.stringify(exam ? EXAM12.units[0].reply : solver);
   const refuse = body.model === "claude-sonnet-5-5";
   res.write(ev({ type: "message_start", message: { id: "m", type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 3000, output_tokens: 1 } } }));
   res.write(ev({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
@@ -197,6 +238,9 @@ beforeEach(() => {
   planned = null;
   labels = ["א", "ב"];
   runStatus = "running";
+  lectureRow = null;
+  checkOf = {};
+  texts = {};
   slotOf = { א: { model: "claude-haiku-5-5", status: "waiting", tries: 0 }, ב: { model: "claude-opus-5-5", status: "waiting", tries: 0 } };
 });
 
@@ -294,12 +338,12 @@ test("refusals before the plan: not the owner, the switch, the models, the run's
   assert.equal(await status({ action: "run", group: GROUP, route: "solver", models: ["claude-opus-5-5", "claude-opus-5-5"] }), "400 bad slots");
   assert.equal(await status({ action: "run", group: GROUP, route: "solver", models: ["claude-opus-5-5", "gpt-nothing"] }), "400 bad slots");
   assert.equal(await status({ action: "run", group: GROUP, route: "solver", models: ["claude-opus-5-5", "claude-mythos-5-2"] }), "400 bad model");
-  assert.equal(await status({ action: "run", group: GROUP, route: "part", models: ["claude-opus-5-5", "claude-haiku-5-5"] }), "400 bad route");
+  assert.equal(await status({ action: "run", group: GROUP, route: "outline", models: ["claude-opus-5-5", "claude-haiku-5-5"] }), "400 bad route");
   runCap = 0.0001;
   assert.equal(await status({ action: "run", group: GROUP, route: "solver", models: ["claude-opus-5-5", "claude-haiku-5-5"] }), "402 run_cap");
   assert.equal(calls("study_lab_plan").length, 0, "nothing planned");
   assert.equal(sent.length, 0, "no model called");
-  assert.equal(await status({ action: "check", run: RUN }), "501 not built");
+  assert.equal(await status({ action: "check", run: RUN }), "409 not done", "the paid check waits for the run to end");
   assert.equal(await status({ action: "nonsense" }), "400 bad action");
 });
 
@@ -411,6 +455,88 @@ test("price: the material and each model's worst case, read as run reads it; not
   const refused = await call({ action: "price", group: GROUP, route: "solver" });
   assert.equal(`${refused.status} ${(await refused.json()).error}`, "403 not the creator");
   owner = true;
-  const bad = await call({ action: "price", group: GROUP, route: "part" });
+  const bad = await call({ action: "price", group: GROUP, route: "outline" });
   assert.equal(`${bad.status} ${(await bad.json()).error}`, "400 bad route");
+});
+
+test("run, a kind members rate: practice with the AI score; after the answers the solver's check of each and the judge, each claimed on the worker's path, the response still counts only", async () => {
+  lectureRow = lecture38;
+  const res = await call({ action: "run", group: GROUP, route: "practice", models: ["claude-opus-5-5", "claude-haiku-5-5"], judge: true });
+  assert.equal(res.status, 200);
+  const text = await res.text();
+  await drain();
+  assert.doesNotMatch(text, /claude|opus|haiku|sonnet|[אבגד]"|status|cost|latency|usd|label/i, text);
+  assert.deepEqual(lines(text).at(-1), { t: "done" });
+  assert.equal(planned.p_route, "practice");
+  assert.equal(planned.p_differs, "count");
+  assert.equal(planned.p_judge, "claude-opus-5-5", "the AI score's model: the judge route's, Opus by default");
+  assert.deepEqual(planned.p_source, { lecture: LECTURE, part: 0 });
+  assert.equal(planned.p_title, "שאלות תרגול · משתנים (בדוי) · חלק 1");
+  assert.equal(planned.p_request.material.count, 3);
+  // The answers, then a paid check of each and the AI score, every one a worker's claim (no user, OD5).
+  assert.deepEqual(
+    calls("study_lab_claim").map((c) => `${c.body.p_label}:${c.body.p_part}`).sort(),
+    ["j:judge", "א:answer", "א:solve", "ב:answer", "ב:solve"],
+  );
+  for (const c of calls("study_lab_claim")) assert.notEqual(c.auth, `Bearer ${TOKEN}`);
+  const s = saves();
+  for (const k of ["out-0", "out-1"]) {
+    assert.equal(s.get(k).p_status, "done");
+    assert.equal(s.get(k).p_check_status, "pending", "it waits for the solver");
+    assert.deepEqual({ items: s.get(k).p_checks.items, ok: s.get(k).p_checks.ok }, { items: 1, ok: 1 });
+  }
+  const checks = calls("study_lab_check_save");
+  assert.equal(checks.length, 2);
+  for (const c of checks) {
+    assert.equal(c.body.p_status, "done");
+    assert.equal(c.body.p_checks.solved, 1);
+  }
+  const judged = calls("study_lab_judged");
+  assert.equal(judged.length, 2);
+  for (const j of judged) {
+    assert.equal(j.body.p_judge, "claude-opus-5-5");
+    assert.ok(j.body.p_scores.overall >= 1 && Number.isInteger(j.body.p_scores.order));
+  }
+  // The judge read the slides' text and the answers under their labels: no model's name.
+  const judge = sent.find((b) => JSON.stringify(b.output_config?.format?.schema ?? {}).includes('"outputs"'));
+  assert.ok(judge, "the judge was called");
+  assert.doesNotMatch(JSON.stringify(judge.messages), /claude|opus|haiku/i);
+  // The run's estimate held the answers, the checks and the AI score.
+  assert.ok(planned.p_estimate > 0.2, String(planned.p_estimate));
+});
+
+test("check: a done run's pending checks only, claimed again (a step that ran is not paid twice); judge needs a run that asked for it", async () => {
+  lectureRow = lecture38;
+  const first = await call({ action: "run", group: GROUP, route: "practice", models: ["claude-opus-5-5", "claude-haiku-5-5"] });
+  await first.text();
+  await drain();
+  assert.equal(planned.p_judge, null, "the AI score is off by default (OD12)");
+  log = [];
+  runStatus = "done";
+  checkOf = { א: "pending", ב: "done" };
+  const res = await call({ action: "check", run: RUN });
+  assert.equal(res.status, 200);
+  const got = lines(await res.text());
+  await drain();
+  assert.deepEqual(got[0], { t: "check", pending: 1 });
+  assert.deepEqual(calls("study_lab_claim").map((c) => `${c.body.p_label}:${c.body.p_part}`), ["א:solve"]);
+  assert.equal(calls("study_lab_check_save").length, 1);
+  const judge = await call({ action: "judge", run: RUN });
+  assert.equal(`${judge.status} ${(await judge.json()).error}`, "409 not waiting");
+});
+
+test("price, a kind members rate: the paid steps' worst cases beside the models'; לשאול needs its typed question to run", async () => {
+  lectureRow = lecture38;
+  const res = await call({ action: "price", group: GROUP, route: "practice", models: ["claude-opus-5-5", "claude-haiku-5-5"] });
+  assert.equal(res.status, 200);
+  const p = await res.json();
+  assert.ok(p.steps.check > 0, "the solver's check of one answer");
+  assert.equal(p.steps.judge.length, 5);
+  assert.ok(p.steps.judge[2] > 0 && p.steps.judge[4] > p.steps.judge[2]);
+  const ask = await call({ action: "price", group: GROUP, route: "ask" });
+  assert.equal(ask.status, 200, "a price without the question takes the longest one");
+  assert.equal((await ask.json()).steps.check, 0);
+  const run = await call({ action: "run", group: GROUP, route: "ask", models: ["claude-opus-5-5", "claude-haiku-5-5"] });
+  assert.equal(`${run.status} ${(await run.json()).error}`, "400 no question");
+  assert.equal(calls("study_lab_plan").length, 0);
 });
