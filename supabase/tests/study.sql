@@ -392,6 +392,8 @@ select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, 
                          'study_claim_exam', 'study_exam_save_items', 'study_exam_save_keys', 'study_finish_exam_job',
                          -- section O 2 (uploaded sheets): the sheet reader's saves and its answers file's pages, each refusing without the key
                          'study_sheet_queue_key', 'study_sheet_save_items', 'study_sheet_save_keys',
+                         -- section O 3 (similar questions): the worker's claim, charge, save and finish of a job, each refusing without the key
+                         'study_claim_similar', 'study_similar_charge', 'study_similar_save', 'study_finish_similar_job',
                          -- section I: the personal code's redeem, called by /api/study/code, refusing without the key
                          'study_code_redeem',
                          -- section R: the push worker's claim and report (refusing without the key), and
@@ -11640,5 +11642,324 @@ delete from public.study_groups where id in (:'pg', :'pzg');
 delete from auth.users where id in (:'pa', :'pb', :'pz');
 select pg_temp.ook('O2-end', not exists (select 1 from public.study_exams where group_id = :'pg')
   and not exists (select 1 from study_private.open_marks m where m.user_id in (:'pa', :'pb')),
+  'the fixtures are gone');
+-- ── O 3: similar questions (docs/study/sheets.md, "SQL section O 3") ──
+-- Fixtures of their own (every text invented), removed at the end.
+reset role;
+set request.jwt.claim.sub = '';
+\set sa '0e300000-0000-4000-8000-000000000001'
+\set sb '0e300000-0000-4000-8000-000000000002'
+\set sz '0e300000-0000-4000-8000-000000000009'
+\set sg '0e300000-0000-4000-8000-0000000000a1'
+\set szg '0e300000-0000-4000-8000-0000000000a2'
+\set sl1 '0e300000-0000-4000-8000-0000000000b1'
+\set ssh '0e300000-0000-4000-8000-0000000000c1'
+\set sq1 '0e300000-0000-4000-8000-0000000000d1'
+\set sq2 '0e300000-0000-4000-8000-0000000000d2'
+\set sq3 '0e300000-0000-4000-8000-0000000000d3'
+\set sq4 '0e300000-0000-4000-8000-0000000000d4'
+\set sq5 '0e300000-0000-4000-8000-0000000000d5'
+\set sq6 '0e300000-0000-4000-8000-0000000000d6'
+\set sq7 '0e300000-0000-4000-8000-0000000000d7'
+\set sser '0e300000-0000-4000-8000-0000000000e1'
+insert into auth.users (id, raw_user_meta_data) values
+ (:'sa', '{"app":"study","full_name":"אביב"}'), (:'sb', '{"app":"study","full_name":"בן"}'), (:'sz', '{"app":"study","full_name":"זרה"}');
+insert into public.study_groups (id, name, join_code, created_by) values (:'sg', 'קבוצת הדומות', 'OTWINS', :'sa'), (:'szg', 'קבוצה זרה ג', 'OTWINZ', :'sz');
+insert into public.study_members (group_id, user_id, name) values (:'sg', :'sa', 'אביב'), (:'sg', :'sb', 'בן'), (:'szg', :'sz', 'זרה');
+insert into public.study_lectures (id, group_id, course, title, source_kind, slides, status, created_by) values
+ (:'sl1', :'sg', 'פרמקו דומות', 'פרמקוקינטיקה ג (בדוי)', 'pptx', '[{"n":1,"title":"פינוי (בדוי)","lines":["CL = k·Vd"],"tables":[],"notes":"","figures":[]}]', 'ready', :'sa');
+select count(*) = 0 as s_nokey from vault.decrypted_secrets where name = 'study_worker_key' \gset
+\if :s_nokey
+insert into vault.decrypted_secrets (name, decrypted_secret) values ('study_worker_key', 'k-0123456789abcdef0123456789abcdef');
+\endif
+select decrypted_secret as skey from vault.decrypted_secrets where name = 'study_worker_key' limit 1 \gset
+select coalesce((select enabled from study_private.features where name = 'exams'), false) as s_exams_was \gset
+update study_private.features set enabled = true where name in ('exams', 'sheets');
+-- A ready sheet of seven items: a one-answer item with a figure, a true/false item, a numeric item,
+-- an open item, a one-answer item with only a model's unsure key, and a question in two parts.
+insert into public.study_exams (id, group_id, course, title, status, kind, key_source, lecture_id, hide_from_profile, created_by)
+values (:'ssh', :'sg', 'פרמקו דומות', 'תרגיל 4 (בדוי)', 'ready', 'sheet', 'separate', :'sl1', true, :'sa');
+insert into public.study_exam_pages (exam_id, n, path, w, h) select :'ssh', n, :'sg' || '/exams/' || :'ssh' || '/p' || n || '.jpg', 1061, 1500 from generate_series(1, 3) n;
+insert into public.study_questions (id, group_id, exam_id, exam_no, no_label, no_key, source, kind, question, options, form, page, figures, figure,
+                                    ref_lecture, topic, aspect, series, step, has_key, created_by) values
+ (:'sq1', :'sg', :'ssh', 100, '1', '1', 'exam', 'mcq', 'מה נפח ההפצה של תרופה X (בדוי)?', array['5 ל', '10 ל', '20 ל', '40 ל'], 'one', 1,
+  array['pg:1:100,100,500,300'], 'pg:1:100,100,500,300', :'sl1', 'נפח הפצה', 'pk', null, null, true, :'sa'),
+ (:'sq2', :'sg', :'ssh', 101, '2', '2', 'exam', 'mcq', 'נכון או לא נכון (בדוי)', array['משפט א', 'משפט ב', 'משפט ג'], 'tf', 1, '{}', '', :'sl1', '', 'pk', null, null, true, :'sa'),
+ (:'sq3', :'sg', :'ssh', 200, '3', '3', 'exam', 'mcq', 'חשבו את הפינוי (בדוי)', '{}', 'numeric', 2, '{}', '', :'sl1', '', 'pk', null, null, true, :'sa'),
+ (:'sq4', :'sg', :'ssh', 201, '4', '4', 'exam', 'mcq', 'הסבירו מדוע (בדוי)', '{}', 'open', 2, '{}', '', :'sl1', '', 'pk', null, null, true, :'sa'),
+ (:'sq5', :'sg', :'ssh', 202, '5', '5', 'exam', 'mcq', 'שאלה שהתשובה לה לא בטוחה (בדוי)', array['א', 'ב'], 'one', 2, '{}', '', :'sl1', '', 'pk', null, null, true, :'sa'),
+ (:'sq6', :'sg', :'ssh', 300, '6א', '6א', 'exam', 'case', 'מה התרופה המתאימה (בדוי)?', array['A', 'B', 'C'], 'one', 3, '{}', '', :'sl1', '', 'pk', :'sser', 1, true, :'sa'),
+ (:'sq7', :'sg', :'ssh', 301, '6ב', '6ב', 'exam', 'case', 'מה המינון בממ״ג (בדוי)?', '{}', 'numeric', 3, '{}', '', :'sl1', '', 'pk', :'sser', 2, true, :'sa');
+insert into public.study_question_keys (question_id, answer, seq, num, num_unit, num_tol, key_origin, key_conf, solution) values
+ (:'sq1', 2, null, null, null, null, 'sheet', null, 'Vd = dose / C (בדוי)'),
+ (:'sq2', null, array[1, 0, 1]::smallint[], null, null, null, 'sheet', null, null),
+ (:'sq3', null, null, 6.93, 'ל/ש', 1, 'sheet', null, null),
+ (:'sq4', null, null, null, null, null, 'solved', 2, null),
+ (:'sq5', 0, null, null, null, null, 'solved', 2, null),
+ (:'sq6', 1, null, null, null, null, 'sheet', null, null),
+ (:'sq7', null, null, 250, 'mg', 1, 'sheet', null, null);
+update public.study_question_keys set model_answer = 'כי… (בדוי)' where question_id = :'sq4';
+
+-- ── The registry, the columns, the checks, the switch ──
+select pg_temp.ook('O3-reg', (public.study_schema() ->> 'O')::int >= 3
+  and exists (select 1 from study_private.features where name = 'similar' and not enabled)
+  and (select pg_get_constraintdef(oid) like '%twin%' from pg_constraint where conname = 'study_questions_source_check' and conrelid = 'public.study_questions'::regclass)
+  and (select count(*) from pg_constraint where conname in ('study_questions_lecture_x', 'study_questions_ref_x', 'study_questions_twin_x')) = 3
+  and not exists (select 1 from pg_constraint x where x.conrelid = 'public.study_questions'::regclass
+                   and x.conname not in ('study_questions_lecture_x', 'study_questions_ref_x')
+                   and (pg_get_constraintdef(x.oid) like '%(source = ''exam''::text) OR (lecture_id IS NOT NULL)%'
+                        or pg_get_constraintdef(x.oid) like '%(source = ''exam''::text) OR (ref_lecture IS NULL)%'))
+  and (select pg_get_constraintdef(oid) like '%twin%' from pg_constraint where conname = 'study_question_keys_origin_x')
+  and (select pg_get_constraintdef(oid) like '%twin%' from pg_constraint where conname = 'study_question_keys_sheet_x')
+  and not study_private.kind_on('similar')
+  and exists (select 1 from pg_policies where tablename = 'study_similar_runs' and cmd = 'SELECT'),
+  'section O at 3; the source, lecture, twin and key checks widened by name, the inline ones gone; the switch similar starts off and kind_on obeys it');
+reset role;
+-- As the owner (nobody else writes study_questions directly): the statement's 'ok', or its error's code.
+create or replace function pg_temp.o3try(p_sql text) returns text language plpgsql as $$
+begin
+  execute p_sql;
+  return 'ok';
+exception when others then
+  return sqlstate;
+end $$;
+select pg_temp.ook('O3-shape', (select string_agg(x, ' · ' order by o) from (select o, pg_temp.o3try(q) x from unnest(array[
+      format($q$insert into public.study_questions (group_id, source, from_exam, twin_of, twin_check, kind, question, options, form) values (%L, 'twin', %L, %L, 'blind', 'mcq', 'שאלה דומה (בדוי)', array['א','ב'], 'one')$q$, :'sg', :'ssh', :'sq1'),
+      format($q$insert into public.study_questions (group_id, source, from_exam, twin_of, twin_check, exam_id, kind, question, options, form) values (%L, 'twin', %L, %L, 'blind', %L, 'mcq', 'שאלה דומה (בדוי)', array['א','ב'], 'one')$q$, :'sg', :'ssh', :'sq1', :'ssh'),
+      format($q$insert into public.study_questions (group_id, source, from_exam, twin_of, twin_check, kind, question, options, form) values (%L, 'twin', %L, %L, 'guess', 'mcq', 'שאלה דומה (בדוי)', array['א','ב'], 'one')$q$, :'sg', :'ssh', :'sq1'),
+      format($q$insert into public.study_questions (group_id, source, twin_of, twin_check, kind, question, options, form) values (%L, 'twin', %L, 'blind', 'mcq', 'שאלה דומה (בדוי)', array['א','ב'], 'one')$q$, :'sg', :'sq1'),
+      format($q$insert into public.study_questions (group_id, source, from_exam, lecture_id, kind, question, options) values (%L, 'ai', %L, %L, 'mcq', 'שאלה רגילה (בדוי)', array['א','ב'])$q$, :'sg', :'ssh', :'sl1')
+    ]) with ordinality t(q, o)) y) = 'ok · 23514 · 23514 · 23514 · 23514',
+  'as the owner: a twin of the sheet fits (no lecture, no exam, its check); with an exam id, an unknown check, without its sheet, or a sheet on an ai question: refused');
+delete from public.study_questions where source = 'twin' and from_exam = :'ssh';
+
+-- ── The plan, with the switch off and on ──
+select pg_temp.ook('O3a', pg_temp.oas(:'sa', format('select public.study_similar_plan(%L, %L, %L)', :'ssh', :'sq1', 'item')) = 'error: off',
+  'with the switch similar off: no plan');
+update study_private.features set enabled = true where name = 'similar';
+select pg_temp.oas(:'sb', format('select public.study_similar_plan(%L, %L, %L)::text', :'ssh', :'sq1', 'item')) as s_p1 \gset
+select pg_temp.oas(:'sb', format('select public.study_similar_plan(%L, %L, %L)::text', :'ssh', :'sq7', 'item')) as s_p7 \gset
+select pg_temp.oas(:'sb', format('select public.study_similar_plan(%L, null, %L)::text', :'ssh', 'sheet')) as s_ps \gset
+select pg_temp.ook('O3b', (:'s_p1')::jsonb ->> 'root' = :'sq1' and (:'s_p1')::jsonb ->> 'room' = '6' and (:'s_p1')::jsonb ->> 'count' = '0'
+  and (:'s_p1')::jsonb -> 'pages' = '[1]'::jsonb and (:'s_p1')::jsonb -> 'joined' = 'null'::jsonb and (:'s_p1')::jsonb ->> 'label' = '1'
+  and (:'s_p7')::jsonb ->> 'root' = :'sq6' and (:'s_p7')::jsonb ->> 'parts' = '2'
+  and (:'s_ps')::jsonb -> 'items' = jsonb_build_array(:'sq1', :'sq2', :'sq3', :'sq6') and (:'s_ps')::jsonb ->> 'today' = 'false'
+  and (:'s_ps')::jsonb ->> 'parts' = '5' and (:'s_ps')::jsonb -> 'forms' = '["one", "tf", "numeric", "one"]'::jsonb
+  and (:'s_ps')::jsonb -> 'roots' -> 3 = jsonb_build_object('id', :'sq6', 'parts', 2, 'numeric', 1, 'pages', '[]'::jsonb)
+  and (:'s_ps')::jsonb -> 'roots' -> 0 -> 'pages' = '[1]'::jsonb and (:'s_p7')::jsonb ->> 'numeric' = '1'
+  and study_private.similar_job_roots() = 4
+  and pg_temp.oas(:'sb', format('select public.study_similar_plan(%L, %L, %L)', :'ssh', :'sq4', 'item')) = 'error: not eligible'
+  and pg_temp.oas(:'sb', format('select public.study_similar_plan(%L, %L, %L)', :'ssh', :'sq5', 'item')) = 'error: not eligible'
+  and pg_temp.oas(:'sz', format('select public.study_similar_plan(%L, %L, %L)', :'ssh', :'sq1', 'item')) = 'error: exam not found',
+  'an item: its root, 6 to make, its figure''s page; a part''s root is the question''s first part; the sheet: four roots in printed order (5 parts); an open item and one keyed only by an unsure guess are not offered; a stranger: not found');
+
+-- ── The start: one lock a sheet, the reservation, the line, the set ──
+select pg_temp.oas(:'sa', format('select public.study_reserve(%L, null, %L, %L, 0.30, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) as s_r1 \gset
+select pg_temp.oas(:'sb', format('select public.study_reserve(%L, null, %L, %L, 0.30, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) as s_r2 \gset
+select pg_temp.ook('O3c0', pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, null, null)', :'ssh', :'sq1', 'item', :'s_r1')) = 'error: forbidden'
+  and pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, null, null, %L)', :'ssh', :'sq1', 'item', :'s_r2', :'skey')) = 'error: bad reserve'
+  and pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 0.2, null, null, %L)', :'ssh', :'sq1', 'item', :'s_r1', :'skey')) = 'error: similar_cap'
+  and pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, %L, null, %L)', :'ssh', :'sq1', 'item', :'s_r1', '{"x/y.jpg":"https://a"}', :'skey')) = 'error: bad urls'
+  and pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, null, null, %L)', :'ssh', :'sq4', 'item', :'s_r1', :'skey')) = 'error: not eligible',
+  'refused: without the server key, another member''s reservation, a run over the similar line, links that are not the sheet''s pages, an open item');
+select pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, %L, null, %L)::text', :'ssh', :'sq1', 'item', :'s_r1',
+  jsonb_build_object(:'sg' || '/exams/' || :'ssh' || '/p1.jpg', 'https://proj.supabase.co/storage/v1/object/sign/study/' || :'sg' || '/exams/' || :'ssh' || '/p1.jpg?token=a.b.c'), :'skey')) as s_b1 \gset
+select (:'s_b1'::jsonb ->> 'run_id') as srun1, (:'s_b1'::jsonb ->> 'set_id') as sset \gset
+select pg_temp.ook('O3c', (:'s_b1')::jsonb ->> 'jobs' = '1' and (:'s_b1')::jsonb ->> 'per' = '2' and (:'s_b1')::jsonb ->> 'items' = '1'
+  and (select scope || ' ' || status || ' ' || per || ' ' || reserved_usd || ' ' || (reserve_id = :'s_r1')::text || ' ' || (created_by = :'sa')::text
+         from public.study_similar_runs where id = :'srun1') = 'item running 2 0.3000 true true'
+  and (select kind || ' · ' || title || ' · ' || state || ' · ' || (exam_id = :'ssh')::text || ' · ' || (similar_run = :'srun1')::text || ' · ' || want
+         from public.study_qsets where id = :'sset') = 'sheet · שאלות דומות · תרגיל 4 (בדוי) · making · true · true · 2'
+  and (select urls_until > now() + interval '47 hours' from study_private.similar_queue where run_id = :'srun1'),
+  'an item''s run: one job, 2 twins, the member''s reservation held on it; the sheet''s practice set (kind sheet) is made, "שאלות דומות · {sheet}"; the fresh links kept privately for 48 hours');
+select pg_temp.oas(:'sb', format('select public.study_reserve(%L, null, %L, %L, 0.30, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) as s_r3 \gset
+select pg_temp.ook('O3d', pg_temp.oas(:'sb', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, null, null, %L)::text', :'ssh', :'sq1', 'item', :'s_r3', :'skey'))::jsonb
+      = jsonb_build_object('joined', :'srun1')
+  and (select count(*) from public.study_similar_runs where exam_id = :'ssh') = 1,
+  'a second tap on the same item joins the run making it (nothing new; the op lets the reservation go)');
+reset role;
+update public.study_usage set cost_usd = 0, settled_at = now() where id in (:s_r2, :s_r3);
+set role authenticated;
+select pg_temp.oas(:'sz', 'select count(*)::text from public.study_similar_runs') as s_rls_z \gset
+select pg_temp.oas(:'sb', 'select count(*)::text from public.study_similar_runs') as s_rls_b \gset
+reset role;
+select pg_temp.ook('O3d2', (select count(*) from public.study_similar_runs r where r.exam_id = :'ssh') = 1
+  and study_private.similar_live(:'srun1')
+  and :'s_rls_z' = '0' and :'s_rls_b' = '1',
+  'members of the group read its runs; a stranger reads none');
+reset role;
+
+-- ── The worker: claim, charge, save, finish ──
+select public.study_claim_similar(:'srun1', :'skey') as sc1 \gset
+select ((:'sc1'::jsonb ->> 'job')::uuid) as sj1, ((:'sc1'::jsonb ->> 'lease')::uuid) as sl_1 \gset
+select pg_temp.ook('O3e', (:'sc1')::jsonb -> 'run' ->> 'per' = '2' and (:'sc1')::jsonb -> 'run' ->> 'left_usd' = '0.3000'
+  and (:'sc1')::jsonb -> 'lecture' ->> 'id' = :'sl1' and jsonb_array_length((:'sc1')::jsonb -> 'lecture' -> 'slides') = 1
+  and jsonb_array_length((:'sc1')::jsonb -> 'items') = 1
+  and (:'sc1')::jsonb -> 'items' -> 0 -> 'parts' -> 0 ->> 'answer' = '2'
+  and (:'sc1')::jsonb -> 'items' -> 0 -> 'parts' -> 0 ->> 'solution' = 'Vd = dose / C (בדוי)'
+  and (:'sc1')::jsonb -> 'items' -> 0 -> 'pages' -> 0 ->> 'url' like 'https://proj.supabase.co/%p1.jpg?token=a.b.c'
+  and study_private.group_live(:'sg') = 1
+  and public.study_claim_similar(:'srun1', :'skey') is null
+  and pg_temp.oas(:'sz', format('select public.study_claim_similar(%L, %L)', :'srun1', :'skey')) = 'error: forbidden',
+  'the claim: the run''s money, the sheet''s lecture and slides, the root with its key, solution and figure page''s fresh link; it counts in the group''s three; nothing more to take; a stranger: refused');
+select public.study_similar_charge(:'sj1', :'sl_1', 'claude-opus-5-5', '{"output_tokens": 900}', 0.05, 0.02, :'skey') as s_ch1 \gset
+select public.study_similar_charge(:'sj1', :'sl_1', 'claude-opus-5-5', '{"output_tokens": 300}', 0.02, 0.5, :'skey') as s_ch2 \gset
+select pg_temp.ook('O3f', :'s_ch1' = 't' and :'s_ch2' = 'f'
+  and (select string_agg(ref || ':' || cost_usd || ':' || (user_id = :'sa')::text || ':' || (settled_at is not null)::text, ' ' order by id)
+         from public.study_usage where group_id = :'sg' and kind = 'similar' and ref = 'unit') = 'unit:0.05000:true:true unit:0.02000:true:true'
+  and (select cost_usd from public.study_usage where id = :s_r1) = 0.23
+  and (select charged_usd from public.study_similar_runs where id = :'srun1') = 0.07
+  and (select sum(cost_usd) from public.study_usage where group_id = :'sg' and kind = 'similar' and settled_at is null or id = :s_r1) = 0.23
+  and pg_temp.oas(:'sa', format('select public.study_similar_charge(%L, %L, %L, null, 0.01, 0, %L)', :'sj1', gen_random_uuid(), 'm', :'skey')) = 'error: lease lost',
+  'each call is a settled similar row in the requester''s name, and the reservation drops by as much; the next call''s worst case past what is left: false (the job stops); a wrong lease: refused');
+\set stw1 '{"root":"0e300000-0000-4000-8000-0000000000d1","check":"blind","reuse_figure":true,"vignette":"","parts":[{"form":"one","question":"מה נפח ההפצה של תרופה Y (בדוי)?","options":["4 ל","8 ל","16 ל","32 ל"],"answer":1,"explanations":["א","ב","ג","ד"],"takeaway":"Vd = dose/C","solution":"8 ל (בדוי)"}]}'
+\set stw2 '{"root":"0e300000-0000-4000-8000-0000000000d1","check":"blind","parts":[{"form":"one","question":"שאלה עם שלוש תשובות (בדוי)","options":["א","ב","ג"],"answer":1}]}'
+\set stw3 '{"root":"0e300000-0000-4000-8000-0000000000d3","check":"recalc","parts":[{"form":"numeric","question":"שורש שאינו בעבודה (בדוי)","options":[],"num":3}]}'
+select public.study_similar_save(:'sj1', :'sl_1', jsonb_build_array(:'stw1'::jsonb, :'stw2'::jsonb, :'stw3'::jsonb), 1, 0, 'claude-opus-5-5', :'skey')::text as s_sv1 \gset
+select id as stwin1 from public.study_questions where source = 'twin' and twin_of = :'sq1' \gset
+select pg_temp.ook('O3g', (:'s_sv1')::jsonb = '{"saved": 1, "dropped": 3}'::jsonb
+  and (select source || ' ' || coalesce(exam_id::text, '-') || ' ' || coalesce(lecture_id::text, '-') || ' ' || (from_exam = :'ssh')::text || ' '
+              || (ref_lecture = :'sl1')::text || ' ' || twin_check || ' ' || form || ' ' || cardinality(options) || ' ' || figure || ' ' || page || ' '
+              || topic || ' ' || (created_by = :'sa')::text || ' ' || model
+         from public.study_questions where id = :'stwin1')
+      = 'twin - - true true blind one 4 pg:1:100,100,500,300 1 נפח הפצה true claude-opus-5-5'
+  and (select answer || ' ' || key_origin || ' ' || key_conf || ' ' || cardinality(explanations) || ' ' || takeaway || ' ' || solution_origin
+         from public.study_question_keys where question_id = :'stwin1') = '1 twin 3 4 Vd = dose/C twin'
+  and (select string_agg(question_id::text, ',' order by pos) from public.study_qset_items where set_id = :'sset') = :'stwin1'
+  and (select made || ' ' || dropped from public.study_similar_runs where id = :'srun1') = '1 3',
+  'saved: a twin keeping its root''s form and four options, its figure reused, the sheet''s lecture to read, its key a twin''s at 3 with the solution; added to the sheet''s set; a twin with three options and one of a root not in the job: dropped');
+-- Twins stay out of the upload's own reads and of the group's pickers.
+select pg_temp.oas(:'sb', format('select public.study_sheet_review(%L)::text', :'ssh')) as s_rv \gset
+select pg_temp.oas(:'sb', format('select public.study_similar_of(%L)::text', :'stwin1')) as s_of \gset
+select pg_temp.ook('O3h', jsonb_array_length((:'s_rv')::jsonb -> 'items') = 7
+  and not study_private.q_plain('twin', 'one') and not study_private.boss_askable(:'stwin1')
+  and (:'s_of')::jsonb ->> 'root' = :'sq1' and jsonb_array_length((:'s_of')::jsonb -> 'twins') = 1 and (:'s_of')::jsonb ->> 'room' = '5'
+  and (:'s_of')::jsonb -> 'twins' -> 0 ->> 'check' = 'blind' and (:'s_of')::jsonb ->> 'running' = :'srun1'
+  and pg_temp.oas(:'sz', format('select public.study_similar_of(%L)', :'stwin1')) = 'error: question not found',
+  'the sheet''s review still has its 7 items; the boss and the quiz never draw a twin; the item''s twins from the twin itself: one, 5 to go, its run; a stranger: not found');
+select pg_temp.oas(:'sb', format('select (r.correct)::text from public.study_answer_question(%L, 1, %L) r', :'stwin1', 'exam')) as s_ans \gset
+select pg_temp.ook('O3h2', :'s_ans' = 'true' and (select count(*) from public.study_answers where question_id = :'stwin1' and user_id = :'sb' and correct) = 1,
+  'a twin is answered like any practice question and counts (OD7)');
+select public.study_finish_similar_job(:'sj1', :'sl_1', 'done', null, :'skey') as s_fin1 \gset
+select pg_temp.ook('O3i', :'s_fin1' = 't'
+  and (select status || ' ' || made || ' ' || charged_usd from public.study_similar_runs where id = :'srun1') = 'done 1 0.0700'
+  and (select cost_usd || ' ' || (settled_at is not null)::text || ' ' || (usage ->> 'similar_run') from public.study_usage where id = :s_r1) = '0.00000 true ' || :'srun1'
+  and (select sum(cost_usd) from public.study_usage where group_id = :'sg' and kind = 'similar') = 0.07
+  and not exists (select 1 from study_private.similar_queue where run_id = :'srun1')
+  and (select state from public.study_qsets where id = :'sset') = 'ready'
+  and not exists (select 1 from public.study_notices where kind = 'similar_ready' and user_id = :'sa')
+  and study_private.group_live(:'sg') = 0,
+  'the run is done: its reservation ends at $0 (only the calls cost: $0.07), its links gone, the set ready; an item''s run sends no notice; the group''s three are free');
+
+-- ── The whole sheet: once a day, one twin a root, the same set ──
+select pg_temp.oas(:'sb', format('select public.study_reserve(%L, null, %L, %L, 1.00, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) as s_r4 \gset
+select pg_temp.oas(:'sb', format('select public.study_similar_begin(%L, null, %L, 2, %s, 1.00, 5, null, null, %L)::text', :'ssh', 'sheet', :'s_r4', :'skey')) as s_b2 \gset
+select (:'s_b2'::jsonb ->> 'run_id') as srun2 \gset
+select pg_temp.oas(:'sa', format('select public.study_reserve(%L, null, %L, %L, 1.00, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) as s_r5 \gset
+select pg_temp.ook('O3j', (:'s_b2')::jsonb ->> 'per' = '1' and (:'s_b2')::jsonb ->> 'items' = '3' and (:'s_b2')::jsonb ->> 'set_id' = :'sset'
+  and (select array_to_string(items, ',') from public.study_similar_runs where id = :'srun2') = :'sq2' || ',' || :'sq3' || ',' || :'sq6'
+  and pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, null, %L, 1, %s, 1.00, 5, null, null, %L)::text', :'ssh', 'sheet', :'s_r5', :'skey'))::jsonb
+      = jsonb_build_object('joined', :'srun2'),
+  'the whole sheet: one twin for each root that has none (printed order; item 1 has one), into the sheet''s one set; a second tap joins it');
+select public.study_claim_similar(:'srun2', :'skey') as sc2 \gset
+select ((:'sc2'::jsonb ->> 'job')::uuid) as sj2, ((:'sc2'::jsonb ->> 'lease')::uuid) as sl_2 \gset
+\set stw4 '{"root":"0e300000-0000-4000-8000-0000000000d3","check":"recalc","parts":[{"form":"numeric","question":"חשבו את הפינוי של תרופה Z (בדוי)","options":[],"num":4.62,"num_unit":"ל/ש","num_tol":1,"solution":"CL = k·Vd (בדוי)"}]}'
+\set stw5 '{"root":"0e300000-0000-4000-8000-0000000000d6","check":"blind","vignette":"מטופל בדוי חדש","parts":[{"form":"one","question":"מה התרופה המתאימה לו (בדוי)?","options":["D","E","F"],"answer":2},{"form":"numeric","question":"מה המינון בממ״ג (בדוי)?","options":[],"num":125,"num_unit":"mg"}]}'
+\set stw6 '{"root":"0e300000-0000-4000-8000-0000000000d6","check":"blind","parts":[{"form":"one","question":"חלק אחד בלבד (בדוי)","options":["D","E","F"],"answer":2}]}'
+select public.study_similar_save(:'sj2', :'sl_2', jsonb_build_array(:'stw4'::jsonb, :'stw5'::jsonb, :'stw6'::jsonb), 1, 0, 'claude-opus-5-5', :'skey')::text as s_sv2 \gset
+select public.study_finish_similar_job(:'sj2', :'sl_2', 'done', null, :'skey') as s_fin2 \gset
+select pg_temp.ook('O3k', (:'s_sv2')::jsonb = '{"saved": 2, "dropped": 2}'::jsonb
+  and (select num || ' ' || num_unit || ' ' || num_tol || ' ' || key_origin from public.study_question_keys k join public.study_questions q on q.id = k.question_id
+        where q.twin_of = :'sq3') = '4.62 ל/ש 1 twin'
+  and (select string_agg(q.form || ':' || q.step || ':' || (q.twin_of = case q.step when 1 then :'sq6'::uuid else :'sq7'::uuid end)::text || ':' || q.kind, ' ' order by q.step)
+         from public.study_questions q where q.from_exam = :'ssh' and q.series is not null) = 'one:1:true:case numeric:2:true:case'
+  and (select count(distinct series) from public.study_questions where from_exam = :'ssh' and series is not null) = 1
+  and study_private.similar_count(:'sq6') = 1 and study_private.similar_count(:'sq7') = 1
+  and (select count(*) from public.study_qset_items where set_id = :'sset') = 4
+  and (select status || ' ' || made || ' ' || dropped from public.study_similar_runs where id = :'srun2') = 'done 2 2'
+  and (select count(*) from public.study_notices where kind = 'similar_ready' and user_id = :'sb'
+         and route = jsonb_build_object('v', 'sets', 'k', :'sset') and args ->> 'k' = '2') = 1,
+  'a numeric twin with its unit and tolerance; a twin of a two-part question in parts of its own series, each part the twin of its root''s part; one with fewer parts dropped; the set holds the four; the requester is told (similar_ready, to the set)');
+update public.study_usage set cost_usd = 0, settled_at = now() where id = :s_r5;
+select pg_temp.oas(:'sa', format('select public.study_reserve(%L, null, %L, %L, 1.00, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) as s_r6 \gset
+select pg_temp.ook('O3l', pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, null, %L, 1, %s, 1.00, 5, null, null, %L)', :'ssh', 'sheet', :'s_r6', :'skey')) = 'error: today'
+  and pg_temp.oas(:'sa', format('select public.study_similar_plan(%L, null, %L)::text', :'ssh', 'sheet'))::jsonb ->> 'today' = 'true',
+  'the whole sheet once a day');
+-- Six a root: four more twins of item 1 (as the owner), then the seventh is refused, and a save past it is dropped.
+reset role;
+insert into public.study_questions (group_id, source, from_exam, twin_of, twin_check, kind, question, options, form, has_key, created_by)
+select :'sg', 'twin', :'ssh', :'sq1', 'blind', 'mcq', 'עוד שאלה דומה ' || n || ' (בדוי)', array['א', 'ב', 'ג', 'ד'], 'one', true, :'sa' from generate_series(1, 4) n;
+select pg_temp.ook('O3m', study_private.similar_count(:'sq1') = 5
+  and pg_temp.oas(:'sa', format('select public.study_similar_plan(%L, %L, %L)::text', :'ssh', :'sq1', 'item'))::jsonb ->> 'room' = '1',
+  'five twins: room for one more');
+insert into public.study_questions (group_id, source, from_exam, twin_of, twin_check, kind, question, options, form, has_key, created_by)
+values (:'sg', 'twin', :'ssh', :'sq1', 'blind', 'mcq', 'השישית (בדוי)', array['א', 'ב', 'ג', 'ד'], 'one', true, :'sa');
+select pg_temp.ook('O3m2', pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, null, null, %L)', :'ssh', :'sq1', 'item', :'s_r6', :'skey')) = 'error: max',
+  'six twins a root: no more');
+
+-- ── The switch and the sheet stop work in flight; a job that died ──
+select pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, null, null, %L)::text', :'ssh', :'sq2', 'item', :'s_r6', :'skey')) as s_b3 \gset
+select (:'s_b3'::jsonb ->> 'run_id') as srun3 \gset
+reset role;
+update study_private.features set enabled = false where name = 'similar';
+select pg_temp.ook('O3n', public.study_claim_similar(:'srun3', :'skey') is null and not study_private.kind_on('similar')
+  and pg_temp.oas(:'sa', format('select public.study_reserve(%L, null, %L, %L, 0.30, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) = 'error: off',
+  'the switch off: no claim, no new reservation of kind similar');
+select study_private.similar_dispatch() is not null as s_disp \gset
+select pg_temp.ook('O3n2', (select status || ' ' || error from public.study_similar_runs where id = :'srun3') = 'stopped off'
+  and (select cost_usd || ' ' || (settled_at is not null)::text from public.study_usage where id = :s_r6) = '0.00000 true',
+  'the sweeper stops the run that waited (its reservation let go)');
+update study_private.features set enabled = true where name = 'similar';
+select pg_temp.oas(:'sa', format('select public.study_reserve(%L, null, %L, %L, 0.30, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) as s_r7 \gset
+select pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, null, null, %L)::text', :'ssh', :'sq2', 'item', :'s_r7', :'skey')) as s_b4 \gset
+select (:'s_b4'::jsonb ->> 'run_id') as srun4 \gset
+reset role;
+update study_private.similar_jobs set status = 'running', attempts = 4, lease_id = gen_random_uuid(), lease_until = now() - interval '1 second' where run_id = :'srun4';
+select public.study_claim_similar(:'srun4', :'skey') is null as s_c4null \gset
+select pg_temp.ook('O3o', :'s_c4null'::boolean
+  and (select status from public.study_similar_runs where id = :'srun4') = 'failed'
+  and (select error from study_private.similar_jobs where run_id = :'srun4') = 'lost'
+  and (select settled_at is not null from public.study_usage where id = :s_r7),
+  'a job that died four times is lost: the run failed, its reservation let go');
+select pg_temp.oas(:'sa', format('select public.study_reserve(%L, null, %L, %L, 0.30, 33, 0.8, 0.4, 10, %L, %L)', :'sg', 'similar', 'ask', 'ask', :'skey')) as s_r8 \gset
+select pg_temp.oas(:'sa', format('select public.study_similar_begin(%L, array[%L]::uuid[], %L, 2, %s, 0.30, 5, null, null, %L)::text', :'ssh', :'sq2', 'item', :'s_r8', :'skey')) as s_b5 \gset
+select (:'s_b5'::jsonb ->> 'run_id') as srun5 \gset
+reset role;
+update public.study_exams set deleted_at = now() where id = :'ssh';
+select study_private.similar_dispatch() is not null as s_disp \gset
+select pg_temp.ook('O3p', (select status from public.study_similar_runs where id = :'srun5') = 'stopped'
+  and pg_temp.oas(:'sb', format('select public.study_similar_of(%L)', :'stwin1')) = 'error: question not found'
+  and pg_temp.oas(:'sb', format('select public.study_similar_plan(%L, %L, %L)', :'ssh', :'sq1', 'item')) = 'error: exam not found',
+  'a deleted sheet: its waiting run stops, its twins are hidden, nothing more is made of it');
+update public.study_exams set deleted_at = null where id = :'ssh';
+
+-- ── Re-running E's part keeps the wider source check; deleting the sheet takes its twins ──
+do $$
+begin
+  if exists (select 1 from pg_constraint x where x.conname = 'study_questions_source_check' and x.conrelid = 'public.study_questions'::regclass
+              and pg_get_constraintdef(x.oid) not like '%member%') then
+    alter table public.study_questions drop constraint study_questions_source_check;
+  end if;
+  if not exists (select 1 from pg_constraint x where x.conname = 'study_questions_source_check' and x.conrelid = 'public.study_questions'::regclass) then
+    alter table public.study_questions add constraint study_questions_source_check check (source in ('ai', 'exam', 'member'));
+  end if;
+end $$;
+select pg_temp.ook('O3q', (select pg_get_constraintdef(oid) like '%twin%' from pg_constraint where conname = 'study_questions_source_check' and conrelid = 'public.study_questions'::regclass),
+  'section E''s block, run again with twins in the table: the check stays wide');
+delete from public.study_exams where id = :'ssh';
+select pg_temp.ook('O3r', not exists (select 1 from public.study_questions where from_exam = :'ssh')
+  and not exists (select 1 from public.study_similar_runs where exam_id = :'ssh'),
+  'the sheet removed: its items, its twins and its runs go with it');
+
+-- ── The fixtures go ──
+reset role;
+set request.jwt.claim.sub = '';
+update study_private.features set enabled = false where name in ('sheets', 'similar');
+update study_private.features set enabled = :'s_exams_was'::boolean where name = 'exams';
+delete from public.study_notices where group_id = :'sg';
+delete from public.study_groups where id in (:'sg', :'szg');
+delete from auth.users where id in (:'sa', :'sb', :'sz');
+select pg_temp.ook('O3-end', not exists (select 1 from public.study_similar_runs where group_id = :'sg')
+  and not exists (select 1 from study_private.similar_jobs where group_id = :'sg'),
   'the fixtures are gone');
 -- ════ END SECTION O ════
