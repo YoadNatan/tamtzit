@@ -390,6 +390,7 @@ export const MC = {
   } as Readonly<Record<string, string>>,
   keyPrices: "המחירים של המודלים שלו עוד לא נבדקו מול הדף של הספק: בהשוואות הם מוערכים פי 1.5, ואי אפשר להעביר אליהם סוג עבודה עד שהם נבדקים.",
   pricesChecked: (d: string) => `המחירים נבדקו ב-${d}`,
+  pricesUnchecked: "המחירים עוד לא נבדקו מול הדף של הספק",
   stale: "המחיר נבדק לפני יותר מ-45 יום",
   // A member's list (C51)
   memberTitle: "השוואות לדירוג",

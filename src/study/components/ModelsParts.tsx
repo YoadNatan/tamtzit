@@ -431,7 +431,11 @@ export function ProvidersBlock({ ctx, state, keys, onChange }: { ctx: Ctx; state
               <b>
                 <bdi dir="ltr">{p.name}</bdi>
               </b>
-              {checked ? <div className={`a-small ${staleDate(checked) ? "md-stale" : "a-muted"}`}>{staleDate(checked) ? MC.stale : MC.pricesChecked(checked.split("-").reverse().join("."))}</div> : null}
+              {unverifiedOf(p.id) ? (
+                <div className="a-small md-stale">{MC.pricesUnchecked}</div>
+              ) : checked ? (
+                <div className={`a-small ${staleDate(checked) ? "md-stale" : "a-muted"}`}>{staleDate(checked) ? MC.stale : MC.pricesChecked(checked.split("-").reverse().join("."))}</div>
+              ) : null}
             </div>
             <div className="a-wrap">
               {hasKey ? (

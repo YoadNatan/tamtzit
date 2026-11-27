@@ -54,7 +54,13 @@ const FACTOR = {
   "claude-opus-5-5": 1, "claude-opus-5": 1, "claude-opus-4-8": 1, "claude-opus-4-7": 1, "claude-opus-4-6": 1,
   "claude-sonnet-5-5": 0.5, "claude-sonnet-5": 0.5, "claude-sonnet-4-6": 0.6, "claude-haiku-5-5": 0.026, "claude-haiku-4-5": 0.25,
 };
-const EXPENSIVE = new Set(["claude-fable-5-2", "claude-fable-5-1", "claude-fable-5", "claude-mythos-5-2", "claude-mythos-5-1", "claude-mythos-5"]);
+/** Other providers' models (WP9): unverified prices (× 1.5 in comparisons, never routed). */
+const OTHER = { "openai:gpt-6.2-astra": 2, "openai:gpt-6.2-sol": 0.5, "openai:gpt-6.1-terra": 0.25, "openai:gpt-6-luna": 0.025, "google:gemini-4-argon": 1, "google:gemini-3.8-flash": 0.19 };
+Object.assign(FACTOR, OTHER);
+const providerOf = (id) => (id.includes(":") ? id.split(":")[0] : "anthropic");
+/** The lab kinds a provider approved with scope "text" may take (no pictures, members' wording or exam pages). */
+const TEXT_KINDS = ["points", "cards"];
+const EXPENSIVE = new Set(["openai:gpt-6.2-astra", "claude-fable-5-2", "claude-fable-5-1", "claude-fable-5", "claude-mythos-5-2", "claude-mythos-5-1", "claude-mythos-5"]);
 const MYTHOS = new Set(["claude-mythos-5-2", "claude-mythos-5-1", "claude-mythos-5"]);
 /** Opus's worst case on each kind's material (the price action), and its typical settled cost. */
 const BASE = { solver: 0.03, fix_check: 0.02, exam_read: 0.5, sheet_read: 0.4, practice: 0.25, set_write: 0.25, points: 0.12, cards: 0.1, ask: 0.08, part: 0.4 };
@@ -131,6 +137,17 @@ module.exports = {
       return { status: "done", text: JSON.stringify({ questions: [{ no: 1, question: "שאלה בדויה", options: ["א", "ב", "ג", "ד"] }] }), checks: { pass: true, items: 12, match: copied, numbered: 12, options: 12, copied, figures: 12, extra: 0 }, cost };
     };
     L.finished = (s) => s === "done" || s === "truncated";
+    /** Why a model may not answer a comparison of `route` (server/study/lab.ts's labRefusal), or null:
+     *  another provider needs its key (health's providers), the group's consent and a scope that takes the kind. */
+    L.refusal = (id, route) => {
+      if (!(id in FACTOR) || MYTHOS.has(id)) return "bad model";
+      const p = providerOf(id);
+      if (p === "anthropic") return null;
+      if ((db.providers ?? {})[p] !== true) return "not configured";
+      if (L.providers[p]?.allowed !== true) return "not allowed";
+      if (L.providers[p].scope === "text" && !TEXT_KINDS.includes(route)) return "not for this kind";
+      return null;
+    };
     /** The run goes on on the server: answers whose time has come end (read at every call). */
     L.tick = () => {
       for (const r of L.runs) {
@@ -153,7 +170,7 @@ module.exports = {
       const order = models.map((m, i) => ({ m, label: labels[(i + 1) % models.length] }));
       order.forEach(({ m, label }, i) => {
         const waiting = stall && i === models.length - 1;
-        L.outputs.push({ id: hex("1ac00000", ++L.seq), run_id: id, slot: i, label, model: m, provider: "anthropic", status: waiting ? "waiting" : "running", reason: null, tries: 0, text: null, checks: {}, check_status: "none", cost_usd: null, latency_ms: null, usage: null, doneAt: Date.now() + L.pace * (i + 1) });
+        L.outputs.push({ id: hex("1ac00000", ++L.seq), run_id: id, slot: i, label, model: m, provider: providerOf(m), status: waiting ? "waiting" : "running", reason: null, tries: 0, text: null, checks: {}, check_status: "none", cost_usd: null, latency_ms: null, usage: null, doneAt: Date.now() + L.pace * (i + 1) });
       });
       L.runsToday += 1;
       return r;
@@ -381,7 +398,8 @@ module.exports = {
         const models = {};
         for (const id of ids) {
           if (!(id in FACTOR)) continue;
-          models[id] = MYTHOS.has(id) ? { refused: "bad model" } : { usd: Math.round(BASE[b.route] * FACTOR[id] * 100000) / 100000 };
+          const why = L.refusal(id, b.route);
+          models[id] = why ? { refused: why } : { usd: Math.round(BASE[b.route] * FACTOR[id] * (id in OTHER ? 1.5 : 1) * 100000) / 100000 };
         }
         const steps = RATED.includes(b.route) ? { check: b.route === "practice" || b.route === "set_write" ? 0.004 : 0, judge: [0, 0, 0.06, 0.08, 0.1] } : undefined;
         return send(200, { route: b.route, title: titleOf(b.route), source: b.route === "solver" ? { lecture: null, n: 10 } : RATED.includes(b.route) ? { lecture: null, part: 0 } : { exam: null }, pictures: ["exam_read", "sheet_read", "part"].includes(b.route), models, runCap: L.runCap, ...(steps ? { steps } : {}) });
@@ -394,8 +412,10 @@ module.exports = {
         const models = Array.isArray(b.models) ? b.models : [];
         if (models.length < 2 || models.length > 4 || new Set(models).size !== models.length || models.some((x) => !(x in FACTOR))) return fail("bad slots");
         if (models.some((x) => MYTHOS.has(x))) return fail("bad model");
+        const refused = models.map((x) => L.refusal(x, b.route)).find(Boolean);
+        if (refused) return fail(refused);
         if (b.route === "ask" && !String(b.source?.question ?? "").trim()) return fail("no question");
-        const est = models.reduce((a, x) => a + BASE[b.route] * FACTOR[x], 0);
+        const est = models.reduce((a, x) => a + BASE[b.route] * FACTOR[x] * (x in OTHER ? 1.5 : 1), 0);
         if (est > L.runCap) return fail("run_cap");
         if (L.runsToday >= L.daily) return fail("daily_runs");
         if (L.spent + est > L.line) return fail("lab_budget");
@@ -442,6 +462,7 @@ module.exports = {
         }
         if (!(b.model in FACTOR)) return fail("bad model");
         if (MYTHOS.has(b.model)) return fail("not for this kind");
+        if (b.model in OTHER) return fail("unverified price");
         if (EXPENSIVE.has(b.model) && b.confirmExpensive !== true) return fail("expensive");
         L.routes[b.route] = { model: b.model, set_at: iso() };
         return send(200, { route: b.route, model: b.model });
