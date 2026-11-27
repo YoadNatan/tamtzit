@@ -1153,3 +1153,68 @@ Every "must" and "should" is fixed; the nits too but one. Details:
   `plan.cjs` fails its "הוזז מאתמול" step in the early morning on `4b9b832`
   too (checked): not this package's, left as it is.
 
+
+## Models and the comparison (design-models, revision 2; Yoad's answers of 27 November 2026)
+
+The models package ("השוואת מודלים", section Y, flag `VITE_STUDY_MODELS`).
+This table is the record for every open decision of the design; where it
+differs from the earlier "Models" table above, this one holds. **Changed by
+Yoad** marks an answer that differs from the design's recommended default;
+every other row is the recommended default.
+
+| OD | Decision |
+|---|---|
+| OD1 | **Changed by Yoad:** phases 1 to 3 are built now (WP2 to WP10, and WP11 through section R); WP12 (moving the outline and the ask route into `run()`) and WP13 (overnight comparisons through batch APIs) stay later |
+| OD2 | The owner is the group's creator (`study_groups.created_by`), plus `study_private.lab_admins` (SQL editor only). Before release: check the creator is Yoad's account and that it has a personal code |
+| OD3 | Yoad is blind too; his ratings count |
+| OD4 | **Changed by Yoad:** total cap $33; the comparison line is a fixed **$3.30 a month** (10%), with **no** drop to 3% after 2027-01-31 (a change is one SQL line, `lab_settings.lab_usd`, used up to 15% of the cap); $1.50 a run worst case; 3 runs a day. The sub-lines of sets ($12), sheets ($6) and similar questions ($5) and the summaries' protected 20% are unchanged |
+| OD5 | Comparison calls use the group's budget: reserved with no user (the worker's path), so they are in nobody's own share or "נוצל על ידך החודש" |
+| OD6 | Members rate only short answers (practice questions, the set generator's questions, "לשאול", points, cards): one score 1-5, "יש כאן טעות עובדתית", a best pick, and skip |
+| OD7 | Members do not see the console; their row opens the next run to rate |
+| OD8 | **Changed by Yoad:** a run waiting for ratings also makes a notice through section R (kind `lab_new`: the inbox on, the push off by default), besides the owner's WhatsApp share |
+| OD9 | "לשאול" comparisons leave out the group's threads and corrections |
+| OD10 | Kinds that cannot be compared may move to another Claude model only, from "מי כותב מה" |
+| OD11 | Answer-key kinds move first: Haiku 5.5 for the question check and fix_check, Sonnet 5.5 for points and exam reading, each after its comparison holds |
+| OD12 | The AI score is off by default, from slice 3, judged by Opus 5.5, never mixed into the group's score |
+| OD13 | Frozen inputs are kept 60 days |
+| OD14 | Claude Fable 5.2 (and every model at about twice the default's price or more) in comparisons; a production route to it needs a second confirmation |
+| OD15 | **Changed by Yoad:** the entry chunk's limit is 410,000 B (about 406,087 B used with every flag on); Y's entry share is capped at **1,500 B** (bundle owner `Y`); everything else lazy |
+| OD16 | Check `/api/study/health` for `budgetUsd: 33`; the code's default is 33 |
+| OD17 | **Changed by the build order:** section Y comes **after O 3** in `study-schema.sql` (O was built first); it goes into part 12 while part 12 stays at or under 170 KB (it does: 124,476 B), otherwise it would start part 13 |
+| OD18 | $5 prepaid credit per provider with auto-recharge off (Gemini: a low requests-per-day quota); keys on Production only, never Preview |
+| OD19 | **Changed by Yoad:** other providers may see everything (lectures with pictures, past exams, sheets, members' text). Once Yoad approves a provider in the app ("לאשר שליחה", recorded per provider, D17), its scope is `all`; scope `text` stays an option |
+| OD20 | **Changed by Yoad:** past exam pages and sheets may go to an approved provider (scope `all`) |
+| OD21 | **Changed by Yoad:** one informational line in help / privacy naming the providers the group approved (not a gate), and the WhatsApp message text in the release notes |
+| OD22 | Chinese models only through OpenRouter, zero data retention (`provider: {data_collection: "deny", zdr: true}`), hosts outside China where available; a direct endpoint only by a row written in the SQL editor |
+| OD23 | Yoad checks provider invoices against the ledger monthly; a gap above $2 turns routing off until it is explained |
+| OD24 | **Changed by Yoad:** yes, per kind, by Yoad, with the approved provider's scope (`all` by default) |
+| Models | **Changed by Yoad:** every current Claude API model (16, from Anthropic's model list: Fable and Mythos 5.2, 5.1 and 5; Opus 5.5, 5, 4.8, 4.7, 4.6; Sonnet 5.5, 5, 4.6; Haiku 5.5, 4.5), plus OpenAI, Google Gemini and the Chinese models (DeepSeek, Qwen, Kimi, GLM). Mythos serves only organizations Anthropic verified: listed, never offered. A non-Anthropic price counts as verified only from the vendor's own page; otherwise `verified: false` (× 1.5 in comparisons, never routed in production) |
+
+### Section Y 1, the registry and the bundle room (WP1 to WP3), built on 27 November 2026
+
+- **The registry (WP1, checked):** slice 0 was built; its price fixes hold.
+  `shared/study/models.ts` now lists all 16 current Claude models with
+  Anthropic's prices (unchanged rows of `prices.ts`, checked again
+  2026-11-27), context (Haiku 4.5: 200k, every other 1M), output caps (Haiku
+  4.5: 64k), effort (none on Haiku 4.5), server-side fallback (Fable and
+  Mythos 5.2 and 5.1, Opus 5.5 and 5, Sonnet 5.5 only), `expensive` (Fable
+  and Mythos, twice Opus 5.5's price or more) and `verifiedOrgsOnly`
+  (Mythos). Opus 4.6, Sonnet 4.6 and Haiku 4.5 count about 30% fewer tokens;
+  their estimates keep 2.5 characters a token, which errs high. Opus 4.5 and
+  Sonnet 4.5 (deprecated) stay pricing only. It also has the route keys
+  (`ROUTE_KEYS`, 25: the design's, plus `sheet_read`, `sheet_key`,
+  `sheet_solve`, `similar`, and `set_write` for the practice-set generator,
+  op `questions`) and what each sends (`ROUTE_RULES`: pictures, members'
+  wording, exam or sheet pages, Anthropic only).
+- **The bundle room (WP2):** `tools/study-bundle.mjs` owns package `Y` (slot
+  `features/models.tsx`, its screens, `lib/models` and `lib/modelsCopy`,
+  `shared/study/models` and `estimate`) with a cap of 1,500 B and only its
+  slot in the entry. `shared/study/prices.ts` stays F's: the phone's price
+  cards (batch, examPrice, practice2) read it already. Y's share today: 0 B.
+- **SQL section Y 1 (WP3)** after O 3, in part 12 (124,476 B): see
+  [`models.md`](models.md). The line of $3.30 is `lab_settings.lab_usd`
+  (no date, no second share). Providers approved in the app get scope `all`.
+  The notice is R's reserved kind `lab_new` (cat `inapp`, push off); to push
+  it, one SQL line (`cat = 'mine', push = true`). Its words are in
+  `shared/study/notifyCopy.ts`; Y's refusals in `src/study/lib/modelsCopy.ts`
+  (lazy), the fourth source of `failText.test.ts`.

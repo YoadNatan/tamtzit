@@ -52,7 +52,7 @@ npm run dev                  # http://localhost:5173/
 
 כל מסד הנתונים של האפליקציה הוא קובץ אחד:
 [`supabase/study-schema.sql`](supabase/study-schema.sql). אפשר להריץ אותו שוב
-בבטחה. הוא גדול מדי (כ-0.9 MB) להדבקה אחת ב-SQL Editor של Supabase, ולכן הוא
+בבטחה. הוא גדול מדי (כ-1.5 MB) להדבקה אחת ב-SQL Editor של Supabase, ולכן הוא
 מחולק לשנים-עשר קבצים ב-[`supabase/parts/`](supabase/parts/):
 
 1. Supabase → **SQL Editor** → New query.
@@ -191,7 +191,7 @@ only after its SQL has run and its code is merged
 [`supabase/study-schema.sql`](supabase/study-schema.sql) is the whole
 database: tables, Row Level Security, functions, the Storage bucket `study`,
 the realtime policies, the pg_cron jobs. It is safe to run again. At about
-0.9 MB it is too big for one paste into Supabase's SQL Editor, so
+1.5 MB it is too big for one paste into Supabase's SQL Editor, so
 [`supabase/parts/1.sql` … `12.sql`](supabase/parts/) hold the same file cut
 between its sections, and once inside section O (`tools/sql-parts.mjs`):
 
@@ -226,7 +226,10 @@ draw an open or numeric item); run alone, it stops with a message saying so.
 Part 12 is section O going on at its version 3 (similar questions; with part
 11 it would pass 170 KB, so the file is cut at O's own "SECTION O CONTINUES ·
 O 3" line); it stops with a message when part 11 has not run, and O 3 also
-edits section E (part 7) and `kind_on` (parts 1 and 10) in place. After editing the schema, run `npm run sql:parts`; a unit test
+edits section E (part 7) and `kind_on` (parts 1 and 10) in place. Part 12 also
+holds section Y after O 3 (models: routes, providers and "השוואת מודלים", the
+switch `lab` inserted off, [`docs/study/models.md`](docs/study/models.md));
+nothing else needs it. After editing the schema, run `npm run sql:parts`; a unit test
 fails while the parts are stale, or while one is over 170 KB (the SQL Editor's
 limit). Run the SQL **before** the code that needs
 it deploys: until then `/api/study/health` says `"schemaOk":false`.
