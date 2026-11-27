@@ -28,7 +28,7 @@ export const SolverAnswer = z.object({
 });
 export const SolverSet = z.object({ answers: z.array(SolverAnswer) });
 /** As the reply is read back: "seq" defaulted (a one-answer question's reply from before the question types). */
-const SolverAnswerIn = SolverAnswer.extend({ seq: z.array(z.number().int()).default([]) });
+export const SolverAnswerIn = SolverAnswer.extend({ seq: z.array(z.number().int()).default([]) });
 export type SolverAnswer = z.infer<typeof SolverAnswer>;
 
 /** The schema sent: the addendum's JSON (cleanSchema drops only the SDK's integer bounds). */
@@ -137,6 +137,31 @@ export function verdictsOf(
   });
 }
 
+/** Each item's verdict from the solver's answers to the items as asked
+ *  (withTwins: `all` and `twin`), pure: an image item whose picture could
+ *  not be signed is not judged (null); one solved right without its
+ *  picture as well is rejected ("blind": the picture adds nothing). The
+ *  question check's comparison (lab.ts) judges a model's answers the same way. */
+export function judgeItems(
+  items: readonly SolverItem[],
+  all: readonly SolverItem[],
+  twin: ReadonlyMap<number, number>,
+  answers: readonly SolverAnswer[],
+  complete: boolean,
+): Array<Verdict | null> {
+  const asked = verdictsOf(all, answers, complete);
+  return items.map((it, i): Verdict | null => {
+    // An image item whose picture could not be signed is not judged ("unchecked"), never passed blind.
+    if (it.withoutPicture) return null;
+    const v = asked[i];
+    const t = twin.has(i) ? asked[twin.get(i)!] : null;
+    if (!v) return null;
+    // Solved without the picture, the key and nothing else: the picture adds nothing.
+    if (v.ok && t && t.choice === it.answer && !t.ambiguous) return { ...v, ok: false, blind: true };
+    return v;
+  });
+}
+
 /** Answers the items without their keys, through `ledger` (the caller's
  *  reservation, kind "solver" unless `kind` says otherwise). Returns each item's verdict (null: not
  *  judged, the reply stopped before it), the items kept, how many the
@@ -182,17 +207,7 @@ export async function solveQuestions<T extends SolverItem>(o: {
     },
   });
   const complete = !res.timedOut && res.stop !== "refusal" && res.stop !== "aborted" && res.stop !== "max_tokens";
-  const asked = verdictsOf(all, answers, complete);
-  const verdicts = o.items.map((it, i): Verdict | null => {
-    // An image item whose picture could not be signed is not judged ("unchecked"), never passed blind.
-    if (it.withoutPicture) return null;
-    const v = asked[i];
-    const t = twin.has(i) ? asked[twin.get(i)!] : null;
-    if (!v) return null;
-    // Solved without the picture, the key and nothing else: the picture adds nothing.
-    if (v.ok && t && t.choice === it.answer && !t.ambiguous) return { ...v, ok: false, blind: true };
-    return v;
-  });
+  const verdicts = judgeItems(o.items, all, twin, answers, complete);
   return {
     verdicts,
     kept: o.items.filter((_, i) => verdicts[i]?.ok),
