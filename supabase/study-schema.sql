@@ -25081,6 +25081,81 @@ begin
   end if;
 end $$;
 
+-- ── The op lab's own reads and writes (WP5: server/study/ops/lab.ts) ──
+
+-- The question check's material with its answer key (the owner, through
+-- the server). Route solver compares models against the bank's keys,
+-- which no member's read gives (study_question_keys has no grant): up to
+-- p_n (2-20, default 10) of a lecture's active keyed questions, picked at
+-- random, with their public text and their keys. The lecture given, or the
+-- group's newest with at least 5 of them. The keys go into the frozen
+-- request, which only the server reads (study_lab_slot); members see its
+-- material only (study_lab_source). Raises forbidden (no key, a lecture
+-- of another group), not the creator. {lecture: null, items: []} when the
+-- bank has none.
+create or replace function public.study_lab_bank(p_group uuid, p_lecture uuid default null, p_n int default 10, p_key text default null)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  v_lecture uuid := p_lecture;
+  v_n       int  := least(greatest(coalesce(p_n, 10), 2), 20);
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  if not study_private.lab_owner(p_group) then raise exception 'not the creator'; end if;
+  if v_lecture is not null and not exists (select 1 from public.study_lectures l
+                                            where l.id = v_lecture and l.group_id = p_group and l.deleted_at is null) then
+    raise exception 'forbidden';
+  end if;
+  if v_lecture is null then
+    select q.lecture_id into v_lecture
+      from public.study_questions q
+      join public.study_question_keys k on k.question_id = q.id
+      join public.study_lectures l on l.id = q.lecture_id and l.deleted_at is null
+     where q.group_id = p_group and q.source in ('ai', 'member') and q.retired_at is null and q.hidden_at is null
+       and (k.held_until is null or k.held_until <= now()) and (k.answer is not null or k.seq is not null)
+     group by q.lecture_id
+    having count(*) >= 5
+     order by max(q.created_at) desc
+     limit 1;
+  end if;
+  if v_lecture is null then return jsonb_build_object('lecture', null, 'items', '[]'::jsonb); end if;
+  return jsonb_build_object('lecture', v_lecture, 'items', coalesce((
+    select jsonb_agg(x.item order by x.pick) from (
+      select jsonb_build_object('id', q.id, 'vignette', q.vignette, 'question', q.question, 'options', to_jsonb(q.options),
+               'form', coalesce(q.form, 'one'),
+               'prompts', case when q.layout ->> 'kind' = 'match' then coalesce(q.layout -> 'prompts', '[]'::jsonb) else '[]'::jsonb end,
+               'style', q.style, 'figure', q.figure, 'answer', k.answer, 'seq', to_jsonb(k.seq)) as item,
+             random() as pick
+        from public.study_questions q
+        join public.study_question_keys k on k.question_id = q.id
+       where q.group_id = p_group and q.lecture_id = v_lecture and q.source in ('ai', 'member')
+         and q.retired_at is null and q.hidden_at is null
+         and (k.held_until is null or k.held_until <= now()) and (k.answer is not null or k.seq is not null)
+       order by pick
+       limit v_n) x), '[]'::jsonb));
+end;
+$$;
+
+-- A slot the server could not start (its claim was refused: the month's
+-- line, the cap): it ends 'error' with the reason, and the run closes when
+-- it was the last. The worker's, with the key; false when the slot no
+-- longer waits.
+create or replace function public.study_lab_skip(p_run uuid, p_label text, p_reason text, p_key text default null)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+begin
+  if not study_private.is_worker(p_key) then raise exception 'forbidden'; end if;
+  update public.study_lab_outputs set status = 'error', reason = left(coalesce(nullif(btrim(p_reason), ''), 'not started'), 40), finished_at = now()
+   where run_id = p_run and label = p_label and status = 'waiting';
+  if not found then return false; end if;
+  perform study_private.lab_close(p_run);
+  return true;
+end;
+$$;
+
+revoke all on function public.study_lab_bank(uuid, uuid, int, text), public.study_lab_skip(uuid, text, text, text) from public, anon;
+-- The server's, with the owner's token and the key inside; the worker's (the key inside).
+grant execute on function public.study_lab_bank(uuid, uuid, int, text) to authenticated;
+grant execute on function public.study_lab_skip(uuid, text, text, text) to anon, authenticated;
+
 -- Section R's kind for a run waiting for ratings: R reserved it (the inbox
 -- only, never pushed); registered here too in case R's row is missing, and
 -- never changed here, so a push the owner turned on stays on.

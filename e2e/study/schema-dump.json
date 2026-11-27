@@ -1231,6 +1231,17 @@
     "required": 2
    }
   ],
+  "study_lab_bank": [
+   {
+    "args": [
+     "p_group",
+     "p_lecture",
+     "p_n",
+     "p_key"
+    ],
+    "required": 1
+   }
+  ],
   "study_lab_board": [
    {
     "args": [
@@ -1379,6 +1390,17 @@
      "p_run"
     ],
     "required": 1
+   }
+  ],
+  "study_lab_skip": [
+   {
+    "args": [
+     "p_run",
+     "p_label",
+     "p_reason",
+     "p_key"
+    ],
+    "required": 3
    }
   ],
   "study_lab_slot": [

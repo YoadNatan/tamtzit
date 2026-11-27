@@ -402,7 +402,9 @@ select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, 
                          -- section Y (models, the comparison): the worker's claim, status poll and saves (the claim refuses
                          -- a signed-in caller), the model of a moment, and the routes read (each refusing without the key)
                          'study_lab_claim', 'study_lab_status', 'study_lab_output_save', 'study_lab_check_save', 'study_lab_judged',
-                         'study_model_at', 'study_models', 'study_lecture_made', 'study_model_routed');
+                         'study_model_at', 'study_models', 'study_lecture_made', 'study_model_routed',
+                         -- and the op lab's skip of a slot it could not start (the key inside)
+                         'study_lab_skip');
 
 -- F28 (review of F0, SEC-1): the slide pictures stay with their lecture. The
 -- app of before F0 deletes a lecture's files first and then its row, which
@@ -12686,6 +12688,51 @@ select pg_temp.yok('Y16-keep', (select request is null from public.study_lab_run
 select pg_temp.yok('Y17-ledger', not exists (select 1 from public.study_usage where group_id = :'yg' and kind = 'lab' and user_id is not null)
   and (select count(*) from public.study_usage where group_id = :'yg' and kind = 'lab' and ref like 'run:%') >= 8,
   'every comparison call is a ledger row of kind lab with no user');
+
+-- ── The op lab's reads: the bank with its keys (the owner, through the server), a slot skipped ──
+reset role;
+insert into public.study_questions (id, group_id, lecture_id, source, kind, question, options, created_by, retired_at) values
+ ('0f000000-0000-4000-8000-0000000000c1', :'yg', :'yl', 'ai', 'mcq', 'שאלה בדויה ראשונה?', '{א,ב,ג,ד}', :'ya', null),
+ ('0f000000-0000-4000-8000-0000000000c2', :'yg', :'yl', 'ai', 'mcq', 'שאלה בדויה שנייה?', '{א,ב,ג,ד}', :'ya', null),
+ ('0f000000-0000-4000-8000-0000000000c3', :'yg', :'yl', 'ai', 'mcq', 'שאלה בדויה שלישית?', '{א,ב,ג,ד}', :'ya', null),
+ ('0f000000-0000-4000-8000-0000000000c4', :'yg', :'yl', 'ai', 'mcq', 'שאלה בדויה רביעית?', '{א,ב,ג,ד}', :'ya', null),
+ ('0f000000-0000-4000-8000-0000000000c5', :'yg', :'yl', 'ai', 'mcq', 'שאלה בדויה חמישית?', '{א,ב,ג,ד}', :'ya', null),
+ ('0f000000-0000-4000-8000-0000000000c6', :'yg', :'yl', 'ai', 'mcq', 'שאלה בדויה שישית?', '{א,ב,ג,ד}', :'ya', null),
+ ('0f000000-0000-4000-8000-0000000000c7', :'yg', :'yl', 'ai', 'mcq', 'שאלה בדויה שהוצאה?', '{א,ב,ג,ד}', :'ya', now()),
+ ('0f000000-0000-4000-8000-0000000000c8', :'yg', :'yl', 'ai', 'mcq', 'שאלה בדויה בלי מפתח?', '{א,ב,ג,ד}', :'ya', null);
+insert into public.study_question_keys (question_id, answer, held_until) values
+ ('0f000000-0000-4000-8000-0000000000c1', 0, null), ('0f000000-0000-4000-8000-0000000000c2', 1, null),
+ ('0f000000-0000-4000-8000-0000000000c3', 2, null), ('0f000000-0000-4000-8000-0000000000c4', 3, null),
+ ('0f000000-0000-4000-8000-0000000000c5', 0, null), ('0f000000-0000-4000-8000-0000000000c6', 1, now() + interval '5 minutes'),
+ ('0f000000-0000-4000-8000-0000000000c7', 2, null), ('0f000000-0000-4000-8000-0000000000c8', null, null)
+on conflict (question_id) do update set answer = excluded.answer, held_until = excluded.held_until;
+select pg_temp.yas(:'ya', format('select public.study_lab_bank(%L, null, 10, %L)::text', :'yg', :'ykey')) as y19_bank \gset
+select pg_temp.yas(:'ya', format('select public.study_lab_bank(%L, %L, 3, %L)::text', :'yg', :'yl', :'ykey')) as y19_three \gset
+select pg_temp.yok('Y19-bank', (:'y19_bank')::jsonb ->> 'lecture' = :'yl'
+  and jsonb_array_length((:'y19_bank')::jsonb -> 'items') = 5
+  and (select bool_and(i ? 'answer' and i ->> 'answer' is not null and i ->> 'id' not in ('0f000000-0000-4000-8000-0000000000c6', '0f000000-0000-4000-8000-0000000000c7', '0f000000-0000-4000-8000-0000000000c8'))
+         from jsonb_array_elements((:'y19_bank')::jsonb -> 'items') i)
+  and jsonb_array_length((:'y19_three')::jsonb -> 'items') = 3,
+  'the owner''s server reads up to n active keyed questions with their keys: not retired, not held by a live quiz, not unkeyed');
+select pg_temp.yok('Y19-bank-gate', pg_temp.yas(:'yb', format('select public.study_lab_bank(%L, null, 10, %L)', :'yg', :'ykey')) = 'error: not the creator'
+  and pg_temp.yas(:'ya', format('select public.study_lab_bank(%L, null, 10, %L)', :'yg', 'wrong')) = 'error: forbidden'
+  and pg_temp.yas(:'ya', format('select public.study_lab_bank(%L, %L, 10, %L)', :'yg', :'yg', :'ykey')) = 'error: forbidden'
+  and pg_temp.yas(:'yz', format('select public.study_lab_bank(%L, null, 10, %L)', :'yzg', :'ykey')) = '{"items": [], "lecture": null}'
+  and not has_function_privilege('anon', 'public.study_lab_bank(uuid, uuid, int, text)', 'execute'),
+  'a member is not the owner; no key, no read; a lecture that is none; a group with no bank: nothing; anon cannot call it');
+reset role;
+insert into public.study_lab_runs (id, group_id, lecture_id, route, title, source, request, request_hash, member_rate, estimate_usd, created_by)
+values ('0f000000-0000-4000-8000-0000000000d1', :'yg', :'yl', 'solver', 'השוואה בדויה לדילוג', '{}', '{}', 'hash-0123456789', false, 0.1, :'ya');
+insert into public.study_lab_outputs (run_id, slot, label, model, provider, status, text, finished_at) values
+ ('0f000000-0000-4000-8000-0000000000d1', 0, 'א', 'claude-opus-5-5', 'anthropic', 'waiting', null, null),
+ ('0f000000-0000-4000-8000-0000000000d1', 1, 'ב', 'claude-haiku-5-5', 'anthropic', 'done', 'תשובה בדויה', now());
+select pg_temp.yas('', format('select public.study_lab_skip(%L, %L, %L)', '0f000000-0000-4000-8000-0000000000d1', 'א', 'budget')) as y20_nokey \gset
+select pg_temp.yas('', format('select public.study_lab_skip(%L, %L, %L, %L)', '0f000000-0000-4000-8000-0000000000d1', 'א', 'lab_budget', :'ykey')) as y20_skip \gset
+select pg_temp.yas('', format('select public.study_lab_skip(%L, %L, %L, %L)', '0f000000-0000-4000-8000-0000000000d1', 'א', 'lab_budget', :'ykey')) as y20_again \gset
+select pg_temp.yok('Y20-skip', :'y20_nokey' = 'error: forbidden' and :'y20_skip' = 'true' and :'y20_again' = 'false'
+  and (select status || ' ' || reason from public.study_lab_outputs where run_id = '0f000000-0000-4000-8000-0000000000d1' and label = 'א') = 'error lab_budget'
+  and (select status from public.study_lab_runs where id = '0f000000-0000-4000-8000-0000000000d1') = 'done',
+  'a slot the server could not start ends error with its reason, once; the run closes with its last answer; never without the key');
 
 -- ── Loading section Y again keeps everything ──
 select pg_temp.yok('Y18-grants', not has_function_privilege('anon', 'public.study_lab_rate(uuid, int, int, int, int, boolean, text)', 'execute')
