@@ -143,17 +143,35 @@
   min-height: var(--hit);
 }
 .se-opt {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
   gap: var(--sp-2);
 }
 .se-opt .a-input {
-  flex: 1;
   min-width: 0;
+  min-height: var(--hit);
+  resize: vertical;
+  field-sizing: content;
+}
+.se-tools {
+  display: flex;
+  gap: var(--sp-1);
+}
+/* A phone: the option's text on its whole line, its ↑ ↓ ✕ under it. */
+@media (max-width: 559px) {
+  .se-opt {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .se-tools {
+    grid-column: 2;
+    justify-content: flex-end;
+  }
 }
 .se-opt .l {
   min-width: 1.5em;
   font-weight: 600;
+  line-height: var(--hit);
 }
 .se-opt .a-btn {
   min-width: var(--hit);
@@ -218,4 +236,18 @@
   min-height: var(--hit);
   display: inline-flex;
   align-items: center;
+}
+
+/* The edit sheet's and the answer cards' buttons, a finger's size (the review measured 32 px). */
+.se .a-btn,
+.se .a-chip,
+.sa-self .a-btn {
+  min-height: var(--hit);
+}
+.se .a-btn.ghost.small {
+  min-width: var(--hit);
+}
+.sa-keys .a-btn {
+  min-width: var(--hit);
+  min-height: var(--hit);
 }

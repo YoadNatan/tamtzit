@@ -41,10 +41,14 @@ test("the screens' words, pinned (design §5.10, §5.11, §6)", () => {
   assert.equal(C.SIM.joined, "כבר מכינים שאלות כמו זו · יופיעו כאן בעוד כחצי דקה");
   assert.equal(C.twinOf("3א", "תרגיל 3"), "דומה לשאלה 3א בתרגיל 3 · נבדקה");
   assert.equal(C.twinOf("3א", ""), "דומה לשאלה 3א · נבדקה");
+  assert.equal(C.twinOf("1", "sheet 3"), "דומה לשאלה 1 ב-sheet 3 · נבדקה", "a Latin title is joined with a maqaf");
+  assert.equal(C.similarFail("member_share"), "החלק האישי בתקציב השאלות הדומות נגמר החודש. מתחדש ב-1 בחודש.", "the member's share is not the group's line");
+  assert.ok(C.similarFail("today").endsWith("· לפתור"), "the agreed verb");
   assert.equal(C.sheetButton(0.47), "שאלות דומות לכל הדף · כ-$0.47");
-  assert.equal(C.sheetOne(14, 0), "שאלה דומה אחת לכל שאלה (14). זה לוקח כמה דקות; אפשר לסגור.");
+  assert.equal(C.sheetOne(14, 0), "שאלה דומה אחת לכל אחת מ-14 השאלות שעוד אין להן דומה. זה לוקח כמה דקות; אפשר לסגור.");
+  assert.equal(C.sheetOne(1, 0), "שאלה דומה אחת לשאלה היחידה שעוד אין לה דומה. זה לוקח כמה דקות; אפשר לסגור.");
   assert.match(C.sheetOne(24, 3), /^שאלה דומה ל-24 השאלות הראשונות שאין להן עדיין דומה/);
-  assert.equal(C.SIM.sheetToday, "היום כבר נוצרו שאלות דומות לדף הזה · לתרגל אותן");
+  assert.equal(C.SIM.sheetToday, "היום כבר נוצרו שאלות דומות לדף הזה · לפתור");
   assert.equal(C.sheetMade(14), "נוצרו 14 שאלות דומות · לפתור", "practice sets' word for solving a set");
 });
 

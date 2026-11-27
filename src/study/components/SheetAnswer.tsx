@@ -12,6 +12,7 @@ import {
   questionSolution,
   saveDraft,
   type SolutionOrigin,
+  type ValueResult,
 } from "../lib/sheetForms";
 import SheetText from "./SheetText";
 import "../styles/sheetForms.css";
@@ -23,8 +24,8 @@ import "../styles/sheetForms.css";
  * at $0 within its tolerance (study_answer_value, an answer row like any
  * practice answer, OD7): "✓ נכון · 3 שעות" or "✗ התשובה: 3 שעות", and "פתרון
  * מלא" with where it came from and the tolerance. The field takes "," or ".",
- * either minus, "1.2e-3" and "1.2×10^-3"; inputmode text, since iOS's decimal
- * pad has no minus.
+ * either minus, "1.2e-3" and "1.2×10^-3"; the decimal pad (inputmode decimal), with
+ * "−" and "×10ⁿ" keys under the field, since iOS's decimal pad has neither.
  * Open: the member writes on the device only (a draft kept per item in
  * localStorage, through a lock or an app switch, cleared once marked), then
  * "להראות פתרון" (study_open_show) shows the model answer, its rubric and the
@@ -72,6 +73,8 @@ export default function SheetAnswer(p: {
   onSkip?: () => void;
   /** The end of a round's list: no field, the verdict only. */
   read?: boolean;
+  /** How a numeric answer is sent (a practice set's round stamps it on its attempt); study_answer_value by default. */
+  sendValue?: (value: number | null, ms: number) => Promise<ValueResult>;
 }) {
   const { item: q } = p;
   const shownAt = useRef(Date.now());
@@ -83,6 +86,19 @@ export default function SheetAnswer(p: {
   const [mark, setMark] = useState<0 | 1 | 2 | null>(null);
   const [stemOpen, setStemOpen] = useState(!p.stemFolded);
   const head = useRef<HTMLParagraphElement>(null);
+  const numRef = useRef<HTMLInputElement>(null);
+  /** "−" / "×10ⁿ": the sign at the caret ("1.2e-3" is a number the parser reads). */
+  const insert = (c: string) => {
+    const el = numRef.current;
+    const at = el?.selectionStart ?? text.length;
+    const to = el?.selectionEnd ?? at;
+    const next = text.slice(0, at) + c + text.slice(to);
+    setText(next);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(at + c.length, at + c.length);
+    });
+  };
 
   // Answered before this screen (a reload, the end's list): the solution comes back once the member answered.
   useEffect(() => {
@@ -107,8 +123,17 @@ export default function SheetAnswer(p: {
     setBad("");
     setBusy(true);
     try {
-      const r = await answerValue(q.id, v, p.mode, Date.now() - shownAt.current);
-      setChecked({ correct: r.correct, num: r.num, unit: r.unit ?? q.unit, tol: r.tol, solution: r.solution, origin: r.origin, solution_origin: r.solution_origin });
+      const ms = Date.now() - shownAt.current;
+      const r = await (p.sendValue ? p.sendValue(v, ms) : answerValue(q.id, v, p.mode, ms));
+      setChecked({
+        correct: r.correct,
+        num: r.num,
+        unit: r.unit ?? q.unit,
+        tol: r.tol,
+        solution: r.solution,
+        origin: r.origin,
+        solution_origin: r.solution_origin,
+      });
       p.onAnswered(r.correct, false);
       requestAnimationFrame(() => head.current?.focus());
     } catch (e) {
@@ -208,8 +233,9 @@ export default function SheetAnswer(p: {
             <div className="sa-num">
               <input
                 id={fieldId}
+                ref={numRef}
                 className="a-input"
-                inputMode="text"
+                inputMode="decimal"
                 enterKeyHint="done"
                 autoComplete="off"
                 autoCorrect="off"
@@ -232,6 +258,15 @@ export default function SheetAnswer(p: {
                   {q.unit}
                 </span>
               ) : null}
+            </div>
+            {/* The numbers pad has no minus and no exponent on every phone: the two keys it lacks. */}
+            <div className="a-row sa-keys" role="group" aria-label="סימנים למספר">
+              <button type="button" className="a-btn small" aria-label="מינוס" disabled={busy} onClick={() => insert("-")}>
+                −
+              </button>
+              <button type="button" className="a-btn small" aria-label="כפול 10 בחזקת" disabled={busy} onClick={() => insert("e")}>
+                ×10ⁿ
+              </button>
             </div>
             {bad ? (
               <p id={`${fieldId}-bad`} className="a-small a-error" role="alert">

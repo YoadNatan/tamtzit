@@ -26,7 +26,17 @@ const SHEET = JSON.parse(readFileSync(join(process.cwd(), "e2e", "study", "fixtu
 test("a file's name as a sheet's title; an empty name's fallback; Word, PDF and pictures told apart", () => {
   assert.equal(S.nameFromFile("tirgul_3-pharmaco.pdf"), "tirgul 3 pharmaco");
   assert.equal(S.nameFromFile("תרגיל 3 - פרמקוקינטיקה.PDF"), "תרגיל 3 - פרמקוקינטיקה", "a spaced dash stays");
-  assert.equal(S.nameFromFile("IMG_2041.HEIC"), "IMG 2041");
+  for (const f of [
+    "IMG_2041.HEIC",
+    "image.jpg",
+    "PXL_20261127_101500.jpg",
+    "WhatsApp Image 2026-11-27 at 10.15.00.jpeg",
+    "Screenshot 2026-11-27.png",
+    "scan0001.pdf",
+    "DSC_0042.JPG",
+  ])
+    assert.equal(S.nameFromFile(f), "", `${f}: a device's own name is not a sheet's`);
+  assert.equal(S.nameFromFile("Imaging review.pdf"), "Imaging review", "a word that only starts like one stays");
   assert.equal(S.nameFromFile(`${"א".repeat(130)}.pdf`).length, 120);
   assert.equal(S.fallbackName(new Date(2026, 10, 26)), "דף תרגילים 26.11");
   assert.ok(S.isWord({ name: "sheet.docx" }) && S.isWord({ name: "x", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));

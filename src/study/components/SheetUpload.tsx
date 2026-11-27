@@ -31,6 +31,7 @@ import { holdScreen, setDrive } from "./ExamParts";
 import { BackLink, Head, Loading, StickyActions } from "./Shell";
 import "../styles/exams.css";
 import "../styles/sheets.css";
+import { radioProps } from "../lib/radios";
 
 /* ── "העלאת מבחן או דף תרגילים" (uploaded sheets, release A0; design-exams
  *    §5.2-5.4, docs/study/sheets.md) ──
@@ -55,11 +56,20 @@ import "../styles/sheets.css";
 
 type Quality = { sharp: number; light: number };
 type Part =
-  | { id: number; kind: "pdf"; name: string; pdf: ExamPdf; skip: number }
+  | {
+      id: number;
+      kind: "pdf";
+      name: string;
+      pdf: ExamPdf;
+      skip: number;
+      sig?: string;
+      thumbs?: Array<string | null>;
+    }
   | {
       id: number;
       kind: "photo";
       name: string;
+      sig?: string;
       file: File;
       url: string;
       turns: number;
@@ -76,6 +86,8 @@ const KINDS: Array<{ v: UploadKind; label: string }> = [
   { v: "sheet", label: "דף תרגילים" },
 ];
 const WORD = "קובץ Word? צריך קודם לשמור אותו כ-PDF.";
+/** The same file picked again: its name, size and time. */
+const sigOf = (f: File) => `${f.name}|${f.size}|${f.lastModified}`;
 
 let seq = 0;
 const pagesOf = (parts: readonly Part[]) => parts.reduce((n, p) => n + (p.kind === "pdf" ? p.pdf.count - p.skip : 1), 0);
@@ -168,6 +180,15 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
   const [coverOff, setCoverOff] = useState(false);
   const [asking, setAsking] = useState<File[] | null>(null);
   const [confirm, setConfirm] = useState(false);
+  // An alertdialog has the focus (a screen reader says it): the confirmation's and the question's first button.
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const askRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (confirm) confirmRef.current?.focus();
+  }, [confirm]);
+  useEffect(() => {
+    if (asking) askRef.current?.focus();
+  }, [asking]);
   const [dragging, setDragging] = useState(false);
   const [opening, setOpening] = useState(0);
   const [busy, setBusy] = useState("");
@@ -205,7 +226,15 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
   // Thumbnails' object URLs go with the screen.
   const all = useRef<Part[]>([]);
   all.current = [...parts, ...keyParts];
-  useEffect(() => () => all.current.forEach((p) => p.kind === "photo" && URL.revokeObjectURL(p.url)), []);
+  const mounted = useRef(true);
+  const urlsOf = (p: Part) => (p.kind === "photo" ? [p.url] : (p.thumbs ?? []).filter((u): u is string => Boolean(u)));
+  useEffect(
+    () => () => {
+      mounted.current = false;
+      all.current.forEach((p) => urlsOf(p).forEach((u) => URL.revokeObjectURL(u)));
+    },
+    [],
+  );
   useEffect(() => {
     if (sending) progRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
   }, [sending]);
@@ -250,15 +279,24 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
       });
     const set = to === "key" ? setKeyParts : setParts;
     const out: Part[] = [];
+    // The same file picked twice (a double tap in Files): kept once, and said so.
+    const have = new Set(all.current.map((p) => p.sig).filter(Boolean));
+    const fresh = usable.filter((f) => !have.has(sigOf(f)));
+    if (fresh.length < usable.length)
+      setFieldError({
+        field: to === "key" ? "key" : "file",
+        text: fresh.length ? "קובץ שכבר בהעלאה לא נוסף שוב." : "הקובץ הזה כבר בהעלאה.",
+      });
     setOpening((n) => n + 1);
     try {
-      for (const f of usable) {
+      for (const f of fresh) {
         if (isPdf(f)) {
           try {
             out.push({
               id: ++seq,
               kind: "pdf",
               name: f.name,
+              sig: sigOf(f),
               pdf: await openExamPdf(f),
               skip: 0,
             });
@@ -273,6 +311,7 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
             id: ++seq,
             kind: "photo",
             name: f.name,
+            sig: sigOf(f),
             file: f,
             url: URL.createObjectURL(f),
             turns: 0,
@@ -293,6 +332,15 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
       let left = MAX_PHOTOS - ps.filter((p) => p.kind === "photo").length;
       return [...ps, ...out.filter((p) => p.kind === "pdf" || left-- > 0)];
     });
+    // A PDF's first two pages drawn small: the tile shows the first page sent (the cover question's page 1).
+    for (const p of out)
+      if (p.kind === "pdf")
+        void Promise.all([p.pdf.thumb(1), p.pdf.thumb(2)])
+          .then((thumbs) => {
+            if (!mounted.current) return thumbs.forEach((u) => u && URL.revokeObjectURL(u));
+            set((ps) => ps.map((x) => (x.id === p.id && x.kind === "pdf" ? { ...x, thumbs } : x)));
+          })
+          .catch(() => undefined);
     // The first file names a sheet, until the name is typed.
     if (to === "main" && !named.current) {
       named.current = true;
@@ -334,7 +382,7 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
   const drop = (set: typeof setParts, id: number) =>
     set((ps) => {
       const gone = ps.find((p) => p.id === id);
-      if (gone?.kind === "photo") URL.revokeObjectURL(gone.url);
+      if (gone) urlsOf(gone).forEach((u) => URL.revokeObjectURL(u));
       return ps.filter((p) => p.id !== id);
     });
   /** "לצלם שוב": the new photo takes the old one's place. */
@@ -383,7 +431,18 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
     return out;
   };
 
+  // A field the button found wrong gets the focus (its error is read with it), scrolled into view.
+  const focusErr = useRef(false);
+  useEffect(() => {
+    if (!fieldError || !focusErr.current) return;
+    focusErr.current = false;
+    const f = fieldError.field;
+    const el = document.querySelector<HTMLElement>(`[aria-describedby~="sx-err-${f}"]`) ?? document.getElementById(`sx-err-${f}`);
+    el?.focus({ preventScroll: true });
+    el?.scrollIntoView({ block: "center" });
+  }, [fieldError]);
   const check = (): boolean => {
+    focusErr.current = true;
     if (!pages) {
       setFieldError({
         field: "file",
@@ -416,6 +475,7 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
       setFieldError({ field: "minutes", text: "בין 10 ל-600 דקות." });
       return false;
     }
+    focusErr.current = false;
     setFieldError(null);
     return true;
   };
@@ -476,7 +536,7 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
   const fieldErr = (f: string) => (fieldError?.field === f ? fieldError.text : "");
   const err = (f: string) =>
     fieldErr(f) ? (
-      <p id={`sx-err-${f}`} className="a-error a-small" role="alert">
+      <p id={`sx-err-${f}`} className="a-error a-small" role="alert" tabIndex={-1}>
         {fieldErr(f)}
       </p>
     ) : null;
@@ -612,6 +672,8 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
               <div className="sx-thumb">
                 {p.kind === "photo" ? (
                   <img src={p.url} alt={label} style={{ transform: `rotate(${p.turns * 90}deg)` }} />
+                ) : p.thumbs?.[p.skip] ? (
+                  <img src={p.thumbs[p.skip]!} alt={`${p.name}, עמוד ${p.skip + 1}`} />
                 ) : (
                   <span className="sx-pdf">
                     <FileIcon />
@@ -629,7 +691,16 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
                   </span>
                 ) : null}
               </div>
-              {p.kind === "pdf" ? <span className="a-small a-muted sx-cap">{n === 1 ? "עמוד אחד" : `${n} עמודים`}</span> : null}
+              {p.kind === "pdf" ? (
+                <span className="a-small a-muted sx-cap">
+                  {p.thumbs?.[p.skip] ? (
+                    <>
+                      <bdi>{p.name}</bdi> ·{" "}
+                    </>
+                  ) : null}
+                  {n === 1 ? "עמוד אחד" : `${n} עמודים`}
+                </span>
+              ) : null}
               <div className="sx-tools">
                 {/* The pages run right to left: earlier is to the right. */}
                 <button
@@ -679,6 +750,7 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
           <span>זה קובץ התשובות?</span>
           <span className="a-row">
             <button
+              ref={askRef}
               type="button"
               className="a-btn primary small"
               onClick={() => {
@@ -762,8 +834,19 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
       <fieldset className="sx-field" disabled={sending}>
         <legend className="sx-label">מה זה?</legend>
         <div className="a-seg sx-kinds" role="radiogroup" aria-label="מה זה?">
-          {KINDS.map((k) => (
-            <button key={k.v} type="button" className="a-btn" role="radio" aria-checked={kind === k.v} onClick={() => setKind(k.v)}>
+          {KINDS.map((k, i) => (
+            <button
+              key={k.v}
+              type="button"
+              className="a-btn"
+              {...radioProps(
+                i,
+                KINDS.findIndex((x) => x.v === kind),
+                KINDS.length,
+                (j) => setKind(KINDS[j].v),
+              )}
+              onClick={() => setKind(k.v)}
+            >
               {k.label}
             </button>
           ))}
@@ -837,7 +920,7 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
               maxLength={3}
               disabled={sending}
               aria-invalid={Boolean(fieldErr("minutes")) || undefined}
-              aria-describedby="sx-min-help"
+              aria-describedby={fieldErr("minutes") ? "sx-min-help sx-err-minutes" : "sx-min-help"}
               onChange={(e) => setMinutes(e.target.value.replace(/\D/g, ""))}
             />
             <small id="sx-min-help">לפי זה נקבע השעון בסימולציה.</small>
@@ -871,7 +954,7 @@ export default function SheetUpload({ route, ctx }: ScreenProps<"exams">) {
         <div className="a-callout warn sx-big" role="alertdialog" aria-label="הדף ארוך">
           <span>{`הדף ארוך (${pages} עמודים) · ${priceText(price)} · להמשיך?`}</span>
           <span className="a-row">
-            <button type="button" className="a-btn primary small" onClick={() => void upload(true)}>
+            <button ref={confirmRef} type="button" className="a-btn primary small" onClick={() => void upload(true)}>
               להמשיך
             </button>
             <button type="button" className="a-btn small" onClick={() => setConfirm(false)}>

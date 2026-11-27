@@ -37,7 +37,7 @@ import { failText } from "../lib/failText";
 import { flags } from "../lib/flags";
 import { richText } from "../lib/rich";
 import { EXACT_BELOW, examKeySet, inexact, pageLines, seqComplete, step, uploadMeta, type UploadKind } from "../lib/sheets";
-import { itemFix, itemRetire, itemSolution, itemUnretire, labelOf, numLine, openAdd, originLine, partLine, partOf, sheetResume, sheetReview } from "../lib/sheetForms";
+import { itemFix, itemRetire, itemSolution, itemUnretire, labelOf, numLine, openAdd, originLine, partLine, partOf, sheetResume, sheetResumeFits, sheetReview } from "../lib/sheetForms";
 import { parsePageBox } from "../lib/exams";
 import type { ScreenProps } from "../features/types";
 import { drives, holdScreen, PageCrop, setDrive } from "./ExamParts";
@@ -45,6 +45,7 @@ import PageView from "./PageView";
 import { BackLink, Head, Loading, RouteLink, Sheet } from "./Shell";
 import "../styles/exams.css";
 import "../styles/sheets.css";
+import { radioProps } from "../lib/radios";
 
 /* Release A1 (VITE_STUDY_SHEETS_FORMS): the exact text, the edit sheet and the answer editor, loaded when first needed. */
 const SheetText = lazy(() => import("./SheetText"));
@@ -194,6 +195,19 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
         </p>
       </main>
     );
+  // A held sheet (D23): while the month's line is spent, "להמשיך" would be refused: it waits, disabled, with the day it can.
+  const pausedNow = Boolean(flags.sheetForms && status?.status === "reading" && status?.error === "budget");
+  const [fits, setFits] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!pausedNow) return;
+    let alive = true;
+    sheetResumeFits(examId)
+      .then((f) => alive && setFits(f))
+      .catch(() => alive && setFits(null));
+    return () => {
+      alive = false;
+    };
+  }, [pausedNow, examId]);
   if (!status) return <Loading />;
 
   const retryAll = async (pages: number[] | null) => {
@@ -221,7 +235,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
       {status.pages ? (
         <>
           {examLengthLine(status) ? <span aria-hidden="true">·</span> : null}
-          <span>{status.pages === 1 ? "דף אחד" : `${status.pages} דפים`}</span>
+          <span>{status.pages === 1 ? "עמוד אחד" : `${status.pages} עמודים`}</span>
         </>
       ) : null}
       {by ? (
@@ -276,7 +290,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
       <div className="a-bar" role="progressbar" aria-label="ההעתקה" aria-valuemin={0} aria-valuemax={100} aria-valuenow={readingPercent(status.units)}>
         <i style={{ width: `${Math.max(4, readingPercent(status.units))}%` }} />
       </div>
-      <p className="a-small a-muted">{drives(examId) ? "הטלפון מעתיק את הדפים. כדאי להשאיר את המסך פתוח." : "אפשר לסגור את הטלפון. ההעתקה ממשיכה בלעדיו."}</p>
+      <p className="a-small a-muted">{drives(examId) ? "הטלפון מעתיק את העמודים. כדאי להשאיר את המסך פתוח." : "אפשר לסגור את הטלפון. ההעתקה ממשיכה בלעדיו."}</p>
     </section>
   ) : null;
   // A failed exam (no review) gets a new upload only, no paid re-read (owner's decision): its rows say what failed, without "לנסות שוב".
@@ -290,7 +304,9 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
             <div>
               <b>{l.title}</b>
               <span className="m">
-                {l.state === "failed" ? (
+                {l.state === "failed" && pausedNow && heldError(l.error) ? (
+                  <span className="a-chip">נעצר</span>
+                ) : l.state === "failed" ? (
                   <span className="a-chip warn">{l.kind === "read" ? "לא נקראו" : "לא הצליח"}</span>
                 ) : l.state === "running" ? (
                   "מעתיקים…"
@@ -303,7 +319,7 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
                 {l.state === "failed" && l.error === "pages_expired" ? ` · ${failText(l.error, "exam")}` : ""}
               </span>
             </div>
-            {l.state === "failed" && canRetry ? (
+            {l.state === "failed" && pausedNow && heldError(l.error) ? null : l.state === "failed" && canRetry ? (
               <button type="button" className="a-btn small x-retry" disabled={busy} onClick={() => void retryAll(null)}>
                 לנסות שוב
               </button>
@@ -346,15 +362,26 @@ export default function ExamView({ route, ctx }: ScreenProps<"exams">) {
               נעצר: נגמר התקציב החודשי.
             </h2>
             <p className="a-small">{status.found ? `✓ ${status.found === 1 ? "שאלה אחת הועתקה" : `${status.found} שאלות הועתקו`}${status.unkeyed ? ` · ${status.unkeyed} עוד בלי תשובה` : ""}` : "עוד לא הועתקו שאלות."}</p>
-            <p className="a-small a-muted">מה שכבר הועתק נשמר. אפשר להמשיך כשיש שוב תקציב החודש, או לסיים עכשיו: השאלות יישארו בלי תשובות מוצעות, ואפשר לסמן להן תשובה ביד.</p>
+            <p className="a-small a-muted">מה שכבר הועתק נשמר. אפשר להמשיך כשהתקציב החודשי מתחדש, או לסיים עכשיו: השאלות יישארו בלי תשובות מוצעות, ואפשר לסמן להן תשובה ביד.</p>
             <div className="a-row">
-              <button type="button" className="a-btn primary" disabled={busy} onClick={() => void resume(false)}>
+              <button
+                type="button"
+                className={`a-btn${fits === false ? "" : " primary"}`}
+                disabled={busy || fits === false}
+                aria-describedby={fits === false ? "ss-paused-when" : undefined}
+                onClick={() => void resume(false)}
+              >
                 להמשיך
               </button>
-              <button type="button" className="a-btn" disabled={busy} onClick={() => void resume(true)}>
+              <button type="button" className={`a-btn${fits === false ? " primary" : ""}`} disabled={busy} onClick={() => void resume(true)}>
                 לסיים בלי תשובות מוצעות
               </button>
             </div>
+            {fits === false ? (
+              <p id="ss-paused-when" className="a-small a-muted">
+                אפשר להמשיך מ-1 בחודש.
+              </p>
+            ) : null}
           </section>
         ) : (
           progress
@@ -535,15 +562,21 @@ function ExamReviewBody(p: {
   const openItem = live.find((q) => q.id === open) ?? null;
   const pageNo = (openItem ? (parsePageBox(openItem.figure)?.page ?? openItem.page) : null) ?? pick ?? readPages[0] ?? 1;
   const ids = shown.map((q) => q.id);
-  // The keyboard (matched on event.code, so a Hebrew layout works): ↑ ↓ the item before or after, E "לתקן טקסט".
+  // The keyboard (matched on event.code, so a Hebrew layout works): J / K the item after or before from
+  // anywhere, ↓ ↑ too while the focus is in the list or the opened item (elsewhere the arrows scroll, and
+  // move within a radio group, a table or the page); E "לתקן טקסט".
   useEffect(() => {
     if (!wide) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.altKey || e.ctrlKey || e.metaKey || e.defaultPrevented) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-      if (e.code === "ArrowDown" || e.code === "ArrowUp") {
-        const next = step(ids, open, e.code === "ArrowDown" ? 1 : -1);
+      if (t?.closest?.('[role="radio"], [role="radiogroup"], [role="region"], .pv, [role="dialog"]')) return;
+      const inList = Boolean(t?.closest?.(".rw-text .r-rows, .rw-text .r-item"));
+      const down = e.code === "KeyJ" || (inList && e.code === "ArrowDown");
+      const up = e.code === "KeyK" || (inList && e.code === "ArrowUp");
+      if (down || up) {
+        const next = step(ids, open, down ? 1 : -1);
         if (!next || next === open) return;
         e.preventDefault();
         setOpen(next);
@@ -626,8 +659,14 @@ function ExamReviewBody(p: {
           <div className="rw-text">
       {live.length ? (
         <div className="r-filters" role="radiogroup" aria-label="להראות">
-          {chips.map((c) => (
-            <button key={c.f} type="button" className={`a-chip r-f-${c.f}`} role="radio" aria-checked={filter === c.f} onClick={() => setFilter(c.f)}>
+          {chips.map((c, i) => (
+            <button
+              key={c.f}
+              type="button"
+              className={`a-chip r-f-${c.f}`}
+              {...radioProps(i, chips.findIndex((x) => x.f === filter), chips.length, (j) => setFilter(chips[j].f))}
+              onClick={() => setFilter(c.f)}
+            >
               {c.label} · {c.n}
             </button>
           ))}
@@ -662,7 +701,7 @@ function ExamReviewBody(p: {
         <p className="a-para a-muted">{filter === "look" ? "אין שאלות לבדיקה." : "אין כאן שאלות."}</p>
       )}
 
-            <p className="a-small a-muted rw-keys">מקשים: חצים למעלה ולמטה, השאלה הקודמת או הבאה · E: לתקן טקסט.</p>
+            <p className="a-small a-muted rw-keys">מקשים: J ו-K (או החצים ברשימה), השאלה הבאה או הקודמת · E: לתקן טקסט.</p>
           </div>
           <aside className="rw-page" aria-label="העמוד">
             <PageView
@@ -695,8 +734,14 @@ function ExamReviewBody(p: {
         <>
       {live.length ? (
         <div className="r-filters" role="radiogroup" aria-label="להראות">
-          {chips.map((c) => (
-            <button key={c.f} type="button" className={`a-chip r-f-${c.f}`} role="radio" aria-checked={filter === c.f} onClick={() => setFilter(c.f)}>
+          {chips.map((c, i) => (
+            <button
+              key={c.f}
+              type="button"
+              className={`a-chip r-f-${c.f}`}
+              {...radioProps(i, chips.findIndex((x) => x.f === filter), chips.length, (j) => setFilter(chips[j].f))}
+              onClick={() => setFilter(c.f)}
+            >
               {c.label} · {c.n}
             </button>
           ))}
@@ -811,6 +856,9 @@ function ExamReviewBody(p: {
   );
 }
 
+/** A unit the budget holds (D23): "נעצר", answered by the paused card, never "לנסות שוב". */
+const heldError = (e: string | null | undefined) => e === "budget" || e === "reserve";
+
 /** From 760 px wide (iPad portrait and wider): the review in two columns. */
 function useWide(): boolean {
   const q = "(min-width: 760px)";
@@ -867,7 +915,7 @@ function ItemCard(p: {
   useEffect(() => {
     if ((p.editTick ?? 0) === tick.current) return;
     tick.current = p.editTick ?? 0;
-    setMode("edit");
+    setMode(a1 ? "fix" : "edit");
   }, [p.editTick]);
   const st = itemState(q);
   const undo = lastUndoable(p.log, q.id);
@@ -1186,7 +1234,8 @@ function ItemCard(p: {
               לתקן תשובה
             </button>
           ) : null}
-          <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode("edit")}>
+          {/* One verb for the question's text: with release A1 it opens the edit sheet (lines, options, form). */}
+          <button type="button" className="a-btn small" disabled={sending} onClick={() => setMode(a1 ? "fix" : "edit")}>
             {st === "unclear" ? "לא נקראה טוב · לתקן טקסט" : "לתקן טקסט"}
           </button>
           {a1 ? (
@@ -1226,9 +1275,6 @@ function ItemCard(p: {
               {q.solution ? "לתקן את הפתרון המלא" : "להוסיף פתרון מלא"}
             </button>
           ) : null}
-          <button type="button" className="a-btn small" disabled={sending} onClick={() => (setMore(false), setMode("fix"))}>
-            לתקן את השאלה
-          </button>
           <button type="button" className="a-btn small" disabled={sending || !(p.pages ?? []).length} onClick={() => (setMore(false), setMode("figs"))}>
             לסמן איור
           </button>

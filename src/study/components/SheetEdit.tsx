@@ -22,7 +22,7 @@ import "../styles/sheetForms.css";
 /* ── The edit sheet and the answer editor (uploaded sheets, release A1;
  *    design-exams §5.8, §5.6 "⋯ עוד") ──
  *
- * "לתקן את השאלה {label}" (study_exam_item_fix) and "+ להוסיף שאלה שלא
+ * "לתקן טקסט" on question {label} (study_exam_item_fix) and "+ להוסיף שאלה שלא
  * הועתקה" (study_exam_item_add): the label, the form (בחירה · נכון/לא נכון ·
  * התאמה · פתוחה · מספרית), the case text and the question (their lines
  * kept), the options (moved, removed, up to 10 for one answer, 6 for
@@ -56,7 +56,7 @@ export default function EditSheet(p: {
   onRetire?: () => void;
 }) {
   const { q } = p;
-  const used = Boolean(q && (q.answered || q.marked));
+  const used = Boolean(q && (q.answered || q.locked));
   const [d, setD] = useState<Draft>(() => ({
     label: q ? labelOf(q) : "",
     form: (q?.form as SheetFormName) ?? "one",
@@ -135,29 +135,49 @@ export default function EditSheet(p: {
           <span className="l" aria-hidden="true">
             {list === "options" ? LETTERS[i] : `${i + 1}.`}
           </span>
-          <input
+          {/* A line of its own that grows with the text: on a phone the whole option shows, the tools under it. */}
+          <textarea
             className="a-input"
             dir="auto"
+            rows={Math.min(6, Math.max(1, o.split("\n").length, Math.ceil(o.length / 32)))}
             aria-label={name(i)}
             value={o}
             disabled={sending}
             onChange={(e) => set({ [list]: d[list].map((x, k) => (k === i ? e.target.value : x)) } as Partial<Draft>)}
           />
-          <button type="button" className="a-btn ghost small" aria-label={`להעלות את ${name(i)}`} disabled={sending || used || i === 0} onClick={() => move(list, i, -1)}>
-            ↑
-          </button>
-          <button type="button" className="a-btn ghost small" aria-label={`להוריד את ${name(i)}`} disabled={sending || used || i === d[list].length - 1} onClick={() => move(list, i, 1)}>
-            ↓
-          </button>
-          <button
-            type="button"
-            className="a-btn ghost small"
-            aria-label={`להסיר את ${name(i)}`}
-            disabled={sending || used || d[list].length <= 2}
-            onClick={() => set({ [list]: d[list].filter((_, k) => k !== i) } as Partial<Draft>)}
-          >
-            ✕
-          </button>
+          <span className="se-tools">
+            <button
+              type="button"
+              className="a-btn ghost small"
+              aria-label={`להעלות את ${name(i)}`}
+              disabled={sending || used || i === 0}
+              onClick={() => move(list, i, -1)}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="a-btn ghost small"
+              aria-label={`להוריד את ${name(i)}`}
+              disabled={sending || used || i === d[list].length - 1}
+              onClick={() => move(list, i, 1)}
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              className="a-btn ghost small"
+              aria-label={`להסיר את ${name(i)}`}
+              disabled={sending || used || d[list].length <= 2}
+              onClick={() =>
+                set({
+                  [list]: d[list].filter((_, k) => k !== i),
+                } as Partial<Draft>)
+              }
+            >
+              ✕
+            </button>
+          </span>
         </div>
       ))}
       {!used && d[list].length < cap ? (

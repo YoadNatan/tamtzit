@@ -64,7 +64,8 @@ import type { Op } from "./types.js";
  *   settled at $0; the units run beside the ready upload. 200 {units,
  *   priceUsd}. 409 nothing to copy | already, 402 sheets_cap | budget.
  *
- * {op:"exam_read", action:"resume", examId, skipSolve?}
+ * {op:"exam_read", action:"resume", examId, skipSolve?, dry?}
+ *   dry: 200 {read, key, solve, fits} (would it go on now) and nothing else.
  *   "להמשיך" / "לסיים בלי תשובות מוצעות" (D23): the units the budget held
  *   go on (with skipSolve, the held solve units are dropped) once their
  *   worst case fits the sheets line and the room under the 80% line again
@@ -264,8 +265,26 @@ async function resume(sb: Sb, examId: string, body: Record<string, unknown>): Pr
   const skip = body.skipSolve === true;
   const dry = await sb.rpc("study_sheet_resume", keyed({ p_exam: examId, p_skip_solve: skip, p_dry: true }));
   if (dry.error) throw rpcError(dry.error);
-  const held = (dry.data ?? {}) as { read?: number; key?: number; solve?: number };
-  const worst = heldWorstUsd({ read: held.read ?? 0, key: held.key ?? 0, solve: held.solve ?? 0 });
+  const held = (dry.data ?? {}) as {
+    read?: number;
+    key?: number;
+    solve?: number;
+  };
+  const worst = heldWorstUsd({
+    read: held.read ?? 0,
+    key: held.key ?? 0,
+    solve: held.solve ?? 0,
+  });
+  // dry: whether it would go on now (the card offers "להמשיך" only then); nothing changes.
+  if (body.dry === true) {
+    const fits =
+      worst <= 0 ||
+      (await roomFor(sb, e, worst).then(
+        () => true,
+        (x) => (x instanceof HttpError && x.status === 402 ? false : Promise.reject(x)),
+      ));
+    return json(200, { ...held, fits });
+  }
   if (worst > 0) await roomFor(sb, e, worst);
   // A sheet's held work is its hold now (a skipped solve is not); it lapses with the sheet's last unit.
   if (worst > 0 && e.kind === "sheet") await takeHold(sb, examId, worst);

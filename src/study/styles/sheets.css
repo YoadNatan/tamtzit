@@ -83,7 +83,8 @@
 .sx-drophint {
   display: none;
 }
-@media (hover: hover) and (pointer: fine) {
+/* Any fine pointer: an iPad with a trackpad drags files in from split view too. */
+@media (any-pointer: fine) {
   .sx-drophint {
     display: block;
   }
@@ -330,6 +331,13 @@
 }
 .rw-keys {
   margin: 0;
+  display: none;
+}
+/* The keys' line only where a keyboard is likely (a mouse), not on a touch-only iPad. */
+@media (hover: hover) and (pointer: fine) {
+  .rw-keys {
+    display: block;
+  }
 }
 .rw-here {
   display: flex;
@@ -438,4 +446,22 @@
 }
 .r-seq .a-seg {
   max-width: 260px;
+}
+
+/* A finger's size for the upload's and the review's controls (the review measured 23-40 px):
+ * the small buttons, the kind and moed segments, the filter and page chips, the item's menu. */
+.sheet-new .a-btn.small,
+.sheet-new .a-seg .a-btn,
+.sheet-new .sx-help,
+.r-item .a-btn.small,
+.r-item .a-btn.ghost,
+.rw-here .a-chip,
+.r-filters .a-chip,
+.ss-tail .a-btn.small,
+.ss-menu .a-btn,
+.ss-menu-sheet .a-btn {
+  min-height: var(--hit);
+}
+.r-item .a-btn.ghost.icon {
+  min-width: var(--hit);
 }

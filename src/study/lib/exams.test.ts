@@ -279,6 +279,23 @@ test("the review's words after the guidance review: a confirmation reads אוש�
   assert.equal(X.unkeyedLine([it(0), it(null), it(null), it(null, [1, 0]), it(null, null, true)]), "2 שאלות בלי תשובה לא נכנסות לתרגול עד שמסמנים להן תשובה.");
   assert.equal(X.unkeyedLine([it(0), it(null)]), "שאלה אחת בלי תשובה לא נכנסת לתרגול עד שמסמנים לה תשובה.");
   assert.equal(X.unkeyedLine([it(0)]), "");
+  // A numeric item is keyed by its number, an open one by its model answer (the review's "4 בלי תשובה" that had answers).
+  const num = (v: number | null) => ({
+    answer: null,
+    seq: null,
+    retired: false,
+    form: "numeric" as const,
+    num: v,
+  });
+  const open = (a: string | null) => ({
+    answer: null,
+    seq: null,
+    retired: false,
+    form: "open" as const,
+    model_answer: a,
+  });
+  assert.equal(X.unkeyedLine([num(6.93), open("הפינוי יורד"), it(0)]), "");
+  assert.equal(X.unkeyedLine([num(null), open(""), num(1)]), "2 שאלות בלי תשובה לא נכנסות לתרגול עד שמסמנים להן תשובה.");
   // 12 items of a 14-question, 30-minute exam (2 open questions skipped): 26 minutes for מלא, and why.
   const exam = { questions: 12, minutes: 30, printed: 14 };
   const L = X.lengthsFor(exam);

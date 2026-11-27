@@ -47,7 +47,7 @@ export async function sheetReview(examId: string): Promise<Review> {
 /* ── Fixing an item (any member; logged) ── */
 
 export type ItemPatch = { label?: string; form?: SheetFormName; vignette?: string; question?: string; options?: string[]; prompts?: string[]; figures?: string[] };
-/** "לתקן את השאלה": once anyone answered or marked it, only its text (`answered`). */
+/** "לתקן טקסט" (the edit sheet): once anyone answered or marked it, only its text (`answered`). */
 export const itemFix = (questionId: string, patch: ItemPatch) => rpc<Record<string, unknown>>("study_exam_item_fix", { p_question: questionId, p_patch: patch });
 /** "+ להוסיף שאלה שלא הועתקה": after its page's last item. Returns its id. */
 export const itemAdd = (examId: string, item: ItemPatch & { label: string; form: SheetFormName; question: string; page: number }) =>
@@ -65,8 +65,29 @@ export const itemSolution = (questionId: string, patch: SolutionPatch) => rpc<Re
 export type ValueResult = { correct: boolean; num: number; unit: string | null; tol: number; solution: string | null; origin: SolutionOrigin; conf: number | null; solution_origin: SolutionOrigin };
 /** A numeric answer, checked at $0 within the item's tolerance (null: "לא יודעים"). */
 export const answerValue = (questionId: string, value: number | null, mode: string, ms: number) =>
-  rpc<ValueResult>("study_answer_value", { p_question: questionId, p_value: value, p_mode: mode, p_ms: Math.max(0, Math.round(ms)) });
-export type OpenShown = { model_answer: string | null; rubric: string[]; solution: string | null; origin: SolutionOrigin; conf: number | null; solution_origin: SolutionOrigin };
+  rpc<ValueResult>("study_answer_value", {
+    p_question: questionId,
+    p_value: value,
+    p_mode: mode,
+    p_ms: Math.max(0, Math.round(ms)),
+  });
+/** The same inside a practice set's attempt (section O 3's study_qset_answer_value): stamped, so the set's score counts it. */
+export const answerValueInSet = (attempt: string, questionId: string, value: number | null, mode: string, ms: number) =>
+  rpc<ValueResult>("study_qset_answer_value", {
+    p_attempt: attempt,
+    p_question: questionId,
+    p_value: value,
+    p_mode: mode,
+    p_ms: Math.max(0, Math.round(ms)),
+  });
+export type OpenShown = {
+  model_answer: string | null;
+  rubric: string[];
+  solution: string | null;
+  origin: SolutionOrigin;
+  conf: number | null;
+  solution_origin: SolutionOrigin;
+};
 /** "להראות פתרון": the model answer, its rubric and the worked solution (a row in the member's own marks). */
 export const openShow = (questionId: string) => rpc<OpenShown>("study_open_show", { p_question: questionId });
 /** "איך הלך?": 0 טעיתי · 1 חלקית · 2 צדקתי. */
@@ -110,7 +131,14 @@ async function op<T>(body: Record<string, unknown>): Promise<T> {
 export const openAdd = (examId: string, o: { dry: true } | { dry?: false; urls: Record<string, string>; until: string }) =>
   op<{ units: number; pages?: number; skipped?: number; priceUsd: number }>({ action: "open_add", examId, ...o });
 /** "להמשיך" / "לסיים בלי תשובות מוצעות" after a budget pause (D23). */
-export const sheetResume = (examId: string, skipSolve: boolean) => op<{ read: number; key: number; solve: number; skipped: number }>({ action: "resume", examId, skipSolve });
+export const sheetResume = (examId: string, skipSolve: boolean) =>
+  op<{ read: number; key: number; solve: number; skipped: number }>({
+    action: "resume",
+    examId,
+    skipSolve,
+  });
+/** Whether "להמשיך" would go on now (the held work fits the sheets line and the 80% line); nothing changes. */
+export const sheetResumeFits = (examId: string) => op<{ fits: boolean }>({ action: "resume", examId, dry: true }).then((r) => r.fits !== false);
 
 /** A session's uploaded items (release A1): where each key came from, the uploads' titles, and each
  *  item's printed label and a numeric item's unit (the review's, as lib/exams.ts keyOrigins reads it). */

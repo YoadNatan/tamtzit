@@ -124,6 +124,9 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
     const st = EXAM_STATUS[e.status] ?? { label: "בקריאה", cls: "a-chip busy" };
     const meta = e.status === "ready" ? examLengthLine(e) : e.status === "reading" || e.status === "linking" ? "מעתיקים את השאלות…" : "";
     const lec = e.lecture_id ? lectureTitle.get(e.lecture_id) : undefined;
+    // Two uploads of one name ("sheet 3" twice) are told apart by the day each was uploaded.
+    const twin = uploads.filter((x) => x.title === e.title).length > 1 && e.created_at;
+    const day = twin ? `הועלה ב-${new Date(e.created_at!).getDate()}.${new Date(e.created_at!).getMonth() + 1}` : "";
     return (
       <li key={e.id}>
         <RouteLink to={{ v: "exams", e: e.id, c: course.id }} go={ctx.go} className="a-li c-row c-exam-row">
@@ -131,7 +134,7 @@ export default function CourseScreen({ route, ctx }: ScreenProps<"course">) {
             <b>
               <bdi>{e.title}</bdi>
             </b>
-            {meta ? <span className="m">{meta}</span> : null}
+            {meta || day ? <span className="m">{[meta, day].filter(Boolean).join(" · ")}</span> : null}
             {lec ? (
               <span className="m">
                 <bdi>{lec}</bdi>

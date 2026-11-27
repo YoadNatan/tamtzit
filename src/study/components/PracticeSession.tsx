@@ -31,11 +31,26 @@ import { isChoiceForm, isSetForm, toShownSet } from "../../../shared/study/forms
 import { getSignals, pulseReady } from "../lib/pulse";
 import { shortName } from "../lib/questionText";
 import { myDangerDue, myRewordings } from "../lib/progress";
-import type { Route } from "../lib/route";
-import { groupExams, keyOrigins, listExamQuestions, listQuestionsAll, mockGet, notCounted, type KeyOrigin } from "../lib/exams";
+import { BACK_LABEL, type Route } from "../lib/route";
+import { examKindsOf, groupExams, keyOrigins, listExamQuestions, listQuestionsAll, mockGet, notCounted, type KeyOrigin } from "../lib/exams";
 import { PageCrop } from "./ExamParts";
 import { keepAll, usd } from "../lib/practice2";
-import { attemptFinish, attemptStart, mostLecture, myNamesPref, openSet, setLink, setNamesPref, setProgress, setRequests, setStats, shareSet, type Finish, type Stats } from "../lib/sets";
+import { answerValue, answerValueInSet } from "../lib/sheetForms";
+import {
+  attemptFinish,
+  attemptStart,
+  mostLecture,
+  myNamesPref,
+  openSet,
+  setLink,
+  setNamesPref,
+  setProgress,
+  setRequests,
+  setStats,
+  shareSet,
+  type Finish,
+  type Stats,
+} from "../lib/sets";
 import { genAddReady, genAdded, mistakesNew, setFail, SETS } from "../lib/setsCopy";
 import { DEFAULT_SIZE } from "../lib/make";
 import { expectedQuestionUsd } from "../../../shared/study/practice2";
@@ -153,18 +168,18 @@ async function scopeQuestions(scope: S.Scope, groupId: string): Promise<PublicQu
     case "mistakes": {
       const [open, more] = await Promise.all([myMistakes(groupId, scope.lecture ?? undefined), againOf(scope, groupId)]);
       const ids = [...new Set([...open.map((m) => m.question_id), ...more.again.map((a) => a.ask)])];
-      return ids.length ? listQuestionsByIds(ids) : [];
+      return ids.length ? sheetSafe(await listQuestionsByIds(ids)) : [];
     }
     case "again": {
       const { again } = await againOf(scope, groupId);
       const ids = [...new Set(again.flatMap((a) => [a.ask, a.question_id]))];
-      return ids.length ? listQuestionsByIds(ids) : [];
+      return ids.length ? sheetSafe(await listQuestionsByIds(ids)) : [];
     }
     case "set": {
       // A practice set (docs/study/sets.md): its questions, in the set's order.
       const d = await openSet(scope.set);
       const at = new Map(d.items.map((i) => [i.question_id, i.pos]));
-      const qs = d.items.length ? await listQuestionsByIds(d.items.map((i) => i.question_id)) : [];
+      const qs = d.items.length ? sheetSafe(await listQuestionsByIds(d.items.map((i) => i.question_id))) : [];
       return qs.sort((a, b) => (at.get(a.id) ?? 0) - (at.get(b.id) ?? 0));
     }
     case "paragraph": {
@@ -181,6 +196,10 @@ async function scopeQuestions(scope: S.Scope, groupId: string): Promise<PublicQu
 
 /** A build without the question types never asks an exam's true/false or match item (it would read as one-answer);
  *  one without release A1 never an open or numeric one (it has no way to answer it). */
+/** A set's or the mistakes' questions in a build without the sheets' flags (a rollback, sheets.md):
+ *  no open or numeric item without release A1, no similar question without release B. */
+const sheetSafe = (qs: PublicQuestion[]): PublicQuestion[] =>
+  qs.filter((q) => (flags.sheetForms || isChoiceForm(q.form ?? "one")) && (flags.similar || q.source !== "twin"));
 const examItems = (qs: PublicQuestion[]): PublicQuestion[] => {
   const drawable = flags.sheetForms ? qs : qs.filter((q) => isChoiceForm(q.form ?? "one"));
   return flags.qtypes ? drawable : drawable.filter((q) => (q.form ?? "one") === "one");
@@ -197,8 +216,35 @@ async function examInfo(byId: Record<string, PublicQuestion>): Promise<Pick<Data
     const r = await sheetInfo(exams).catch(() => ({ origins: new Map(), titles: {}, extras: {}, kinds: {} }));
     return { origins: r.origins, examTitles: r.titles, sheetExtras: r.extras, examKinds: r.kinds };
   }
-  const { origins, titles } = await keyOrigins(exams).catch(() => ({ origins: new Map(), titles: {} }));
-  return { origins, examTitles: titles };
+  const { origins, titles } = await keyOrigins(exams).catch(() => ({
+    origins: new Map(),
+    titles: {},
+  }));
+  // Release A0: the uploads' kinds too (a sheet's back arrow, the twin chip), where the column exists.
+  const kinds = flags.sheets ? await examKindsOf(exams).catch(() => ({})) : {};
+  return { origins, examTitles: titles, examKinds: kinds };
+}
+
+/** The end of a round's row: its topic and aspect; an uploaded item without a topic by its printed
+ *  label ("שאלה 3ב"), a similar question as one; never "שאלה · אחר" for every row. */
+function reviewHead(q: PublicQuestion, label?: string): React.ReactNode {
+  const aspect = q.aspect && q.aspect !== "other" ? ASPECTS[q.aspect] : "";
+  if (q.topic)
+    return (
+      <>
+        <bdi>{q.topic}</bdi>
+        {aspect ? ` · ${aspect}` : ""}
+      </>
+    );
+  if (q.source === "twin") return "שאלה דומה";
+  const lab = label || (q.exam_id && q.exam_no !== null ? String(q.exam_no) : "");
+  if (lab)
+    return (
+      <>
+        שאלה <bdi>{lab}</bdi>
+      </>
+    );
+  return aspect ? `שאלה · ${aspect}` : "שאלה";
 }
 
 /** Where the back arrow and "חזרה לתרגול" lead: a lecture's practice, else the hub. */
@@ -556,6 +602,25 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     },
     [sending, save, ctx, data, setId],
   );
+  /** A numeric answer (SheetAnswer): inside a set's attempt it is stamped on it (study_qset_answer_value),
+   *  so the set's score counts it; an attempt that ended elsewhere gets a new one, as choose's. */
+  const sendValue = useCallback(
+    async (qid: string, value: number | null, ms: number) => {
+      const cur = sRef.current;
+      const mode = cur?.mode ?? "exam";
+      let attempt = cur?.attempt;
+      const send = (a: string | undefined) => (a ? answerValueInSet(a, qid, value, mode, ms) : answerValue(qid, value, mode, ms));
+      const r = await send(attempt).catch(async (e) => {
+        if (!setId || !attempt || !["attempt finished", "attempt not found"].includes(codeOf(e))) throw e;
+        attempt = (await attemptStart(setId)).id;
+        return send(attempt);
+      });
+      const now = sRef.current;
+      if (attempt && now && attempt !== now.attempt) save({ ...now, attempt });
+      return r;
+    },
+    [setId, save],
+  );
   // An open or numeric question's primary action ("לבדוק" / "להראות פתרון"), in the bottom bar as every question's.
   const [sheetAct, setSheetAct] = useState<{ label: string; busy: boolean; run: () => void } | null>(null);
   /** An open or numeric question answered in SheetAnswer (release A1): the round records it (no bet;
@@ -688,9 +753,11 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     setData((d) => (d && d.byId[qid] ? { ...d, byId: { ...d.byId, [qid]: f(d.byId[qid]) } } : d));
 
   if (phase === "loading" || (phase === "ready" && (!s || !data))) return <Loading />;
+  // A sheet's practice backs to the sheet, not to "the exam".
+  const backWords = backTarget(parentOf(scope)).label;
   const back = (
     <button type="button" className="back" onClick={close}>
-      {backTarget(parentOf(scope)).label}
+      {backWords === BACK_LABEL.exams && scope?.kind === "exam" && data?.examKinds?.[scope.exam] === "sheet" ? "→ לדף" : backWords}
     </button>
   );
   const lectureTitle = scope?.kind === "lecture" || scope?.kind === "paragraph" ? titles[scope.lecture] : undefined;
@@ -703,10 +770,12 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
     ) : scope?.kind === "mockWrong" ? (
       "הטעויות מהסימולציה"
     ) : scope?.kind === "set" ? (
-      <>
-        תרגול{setInfo?.title ? " · " : ""}
-        <bdi>{setInfo?.title ?? ""}</bdi>
-      </>
+      // The set's own name (a sheet's set is long: "שאלות דומות · תרגיל 3 · …"), whole on a phone; "תרגול" without one.
+      setInfo?.title ? (
+        <bdi>{setInfo.title}</bdi>
+      ) : (
+        "תרגול"
+      )
     ) : examTitle ? (
       <>
         תרגול · <bdi>{examTitle}</bdi>
@@ -825,6 +894,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
             media={crop}
             answered={result ? { correct: result.correct } : null}
             onAnswered={(correct, personal) => recordSheet(qq.id, correct, personal)}
+            sendValue={(v, ms) => sendValue(qq.id, v, ms)}
             onAction={read ? undefined : setSheetAct}
             onSkip={read ? undefined : goNext}
             read={read}
@@ -1008,9 +1078,7 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
             onClick={() => (s.timed ? document.getElementById(`rq-${r.id}`)?.scrollIntoView({ block: "start" }) : setOpen(expanded ? null : r.id))}
           >
             <div>
-              <b className="pq-review-topic">
-                <bdi>{qq.topic || "שאלה"}</bdi> · {ASPECTS[qq.aspect] ?? ASPECTS.other}
-              </b>
+              <b className="pq-review-topic">{reviewHead(qq, data.sheetExtras?.[qq.id]?.label)}</b>
               <span className="m" dir="rtl">
                 {firstWords(qq.question)}
               </span>

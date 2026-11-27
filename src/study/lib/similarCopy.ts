@@ -16,12 +16,12 @@ export const SIMILAR_FAIL: Readonly<Record<string, string>> = {
   off: "שאלות דומות עוד לא פתוחות בקבוצה.",
   "not eligible": "לשאלה הזאת אי אפשר ליצור שאלות דומות: היא פתוחה, או שאין לה עדיין תשובה בדוקה.",
   max: "לשאלה הזאת יש כבר 6 שאלות דומות.",
-  today: "היום כבר נוצרו שאלות דומות לדף הזה · לתרגל אותן",
+  today: "היום כבר נוצרו שאלות דומות לדף הזה · לפתור",
   "nothing to make": "לכל השאלות בדף כבר יש שאלות דומות.",
   similar_cap: "התקציב לשאלות דומות נגמר החודש. מתחדש ב-1 בחודש.",
   budget: "התקציב לשאלות דומות נגמר החודש. מתחדש ב-1 בחודש.",
   reserve: "התקציב לשאלות דומות נגמר החודש. מתחדש ב-1 בחודש.",
-  member_share: "התקציב לשאלות דומות נגמר החודש. מתחדש ב-1 בחודש.",
+  member_share: "החלק האישי בתקציב השאלות הדומות נגמר החודש. מתחדש ב-1 בחודש.",
   daily_limit: "היום כבר נוצרו הרבה שאלות דומות. אפשר שוב מחר.",
   "exam not found": "הדף הזה נמחק או לא נמצא.",
   "question not found": "השאלה הזאת כבר לא בדף.",
@@ -62,7 +62,7 @@ export const SIM = {
   checked: "נבדקה",
   /** The whole sheet (end of a sheet's round, the review's "⋯"). */
   sheetHint: "הן יופיעו ב״סטים של הקבוצה״, לכל הקבוצה.",
-  sheetToday: "היום כבר נוצרו שאלות דומות לדף הזה · לתרגל אותן",
+  sheetToday: "היום כבר נוצרו שאלות דומות לדף הזה · לפתור",
   sheetAll: "לכל השאלות בדף כבר יש שאלות דומות.",
   sheetMaking: "יוצרים שאלות דומות לדף · זה לוקח כמה דקות, ואפשר לסגור.",
   sheetStarted: "מתחילים ליצור שאלות דומות לדף. הן יופיעו ב״סטים של הקבוצה״.",
@@ -91,12 +91,18 @@ export function simResult(r: { made: number; dropped: number; skipped_figs: numb
   const figs = r.skipped_figs ? ` · ${simFigs(r.skipped_figs)}` : "";
   return `${made}${dropped}${figs}`;
 }
+/** "בתרגיל 3", and "ב-sheet 3" for a title that does not start with a Hebrew letter (a file's Latin name). */
+export const inTitle = (title: string) => (/^[\u05d0-\u05ea]/.test(title.trim()) ? `ב${title}` : `ב-${title}`);
 /** The twin's chip: "דומה לשאלה 3א בתרגיל 3 · נבדקה". */
-export const twinOf = (label: string, title: string) => `דומה לשאלה ${label}${title ? ` ב${title}` : ""} · ${SIM.checked}`;
+export const twinOf = (label: string, title: string) => `דומה לשאלה ${label}${title ? ` ${inTitle(title)}` : ""} · ${SIM.checked}`;
 /** "שאלות דומות לכל הדף · כ-$0.50". */
 export const sheetButton = (usd: number) => `שאלות דומות לכל הדף · ${PRICE(usd)}`;
 /** Under it: one each, or the first 24 without one. */
 export const sheetOne = (n: number, more: number) =>
-  more > 0 ? "שאלה דומה ל-24 השאלות הראשונות שאין להן עדיין דומה. זה לוקח כמה דקות; אפשר לסגור." : `שאלה דומה אחת לכל שאלה (${n}). זה לוקח כמה דקות; אפשר לסגור.`;
+  more > 0
+    ? "שאלה דומה ל-24 השאלות הראשונות שאין להן עדיין דומה. זה לוקח כמה דקות; אפשר לסגור."
+    : n === 1
+      ? "שאלה דומה אחת לשאלה היחידה שעוד אין לה דומה. זה לוקח כמה דקות; אפשר לסגור."
+      : `שאלה דומה אחת לכל אחת מ-${n} השאלות שעוד אין להן דומה. זה לוקח כמה דקות; אפשר לסגור.`;
 /** A whole sheet's run that made some: to its set. */
 export const sheetMade = (n: number) => `${many(n, "נוצרה שאלה דומה אחת", (k) => `נוצרו ${k} שאלות דומות`)} · ${SIM.sheetSolve}`;

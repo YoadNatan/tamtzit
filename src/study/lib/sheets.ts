@@ -107,8 +107,14 @@ export function sheetFail(code: string, kind: UploadKind): string {
 
 /* ── The upload's words (pure) ── */
 
-/** A file's name as a sheet's title: no extension, "_" and "-" as spaces, one space, at most 120 characters. */
+/** A camera's, a phone's or a chat app's own file name ("image.jpg", "IMG_4021.JPG", "PXL_2026…",
+ *  "WhatsApp Image …", "Screenshot …"): not a name for the group to see. */
+const DEVICE_NAME = /^(img|image|pxl|dsc|dcim|photo|scan|whatsapp|screenshot|screen shot|צילום מסך|תמונה)([\s_\-.(]|\d|$)/i;
+
+/** A file's name as a sheet's title: no extension, "_" and "-" as spaces, one space, at most 120
+ *  characters; "" for a device's own name (the placeholder "דף תרגילים 27.11" is used then). */
 export function nameFromFile(file: string): string {
+  if (DEVICE_NAME.test(file.trim())) return "";
   return file
     .replace(/\.[a-z0-9]{1,5}$/i, "")
     .replace(/_+/g, " ")

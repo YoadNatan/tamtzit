@@ -56,6 +56,8 @@ export type ExamPdf = {
   firstLines: string[];
   /** The pages drawn, from page skip + 1 (a sheet's cover page left out). */
   pages(key: boolean, onPage?: (done: number, total: number) => void, skip?: number): Promise<ExamPageFile[]>;
+  /** Page n drawn small (the upload's tile: what the cover question asks about), as an object URL the caller revokes. */
+  thumb(n: number): Promise<string | null>;
 };
 
 export async function openExamPdf(file: File): Promise<ExamPdf> {
@@ -75,6 +77,11 @@ export async function openExamPdf(file: File): Promise<ExamPdf> {
         onPage?.(out.length, count - skip);
       }
       return out;
+    },
+    async thumb(n) {
+      if (n < 1 || n > count) return null;
+      const img = await deck.pageImage(n, 240);
+      return URL.createObjectURL(img.blob);
     },
   };
 }

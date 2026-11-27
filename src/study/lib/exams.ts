@@ -2,6 +2,7 @@ import { postStudy, sb } from "./api";
 import type { ExamPageFile } from "./examPages";
 import type { PublicQuestion } from "./practice";
 import { qColumns } from "./questionColumns";
+import { flags as appFlags } from "./flags";
 
 /* ── Past exams and simulations: the data (sources.md B2, B6, B7; section S 2) ──
  *
@@ -88,8 +89,8 @@ export type ReviewItem = {
   /* Uploaded sheets, release A1 (study_sheet_review, section O 2): the printed label, the
    * figure boxes, the copy's exactness, a multi-part question's series and step, a numeric
    * item's number, unit and tolerance, an open item's model answer and rubric, the worked
-   * solution and where it came from, who took the item out, whether anyone saw an open
-   * item's solution. Absent from S's review. */
+   * solution and where it came from, who took the item out, whether anyone answered or
+   * self-marked it (locked: only its text may change). Absent from S's review. */
   label?: string;
   figures?: string[];
   exact?: number | null;
@@ -105,7 +106,7 @@ export type ReviewItem = {
   solution?: string | null;
   solution_origin?: KeyOrigin | null;
   solution_conf?: number | null;
-  marked?: boolean;
+  locked?: boolean;
 };
 export type ReviewPage = { n: number; path: string; w: number; h: number; key: boolean };
 export type KeyLog = { id: number; question_id: string; old: number | null; new: number | null; origin_old: string | null; origin_new: string | null; undo_of: number | null; by: string | null; at: string };
@@ -454,8 +455,11 @@ export function wasConfirmed(log: readonly KeyLog[], questionId: string): boolea
 }
 
 /** "6 שאלות בלי תשובה לא נכנסות לתרגול עד שמסמנים להן תשובה." (a session asks only keyed items), or "". */
-export function unkeyedLine(items: ReadonlyArray<Pick<ReviewItem, "answer" | "seq" | "retired">>): string {
-  const n = items.filter((q) => !q.retired && q.answer === null && !(q.seq !== null && q.seq.length > 0)).length;
+export function unkeyedLine(
+  items: ReadonlyArray<Pick<ReviewItem, "answer" | "seq" | "retired"> & Partial<Pick<ReviewItem, "form" | "num" | "model_answer">>>,
+): string {
+  // itemState's rule: a numeric item is keyed by its number, an open one by its model answer.
+  const n = items.filter((q) => !q.retired && itemState({ parse_conf: 3, origin: null, ...q }) === "nokey").length;
   if (!n) return "";
   return n === 1 ? "שאלה אחת בלי תשובה לא נכנסת לתרגול עד שמסמנים לה תשובה." : `${n} שאלות בלי תשובה לא נכנסות לתרגול עד שמסמנים להן תשובה.`;
 }
@@ -618,9 +622,31 @@ export function openAttempt(user: string): string | null {
 
 /** The group's exams (RLS: members read them), for a course session's exam items. */
 export async function groupExams(groupId: string): Promise<Array<{ id: string; course: string; title: string; status: string }>> {
-  const { data, error } = await client().from("study_exams").select("id, course, title, status, deleted_at").eq("group_id", groupId);
+  type Row = {
+    id: string;
+    course: string;
+    title: string;
+    status: string;
+    deleted_at: string | null;
+    kind?: string;
+  };
+  // The kind where section O made it (a build without VITE_STUDY_SHEETS, a rollback, practises past exams only);
+  // a database before O has no such column.
+  const read = (cols: string) => client().from("study_exams").select(cols).eq("group_id", groupId);
+  let res = await read("id, course, title, status, deleted_at, kind");
+  if (res.error && /kind/.test(res.error.message)) res = await read("id, course, title, status, deleted_at");
+  if (res.error) fail(res.error);
+  return ((res.data ?? []) as unknown as Row[]).filter((e) => !e.deleted_at && (appFlags.sheets || (e.kind ?? "exam") === "exam"));
+}
+
+/** The uploads' kinds (section O 1: exam or sheet), by id. */
+export async function examKindsOf(examIds: string[]): Promise<Record<string, "exam" | "sheet">> {
+  const { data, error } = await client()
+    .from("study_exams")
+    .select("id, kind")
+    .in("id", [...new Set(examIds)].slice(0, 50));
   if (error) fail(error);
-  return ((data ?? []) as Array<{ id: string; course: string; title: string; status: string; deleted_at: string | null }>).filter((e) => !e.deleted_at);
+  return Object.fromEntries(((data ?? []) as Array<{ id: string; kind: "exam" | "sheet" }>).map((r) => [r.id, r.kind]));
 }
 
 /** Every item of these exams, in each exam's order. The question types'
