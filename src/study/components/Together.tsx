@@ -246,7 +246,7 @@ export function ThreadPanel({ comments, me, nameOf, draft, onDraft, onSend, onRe
     <details key={c.id} className="note k-attempt">
       <summary className="a-row">
         <Icon name="chat" size={14} />
-        <span className="a-small a-muted">מצורף: הניסיון של <bdi dir="ltr">Claude</bdi> לענות</span>
+        <span className="a-small a-muted">מצורף: התשובה שנכתבה ב״לשאול״</span>
       </summary>
       <div className="a-callout quiet">
         <SummaryView markdown={c.body} compact />

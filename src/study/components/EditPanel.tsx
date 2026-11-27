@@ -284,7 +284,7 @@ export default function EditPanel({ lc, spot }: { lc: LectureCtx; spot: Spot }) 
             ))}
             <li className="a-card flat dashed k-row original">
               <b className="a-small">
-                הנוסח המקורי (<bdi dir="ltr">Claude</bdi>)
+                הנוסח המקורי של הסיכום
               </b>
               <SummaryView markdown={original} compact />
               {!open && original !== block.text ? (

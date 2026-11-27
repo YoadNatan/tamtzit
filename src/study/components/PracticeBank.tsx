@@ -285,13 +285,9 @@ export default function PracticeBank({ route, ctx }: ScreenProps<"practice">) {
         {d.check_state === "failed" ? (
           <p className="a-small a-muted">{rewriting ? (
             "נכתבת מחדש אוטומטית."
-          ) : flags.make ? (
-            // With practice sets: no model's name in member copy (§5.11).
-            "הבדיקה ענתה אחרת מהמפתח. אפשר לנסח אותה מחדש או להוריד."
           ) : (
-            <>
-              בבדיקה, <bdi dir="ltr">Claude</bdi> ענה אחרת מהמפתח. אפשר לנסח אותה מחדש או להוריד.
-            </>
+            // No model's name in member copy (§5.11; design-models WP9: the check may run on any model).
+            "הבדיקה ענתה אחרת מהמפתח. אפשר לנסח אותה מחדש או להוריד."
           )}</p>
         ) : d.check_state === "unchecked" ? (
           <p className="a-small a-muted">הבדיקה לא הספיקה לבדוק אותה. אפשר להשאיר אותה בכל זאת.</p>

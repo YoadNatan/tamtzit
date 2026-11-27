@@ -126,8 +126,9 @@ function numbers(m: BoardModel): BoardModel {
 }
 
 /** "לאשר שליחה" (or its undo) for a provider: scope all (Yoad's OD19), recorded per provider. */
-export const setProvider = (group: string, provider: string, allowed: boolean): Promise<void> =>
-  rpc<void>("study_model_provider_set", { p_group: group, p_provider: provider, p_allowed: allowed, p_scope: "all" });
+/** "לאשר שליחה" (scope "all", the owner's default: OD19) or "רק טקסט" (scope "text"), and its undo. */
+export const setProvider = (group: string, provider: string, allowed: boolean, scope: "all" | "text" = "all"): Promise<void> =>
+  rpc<void>("study_model_provider_set", { p_group: group, p_provider: provider, p_allowed: allowed, p_scope: scope });
 
 /** Which providers' keys are set on the server (health: booleans only); null when health does not answer. */
 export async function providersSet(): Promise<Record<string, boolean> | null> {

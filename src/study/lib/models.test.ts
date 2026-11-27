@@ -272,7 +272,9 @@ test("the rating's words: impersonal, one score of five labels, no model's name"
 });
 
 test("help's line on where the material goes (OD21): Anthropic, the routed providers, those approved for comparisons", () => {
-  assert.equal(providersLine({ inUse: [], approved: [] }), "החומר של הקבוצה נשלח לכתיבה ל-Anthropic (Claude). אף אחד מהם לא מקבל שמות של חברי הקבוצה.");
+  assert.equal(providersLine({ inUse: [], approved: [] }), "החומר של הקבוצה נשלח לכתיבה ל-Anthropic (Claude), בלי שמות של חברי הקבוצה.");
+  assert.equal(providersLine({ inUse: [], approved: ["openai"] }), "החומר של הקבוצה נשלח לכתיבה ל-Anthropic (Claude), ובהשוואת מודלים גם ל-OpenAI. אף אחד מהם לא מקבל שמות של חברי הקבוצה.");
+  assert.equal(providersLine({ inUse: ["google"], approved: ["google"] }), "החומר של הקבוצה נשלח לכתיבה ל-Anthropic (Claude) ו-Google. אף אחד מהם לא מקבל שמות של חברי הקבוצה.");
   assert.equal(
     providersLine({ inUse: ["openai"], approved: ["openai", "google", "openrouter"] }),
     "החומר של הקבוצה נשלח לכתיבה ל-Anthropic (Claude) ו-OpenAI, ובהשוואת מודלים גם ל-Google ו-OpenRouter. אף אחד מהם לא מקבל שמות של חברי הקבוצה.",

@@ -396,6 +396,31 @@
   color: var(--warn-line);
   font-weight: 700;
 }
+/* "לאשר שליחה": what is sent (scope all or text). */
+.md-scope {
+  border: 0;
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.md-scope legend {
+  font-weight: 700;
+  margin-block-end: var(--sp-2);
+}
+.md-scope-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  min-height: 44px;
+  cursor: pointer;
+}
+.md-scope-opt input {
+  margin-block-start: 0.3em;
+  min-width: 20px;
+  min-height: 20px;
+}
 
 /* Sheets. */
 .md-sheet .md-radios {

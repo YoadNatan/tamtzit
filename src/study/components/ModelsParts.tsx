@@ -404,12 +404,13 @@ export function RouteSheet({ ctx, routeKey, state, keys, preset, onClose, onDone
 
 export function ProvidersBlock({ ctx, state, keys, onChange }: { ctx: Ctx; state: ModelsState; keys: Record<string, boolean> | null; onChange: () => void }) {
   const [sheet, setSheet] = useState<{ kind: "key" | "approve"; id: string } | null>(null);
+  const [scope, setScope] = useState<"all" | "text">("all");
   const [busy, setBusy] = useState(false);
   const any = PROVIDERS.some((p) => keys?.[p.id]);
   const set = async (id: string, allowed: boolean) => {
     setBusy(true);
     try {
-      await setProvider(ctx.group.id, id, allowed);
+      await setProvider(ctx.group.id, id, allowed, allowed ? scope : "all");
       onChange();
     } catch (e) {
       ctx.say(modelsFail(e instanceof Error ? e.message : ""));
@@ -444,12 +445,21 @@ export function ProvidersBlock({ ctx, state, keys, onChange }: { ctx: Ctx; state
                 ok ? (
                   <>
                     <span className="a-chip ok">{MC.approved}</span>
+                    {state.providers[p.id]?.scope === "text" ? <span className="a-chip">{MC.scopeTextChip}</span> : null}
                     <button type="button" className="a-link" disabled={busy} onClick={() => void set(p.id, false)}>
                       {MC.unapprove}
                     </button>
                   </>
                 ) : (
-                  <button type="button" className="a-btn small" disabled={busy} onClick={() => setSheet({ kind: "approve", id: p.id })}>
+                  <button
+                    type="button"
+                    className="a-btn small"
+                    disabled={busy}
+                    onClick={() => {
+                      setScope("all");
+                      setSheet({ kind: "approve", id: p.id });
+                    }}
+                  >
                     {MC.approve}
                   </button>
                 )
@@ -477,10 +487,26 @@ export function ProvidersBlock({ ctx, state, keys, onChange }: { ctx: Ctx; state
       {sheet && p ? (
         <Sheet label={sheet.kind === "key" ? MC.keyTitle(p.name) : MC.approveTitle(p.name)} head={<h2 className="a-h2">{sheet.kind === "key" ? MC.keyTitle(p.name) : MC.approveTitle(p.name)}</h2>} onClose={() => setSheet(null)}>
           {sheet.kind === "key" ? (
-            <p>{MC.keyText(p.name, p.env)}</p>
+            <>
+              {MC.keyLimit[p.id] ? <p>{MC.keyLimit[p.id]}</p> : null}
+              <p>{MC.keyText(p.name, p.env)}</p>
+              {unverifiedOf(p.id) ? <p className="a-small a-muted">{MC.keyPrices}</p> : null}
+            </>
           ) : (
             <>
-              <p>{MC.approveText(p.name)}</p>
+              <fieldset className="md-scope">
+                <legend>{MC.scopeLegend}</legend>
+                {(["all", "text"] as const).map((s) => (
+                  <label key={s} className="md-scope-opt">
+                    <input type="radio" name="md-scope" value={s} checked={scope === s} onChange={() => setScope(s)} />
+                    <span>
+                      <b>{s === "all" ? MC.scopeAll : MC.scopeText}</b>
+                      <span className="a-small a-muted"> · {s === "all" ? MC.scopeAllSub : MC.scopeTextSub}</span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+              <p>{MC.approveText(p.name, scope)}</p>
               <div className="a-row md-sheet-actions">
                 <button type="button" className="a-btn primary" disabled={busy} onClick={() => void set(p.id, true)}>
                   {MC.approveYes}
@@ -496,6 +522,9 @@ export function ProvidersBlock({ ctx, state, keys, onChange }: { ctx: Ctx; state
     </section>
   );
 }
+
+/** Whether any of a provider's models has a price not yet checked on the vendor's page. */
+const unverifiedOf = (provider: string): boolean => ALL_MODELS.some((m) => m.provider === provider && !m.verified);
 
 /** Whether health says any provider's key is set (null: it did not answer). */
 export function useKeys(): Record<string, boolean> | null {
