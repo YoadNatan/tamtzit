@@ -292,7 +292,14 @@ const DESK = { width: 1440, height: 900 };
       const planned = S.plan(EID, null, "sheet");
       const label = norm(await offer.innerText());
       expect(/^שאלות דומות לכל הדף · כ-\$\d+\.\d\d$/.test(label), `the end of the round: ${label}`);
-      expect(norm(await page.locator(".sim-sheet-offer").innerText()).includes(`שאלה דומה אחת לכל שאלה (${planned.items.length}).`) && norm(await page.locator(".sim-sheet-offer").innerText()).includes("״סטים של הקבוצה״"), `one for each of the ${planned.items.length} questions without one, into the group's sets`);
+      expect(
+        norm(await page.locator(".sim-sheet-offer").innerText()).includes(
+          planned.items.length === 1
+            ? "שאלה דומה אחת לשאלה היחידה שעוד אין לה דומה."
+            : `שאלה דומה אחת לכל אחת מ-${planned.items.length} השאלות שעוד אין להן דומה.`,
+        ) && norm(await page.locator(".sim-sheet-offer").innerText()).includes("״סטים של הקבוצה״"),
+        `one for each of the ${planned.items.length} questions without one, into the group's sets`,
+      );
       await shot("similar-sheet-offer");
       await noSideScroll("similar-sheet-offer");
       await offer.click();
@@ -329,6 +336,23 @@ const DESK = { width: 1440, height: 900 };
         expect((await page.locator(".sim-more, .sim-have").count()) > 0, "a wrong answer in the sheet's set offers more like it");
       }
       await shot("similar-set-session");
+      // A numeric twin answered in the set's round counts in the set's score (study_qset_answer_value, stamped on the attempt).
+      const setQs = db.qsetsMock.items.filter((i) => i.set_id === set.id).sort((a, b) => a.pos - b.pos).map((i) => db.practice.questions.find((q) => q.id === i.question_id));
+      const numTwin = setQs.find((q) => q && q.form === "numeric");
+      if (numTwin) {
+        await page.goto(`${mock.base}/?v=practice&s=k.${set.id}&n=all`);
+        await skipTo(numTwin.question.slice(0, 20));
+        const k = db.practice.keys.get(numTwin.id);
+        await page.getByLabel(/^התשובה/).fill(String(k.num));
+        await page.getByRole("button", { name: "לבדוק", exact: true }).click();
+        await page.locator(".sa-verdict").first().waitFor({ timeout: 10000 });
+        const row = db.practice.answers.filter((a) => a.question_id === numTwin.id).pop();
+        const att = row && db.qsetsMock.attempts.find((a) => a.id === row.set_attempt);
+        expect(Boolean(row && row.correct && att && att.set_id === set.id), `a numeric twin in the set's round: the answer is right and stamped on the set's attempt (${JSON.stringify(row ?? null)})`);
+        const fin = db.qsetsMock.finish({ ...att });
+        expect(fin.answered >= 1 && fin.right_n >= 1, `the attempt's score counts it (answered ${fin.answered}, right ${fin.right_n})`);
+        await shot("similar-set-numeric");
+      } else steps.setNumeric = "no numeric twin in the set";
 
       /* ── 5c. the review's ⋯: once a day ── */
       await open("שוהם", `/?v=exams&e=${EID}&c=${CID}`, { viewport: DESK });

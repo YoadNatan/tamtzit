@@ -186,7 +186,8 @@ const FRAME = () => {
       await page.keyboard.press("ArrowDown");
       await page.locator(".r-item b[id^=ri-]", { hasText: "שאלה 7" }).waitFor({ timeout: 10000 });
       await page.keyboard.press("KeyE");
-      await page.locator(".r-item .r-edit").waitFor({ timeout: 10000 });
+      // With release A1 "לתקן טקסט" is the edit sheet (.se), with A0 the text editor (.r-edit).
+      await page.locator(".r-item .r-edit, .r-item .se").first().waitFor({ timeout: 10000 });
       check(`${name}: ArrowDown opens the next item, E "לתקן טקסט"`, true);
     }
     await page.goto(`${mock.base}/?v=exams&new=sheet&c=${cid}&l=${L}`);

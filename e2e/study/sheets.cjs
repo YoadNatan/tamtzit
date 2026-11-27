@@ -20,7 +20,7 @@
 //      page's text is "לבדוק מול הדף" with "ההעתקה שונה מהטקסט בקובץ".
 //   5. The wide review at 820 (iPad upright) and 1440: two columns, the text
 //      on the right and the page on the left, the page's picture; the figure's
-//      box opens its item; ArrowDown the next item, E "לתקן טקסט"; Enter
+//      box opens its item; ArrowDown (in the list) and J/K the next item, E "לתקן טקסט"; Enter
 //      confirms nothing (no key change); under 760 the list as on a phone.
 //   6. A computer (1440): the upload's two columns, a PDF dropped (a past exam
 //      by default from new=1, switched to a sheet), the cover kept (6 pages),
@@ -340,11 +340,16 @@ const DESK = { width: 1440, height: 900 };
         await page.waitForTimeout(500);
         const keysAfter = JSON.stringify([...db.practice.keys.entries()].filter(([id]) => items(EID).some((q) => q.id === id)));
         expect(M.keyLog.length === logBefore && keysAfter === keysBefore, `${dev}: Enter confirms nothing (no key changed)`);
-        await page.keyboard.press("ArrowUp");
+        // With nothing focused the arrows scroll the page; K (and J) move between items from anywhere.
+        const y0 = await page.evaluate(() => scrollY);
+        await page.keyboard.press("ArrowDown");
+        await page.waitForTimeout(300);
+        expect((await page.locator(".r-item b[id^=ri-]", { hasText: "שאלה 7" }).count()) === 1, `${dev}: ArrowDown on the page opens no item (it scrolls: ${y0} → ${await page.evaluate(() => scrollY)})`);
+        await page.keyboard.press("KeyK");
         await page.locator(".r-item b[id^=ri-]", { hasText: "שאלה 6" }).waitFor({ timeout: 10000 });
         await page.keyboard.press("KeyE");
         await page.locator(".r-item .r-edit").waitFor({ timeout: 10000 });
-        expect(true, `${dev}: ArrowUp back, E opens ״לתקן טקסט״`);
+        expect(true, `${dev}: K back, E opens ״לתקן טקסט״`);
         await page.screenshot({ path: path.join(out, `sheets-review-${dev}-edit.png`) });
         await page.locator(".r-item").getByRole("button", { name: "ביטול" }).click();
         await page.locator(".r-item").getByRole("button", { name: /^לסגור את שאלה/ }).click();

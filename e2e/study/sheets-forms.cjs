@@ -12,7 +12,7 @@
 //      multi-part question's parts, 8 options, a numeric item's answer from the
 //      answers file and its worked solution ("פתרון מלא"), an open item's
 //      model answer and rubric. The lecture page's row then lists the sheet.
-//   4. "⋯ עוד": the edit sheet ("לתקן את השאלה") fixes a question's lines and
+//   4. "לתקן טקסט": the edit sheet fixes a question's lines and
 //      adds an option (study_exam_item_fix, logged); "לסמן איור" draws a box on
 //      the page at 1440 ("לסמן" on) and "כל העמוד כאיור" in one tap;
 //      "לתקן תשובה" on a numeric item sets its tolerance (study_item_solution,
@@ -221,8 +221,11 @@ const DESK = { width: 1440, height: 900 };
 
       /* ── 4. ⋯ עוד: the edit sheet, the answer, add, retire ── */
       card = await openItem("1");
+      // One verb: "לתקן טקסט" opens the edit sheet with release A1 ("לתקן את השאלה" is gone from ⋯ עוד).
       await card.getByRole("button", { name: "⋯ עוד" }).click();
-      await card.getByRole("button", { name: "לתקן את השאלה" }).click();
+      expect((await card.getByRole("button", { name: "לתקן את השאלה" }).count()) === 0, "⋯ עוד has no second edit verb");
+      await card.getByRole("button", { name: "⋯ עוד" }).click();
+      await card.getByRole("button", { name: "לתקן טקסט", exact: true }).click();
       const se = card.locator(".se");
       await se.waitFor({ timeout: 10000 });
       expect((await se.getByRole("radio", { name: "פתוחה" }).count()) === 1 && (await se.getByRole("radio", { name: "מספרית" }).count()) === 1, "the edit sheet: the five forms");
@@ -301,7 +304,16 @@ const DESK = { width: 1440, height: 900 };
       await page.mouse.up();
       const seText = norm(await card.locator(".se").innerText());
       expect(seText.includes(`איור ${before6 + 1}`), `לסמן: a drag draws a box (${before6}; ${await draw.getByRole("button", { name: "לסמן", exact: true }).getAttribute("aria-pressed")}; ${JSON.stringify(bb)} ${JSON.stringify(vis)}; ${seText.slice(seText.indexOf("איור"), seText.indexOf("איור") + 80)})`);
-      await page.screenshot({ path: path.join(out, "forms-draw-desktop.png"), fullPage: true });
+      // The drawn box settles (its mark on the page) before anything else; then a change of the window's
+      // height (as a full-page screenshot makes) keeps the edit sheet and its unsaved box (the review's C2).
+      await page.waitForFunction((n) => document.querySelectorAll(".se .pv-mine").length >= n, before6 + 1, { timeout: 10000 });
+      await page.waitForTimeout(600);
+      await page.setViewportSize({ width: DESK.width, height: DESK.height + 400 });
+      await page.waitForTimeout(300);
+      await page.setViewportSize(DESK);
+      await page.waitForTimeout(300);
+      expect((await card.locator(".se").count()) === 1 && norm(await card.locator(".se").innerText()).includes(`איור ${before6 + 1}`), "a resize keeps the edit sheet and the box drawn (not saved yet)");
+      await page.screenshot({ path: path.join(out, "forms-draw-desktop.png") });
       await card.locator(".se").getByRole("button", { name: "לשמור" }).click();
       await page.getByText("התיקון נשמר.").first().waitFor({ timeout: 10000 });
       await shot("forms-review-desktop");
@@ -408,18 +420,43 @@ const DESK = { width: 1440, height: 900 };
       expect((await page.locator(".ss-openadd").count()) === 0 && exam.skipped_open === 0, "copied: no button, nothing skipped");
 
       /* ── 7. the budget pause ── */
-      const held = db.sheetsMock.seed({ course: COURSE, title: "דף בלי תשובות", lecture: null, images: clean.slice(1), forms: true, keySource: "none", pause: true });
+      const held = db.sheetsMock.seed({
+        course: COURSE,
+        title: "דף בלי תשובות",
+        lecture: null,
+        images: clean.slice(1),
+        forms: true,
+        keySource: "none",
+        pause: true,
+      });
+      // While the line is spent: "להמשיך" waits, disabled, with the day; "לסיים" is the primary; the held unit says נעצר.
+      M.sheetsCap = true;
       await go(`/?v=exams&e=${held.id}&c=${CID}`);
       const pause = page.locator(".ss-paused");
       await pause.waitFor({ timeout: 15000 });
       expect(norm(await pause.innerText()).includes("נעצר: נגמר התקציב החודשי."), "a held sheet: נעצר: נגמר התקציב החודשי.");
-      await shot("forms-paused");
-      await noSideScroll("forms-paused");
-      M.sheetsCap = true;
-      await pause.getByRole("button", { name: "להמשיך" }).click();
-      await page.getByText("התקציב החודשי עוד לא מספיק להמשך.", { exact: false }).first().waitFor({ timeout: 10000 });
-      expect(held.status === "reading", "להמשיך while the line is spent: refused, still held");
+      await pause.locator("#ss-paused-when").waitFor({ timeout: 10000 });
+      const goOn = pause.getByRole("button", { name: "להמשיך" });
+      expect(
+        (await goOn.isDisabled()) &&
+          norm(await pause.innerText()).includes("אפשר להמשיך מ-1 בחודש.") &&
+          (await pause.locator(".a-btn.primary").innerText()).includes("לסיים בלי תשובות מוצעות"),
+        "the line spent: להמשיך disabled with the day it can, לסיים the primary",
+      );
+      expect(
+        (await page.locator(".x-units .x-retry").count()) === 0 && (await page.locator(".x-units .a-chip", { hasText: "נעצר" }).count()) > 0,
+        "the held unit: נעצר, no לנסות שוב",
+      );
+      await shot("forms-paused-spent");
+      await noSideScroll("forms-paused-spent");
       M.sheetsCap = false;
+      await page.reload();
+      await pause.waitFor({ timeout: 15000 });
+      await page.waitForFunction(() => !document.querySelector(".ss-paused #ss-paused-when") && !document.querySelector(".ss-paused .a-btn[disabled]"), null, {
+        timeout: 10000,
+      });
+      expect((await pause.locator(".a-btn.primary").innerText()).includes("להמשיך"), "room again: להמשיך the primary");
+      await shot("forms-paused");
       await pause.getByRole("button", { name: "לסיים בלי תשובות מוצעות" }).click();
       await until(() => held.status === "ready", "the held sheet finishing", 20000);
       await page.locator(".r-sum").waitFor({ timeout: 20000 });

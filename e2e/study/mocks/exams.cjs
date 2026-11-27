@@ -744,6 +744,15 @@ module.exports = {
       // D23: the units the budget held go on; with skipSolve the held solve units are dropped.
       const held = M.units.filter((u) => u.exam_id === e.id && u.held && u.status === "failed");
       if (!held.length) return send(409, { error: "nothing to resume" });
+      // dry: would it go on now (the paused card offers "להמשיך" only then).
+      if (b.dry === true)
+        return send(200, {
+          read: 0,
+          key: 0,
+          solve: 0,
+          skipped: 0,
+          fits: !M.sheetsCap,
+        });
       if (M.sheetsCap) return send(402, { error: "sheets_cap" });
       const out = { read: 0, key: 0, solve: 0, skipped: 0 };
       for (const u of held) {

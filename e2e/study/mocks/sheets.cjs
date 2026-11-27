@@ -49,7 +49,7 @@ const DOT = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 
 const SHEET_RPCS = new Set([
   "study_sheet_review", "study_exam_item_fix", "study_exam_item_add", "study_exam_item_retire", "study_exam_item_unretire", "study_item_solution",
-  "study_answer_value", "study_open_show", "study_open_mark", "study_question_solution", "study_sheet_progress",
+  "study_answer_value", "study_qset_answer_value", "study_open_show", "study_open_mark", "study_question_solution", "study_sheet_progress",
 ]);
 const labelKey = (s) => String(s ?? "").replace(/[\s.'"׳״()-]+/g, "").toLowerCase();
 
@@ -93,10 +93,23 @@ module.exports = {
         for (const q of P.questions.filter((x) => x.exam_id === e.id)) {
           const k = key(q) ?? {};
           items_extra[q.id] = {
-            label: q.no_label ?? String(q.exam_no), figures: q.figures ?? (q.figure ? [q.figure] : []), exact: q.exact ?? null, series: q.series ?? null, step: q.step ?? null, form: q.form,
-            retired_by: q.retired_by ? nameOf(q.retired_by) : null, retired_at: q.retired_at ?? null, num: k.num ?? null, num_unit: k.num_unit ?? null, num_tol: k.num_tol ?? null,
-            model_answer: k.model_answer ?? null, rubric: k.rubric ?? [], solution: k.solution ?? null, solution_origin: k.solution_origin ?? null, solution_conf: null,
-            marked: M.openMarks.some((x) => x.question_id === q.id),
+            label: q.no_label ?? String(q.exam_no),
+            figures: q.figures ?? (q.figure ? [q.figure] : []),
+            exact: q.exact ?? null,
+            series: q.series ?? null,
+            step: q.step ?? null,
+            form: q.form,
+            retired_by: q.retired_by ? nameOf(q.retired_by) : null,
+            retired_at: q.retired_at ?? null,
+            num: k.num ?? null,
+            num_unit: k.num_unit ?? null,
+            num_tol: k.num_tol ?? null,
+            model_answer: k.model_answer ?? null,
+            rubric: k.rubric ?? [],
+            solution: k.solution ?? null,
+            solution_origin: k.solution_origin ?? null,
+            solution_conf: null,
+            locked: M.openMarks.some((x) => x.question_id === q.id) || P.answers.some((a) => a.question_id === q.id),
           };
         }
         const lec = db.lectures.find((l) => l.id === e.lecture_id && !l.deleted_at);
@@ -226,7 +239,12 @@ module.exports = {
         q.has_key = keyed(q);
         return json({ num: k.num, num_unit: k.num_unit, num_tol: k.num_tol, model_answer: k.model_answer, rubric: k.rubric, solution: k.solution, origin: k.origin, solution_origin: k.solution_origin });
       }
+      case "study_qset_answer_value":
       case "study_answer_value": {
+        // Inside a practice set's attempt (O 3's wrapper): L's attempt check, then the same answer, stamped.
+        const attempt = fn === "study_qset_answer_value" ? db.qsetsMock?.attemptFor(me, body.p_attempt, body.p_question) : null;
+        if (fn === "study_qset_answer_value" && !db.qsetsMock) return refuse("off");
+        if (attempt?.error) return refuse(attempt.error);
         const q = P.questions.find((x) => x.id === body.p_question);
         if (!q || !member) return refuse("question not found");
         if (q.retired_at) return refuse("retired");
@@ -237,7 +255,7 @@ module.exports = {
         const v = body.p_value === null || body.p_value === undefined ? null : Number(body.p_value);
         const tol = (Math.abs(k.num) * (k.num_tol ?? 1)) / 100;
         const correct = v !== null && Math.abs(v - k.num) <= Math.max(tol, 1e-12);
-        P.answers.push({ user_id: me, question_id: q.id, choice: null, value: v, correct, mode: body.p_mode ?? "exam", ms: body.p_ms ?? null, confidence: null, answered_at: now });
+        P.answers.push({ user_id: me, question_id: q.id, choice: null, value: v, correct, mode: body.p_mode ?? "exam", ms: body.p_ms ?? null, confidence: null, answered_at: now, set_attempt: attempt?.id ?? null });
         return json({ correct, num: k.num, unit: k.num_unit ?? null, tol: k.num_tol ?? 1, solution: k.solution ?? null, origin: k.origin ?? null, conf: k.conf ?? null, solution_origin: k.solution_origin ?? null });
       }
       case "study_open_show": {
