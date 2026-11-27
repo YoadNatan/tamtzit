@@ -3,6 +3,7 @@ import { getDeadline, waitUntil } from "@vercel/functions"; // 3.10.5, pinned
 import { pointsAheadStep } from "../../server/study/bank.js";
 import { claimExam, runExamUnit, UNIT_STOP_MS, type ExamClaim } from "../../server/study/exams.js";
 import { notifyStep } from "../../server/study/notify.js";
+import { claimSimilar, runSimilar, type SimilarClaim } from "../../server/study/similarGen.js";
 import { assertSchema, errorText, HttpError, json, serverClient, workerKey } from "../../server/study/study.js";
 import { rpcStore, writeUnit, type Unit } from "../../server/study/writer.js";
 
@@ -17,6 +18,11 @@ import { rpcStore, writeUnit, type Unit } from "../../server/study/writer.js";
  *                                      items without a key; section S 2,
  *                                      server/study/exams.ts), kicked by
  *                                      study_private.exam_dispatch
+ * POST /api/study/work  { similar }    the same key: the jobs of a run of
+ *                                      similar questions (section O 3,
+ *                                      server/study/similarGen.ts), one
+ *                                      after another while time is left,
+ *                                      kicked by study_private.similar_dispatch
  * POST /api/study/work  { notify:true } the same key: send the pushes that
  *                                      are due (notifications, section R;
  *                                      server/study/notify.ts), kicked by
@@ -41,7 +47,10 @@ import { rpcStore, writeUnit, type Unit } from "../../server/study/writer.js";
  * waitUntil), 503 schema (no section B) or 500. An exam's unit ({exam})
  * answers 200 {claimed:false}, 202 {claimed:true, kind} (the unit runs on
  * in waitUntil and stops at 200 s), 400 {error:"exam"}, 503 schema (no
- * section S at 2) or 500. The pushes ({notify:true}) answer 200
+ * section S at 2) or 500. A run of similar questions ({similar}) answers
+ * 200 {claimed:false}, 202 {claimed:true} (its jobs run on in waitUntil
+ * until 200 s), 400 {error:"similar"}, 503 schema (no section O at 3 or L
+ * at 1) or 500. The pushes ({notify:true}) answer 200
  * {claimed:false} (none due, or reason "vapid": the keys are missing or
  * not a pair, and nothing is claimed), 202 {claimed:true, n} (they go out
  * in waitUntil), 400 {error:"notify"}, 503 schema (no section R) or 500.
@@ -80,12 +89,14 @@ async function handler(req: Request): Promise<Response> {
   let points: unknown;
   let exam: unknown;
   let notify: unknown;
+  let similar: unknown;
   try {
-    const body = (await req.json()) as { lectureId?: unknown; points?: unknown; exam?: unknown; notify?: unknown };
+    const body = (await req.json()) as { lectureId?: unknown; points?: unknown; exam?: unknown; notify?: unknown; similar?: unknown };
     lectureId = body.lectureId ?? "";
     points = body.points;
     exam = body.exam;
     notify = body.notify;
+    similar = body.similar;
   } catch {
     /* below */
   }
@@ -93,6 +104,10 @@ async function handler(req: Request): Promise<Response> {
     if (notify !== true) return json(400, { error: "notify" });
     // pg_net posts to study_site_url, so this is the site's own address: the pushes' links open it.
     return notifyStep(new URL(req.url).origin);
+  }
+  if (similar !== undefined) {
+    if (typeof similar !== "string" || !UUID.test(similar)) return json(400, { error: "similar" });
+    return similarStep(similar.toLowerCase());
   }
   if (exam !== undefined) {
     if (typeof exam !== "string" || !UUID.test(exam)) return json(400, { error: "exam" });
@@ -144,6 +159,26 @@ async function examStep(examId: string): Promise<Response> {
   const stopAt = Math.min(deadline - 25_000, started + UNIT_STOP_MS);
   waitUntil(runExamUnit(sb, c, { stopAt }).catch((e) => console.error(`study exam ${examId} ${c.kind}: ${errorText(e)}`)));
   return json(202, { claimed: true, kind: c.kind });
+}
+
+/** A run of similar questions: its first job claimed with the key alone,
+ *  answered 202 at once, then its jobs one after another in waitUntil until
+ *  200 s (each stops there), or 25 s before the invocation's deadline. */
+async function similarStep(runId: string): Promise<Response> {
+  const sb = serverClient();
+  let claim: SimilarClaim | null;
+  try {
+    await assertSchema(sb, "similar");
+    claim = await claimSimilar(sb, runId);
+  } catch (e) {
+    return json(e instanceof HttpError && e.status === 503 ? 503 : 500, { error: errorText(e) });
+  }
+  if (!claim) return json(200, { claimed: false });
+  const started = Date.now();
+  const deadline = getDeadline()?.getTime() ?? started + 300_000;
+  const stopAt = Math.min(deadline - 25_000, started + UNIT_STOP_MS);
+  waitUntil(runSimilar(sb, claim, { stopAt }).catch((e) => console.error(`study similar ${runId}: ${errorText(e)}`)));
+  return json(202, { claimed: true });
 }
 
 export default { fetch: handler };

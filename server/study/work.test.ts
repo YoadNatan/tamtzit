@@ -106,6 +106,8 @@ const rest = createServer(async (req, res) => {
       return send(res, 200, notifyClaims.shift() ?? { rows: [], more: false, wait_ms: null });
     case "/rest/v1/rpc/study_notify_done":
       return send(res, 200, 1);
+    case "/rest/v1/rpc/study_claim_similar":
+      return send(res, 200, null);
     case "/rest/v1/rpc/study_writing_input":
       return inputStatus === 200 ? send(res, 200, input) : send(res, inputStatus, { code: "XX000", message: "boom" });
     case "/rest/v1/rpc/study_reserve":
@@ -311,6 +313,23 @@ test("notify: 401 without the key, 400 for anything but true, 503 without sectio
   } finally {
     noVapid();
   }
+});
+
+/* ── {similar}: a run of similar questions (section O 3; server/study/similarGen.ts) ── */
+test("similar: 400 for anything but a run's id, 503 without section O at 3 and L at 1, 200 claimed false when there is no job; with the key alone", async () => {
+  for (const bad of ["x", 1, null, {}]) {
+    const res = await notifyKick({ similar: bad });
+    assert.deepEqual([res.status, await res.json()], [400, { error: "similar" }], JSON.stringify(bad));
+  }
+  schemaBody = { ...REQUIRED_SCHEMA, O: 2, L: 1 };
+  const old = await notifyKick({ similar: LECTURE });
+  assert.equal(old.status, 503);
+  assert.equal(rpcs("study_claim_similar").length, 0);
+  schemaBody = { ...REQUIRED_SCHEMA, O: 3, L: 1 };
+  const none = await notifyKick({ similar: LECTURE.toUpperCase() });
+  assert.deepEqual([none.status, await none.json()], [200, { claimed: false }]);
+  const claim = rpcs("study_claim_similar")[0].body;
+  assert.deepEqual([claim.p_run, claim.p_key], [LECTURE.toLowerCase(), KEY]);
 });
 
 test("notify: without VAPID keys 200 reason vapid and no claim; with them 200 when nothing is due, 202 and done() when something is", async () => {
