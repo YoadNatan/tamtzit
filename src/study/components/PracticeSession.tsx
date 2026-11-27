@@ -862,7 +862,9 @@ export default function PracticeSession({ route, ctx }: ScreenProps<"practice">)
         </span>
       ) : null;
     // An uploaded item's printed label ("שאלה 3א") and a multi-part question's part ("סעיף א׳ מתוך 3").
-    const partNow = flags.sheetForms && qq.series && qq.step ? Object.values(data.byId).filter((x) => x.series === qq.series).length : 0;
+    // An uploaded item's only (a sheet's or a twin's): a lecture's case in steps has its own "שלב N מתוך M".
+    const partNow =
+      flags.sheetForms && qq.series && qq.step && (qq.source === "exam" || qq.source === "twin") ? Object.values(data.byId).filter((x) => x.series === qq.series).length : 0;
     const partText = partNow > 1 ? `סעיף ${"אבגדהוזחטיכל"[(qq.step ?? 1) - 1] ?? qq.step}׳ מתוך ${partNow}` : "";
     const labelChip = flags.sheetForms && extra && scope?.kind === "exam" ? <span className="a-chip pq-label-chip">שאלה {extra.label}</span> : null;
     // A twin that reuses its source's figure draws it from its sheet's page (from_exam, release B).
