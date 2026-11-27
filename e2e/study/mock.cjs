@@ -37,7 +37,7 @@ const now = () => new Date().toISOString();
 const uuid = (n) => `${String(n).padStart(8, "0")}-0000-4000-8000-${String(n).padStart(12, "0")}`;
 /** A database with every section loaded, at the versions the approved features
  *  need (spec §2.11, §12.2.2): the SQL always runs before a release's flags. */
-const SCHEMA_ALL = { F: 1, A: 1, W: 2, Q: 3, Z: 3, C: 3, K: 2, P: 2, M: 3, N: 1, V: 1, U: 3, J: 1, H: 3, B: 1, G: 2, E: 1, T: 3, X: 1, S: 2 };
+const SCHEMA_ALL = { F: 1, A: 1, W: 2, Q: 3, Z: 3, C: 3, K: 2, P: 2, M: 3, N: 1, V: 1, U: 3, J: 1, H: 3, B: 1, G: 2, E: 1, T: 3, X: 1, S: 2, Y: 1 };
 /** The registry this branch's SQL writes (each section's last statement in
  *  supabase/study-schema.sql): what production's study_schema() answers once
  *  the release's SQL has run. Builds with every flag off and release 1's
@@ -56,7 +56,7 @@ const SCHEMA_SQL = sqlSchema();
  *  "j" (wave 4's J: the SQL's J 1), "m" (wave 4's M: the SQL's M 1) and "w4"
  *  (all of wave 4), every section for the sets that turn on what is not
  *  built yet. */
-const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i", "notify", "pm", "ps", "o0", "o", "os"];
+const SQL_SETS = ["off", "rel1", "rel2", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i", "notify", "pm", "ps", "o0", "o", "os", "y"];
 const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_ALL) });
 /** The flag set a build was made with, as the e2e scripts name it: "off", "rel1"
  *  (release 1: VITE_STUDY_QUESTIONS, VITE_STUDY_PRACTICE and VITE_STUDY_CARDS;
@@ -126,14 +126,17 @@ const schemaFor = (set) => ({ ...(SQL_SETS.includes(set) ? SCHEMA_SQL : SCHEMA_A
  *  wrong answer, "שאלות דומות לכל הדף", the twins in the sheet's practice set
  *  on L's shelf (ps is in o), section O 3 with L 1; e2e/study/similar.cjs
  *  and mocks/similar.cjs);
+ *  "y" ("os" with VITE_STUDY_MODELS: "השוואת מודלים", the owner's comparisons,
+ *  the results and "מי כותב מה", section Y 1; e2e/study/models.cjs and
+ *  mocks/lab.cjs);
  *  E2E_ANCHOR=1 says a release's build has
  *  VITE_STUDY_ANCHOR too (package N: a paragraph's comments show in its chip
  *  row, not the dot). `any`: a package's flag is on, so the "תרגול" tab shows
  *  (questions or cards); the others name the features the scripts look for. */
 function flagSetOf(name) {
   const set = name || process.env.E2E_FLAGS || "off";
-  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i", "notify", "pm", "ps", "o0", "o", "os"].includes(set))
-    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1, prod, s1, s2, i, notify, pm, ps, o0, o or os`);
+  if (!["off", "rel1", "rel2", "all", "notoday", "k", "v", "j", "m", "w4", "a5", "u", "t", "w5", "h5", "g", "e5", "w5x", "guide", "guide1", "prod", "s1", "s2", "i", "notify", "pm", "ps", "o0", "o", "os", "y"].includes(set))
+    throw new Error(`unknown flag set ${set}: off, rel1, rel2, all, notoday, k, v, j, m, w4, a5, u, t, w5, h5, g, e5, w5x, guide, guide1, prod, s1, s2, i, notify, pm, ps, o0, o, os or y`);
   if (set === "guide1") return { ...flagSetOf("rel1"), set, guide: true };
   if (set === "s1") return { ...flagSetOf("prod"), set, courses: true };
   if (set === "s2") return { ...flagSetOf("s1"), set, exams: true };
@@ -149,6 +152,8 @@ function flagSetOf(name) {
   if (set === "o") return { ...flagSetOf("o0"), set, sheetForms: true };
   // os is release B, o with VITE_STUDY_SIMILAR (section O 3; L's shelf is in ps, under o).
   if (set === "os") return { ...flagSetOf("o"), set, similar: true };
+  // y is "השוואת מודלים", os with VITE_STUDY_MODELS (section Y 1).
+  if (set === "y") return { ...flagSetOf("os"), set, models: true };
   const every = set === "all" || set === "notoday";
   const w5x = set === "w5x" || set === "guide" || set === "prod";
   const h5 = set === "h5" || w5x;
@@ -797,7 +802,7 @@ async function createMock(o) {
     const b = req.method === "POST" ? await readBody(req) : null;
     for (const plugin of plugins) if ((await plugin.apiGuard?.(req, res, db, b)) !== undefined) return;
     for (const plugin of plugins) if ((await plugin.api?.(req, res, db, b, { auth, users })) !== undefined) return;
-    if (p === "/api/study/health") return sendJson(res, { ok: true, anthropicKey: true, supabase: true, worker: false, workerOk: false, budgetUsd: db.budgetUsd, schema: db.schema, schemaOk: true, features: {} });
+    if (p === "/api/study/health") return sendJson(res, { ok: true, anthropicKey: true, supabase: true, worker: false, workerOk: false, budgetUsd: db.budgetUsd, schema: db.schema, schemaOk: true, features: {}, providers: db.providers ?? { anthropic: true, openai: false, google: false, openrouter: false }, stalePrices: [] });
     const me = users.get((req.headers.authorization || "").replace(/^Bearer /, ""));
     if (!me) return sendJson(res, { error: "not signed in" }, 401);
     // A deleted lecture is not found, as loadLecture answers (section F).

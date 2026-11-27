@@ -249,7 +249,7 @@ function SideBySide({ run, keyed, maxCost }: { run: Run; keyed: boolean; maxCost
               </b>
               {k >= 1.2 ? <span className="a-chip ok">{MC.cheaper(times(k))}</span> : k > 0 && k <= 1 / 1.2 ? <span className="a-chip warn">{MC.dearer(times(1 / k))}</span> : null}
             </div>
-            <QualityPrice quality={q} qualityText={q === null ? (MC.status[o.status ?? ""] ?? "—") : keyed ? `${Math.round(q * 100)}% · ${MC.items(items)}` : `${Math.round(q * 100)}%`} price={cost} priceText={usd(cost)} max={maxCost} small={keyed && items < 20} />
+            <QualityPrice quality={q} qualityText={q === null ? (MC.status[o.status ?? ""] ?? "—") : keyed ? `${Math.round(q * 100)}% · ${MC.items(items)}` : `${Math.round(q * 100)}%`} price={cost} priceText={usd(cost)} max={maxCost} />
           </div>
         );
       })}

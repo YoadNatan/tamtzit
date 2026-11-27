@@ -91,6 +91,8 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
       ? MC.offline
       : dailyDone
         ? MC.dailyDone(state.lab.runs_today)
+        : left <= 0
+          ? modelsFail("lab_budget")
         : picked.length < 2
           ? MC.pickTwo
           : picked.length > 4
@@ -197,7 +199,7 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
                       {!m.verified ? <span className="a-chip warn">{MC.tagUnverified}</span> : null}
                       {m.expensive ? <span className="a-chip warn">{MC.tagExpensive}</span> : null}
                     </span>
-                    <span className="md-check-usd a-small">{est !== undefined ? `≈${usd(est)}` : quote ? "" : "…"}</span>
+                    <span className="md-check-usd a-small">{est !== undefined ? <bdi dir="ltr">≈{usd(est)}</bdi> : quote ? "" : "…"}</span>
                   </label>
                 </li>
               );

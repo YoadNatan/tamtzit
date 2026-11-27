@@ -27,7 +27,7 @@ import {
   type ModelsState,
   type Recommendation,
 } from "../lib/models";
-import { MC, modelsFail, routeName, usd } from "../lib/modelsCopy";
+import { iso, MC, modelsFail, routeName, usd } from "../lib/modelsCopy";
 import "../styles/models.css";
 import { RouteLink, Sheet } from "./Shell";
 
@@ -241,7 +241,7 @@ export function ModelCard({ m, route, board, max, onUse }: { m: BoardModel; rout
 
 /** The recommendation's callout (C34, C34b) and its button. */
 export function RecCallout({ rec, route, onUse }: { rec: Recommendation; route: string; onUse: () => void }) {
-  const name = labelOf(rec.model);
+  const name = iso(labelOf(rec.model));
   return (
     <aside className="a-callout rec md-rec" aria-label={MC.use(routeName(route))}>
       <p>
@@ -319,7 +319,13 @@ export function RouteSheet({ ctx, routeKey, state, keys, preset, onClose, onDone
                 {modelInfo(id)?.expensive ? <span className="a-chip warn">{MC.tagExpensive}</span> : null}
               </span>
               <span className="md-radio-usd a-small">
-                {board ? `≈ ${MC.month(usd(p.usd))}` : "…"}
+                {board ? (
+                  <>
+                    <bdi dir="ltr">≈{usd(p.usd)}</bdi> {MC.perMonthShort}
+                  </>
+                ) : (
+                  "…"
+                )}
                 {board && p.rough ? <span className="a-muted"> · {MC.rough}</span> : null}
               </span>
             </label>
@@ -334,11 +340,11 @@ export function RouteSheet({ ctx, routeKey, state, keys, preset, onClose, onDone
       {board && !board.models.length ? <p className="a-small a-muted">{MC.noBoard}</p> : null}
       {pick !== current ? (
         <div className="a-callout md-say" role="status">
-          <p>{now.base > 0 ? MC.routeSay(name, labelOf(pick), usd(chosen.usd), usd(now.usd)) : MC.routeNoUse(name, labelOf(pick))}</p>
-          {next ? <p className="a-small">{MC.nextPrice(next.split("-").reverse().join("."), labelOf(pick), usd(chosen.usd * priceFactor(pick, next)))}</p> : null}
+          <p>{now.base > 0 ? MC.routeSay(name, iso(labelOf(pick)), usd(chosen.usd), usd(now.usd)) : MC.routeNoUse(name, iso(labelOf(pick)))}</p>
+          {next ? <p className="a-small">{MC.nextPrice(next.split("-").reverse().join("."), iso(labelOf(pick)), usd(chosen.usd * priceFactor(pick, next)))}</p> : null}
           {routeKey === "part" || routeKey === "outline" ? <p className="a-small">{MC.summaries}</p> : null}
           {modelInfo(pick)?.provider !== "anthropic" ? <p className="a-small">{MC.otherProvider(name, PROVIDERS.find((x) => x.id === modelInfo(pick)?.provider)?.name ?? "")}</p> : null}
-          {expensive ? <p className="a-small">{MC.expensive(labelOf(pick), times(ratio || 2), usd(chosen.usd))}</p> : null}
+          {expensive ? <p className="a-small">{MC.expensive(iso(labelOf(pick)), times(ratio || 2), usd(chosen.usd))}</p> : null}
         </div>
       ) : null}
       {error ? (

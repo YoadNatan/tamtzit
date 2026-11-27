@@ -376,7 +376,7 @@ function RoutesTab({ ctx, state, onState }: { ctx: Ctx; state: ModelsState; onSt
           <span className="md-route-name">
             <b>{routeName(k)}</b>
             <span className="a-small a-muted">
-              {usage ? (p.usd > 0 ? `≈ ${MC.month(usd(p.usd))}` : "$0") : ""}
+              {usage ? p.usd > 0 ? <><bdi dir="ltr">≈{usd(p.usd)}</bdi> {MC.perMonthShort}</> : "$0" : ""}
               {usage && p.rough && p.usd > 0 ? ` · ${MC.rough}` : ""}
             </span>
           </span>

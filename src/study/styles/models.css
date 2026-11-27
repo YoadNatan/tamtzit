@@ -10,6 +10,15 @@
 .md-screen > * {
   min-width: 0;
 }
+/* Cards hold one column as wide as they are: nothing inside sizes them. */
+.md-model,
+.md-answer,
+.md-side,
+.md-first,
+.md-progress,
+.md-run-card {
+  grid-template-columns: minmax(0, 1fr);
+}
 .md-tabs > .a-btn {
   min-height: 44px;
   padding-inline: var(--sp-4);
@@ -62,17 +71,6 @@
 .md-kind {
   min-height: 44px;
   padding-inline: var(--sp-7);
-  border: 1px solid var(--line);
-  cursor: pointer;
-  font: inherit;
-  color: var(--ink);
-}
-.md-kind.on,
-.md-kind[aria-checked="true"] {
-  border-color: var(--accent-fill);
-  background: var(--accent-fill);
-  color: var(--accent-fill-ink);
-  font-weight: 700;
 }
 .md-kind[aria-disabled="true"] {
   border-style: dashed;
@@ -312,9 +310,9 @@
   min-height: 44px;
 }
 .md-facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(7.5em, 1fr));
-  gap: var(--sp-4) var(--sp-6);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4) var(--sp-8);
   margin: 0;
 }
 .md-facts div {

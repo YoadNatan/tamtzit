@@ -90,6 +90,10 @@ export const ROUTE_SUBLINE: Readonly<Record<string, string>> = {
   sheet_read: "העמודים של דף תרגילים מועתקים לשאלות",
 };
 
+/** A model's name inside a Hebrew line, isolated (U+2068 … U+2069) so its digits and dots stay in order. */
+export const iso = (name: string): string => `\u2068${name}\u2069`;
+const OPUS = iso("Claude Opus 5.5");
+
 /** A kind's one name; the key itself for a key this build does not name. */
 export const routeName = (key: string): string => ROUTE_NAMES[key] ?? key;
 
@@ -130,7 +134,7 @@ export const MC = {
   // Switch off, offline (C18, C57, C59)
   off: "השוואות כבויות כרגע.",
   offline: "צריך חיבור כדי להריץ השוואה.",
-  routesOff: "המעבר בין מודלים כבוי כרגע: הכול נכתב ב-Claude Opus 5.5.",
+  routesOff: `המעבר בין מודלים כבוי כרגע: הכול נכתב ב-${OPUS}.`,
   // A new comparison (C7, C10, C12, C13, C14, C55)
   newTitle: "השוואה חדשה",
   step1: "מה להשוות?",
@@ -241,11 +245,12 @@ export const MC = {
  last30: (name: string, x: string) => `(״${name}״: ${x} ב-30 הימים האחרונים)`,
   monthNote: "״בחודש״: מה הסוג הזה עלה ב-30 הימים האחרונים, אילו נכתב כולו במודל הזה, כולל הרצות חוזרות אחרי סירוב.",
   // מי כותב מה (C36-C41, C59)
-  routesLead: "כל סוג עבודה נכתב במודל אחד. מה שלא שונה נכתב ב-Claude Opus 5.5.",
+  routesLead: `כל סוג עבודה נכתב במודל אחד. מה שלא שונה נכתב ב-${OPUS}.`,
   inside: "בדיקות ופעולות פנימיות",
   chipDefault: "ברירת מחדל",
   chipChanged: (d: string) => `שונה ב-${d}`,
   month: (x: string) => `${x} בחודש`,
+  perMonthShort: "בחודש",
   sheetTitle: (name: string) => `מי כותב ״${name}״`,
   sheetLead: "המחיר לחודש לפי 30 הימים האחרונים.",
   routeSay: (name: string, model: string, now: string, before: string) =>
@@ -257,7 +262,7 @@ export const MC = {
   change: "החלפה",
   changeAnyway: "להחליף",
   back: "חזרה לברירת המחדל",
-  backSay: (name: string) => `״${name}״ חוזר ל-Claude Opus 5.5.`,
+  backSay: (name: string) => `״${name}״ חוזר ל-${OPUS}.`,
   changed: (name: string) => `המודל של ״${name}״ הוחלף.`,
   noBoard: "בלי השוואות של הסוג הזה המחיר הוא הערכה גסה, לפי מחירי המודלים בלבד.",
   sheetNo: "ביטול",
