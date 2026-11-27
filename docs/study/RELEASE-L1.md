@@ -10,6 +10,15 @@ monthly line for sets, 5 new sets a member a day, the switch
 Built on `dev`; each release point below works on its own and rolls back on
 its own.
 
+> **From this `dev` (27 Nov 2026), the SQL step is parts 1 to 12 in order.**
+> Uploaded sheets ([`RELEASE-O.md`](RELEASE-O.md)) edit earlier sections in
+> place, so wherever this page says "run part 10", run `supabase/parts/1.sql`
+> to `12.sql` in order instead, each to the end. That one run installs
+> sections R, L and O together. Nothing new shows or spends until its own
+> Vercel flag below; the switches start as the checks below list them. It was
+> tested on a copy of production's schema
+> (`eed179e`). The read-only checks below are unchanged.
+
 ## Rules for all of it
 
 - **Production only.** Never put `VITE_STUDY_MAKE` or `VITE_STUDY_SETS` on

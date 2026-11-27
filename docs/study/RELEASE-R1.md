@@ -6,6 +6,15 @@ its own and rolls back on its own. Yoad's choices for it (on by default:
 "עכשיו בקבוצה" and "בשבילך"; the daily reminder off at 19:30; a pilot with
 the switch off first) are in [`DECISIONS-2026-11-26.md`](DECISIONS-2026-11-26.md).
 
+> **From this `dev` (27 Nov 2026), the SQL step is parts 1 to 12 in order.**
+> Uploaded sheets ([`RELEASE-O.md`](RELEASE-O.md)) edit earlier sections in
+> place, so wherever this page says "run part 9", run `supabase/parts/1.sql`
+> to `12.sql` in order instead, each to the end. That one run installs
+> sections R, L and O together. Nothing new shows or spends until its own
+> Vercel flag below; the switches start as the checks below list them. It was
+> tested on a copy of production's schema
+> (`eed179e`). The read-only checks below are unchanged.
+
 ## Rules for all of it
 
 - **Production only.** Never put `VITE_STUDY_NOTIFY` or a `STUDY_VAPID_*`
