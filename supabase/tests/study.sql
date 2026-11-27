@@ -402,7 +402,7 @@ select 'F27. ' || coalesce('FAIL: anon may also call ' || string_agg(p.proname, 
                          -- section Y (models, the comparison): the worker's claim, status poll and saves (the claim refuses
                          -- a signed-in caller), the model of a moment, and the routes read (each refusing without the key)
                          'study_lab_claim', 'study_lab_status', 'study_lab_output_save', 'study_lab_check_save', 'study_lab_judged',
-                         'study_model_at', 'study_models');
+                         'study_model_at', 'study_models', 'study_lecture_made');
 
 -- F28 (review of F0, SEC-1): the slide pictures stay with their lecture. The
 -- app of before F0 deletes a lecture's files first and then its row, which
@@ -12300,6 +12300,14 @@ select pg_temp.yok('Y4-unset', not exists (select 1 from public.study_model_rout
   and (select string_agg(coalesce(model, 'default'), ',' order by id) from public.study_model_route_log where group_id = :'yg' and route = 'solver') = 'claude-haiku-5-5,default'
   and pg_temp.yas('', format('select public.study_model_at(%L, %L, now(), %L)', :'yg', 'solver', :'ykey')) = 'null',
   'back to the default: the row goes, the log keeps a null, the moment''s model is the default again');
+
+-- ── When a lecture was made (the as-of rule for its outline and parts) ──
+select pg_temp.yok('Y4-made', pg_temp.yas('', format('select public.study_lecture_made(%L, %L) = (select created_at from public.study_lectures where id = %L)', :'yl', :'ykey', :'yl')) = 'true'
+  and pg_temp.yas(:'yb', format('select public.study_lecture_made(%L) is not null', :'yl')) = 'true'
+  and pg_temp.yas('', format('select public.study_lecture_made(%L)', :'yl')) = 'error: forbidden'
+  and pg_temp.yas(:'yz', format('select public.study_lecture_made(%L)', :'yl')) = 'error: forbidden'
+  and pg_temp.yas('', format('select public.study_lecture_made(%L, %L)', :'yg', :'ykey')) = 'null',
+  'the worker with the key and a member read when the lecture was made; anon without the key and an outsider cannot; no such lecture: null');
 
 -- ── Providers: the owner's consent, scope all unless text is asked ──
 select pg_temp.yas(:'yb', format('select public.study_model_provider_set(%L, %L, true)', :'yg', 'openai')) as y5_provider_1 \gset

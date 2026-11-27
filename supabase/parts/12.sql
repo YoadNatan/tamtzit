@@ -1325,6 +1325,24 @@ begin
 end;
 $$;
 
+-- When a lecture was made: the server's as-of rule for its outline and
+-- parts (D7: a summary keeps the model of its first 48 hours). For the
+-- worker with the key, or a member of the lecture's group; null for a
+-- lecture that is none.
+create or replace function public.study_lecture_made(p_lecture uuid, p_key text default null)
+returns timestamptz language plpgsql stable security definer set search_path = public as $$
+declare
+  v_group uuid;
+  v_at    timestamptz;
+begin
+  select l.group_id, l.created_at into v_group, v_at from public.study_lectures l where l.id = p_lecture;
+  if not (study_private.is_worker(p_key) or (v_group is not null and coalesce(public.study_is_member(v_group), false))) then
+    raise exception 'forbidden';
+  end if;
+  return v_at;
+end;
+$$;
+
 -- The owner sets a key's model (null: back to the default), through the
 -- server, which checked the model against the registry and the providers.
 create or replace function public.study_model_set(p_group uuid, p_route text, p_model text, p_note text default '', p_key text default null)
@@ -1909,6 +1927,7 @@ end;
 $$;
 
 revoke all on function public.study_lab_owner(uuid), public.study_models(uuid, text), public.study_model_at(uuid, text, timestamptz, text),
+  public.study_lecture_made(uuid, text),
   public.study_model_set(uuid, text, text, text, text), public.study_model_provider_set(uuid, text, boolean, text),
   public.study_lab_plan(uuid, uuid, text, text, jsonb, jsonb, text, text, jsonb, text, numeric, numeric, text),
   public.study_lab_slot(uuid, text, text), public.study_lab_judge_input(uuid, text),
@@ -1929,6 +1948,7 @@ grant execute on function public.study_model_set(uuid, text, text, text, text),
   public.study_lab_slot(uuid, text, text), public.study_lab_judge_input(uuid, text) to authenticated;
 -- A member's read, or the worker's with the key; the worker's alone (the key inside; the claim refuses a signed-in caller).
 grant execute on function public.study_models(uuid, text), public.study_model_at(uuid, text, timestamptz, text),
+  public.study_lecture_made(uuid, text),
   public.study_lab_claim(uuid, text, text, numeric, numeric, text), public.study_lab_status(uuid, text),
   public.study_lab_output_save(uuid, text, text, text, jsonb, numeric, int, int, text, jsonb, text, text),
   public.study_lab_check_save(uuid, jsonb, text, text), public.study_lab_judged(uuid, text, jsonb, numeric, text)
