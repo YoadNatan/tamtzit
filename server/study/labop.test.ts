@@ -71,6 +71,10 @@ let owner = true;
 let labOn = true;
 let runCap = 1.5;
 let claimFail: Record<string, string> = {};
+/** study_lab_claim_slots' whole-run check (strict): the line or the 80% line refused before any slot. */
+let lineFail = "";
+let routesNow: Record<string, { model: string }> = {};
+let providersNow: Record<string, { allowed: boolean; scope: string }> = {};
 let slotOf: Record<string, { model: string; status: string; tries: number }> = {};
 let planned: any = null;
 let labels = ["א", "ב"];
@@ -120,7 +124,7 @@ const rest = createServer(async (req, res) => {
     case "/rest/v1/rpc/study_lab_owner":
       return send(res, 200, owner);
     case "/rest/v1/rpc/study_models":
-      return send(res, 200, { routes: {}, providers: {}, switches: { lab: labOn, routes: true }, lab: { line_usd: 3.3, run_cap: runCap, daily_runs: 3 } });
+      return send(res, 200, { routes: routesNow, providers: providersNow, switches: { lab: labOn, routes: true }, lab: { line_usd: 3.3, run_cap: runCap, daily_runs: 3 } });
     case "/rest/v1/rpc/study_lab_bank":
       return send(res, 200, { lecture: LECTURE, items: bank });
     case "/rest/v1/study_lectures":
@@ -171,6 +175,17 @@ const rest = createServer(async (req, res) => {
     case "/rest/v1/rpc/study_lab_claim":
       if (claimFail[body.p_label]) return send(res, 400, pgError(claimFail[body.p_label]));
       return send(res, 200, 500 + labels.indexOf(body.p_label));
+    case "/rest/v1/rpc/study_lab_claim_slots": {
+      // As section Y: strict and the run's line refused, nothing is claimed and the empty run is dropped; else each slot alone.
+      if (body.p_strict && lineFail) return send(res, 200, { claimed: {}, refused: {}, error: lineFail, dropped: true });
+      const claimed: Record<string, number> = {};
+      const refused: Record<string, string> = {};
+      for (const x of body.p_slots as Array<{ label: string }>) {
+        if (claimFail[x.label]) refused[x.label] = claimFail[x.label];
+        else claimed[x.label] = 500 + labels.indexOf(x.label);
+      }
+      return send(res, 200, { claimed, refused, error: null });
+    }
     case "/rest/v1/rpc/study_lab_output_save":
       texts[body.p_output] = body.p_text ?? "";
       return send(res, 200, true);
@@ -235,6 +250,10 @@ beforeEach(() => {
   labOn = true;
   runCap = 1.5;
   claimFail = {};
+  lineFail = "";
+  routesNow = {};
+  providersNow = {};
+  delete process.env.OPENAI_API_KEY;
   planned = null;
   labels = ["א", "ב"];
   runStatus = "running";
@@ -283,8 +302,12 @@ test("run: the owner's question check, blind: the response is counts only; each 
   // The owner's token reads the bank and the slots; the claims and the saves are the worker's (no user, OD5).
   assert.equal(calls("study_lab_bank")[0].auth, `Bearer ${TOKEN}`);
   assert.equal(calls("study_lab_slot")[0].auth, `Bearer ${TOKEN}`);
-  for (const c of [...calls("study_lab_claim"), ...calls("study_lab_output_save"), ...calls("study_settle")]) assert.notEqual(c.auth, `Bearer ${TOKEN}`, c.path);
-  assert.deepEqual(calls("study_lab_claim").map((c) => [c.body.p_label, c.body.p_part]), [["א", "answer"], ["ב", "answer"]]);
+  for (const c of [...calls("study_lab_claim_slots"), ...calls("study_lab_output_save"), ...calls("study_settle")]) assert.notEqual(c.auth, `Bearer ${TOKEN}`, c.path);
+  // Every slot claimed in one call (one transaction: the group's spend never shows one label's estimate alone, D12).
+  assert.equal(calls("study_lab_claim_slots").length, 1);
+  assert.equal(calls("study_lab_claim").length, 0);
+  assert.deepEqual(calls("study_lab_claim_slots")[0].body.p_slots.map((x: any) => x.label), ["א", "ב"]);
+  assert.equal(calls("study_lab_claim_slots")[0].body.p_strict, true);
   // Each model got the frozen request: no server-side fallback, no app fallback (D15).
   assert.deepEqual(sent.map((b) => b.model).sort(), ["claude-haiku-5-5", "claude-opus-5-5"]);
   for (const b of sent) assert.equal(b.fallbacks, undefined, "no server-side fallback in a comparison");
@@ -347,20 +370,21 @@ test("refusals before the plan: not the owner, the switch, the models, the run's
   assert.equal(await status({ action: "nonsense" }), "400 bad action");
 });
 
-test("a first claim refused is the request's status, and every slot ends with the reason; a later one only its own", async () => {
-  claimFail = { א: "lab_budget" };
+test("the run's line refused at the claim is the request's status (the empty run is dropped); a later slot's refusal only its own", async () => {
+  lineFail = "lab_budget";
   let r = await call({ action: "run", group: GROUP, route: "solver", models: ["claude-opus-5-5", "claude-haiku-5-5"] });
   assert.equal(r.status, 402);
   assert.equal((await r.json()).error, "lab_budget");
-  assert.deepEqual(calls("study_lab_skip").map((c) => [c.body.p_label, c.body.p_reason]), [["א", "lab_budget"], ["ב", "lab_budget"]]);
+  assert.equal(calls("study_lab_skip").length, 0, "the run is dropped in SQL: no slot to end, no daily run used");
   assert.equal(sent.length, 0);
   log = [];
-  claimFail = { ב: "reserve" };
+  lineFail = "";
+  claimFail = { ב: "budget" };
   r = await call({ action: "run", group: GROUP, route: "solver", models: ["claude-opus-5-5", "claude-haiku-5-5"] });
   assert.equal(r.status, 200);
   const got = lines(await r.text());
   await drain();
-  assert.deepEqual(calls("study_lab_skip").map((c) => [c.body.p_label, c.body.p_reason]), [["ב", "reserve"]]);
+  assert.equal(calls("study_lab_skip").length, 0, "a refused slot ends with its reason in study_lab_claim_slots");
   assert.equal(sent.length, 1, "the claimed slot runs");
   assert.deepEqual(got.filter((l) => l.t === "progress").map((l) => l.ready), [1, 2], "the skipped slot counts as ended");
 });
@@ -379,6 +403,11 @@ test("retry: one slot that timed out, once, on a new claim; resume: only the slo
   await drain();
   assert.doesNotMatch(text, /claude|haiku/i);
   assert.deepEqual(calls("study_lab_claim").map((c) => [c.body.p_label, c.body.p_part]), [["א", "retry"]]);
+  // The retry reserves the run's dearest model's worst case (Opus here, though א is Haiku): the spend does not tell the label's model.
+  const { labEstimate } = await import("./lab.js");
+  const frozen = planned.p_request;
+  assert.equal(calls("study_lab_claim")[0].body.p_estimate, Number(labEstimate(frozen, "claude-opus-5-5").toFixed(5)));
+  assert.ok(labEstimate(frozen, "claude-opus-5-5") > labEstimate(frozen, "claude-haiku-5-5"));
   assert.equal(saves().get("out-0").p_status, "done");
   slotOf.א = { model: "claude-haiku-5-5", status: "timeout", tries: 1 };
   const again = await call({ action: "retry", run: RUN, label: "א" });
@@ -393,7 +422,8 @@ test("retry: one slot that timed out, once, on a new claim; resume: only the slo
   assert.equal(res.status, 200);
   await res.text();
   await drain();
-  assert.deepEqual(calls("study_lab_claim").map((c) => c.body.p_label), ["ב"]);
+  assert.deepEqual(calls("study_lab_claim_slots")[0].body.p_slots.map((x: any) => x.label), ["ב"]);
+  assert.equal(calls("study_lab_claim_slots")[0].body.p_strict, false);
   assert.deepEqual(sent.map((b) => b.model), ["claude-opus-5-5"]);
   runStatus = "done";
   const closed = await call({ action: "resume", run: RUN });
@@ -448,7 +478,7 @@ test("price: the material and each model's worst case, read as run reads it; not
   assert.equal(all.pictures, true);
   assert.ok(Object.keys(all.models).length >= 10, Object.keys(all.models).join(","));
   assert.deepEqual(all.source, { exam: EXAM, pages: [1, 2, 3, 4] });
-  for (const name of ["study_lab_plan", "study_lab_claim", "study_reserve"]) assert.equal(calls(name).length, 0, `${name} is not called`);
+  for (const name of ["study_lab_plan", "study_lab_claim", "study_lab_claim_slots", "study_reserve"]) assert.equal(calls(name).length, 0, `${name} is not called`);
   assert.equal(sent.length, 0, "no model called");
   // The owner's gate and an unknown kind.
   owner = false;
@@ -474,11 +504,12 @@ test("run, a kind members rate: practice with the AI score; after the answers th
   assert.equal(planned.p_title, "שאלות תרגול · משתנים (בדוי) · חלק 1");
   assert.equal(planned.p_request.material.count, 3);
   // The answers, then a paid check of each and the AI score, every one a worker's claim (no user, OD5).
+  assert.deepEqual(calls("study_lab_claim_slots")[0].body.p_slots.map((x: any) => x.label), ["א", "ב"]);
   assert.deepEqual(
     calls("study_lab_claim").map((c) => `${c.body.p_label}:${c.body.p_part}`).sort(),
-    ["j:judge", "א:answer", "א:solve", "ב:answer", "ב:solve"],
+    ["j:judge", "א:solve", "ב:solve"],
   );
-  for (const c of calls("study_lab_claim")) assert.notEqual(c.auth, `Bearer ${TOKEN}`);
+  for (const c of [...calls("study_lab_claim"), ...calls("study_lab_claim_slots")]) assert.notEqual(c.auth, `Bearer ${TOKEN}`);
   const s = saves();
   for (const k of ["out-0", "out-1"]) {
     assert.equal(s.get(k).p_status, "done");
@@ -539,4 +570,46 @@ test("price, a kind members rate: the paid steps' worst cases beside the models'
   const run = await call({ action: "run", group: GROUP, route: "ask", models: ["claude-opus-5-5", "claude-haiku-5-5"] });
   assert.equal(`${run.status} ${(await run.json()).error}`, "400 no question");
   assert.equal(calls("study_lab_plan").length, 0);
+});
+
+test("consent again after the run began (D17): a retry or resume on a provider no longer approved sends nothing; a step's route there falls back to the default", async () => {
+  process.env.OPENAI_API_KEY = "FAKE-test-key-not-real";
+  const GPT = "openai:gpt-6.2-sol";
+  planned = { p_route: "solver", p_request: null };
+  await call({ action: "run", group: GROUP, route: "solver", models: ["claude-opus-5-5", "claude-haiku-5-5"] }).then((r) => r.text());
+  await drain();
+  // The slot's model is OpenAI's; the group's "לאשר שליחה" was withdrawn since.
+  log = [];
+  sent.length = 0;
+  runStatus = "done";
+  providersNow = { openai: { allowed: false, scope: "all" } };
+  slotOf.א = { model: GPT, status: "timeout", tries: 0 };
+  const r = await call({ action: "retry", run: RUN, label: "א" });
+  assert.equal(`${r.status} ${(await r.json()).error}`, "400 not allowed");
+  assert.equal(calls("study_lab_claim").length, 0, "nothing claimed");
+  assert.equal(sent.length, 0, "nothing sent");
+  // Resume: that slot ends with the reason, the Claude one runs.
+  log = [];
+  runStatus = "running";
+  slotOf = { א: { model: GPT, status: "waiting", tries: 0 }, ב: { model: "claude-opus-5-5", status: "waiting", tries: 0 } };
+  const res = await call({ action: "resume", run: RUN });
+  assert.equal(res.status, 200);
+  await res.text();
+  await drain();
+  assert.deepEqual(calls("study_lab_skip").map((c) => [c.body.p_label, c.body.p_reason]), [["א", "not allowed"]]);
+  assert.deepEqual(calls("study_lab_claim_slots")[0].body.p_slots.map((x: any) => x.label), ["ב"]);
+  assert.deepEqual(sent.map((b) => b.model), ["claude-opus-5-5"]);
+});
+
+test("a step's model: the solver route on a provider that is not approved runs the check on the default, never there", async () => {
+  process.env.OPENAI_API_KEY = "FAKE-test-key-not-real";
+  routesNow = { solver: { model: "openai:gpt-6.2-sol" } };
+  providersNow = { openai: { allowed: false, scope: "all" } };
+  lectureRow = lecture38;
+  const first = await call({ action: "run", group: GROUP, route: "practice", models: ["claude-opus-5-5", "claude-haiku-5-5"] });
+  await first.text();
+  await drain();
+  const solves = sent.filter((b) => JSON.stringify(b.output_config?.format?.schema ?? {}).includes('"answers"'));
+  assert.ok(solves.length >= 1, "the solver's check ran");
+  for (const b of solves) assert.equal(b.model, "claude-opus-5-5");
 });

@@ -1,7 +1,7 @@
 import { getDeadline, waitUntil } from "@vercel/functions"; // 3.10.5, pinned
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ALL_MODELS, modelInfo, ROUTE_KEYS, type RouteKey } from "../../../shared/study/models.js";
+import { ALL_MODELS, DEFAULT_MODEL, modelInfo, ROUTE_KEYS, type RouteKey } from "../../../shared/study/models.js";
 import { SHEET_READ_PAGES } from "../../../shared/study/sheetPrice.js";
 import { monthlyCap } from "../budget.js";
 import { run, settleFor, type RunResult, type Spend } from "../claude.js";
@@ -280,13 +280,11 @@ async function readSlot(sb: SupabaseClient, runId: string, label: string): Promi
   return { ...(data as Omit<Slot, "label">), label };
 }
 
-/** Claims a slot (the worker: no user). Returns its reservation, or the refusal's code. */
-async function claim(worker: SupabaseClient, runId: string, label: string, part: "answer" | "retry", estimate: number): Promise<number | string> {
-  const { data, error } = await worker.rpc("study_lab_claim", keyed({ p_run: runId, p_label: label, p_part: part, p_estimate: estimate, p_cap: monthlyCap() }));
-  if (error) return error.message;
-  const id = Number(data);
-  return Number.isSafeInteger(id) && id > 0 ? id : "no reservation";
-}
+/** A reservation's id from an RPC's answer, or null. */
+const idOf = (v: unknown): number | null => {
+  const id = Number(v);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+};
 
 /** Ends a slot that could not start, with its reason; never fails the caller. */
 async function skip(worker: SupabaseClient, runId: string, label: string, reason: string): Promise<void> {
@@ -294,33 +292,57 @@ async function skip(worker: SupabaseClient, runId: string, label: string, reason
   if (error) console.error(`lab skip ${runId}: ${error.message}`);
 }
 
-/** Claims the slots that wait (answer) or the one to retry. `strict`: the
- *  first refusal is the request's (the slots left are skipped); otherwise a
- *  refused slot is skipped with its reason and the others go on. */
-async function claimAll(
-  worker: SupabaseClient,
-  runId: string,
-  slots: Slot[],
-  frozen: Frozen,
-  part: "answer" | "retry",
-  strict: boolean,
-): Promise<Claimed[]> {
+/** Claims a run's waiting slots in one transaction (study_lab_claim_slots,
+ *  the worker: no user). Their reservations commit together, so the group's
+ *  spend never shows one label's estimate on its own (D12). `strict` (run):
+ *  when the month's line or the group's 80% line cannot take every slot,
+ *  nothing is claimed, the empty run is dropped (it uses none of the day's
+ *  runs) and the refusal is the request's. Otherwise a refused slot ends
+ *  with its reason there and the others go on; a slot another tab claimed
+ *  is left alone (nothing to pay twice). */
+async function claimSlots(worker: SupabaseClient, runId: string, slots: Slot[], frozen: Frozen, strict: boolean): Promise<Claimed[]> {
+  if (!slots.length) return [];
+  const estimates = new Map(slots.map((s) => [s.label, labEstimate(frozen, s.model)]));
+  const { data, error } = await worker.rpc(
+    "study_lab_claim_slots",
+    keyed({ p_run: runId, p_slots: slots.map((s) => ({ label: s.label, estimate: Number(estimates.get(s.label)!.toFixed(5)) })), p_cap: monthlyCap(), p_strict: strict }),
+  );
+  if (error) throw rpcFail(error);
+  const d = (data ?? {}) as { claimed?: Record<string, unknown>; error?: string | null };
+  if (d.error) throw refusal(d.error);
   const out: Claimed[] = [];
-  for (const [i, s] of slots.entries()) {
-    const estimate = labEstimate(frozen, s.model);
-    const got = await claim(worker, runId, s.label, part, estimate);
-    if (typeof got === "number") {
-      out.push({ ...s, reservation: got, estimate, part });
-      continue;
-    }
-    if (got === "not waiting") continue; // a second tab or a double tap claimed it: nothing to pay twice
-    if (strict && !out.length) {
-      if (part === "answer") for (const rest of slots.slice(i)) await skip(worker, runId, rest.label, got);
-      throw refusal(got);
-    }
-    if (part === "answer") await skip(worker, runId, s.label, got);
+  for (const s of slots) {
+    const id = idOf(d.claimed?.[s.label]);
+    if (id) out.push({ ...s, reservation: id, estimate: estimates.get(s.label)!, part: "answer" });
   }
   return out;
+}
+
+/** A retry's claim (study_lab_claim, part retry). It reserves the run's
+ *  dearest model's worst case, whichever label is retried, so the group's
+ *  spend does not tell which model the label is; the SQL refuses it past the
+ *  run's cap (run_cap: what the run spent so far and this). */
+async function claimRetry(worker: SupabaseClient, runId: string, slot: Slot, estimate: number): Promise<Claimed> {
+  const { data, error } = await worker.rpc("study_lab_claim", keyed({ p_run: runId, p_label: slot.label, p_part: "retry", p_estimate: Number(estimate.toFixed(5)), p_cap: monthlyCap() }));
+  if (error) throw refusal(error.message);
+  const id = idOf(data);
+  if (!id) throw new HttpError(500, "no reservation");
+  return { ...slot, reservation: id, estimate, part: "retry" };
+}
+
+/** A slot's model checked again before a later call (resume, retry): the
+ *  provider's key, the group's "לאשר שליחה" and its scope as they are now
+ *  (D17), and pictures. null: it may answer. */
+function refusedNow(frozen: Frozen, model: string, state: LabState): string | null {
+  return labRefusal(model, frozen.route as LabRoute, { providers: state.providers, pictures: picturePaths(frozen).length > 0 });
+}
+
+/** A paid step's recorded model (the AI score's judge) checked again: the
+ *  switch `routes` off keeps only the default; otherwise routeRefusal as
+ *  production decides (consent withdrawn, scope narrowed, key gone). */
+function stepRefusedNow(model: string, key: "solver" | "judge", state: LabState): string | null {
+  if (state.switches.routes === false && model !== DEFAULT_MODEL) return "not allowed";
+  return routeRefusal(model, key, { providers: state.providers });
 }
 
 const line = (o: unknown) => JSON.stringify(o) + "\n";
@@ -514,8 +536,8 @@ async function runAction(req: Request, body: AiBody, started: number): Promise<R
     if (why) throw refusal(why);
   }
   // The paid steps of a rated kind: the solver's check (practice), the AI score when asked for (OD12, off by default).
-  const judge = body.judge === true && isRatedRoute(route) && m.lecture ? stepModel(state.routes, "judge") : null;
-  const solver = stepModel(state.routes, "solver");
+  const judge = body.judge === true && isRatedRoute(route) && m.lecture ? stepModel(state, "judge") : null;
+  const solver = stepModel(state, "solver");
   const steps = m.lecture ? stepsEstimate({ frozen: m.frozen, lecture: m.lecture, models: models.length, solver, judge }) : { check: 0, judge: 0 };
   const total = runEstimate(m.frozen, models).total + steps.check + steps.judge;
   const cap = Number(state.lab?.run_cap ?? LAB_RUN_CAP_USD);
@@ -541,17 +563,20 @@ async function runAction(req: Request, body: AiBody, started: number): Promise<R
   const p = plan as { run: string; labels: string[] };
   const worker = serverClient();
   const slots = await Promise.all(p.labels.map((l) => readSlot(sb, p.run, l)));
-  const claimed = await claimAll(worker, p.run, slots, m.frozen, "answer", true);
+  const claimed = await claimSlots(worker, p.run, slots, m.frozen, true);
   const client = anthropic();
   const after = m.lecture ? stepsOf({ sb, worker, client, runId: p.run, frozen: m.frozen, lecture: m.lecture, solver, judge }) : undefined;
   return runSlots({ sb, worker, client, runId: p.run, frozen: m.frozen, slots: claimed, total: slots.length, ready: slots.length - claimed.length, started, after });
 }
 
-/** The steps of a run read back (resume, retry, check, judge): its lecture, the solver's model, the AI score's model if asked. */
-async function stepsFor(sb: SupabaseClient, worker: SupabaseClient, client: Anthropic, runId: string, slot: Slot & { lecture?: string | null; judge_model?: string | null }): Promise<After | undefined> {
+/** The steps of a run read back (resume, retry): its lecture, the solver's
+ *  model as production would route it now, the AI score's model if asked and
+ *  still allowed (left out otherwise: "ציון AI" can be asked for again). */
+async function stepsFor(sb: SupabaseClient, worker: SupabaseClient, client: Anthropic, runId: string, slot: Slot, state: LabState): Promise<After | undefined> {
   if (!slot.request || !isRatedRoute(slot.request.route) || !slot.lecture) return undefined;
-  const [lecture, state] = await Promise.all([loadLecture(sb, slot.lecture), readModels(sb, slot.group)]);
-  return stepsOf({ sb, worker, client, runId, frozen: slot.request, lecture, solver: stepModel(state.routes, "solver"), judge: slot.judge_model ?? null });
+  const lecture = await loadLecture(sb, slot.lecture);
+  const judge = slot.judge_model && !stepRefusedNow(slot.judge_model, "judge", state) ? slot.judge_model : null;
+  return stepsOf({ sb, worker, client, runId, frozen: slot.request, lecture, solver: stepModel(state, "solver"), judge });
 }
 
 /** The run as the owner reads it (study_lab_run): its labels, status and counts. */
@@ -572,10 +597,18 @@ async function resumeAction(req: Request, body: AiBody, started: number): Promis
   const slots = (await Promise.all(r.labels.map((l) => readSlot(sb, runId, l)))).filter((s) => s.status === "waiting");
   const frozen = slots[0]?.request ?? null;
   const worker = serverClient();
-  const claimed = frozen ? await claimAll(worker, runId, slots, frozen, "answer", false) : [];
+  const state = slots[0] ? await readModels(sb, slots[0].group) : null;
+  // Each model again as it is now (D17): a provider whose consent or scope changed since the run began ends its slot.
+  const allowed: Slot[] = [];
+  for (const s of slots) {
+    const why = frozen && state ? refusedNow(frozen, s.model, state) : null;
+    if (why) await skip(worker, runId, s.label, why);
+    else allowed.push(s);
+  }
+  const claimed = frozen ? await claimSlots(worker, runId, allowed, frozen, false) : [];
   const client = anthropic();
-  const after = slots[0] ? await stepsFor(sb, worker, client, runId, slots[0]) : undefined;
-  return runSlots({ sb, worker, client, runId, frozen: frozen as Frozen, slots: claimed, total: r.total, ready: r.total - slots.length, started, after });
+  const after = slots[0] && state ? await stepsFor(sb, worker, client, runId, slots[0], state) : undefined;
+  return runSlots({ sb, worker, client, runId, frozen: frozen as Frozen, slots: claimed, total: r.total, ready: r.total - claimed.length, started, after });
 }
 
 async function retryAction(req: Request, body: AiBody, started: number): Promise<Response> {
@@ -585,14 +618,19 @@ async function retryAction(req: Request, body: AiBody, started: number): Promise
   if (!label) throw new HttpError(400, "bad slots");
   const { sb } = await memberClient(req);
   const r = await readRun(sb, runId);
-  const slot = await readSlot(sb, runId, label);
-  if (!slot.request || !["timeout", "error"].includes(slot.status) || slot.tries >= 1) throw new HttpError(409, "not waiting");
+  const slots = await Promise.all(r.labels.map((l) => readSlot(sb, runId, l)));
+  const slot = slots.find((s) => s.label === label);
+  if (!slot?.request || !["timeout", "error"].includes(slot.status) || slot.tries >= 1) throw new HttpError(409, "not waiting");
+  const state = await readModels(sb, slot.group);
+  // The model again as it is now (D17): a provider whose consent or scope changed gets nothing.
+  const why = refusedNow(slot.request, slot.model, state);
+  if (why) throw refusal(why);
   const worker = serverClient();
-  const claimed = await claimAll(worker, runId, [slot], slot.request, "retry", true);
-  if (!claimed.length) throw new HttpError(409, "not waiting");
+  const dearest = Math.max(...slots.map((s) => labEstimate(slot.request!, s.model)));
+  const claimed = await claimRetry(worker, runId, slot, dearest);
   const client = anthropic();
-  const after = await stepsFor(sb, worker, client, runId, slot);
-  return runSlots({ sb, worker, client, runId, frozen: slot.request, slots: claimed, total: r.total, ready: r.total - 1, started, after });
+  const after = await stepsFor(sb, worker, client, runId, slot, state);
+  return runSlots({ sb, worker, client, runId, frozen: slot.request, slots: [claimed], total: r.total, ready: r.total - 1, started, after });
 }
 
 /** "לבדוק עכשיו" (check) and the AI score (judge), after the run: what is
@@ -609,10 +647,14 @@ async function stepsAction(req: Request, body: AiBody, started: number, which: "
   const first = slots[0];
   if (!first?.request || !isRatedRoute(first.request.route) || !first.lecture) throw new HttpError(400, "bad route");
   if (which === "judge" && !first.judge_model) throw new HttpError(409, "not waiting");
+  const state = await readModels(sb, first.group);
+  // The AI score's judge again as it is now (D17, D23): a provider whose consent was withdrawn gets nothing.
+  const judgeWhy = which === "judge" ? stepRefusedNow(first.judge_model!, "judge", state) : null;
+  if (judgeWhy) throw refusal(judgeWhy);
   const pending = which === "check" ? slots.filter((s) => s.check_status === "pending") : [];
   const worker = serverClient();
   const client = anthropic();
-  const [lecture, state] = await Promise.all([loadLecture(sb, first.lecture), readModels(sb, first.group)]);
+  const lecture = await loadLecture(sb, first.lecture);
   const frozen = first.request;
   const texts = new Map<string, string>();
   if (pending.length) {
@@ -626,7 +668,7 @@ async function stepsAction(req: Request, body: AiBody, started: number, which: "
     write(line({ t: "check", pending: pending.length + (which === "judge" ? 1 : 0) }));
     const ctx = { sb, worker, client, runId, frozen, lecture, stopAt, claim: stepClaim(worker, runId) };
     if (which === "check") {
-      const solver = stepModel(state.routes, "solver");
+      const solver = stepModel(state, "solver");
       await Promise.all(pending.map((s) => runCheck({ ...ctx, label: s.label, slot: s.slot, output: s.output, text: texts.get(s.label) ?? "", model: solver })));
     } else await runJudge({ ...ctx, model: first.judge_model! });
     write(line({ t: "done" }));
@@ -696,8 +738,8 @@ async function priceAction(req: Request, body: AiBody): Promise<Response> {
   // The paid steps (rated kinds): the solver's check of each answer (practice), the AI score by the number of answers (index 0-4).
   const steps = m.lecture
     ? {
-        check: Number(stepsEstimate({ frozen: m.frozen, lecture: m.lecture, models: 1, solver: stepModel(state.routes, "solver"), judge: null }).check.toFixed(5)),
-        judge: [0, 1, 2, 3, 4].map((n) => (n < 2 ? 0 : Number(stepsEstimate({ frozen: m.frozen, lecture: m.lecture!, models: n, solver: null, judge: stepModel(state.routes, "judge") }).judge.toFixed(5)))),
+        check: Number(stepsEstimate({ frozen: m.frozen, lecture: m.lecture, models: 1, solver: stepModel(state, "solver"), judge: null }).check.toFixed(5)),
+        judge: [0, 1, 2, 3, 4].map((n) => (n < 2 ? 0 : Number(stepsEstimate({ frozen: m.frozen, lecture: m.lecture!, models: n, solver: null, judge: stepModel(state, "judge") }).judge.toFixed(5)))),
       }
     : null;
   return json(200, { route, title: m.title, source: again, pictures, models, runCap: Number.isFinite(cap) ? cap : LAB_RUN_CAP_USD, ...(steps ? { steps } : {}) });

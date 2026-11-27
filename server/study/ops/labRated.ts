@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { numberBlocks } from "../../../shared/study/blocks.js";
-import { DEFAULT_MODEL, modelInfo } from "../../../shared/study/models.js";
+import { DEFAULT_MODEL, modelInfo, type ModelInfo, type Provider } from "../../../shared/study/models.js";
 import { estimateUsd } from "../budget.js";
 import { readInputs } from "../cards.js";
 import { run, settleFor, type Spend } from "../claude.js";
@@ -24,6 +24,7 @@ import {
   type RatedRoute,
 } from "../labRated.js";
 import { LAB_ASK_CHARS } from "../limits.js";
+import { routeRefusal, type ModelsState } from "../routes.js";
 import { courseStyle, knownDrafts, knownQuestions, partCorrections, readPart } from "../practice.js";
 import { errorText, HttpError, keyed, loadLecture, tidyMarkdown, type Lecture } from "../study.js";
 import { partFigures, type InputSection } from "../writer.js";
@@ -127,9 +128,21 @@ export async function ratedMaterial(sb: SupabaseClient, group: string, route: Ra
   }
 }
 
-/** The model of a paid step: the key's route (study_models), the default when unset or not in the registry. */
-export function stepModel(routes: Record<string, { model?: string | null } | undefined>, key: "solver" | "judge"): string {
-  return modelInfo(routes[key]?.model ?? "")?.id ?? DEFAULT_MODEL;
+/** The model of a paid step, decided as production's modelFor decides it:
+ *  the key's route (study_models), or the default when the switch `routes`
+ *  is off, nothing is set, or routeRefusal refuses it (a price unverified,
+ *  a provider whose key is gone, whose "לאשר שליחה" was withdrawn or whose
+ *  scope no longer takes the key: D17, D23). */
+export function stepModel(
+  state: Pick<ModelsState, "routes" | "providers" | "switches">,
+  key: "solver" | "judge",
+  o: { ready?: (p: Provider) => boolean; info?: (m: string) => ModelInfo | null } = {},
+): string {
+  if (state.switches?.routes === false) return DEFAULT_MODEL;
+  const model = state.routes[key]?.model;
+  if (!model) return DEFAULT_MODEL;
+  if (routeRefusal(model, key, { providers: state.providers ?? {}, ...(o.ready ? { ready: o.ready } : {}), ...(o.info ? { info: o.info } : {}) })) return DEFAULT_MODEL;
+  return (o.info ?? modelInfo)(model)?.id ?? DEFAULT_MODEL;
 }
 
 /** The paid steps' worst case before a run: the solver per answer (practice), the AI score over every answer. */
