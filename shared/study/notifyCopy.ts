@@ -262,6 +262,16 @@ export const KINDS: Record<string, Kind> = {
     body: () => "אפשר לראות את המספרים של הקבוצה",
   },
 
+  /* ── Y: "השוואת מודלים" (docs/study/models.md; R's reserved row, section
+   * Y's notice) ── lab_new: a run of a kind members rate is done and waits
+   * for ratings; every member but the owner who ran it, coalesced, inbox
+   * only. Never a model's name (the rating is blind). */
+  lab_new: {
+    cat: "inapp",
+    title: ({ n }) => (n === 1 ? "השוואה חדשה לדירוג" : `${n} השוואות מחכות לדירוג`),
+    body: () => "לדרג תשובות בלי לדעת מי כתב",
+  },
+
   /* ── R: inbox only ── */
   update: { cat: "inapp", title: () => "תיקון הגיע לשורה שלמדת", body: ({ a }) => str(a, "lecture") },
   edit_wait: { cat: "inapp", title: () => "תיקון מחכה לאישור", body: ({ a }) => str(a, "lecture") },

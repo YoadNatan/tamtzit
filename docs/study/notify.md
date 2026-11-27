@@ -86,7 +86,8 @@ on by default (Yoad, 26 Nov 2026); the reminder is off (19:30 when turned on).
 | `update`, `edit_wait`, `lecture_new`, `meeting_set` | inapp | "עדכון", a correction waiting, a new summary, a meeting set or moved | its member, or the rest of the group | never |
 | `set_shared` | mine | a practice set is ready, once ([`sets.md`](sets.md), section L) | the group but its author | one row a member a day, coalesced ("{n} סטים חדשים בקבוצה"); at most one push a member a day; the lock screen without the lecture or the author's name |
 | `set_solved` | inapp | someone other than the author finished a set for the first time | the set's author | never |
-| `similar_ready`, `lab_new` | (reserved) | for packages not built yet | | wired by their packages |
+| `similar_ready` | mine | similar questions for a whole sheet are ready ([`sheets.md`](sheets.md), section O 3) | the requester | held 90 s |
+| `lab_new` | inapp | a comparison of a kind members rate waits for ratings ([`models.md`](models.md), section Y) | the group but the owner who ran it | never (one SQL line turns it on: `models.md`) |
 
 **Never sent:** questions and cards being written (they are written from the
 phone, which is almost always watching), corrections waiting, the daily

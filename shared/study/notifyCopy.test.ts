@@ -52,6 +52,8 @@ const PINNED: Array<[string, Record<string, unknown>, number, Surface, string, s
   ["edit_wait", { lecture: L }, 1, "inbox", "תיקון מחכה לאישור", L],
   ["lecture_new", { lecture: L }, 1, "inbox", "סיכום חדש בספרייה", L],
   ["meeting_set", { lecture: L, at: "2026-12-01T16:00:00Z" }, 1, "inbox", "נקבעה פגישה", `${L} · יום ג׳ 18:00`],
+  ["lab_new", { route: "practice" }, 1, "inbox", "השוואה חדשה לדירוג", "לדרג תשובות בלי לדעת מי כתב"],
+  ["lab_new", { route: "practice" }, 2, "inbox", "2 השוואות מחכות לדירוג", "לדרג תשובות בלי לדעת מי כתב"],
   ["mystery", { title: "כותרת בדויה" }, 1, "inbox", FALLBACK_TITLE, "כותרת בדויה"],
   ["mystery", { title: "כותרת בדויה" }, 1, "lock", FALLBACK_TITLE, ""],
   ["set_shared", { lecture: L, k: 10, name: "נועה" }, 1, "lock", "סט תרגול חדש בקבוצה", "אפשר לפתור מ״סטים של הקבוצה״"],
@@ -90,7 +92,7 @@ test("the lock screen never shows a quiz's title or a name", () => {
     }
   }
   // A kind this build does not know (a later package's, wired before its words ship): the title, never its args.
-  for (const kind of ["lab_new", "mystery"]) assert.deepEqual(render(kind, secret, 1, "lock", NOW), { title: FALLBACK_TITLE, body: "" }, kind);
+  for (const kind of ["mystery"]) assert.deepEqual(render(kind, secret, 1, "lock", NOW), { title: FALLBACK_TITLE, body: "" }, kind);
   // The inbox, inside the app, may show them.
   assert.match(render("quiz_open", secret, 1, "inbox", NOW).body, /כותרת סודית · שם סודי ועוד 4 בפנים/);
   // A shared set (OD10): neither the lecture nor the author's name on the lock screen, at any count.
@@ -186,8 +188,8 @@ test("the copy covers the kinds section R registers, in the same categories", ()
   assert.equal(rows.length, 25, "R 1 and R 2's kinds, and the three reserved");
   // Reserved for packages not built yet: their packages add their words
   // (set_shared was reserved for practice sets, similar_ready for uploaded
-  // sheets' release B, which have them now).
-  const reserved = new Set(["lab_new"]);
+  // sheets' release B, lab_new for the models package, Y, which have them now).
+  const reserved = new Set<string>([]);
   for (const [kind, cat] of rows) {
     if (reserved.has(kind)) {
       assert.equal(catOf(kind), "inapp", `${kind}: no words until its package`);
@@ -211,3 +213,11 @@ test("the copy covers the kinds section L registers or wires, in R's categories"
   assert.match(l, /'set_solved',/);
 });
 
+test("the copy covers the kind section Y adds through R, inbox only, with the run's route", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase", "study-schema.sql"), "utf8");
+  const y = sql.slice(sql.indexOf("-- ════ BEGIN SECTION Y "), sql.indexOf("-- ════ END SECTION Y ════"));
+  assert.match(y, /values \('lab_new', 'inapp', '7 days', '0', false\)\s+on conflict \(kind\) do nothing/);
+  assert.match(y, /study_private\.notice_group\(r\.group_id, r\.created_by, 'lab_new'/);
+  assert.equal(KINDS.lab_new.cat, "inapp");
+  assert.equal(catOf("lab_new"), "inapp");
+});
