@@ -106,7 +106,8 @@ const MODEL_NAMES = /Claude|Opus|Sonnet|Haiku|Fable|GPT|Gemini|DeepSeek|Qwen|Kim
     await page.getByRole("checkbox", { name: /Claude Opus 5\.5/ }).waitFor({ timeout: 10000 });
     await page.waitForTimeout(400); // the price answers, then the list settles
     // Each approved provider is its own group, folded unless one of its models is ticked: open them to read the names.
-    for (const d of await page.locator(".md-new details.md-prov:not([open]) > summary").all()) await d.click();
+    const closed = page.locator(".md-new details.md-prov:not([open]) > summary");
+    for (let i = 0; i < 5 && (await closed.count()); i++) await closed.first().click();
     return norm(await page.locator(".md-new").innerText());
   };
   /** A provider's group in a new comparison (its unverified note said once, in the summary). */

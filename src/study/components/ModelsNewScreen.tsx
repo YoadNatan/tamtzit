@@ -247,7 +247,10 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
           {others.map((g) => {
             const ticked = g.items.some((m) => picked.includes(m.id));
             return (
-              <details key={g.id} className="md-fold md-prov" open={folds[g.id] ?? ticked} onToggle={(e) => setFolds((f) => ({ ...f, [g.id]: (e.currentTarget as HTMLDetailsElement).open }))}>
+              <details key={g.id} className="md-fold md-prov" open={folds[g.id] ?? ticked} onToggle={(e) => {
+                  const open = (e.currentTarget as HTMLDetailsElement).open;
+                  setFolds((f) => (f[g.id] === open ? f : { ...f, [g.id]: open }));
+                }}>
                 <summary>
                   <span>
                     <bdi dir="ltr">{g.name}</bdi> · {MC.modelsN(g.items.length)}
