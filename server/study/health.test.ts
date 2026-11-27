@@ -21,6 +21,8 @@ let authSettings: { status: number; body: unknown } = { status: 200, body: { ext
 let calls: Array<{ path: string; body: string }> = [];
 /** Section R's study_notify_ok() (notifications), or a failure. */
 let notifyOk: { status: number; body: unknown } = { status: 200, body: { wired: true, on: false, pilot: true, stuck: false } };
+/** Section Y's study_model_routed(): the models some key is routed to. */
+let routed: string[] = [];
 let base = "";
 
 const readAll = (req: IncomingMessage) =>
@@ -41,6 +43,10 @@ const rest = createServer(async (req, res) => {
   if (path === "/rest/v1/rpc/study_schema") return send(res, schema.status, schema.body);
   if (path === "/rest/v1/rpc/study_features") return send(res, 200, features);
   if (path === "/rest/v1/rpc/study_notify_ok") return send(res, notifyOk.status, notifyOk.body);
+  if (path === "/rest/v1/rpc/study_model_routed") {
+    const a = JSON.parse(body) as { p_key?: string };
+    return a.p_key === vaultKey ? send(res, 200, routed) : send(res, 400, forbidden);
+  }
   if (path === "/auth/v1/settings") {
     if (req.headers.apikey !== "anon-key") return send(res, 401, { message: "no apikey" });
     return send(res, authSettings.status, authSettings.body);
@@ -67,6 +73,7 @@ beforeEach(() => {
   features = { exams: false, recordings: false };
   authSettings = { status: 200, body: { external: { email: true, anonymous_users: true } } };
   notifyOk = { status: 200, body: { wired: true, on: false, pilot: true, stuck: false } };
+  routed = [];
   calls = [];
   for (const k of ["STUDY_VAPID_PUBLIC", "STUDY_VAPID_PRIVATE", "STUDY_VAPID_SUBJECT"]) delete process.env[k];
 });
@@ -96,8 +103,11 @@ test("wired: the key is set on Vercel and is Vault's, the schema has F and the m
     vapid: null,
     notifyOn: false,
     notifyStuck: false,
+    providers: { anthropic: true, openai: false, google: false, openrouter: false },
+    stalePrices: [],
   });
   assert.equal(calls.filter((c) => c.path === "/auth/v1/settings").length, 0, "Auth is not asked without section I");
+  assert.equal(calls.filter((c) => c.path === "/rest/v1/rpc/study_model_routed").length, 0, "section Y is not asked without it");
   assert.equal(calls.filter((c) => c.path === "/rest/v1/rpc/study_notify_ok").length, 0, "section R is not asked without it");
   const spent = calls.filter((c) => c.path === "/rest/v1/rpc/study_spent");
   assert.equal(spent.length, 1);
@@ -243,4 +253,31 @@ test('"notify": section R, a VAPID pair, the server key and a wired database; "v
   process.env.STUDY_VAPID_PRIVATE = k.priv;
   h = await text();
   assert.deepEqual([h.notify, h.vapid], [false, null]);
+});
+
+test("providers: whether each model provider's key is set, booleans only; stalePrices: routed models whose price is 45 days old", async () => {
+  const secrets = { OPENAI_API_KEY: "sk-test-openai-0123456789", GEMINI_API_KEY: "gm-test-0123456789", OPENROUTER_API_KEY: " \n" };
+  Object.assign(process.env, secrets);
+  try {
+    let h = await check();
+    assert.deepEqual(h.providers, { anthropic: true, openai: true, google: true, openrouter: false }, "only spaces: not set");
+    const text = JSON.stringify(h);
+    for (const v of Object.values(secrets).filter((x) => x.trim())) assert.ok(!text.includes(v) && !text.includes(v.slice(3, 12)), "no key in the answer");
+    // Section Y loaded: the routed models are asked for with the key; today every price is fresh.
+    schema = { status: 200, body: { ...CURRENT, Y: 1 } };
+    routed = ["claude-haiku-5-5", "claude-sonnet-5-5", "nonsense"];
+    h = await check();
+    const asked = calls.filter((c) => c.path === "/rest/v1/rpc/study_model_routed");
+    assert.equal(asked.length, 1);
+    assert.deepEqual(JSON.parse(asked[0].body), { p_key: KEY });
+    assert.deepEqual(h.stalePrices, [], "checked 2026-11-27");
+    // The key not Vault's: not asked.
+    vaultKey = "another-0123456789abcdef0123456789";
+    calls = [];
+    h = await check();
+    assert.deepEqual(h.stalePrices, []);
+    assert.equal(calls.filter((c) => c.path === "/rest/v1/rpc/study_model_routed").length, 0);
+  } finally {
+    for (const k of Object.keys(secrets)) delete process.env[k];
+  }
 });

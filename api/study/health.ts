@@ -25,11 +25,18 @@
  *             null removes its push-only service worker (the kill path).
  *             The private key never appears here.
  *   notifyOn  the switch "notify" (off: only the pilot's members get pushes)
- *   notifyStuck  the sender's breaker stopped the kicks (15 without a claim) */
+ *   notifyStuck  the sender's breaker stopped the kicks (15 without a claim)
+ *   providers each model provider's key is set on Vercel (anthropic, openai,
+ *             google, openrouter): booleans only, never a key or its length
+ *   stalePrices the models a key is routed to (section Y) whose price was
+ *             checked 45 days ago or more: check the vendor's page and update
+ *             shared/study/models.ts (design-models D16); [] without Y */
 
 /// <reference path="../../server/study/env.d.ts" />
 import { monthlyCap } from "../../server/study/budget.js";
+import { providersConfigured } from "../../server/study/llm/index.js";
 import { vapidFromEnv, vapidPairOk } from "../../server/study/push.js";
+import { stalePrices } from "../../server/study/routes.js";
 import { healthSchema, keyed, schemaOk, serverClient, supabaseAnonKey, supabaseUrl, workerKey } from "../../server/study/study.js";
 
 // Node.js runtime: the Anthropic SDK imports @opentelemetry/api, which Vercel's
@@ -37,6 +44,18 @@ import { healthSchema, keyed, schemaOk, serverClient, supabaseAnonKey, supabaseU
 export const config = { maxDuration: 10 };
 
 const TIMEOUT_MS = 4_000;
+
+/** The routed models' stale prices (section Y's study_model_routed, with the key; [] without Y or the key). */
+async function routedStale(schema: unknown, workerOk: boolean): Promise<string[]> {
+  const y = schema && typeof schema === "object" ? (schema as Record<string, unknown>).Y : undefined;
+  if (typeof y !== "number" || y < 1 || !workerOk) return [];
+  try {
+    const { data, error } = await serverClient().rpc("study_model_routed", keyed({})).abortSignal(AbortSignal.timeout(TIMEOUT_MS));
+    return error || !Array.isArray(data) ? [] : stalePrices(data.filter((m): m is string => typeof m === "string"));
+  } catch {
+    return [];
+  }
+}
 
 /** A read-only RPC's answer, or null when it fails or takes over 4 s. */
 async function read(fn: "study_schema" | "study_features" | "study_notify_ok"): Promise<unknown> {
@@ -118,7 +137,12 @@ async function handler(): Promise<Response> {
   const [schema, features, workerOk] = supabase
     ? await Promise.all([read("study_schema"), read("study_features"), workerMatches()])
     : [null, null, false];
-  const [codes, vapid, rOk] = await Promise.all([supabase ? codesOn(schema, features, workerOk) : false, vapidPublic(), supabase ? notifyOk(schema) : null]);
+  const [codes, vapid, rOk, stale] = await Promise.all([
+    supabase ? codesOn(schema, features, workerOk) : false,
+    vapidPublic(),
+    supabase ? notifyOk(schema) : null,
+    supabase ? routedStale(schema, workerOk) : [],
+  ]);
   const body = {
     ok: true,
     anthropicKey: Boolean(process.env.ANTHROPIC_API_KEY),
@@ -135,6 +159,8 @@ async function handler(): Promise<Response> {
     vapid,
     notifyOn: rOk?.on === true,
     notifyStuck: rOk?.stuck === true,
+    providers: providersConfigured(process.env),
+    stalePrices: stale,
   };
   return new Response(JSON.stringify(body), {
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
