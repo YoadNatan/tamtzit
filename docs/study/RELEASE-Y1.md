@@ -17,8 +17,8 @@ by people (practice questions, a set's questions, points, cards, "לשאול", a
 summary part), the owner's screens ("השוואות", "תוצאות" and "מי כותב מה"
 under "שלי"), the members' blind rating, the solver's paid check of practice
 answers, the AI score (off by default), the share to the group's WhatsApp
-and R's notice `lab_new`. The other providers' adapters come with a later
-package of this wave.
+and R's notice `lab_new`. OpenAI, Gemini and OpenRouter are in the same
+code, off until a key and the owner's approval: [`RELEASE-Y2.md`](RELEASE-Y2.md).
 
 ## Rules for all of it
 
