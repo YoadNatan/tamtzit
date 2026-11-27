@@ -144,6 +144,13 @@ export const POLICY: Record<string, Policy> = {
   // member's name, so the 40% share counts them. The similar line
   // (similarMonthlyCap) is checked by study_similar_begin.
   similar: { share: 0.8, memberShare: 0.4, daily: 10, dailyRef: "ask" },
+  // "השוואת מודלים" (section Y, design-models §6.3, OD5): every comparison
+  // call is reserved by study_lab_claim on the worker's path, so it has no
+  // user and is in nobody's share; it stops at the group's 80% line, and
+  // the month's comparison line ($3.30, lab_settings.lab_usd) and the run's
+  // cap ($1.50) are section Y's. No daily count of its own: study_lab_plan
+  // allows 3 runs a day.
+  lab: { share: 0.8, memberShare: null, daily: null },
 };
 
 /** STUDY_MONTHLY_USD: the group's monthly cap in USD; 33 when it is not set

@@ -152,7 +152,8 @@ test("routeRefusal: scope text, pictures, Claude-only keys, keys, approval and t
 });
 
 test("routeKeyFor: every budget kind has its key, except those that call no model", () => {
-  const EXCLUDED = ["transcribe", "pdf", "plaque", "whoami"];
+  // lab: a comparison's calls are of its run's own key (study_lab_runs.route).
+  const EXCLUDED = ["transcribe", "pdf", "plaque", "whoami", "lab"];
   for (const kind of Object.keys(POLICY)) {
     const key = routeKeyFor(kind, kind === "ask" ? "answer" : null);
     if (EXCLUDED.includes(kind)) assert.equal(key, null, kind);

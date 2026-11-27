@@ -87,3 +87,28 @@ export const TRAP_CHECK_TIME_LIMIT_MS = 120_000;
 export const TRAP_PARAGRAPH_CHARS = 2000;
 /** Paid checks a day per person (POLICY; shared/study/extras.ts TRAP_CHECKS_A_DAY says the same). */
 export const DAILY_TRAP_CHECKS = POLICY.trap_check.daily ?? 0;
+
+/* ── Package Y: "השוואת מודלים", the op lab (design-models §7.5, D14, D15;
+ *    Yoad's OD4: a fixed line of $3.30 a month, $1.50 a run, 3 runs a day) ──
+ * The line, the run's cap and the day's count are section Y's
+ * (lab_settings, study_lab_plan and study_lab_claim decide); the server
+ * checks the run's cap first only to refuse before it reads any material. */
+/** A run's worst case, the default of lab_settings.run_cap. */
+export const LAB_RUN_CAP_USD = 1.5;
+/** An unverified price (a vendor page not checked) is estimated this much higher in comparisons (D16). */
+export const LAB_UNVERIFIED_FACTOR = 1.5;
+/** A run's answers stop this long after the function started, or 25 s
+ *  before its deadline (the save keeps that much); 200 s when a paid
+ *  check follows in the same invocation (practice, WP8). */
+export const LAB_ANSWER_MS = 270_000;
+export const LAB_CHECKED_ANSWER_MS = 200_000;
+export const LAB_SAVE_MS = 25_000;
+/** The run's status is read this often while its answers stream; "cancelled" stops them (D10). */
+export const LAB_POLL_MS = 10_000;
+/** The question check's material: this many bank questions by default, at most LAB_SOLVER_MAX. */
+export const LAB_SOLVER_ITEMS = 10;
+export const LAB_SOLVER_MAX = 20;
+/** A picture of a frozen request is signed per call: for Claude as the
+ *  production calls do (30 minutes), for another provider for 120 s (D18). */
+export const LAB_SIGN_SECONDS = 1800;
+export const LAB_SIGN_SECONDS_OTHER = 120;
