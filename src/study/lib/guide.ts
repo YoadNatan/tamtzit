@@ -537,7 +537,8 @@ export const TARGETS = {
   examProg: ".exam-review .x-prog",
   examSum: ".exam-review .r-sum",
   examFilters: ".exam-review .r-filters",
-  examActs: ".exam-review .r-acts",
+  // The first action (״לאשר״ or ״לסמן תשובה״): the whole row, 44 px a button since the sheets review, is too tall to ring on a 320 px phone.
+  examActs: ".exam-review .r-acts > .a-btn:first-child",
   examSim: '.exam-review .r-sum a[href*="v=mock"]',
   examSuggested: ".exam-review .r-filters .r-f-suggested",
   examNokey: ".exam-review .r-filters .r-f-nokey",
