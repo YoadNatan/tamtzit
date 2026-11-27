@@ -78,8 +78,9 @@ for round in $(seq 1 10); do
   R1=$(reserve $U1); R2=$(reserve $U2); R3=$(reserve $U3); R4=$(reserve $U4)
   OUT=$( (begin_as $U1 "$E" item "$Q" "$R1"; echo) & (begin_as $U2 "$E" item "$Q" "$R2"; echo) & (begin_as $U3 "$E" item "$Q" "$R3"; echo) & (begin_as $U4 "$E" item "$Q" "$R4"; echo) & wait )
   RUNS=$(echo "select count(*) from public.study_similar_runs where exam_id = '$E';" | q)
-  MADE=$(echo "$OUT" | grep -c '^|[0-9a-f]' || true)
-  JOINED=$(echo "$OUT" | grep -cE '^[0-9a-f-]{36}\|' || true)
+  # Counted by pattern, not by line: two sessions' answers can land on one line of the joined output.
+  MADE=$(echo "$OUT" | grep -oE '\|[0-9a-f-]{36}' | wc -l)
+  JOINED=$(echo "$OUT" | grep -oE '[0-9a-f-]{36}\|' | wc -l)
   ERR=$(echo "$OUT" | grep -ci 'error\|deadlock' || true)
   if [ "$RUNS" = 1 ] && [ "$MADE" = 1 ] && [ "$JOINED" = 3 ] && [ "$ERR" = 0 ]; then ok1=$((ok1 + 1)); else echo "SC1 round $round: runs $RUNS made $MADE joined $JOINED errors $ERR: $OUT"; fi
 done
