@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod/v4";
 import { estimateUsd, imageTokens } from "./budget.js";
-import { cleanSchema, generateItems, type Ledger } from "./claude.js";
+import { cleanSchema, generateItems, type FallbackReserve, type Ledger } from "./claude.js";
 import { SOLVER_SYSTEM, solverRequest, type SolverText } from "./prompts/solver.js";
 import { type Lecture, lectureBlock, MODEL } from "./study.js";
 
@@ -88,12 +88,12 @@ export function solverCall(o: { lecture: Pick<Lecture, "lecturer" | "slides">; i
 /** The call's worst case, which its reservation holds (an image item is
  *  asked twice, with and without its picture, and a picture is at most
  *  MAX_PICTURE_SIDE square). */
-export function solverEstimate(lecture: Pick<Lecture, "lecturer" | "slides">, items: readonly SolverText[]): number {
+export function solverEstimate(lecture: Pick<Lecture, "lecturer" | "slides">, items: readonly SolverText[], model: string = MODEL): number {
   const c = solverCall({ lecture, items: withTwins(items).all });
   const chars =
     c.system.reduce((n, b) => n + b.text.length, 0) +
     c.messages.reduce((n, m) => n + (Array.isArray(m.content) ? m.content.reduce((k, b) => k + ("text" in b ? b.text.length : 0), 0) : 0), 0);
-  return estimateUsd(MODEL, chars, c.max_tokens, items.filter((it) => it.image).length * imageTokens());
+  return estimateUsd(model, chars, c.max_tokens, items.filter((it) => it.image).length * imageTokens());
 }
 
 /** The items as asked: each, then (after all of them, so q1 … qN stay the
@@ -153,6 +153,9 @@ export async function solveQuestions<T extends SolverItem>(o: {
    *  when it checks a sheet's similar questions inside their run's
    *  reservation (section O 3; the ledger itself is the caller's). */
   kind?: string;
+  /** The solver key's model, or similar's (routes.ts; left out: the default). */
+  model?: string;
+  reserveFallback?: FallbackReserve;
 }): Promise<{ verdicts: Array<Verdict | null>; kept: T[]; rejected: number; costUsd: number }> {
   if (!o.items.length) return { verdicts: [], kept: [], rejected: 0, costUsd: 0 };
   const { all, twin } = withTwins(o.items);
@@ -161,6 +164,8 @@ export async function solveQuestions<T extends SolverItem>(o: {
   let costUsd = 0;
   const res = await generateItems({
     client: o.client,
+    model: o.model,
+    reserveFallback: o.reserveFallback,
     kind: o.kind ?? "solver",
     ref: o.ref ?? null,
     system: call.system,

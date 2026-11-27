@@ -4,6 +4,7 @@ import { numberBlocks } from "../../shared/study/blocks.js";
 import { reserve } from "./budget.js";
 import { type ClaimedPart, pieceEstimate, pointPieces, type PointsResult, readPoints } from "./points.js";
 import { anthropic, assertSchema, errorText, HttpError, json, type Lecture, serverClient, serverKey } from "./study.js";
+import { modelFor } from "./routes.js";
 
 /* ── Package B: the points to know, read ahead (decision 2 of 17 Nov 2026) ──
  *
@@ -99,8 +100,9 @@ export async function pointsAheadStep(lectureId: string, started: number): Promi
   const { parts, old, lecture } = aheadParts(claim, lectureId);
   const idx = parts.map((p) => p.part_idx);
   let reserved: number;
+  const model = await modelFor(sb, claim.group_id, "points");
   try {
-    reserved = await reserve(sb, { groupId: claim.group_id, lectureId, kind: "points", ref: AHEAD_REF, estimateUsd: pieceEstimate(pointPieces(parts)[0]) });
+    reserved = await reserve(sb, { groupId: claim.group_id, lectureId, kind: "points", ref: AHEAD_REF, estimateUsd: pieceEstimate(pointPieces(parts)[0], model) });
   } catch (e) {
     // The cap (402 reserve, budget), the switch of the kind (403 off), or the
     // database: nothing was asked of the model, so nothing is shown as failed.
@@ -117,7 +119,7 @@ export async function pointsAheadStep(lectureId: string, started: number): Promi
   const stopAt = Math.min(deadline - 25_000, started + TIME_LIMIT_MS);
   const client = anthropic();
   waitUntil(
-    readPoints({ client, sb, lecture, parts, old, stopAt, reserved, write: () => undefined }).then(
+    readPoints({ client, sb, lecture, parts, old, stopAt, reserved, model, write: () => undefined }).then(
       (r: PointsResult) => console.info(`study points ahead ${lectureId}: ${r.parts}/${idx.length} parts, ${r.points} points, $${r.costUsd.toFixed(4)}`),
       (e) => console.error(`study points ahead ${lectureId}: ${errorText(e)}`),
     ),

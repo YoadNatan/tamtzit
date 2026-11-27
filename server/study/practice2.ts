@@ -83,6 +83,7 @@ import {
   textStream,
   tidyMarkdown,
 } from "./study.js";
+import { fallbackReserve, modelFor } from "./routes.js";
 
 /* ── Practice 2.0: op "questions"'s actions besides writing a batch ──
  * (docs/study/proposal/practice-2/DECISIONS.md; the API in docs/study/practice-2-api.md)
@@ -138,10 +139,11 @@ export const pointsAction: Op = async (req, body, started) => {
   let parts: Awaited<ReturnType<typeof claimedParts>>["parts"];
   let old: Awaited<ReturnType<typeof claimedParts>>["old"];
   let reserved: number;
+  let model: string;
   try {
-    ({ parts, old } = await claimedParts(sb, lectureId, claim));
+    [{ parts, old }, model] = await Promise.all([claimedParts(sb, lectureId, claim), modelFor(sb, lecture.group_id, "points")]);
     const first = pointPieces(parts)[0];
-    reserved = await reserve(sb, { groupId: lecture.group_id, lectureId, kind: "points", ref: POINTS_READ_REF, estimateUsd: pieceEstimate(first) });
+    reserved = await reserve(sb, { groupId: lecture.group_id, lectureId, kind: "points", ref: POINTS_READ_REF, estimateUsd: pieceEstimate(first, model) });
   } catch (e) {
     await failParts(
       sb,
@@ -156,7 +158,7 @@ export const pointsAction: Op = async (req, body, started) => {
   const deadline = getDeadline()?.getTime();
   const stopAt = Math.min(started + TIME_LIMIT_MS, deadline ? deadline - 25_000 : Infinity);
   return detachedStream(async (write) => {
-    const res = await readPoints({ client, sb, lecture, parts, old, stopAt, write, reserved });
+    const res = await readPoints({ client, sb, lecture, parts, old, stopAt, write, reserved, model });
     write(JSON.stringify({ t: "done", parts: res.parts, points: res.points, costUsd: round6(res.costUsd), unsettled: res.unsettled } satisfies PointsLine) + "\n");
   }, waitUntil);
 };
@@ -823,18 +825,21 @@ export const styleAction: Op = async (req, body, started) => {
     { type: "text", text: styleReadRequest({ text: example.text, image: example.image !== null }) },
   ];
   const chars = STYLE_READ_SYSTEM.length + example.text.length + 200;
+  const model = await modelFor(sb, lecture.group_id, "style", { pictures: example.image !== null });
   const rid = await reserve(sb, {
     groupId: lecture.group_id,
     lectureId,
     kind: "style",
     ref: lectureId,
-    estimateUsd: estimateUsd(MODEL, chars, STYLE_MAX_TOKENS, example.image ? STYLE_IMAGE_TOKENS : 0),
+    estimateUsd: estimateUsd(model, chars, STYLE_MAX_TOKENS, example.image ? STYLE_IMAGE_TOKENS : 0),
   });
   let costUsd = 0;
   let unsettled = 0;
   const items: Array<z.infer<typeof StyleRead>> = [];
   const res = await generateItems({
     client,
+    model,
+    reserveFallback: fallbackReserve(sb, { groupId: lecture.group_id, lectureId, kind: "style", ref: lectureId }, () => (unsettled += 1), (sp) => (costUsd += sp.costUsd)),
     kind: "style",
     ref: lectureId,
     system: [{ type: "text", text: STYLE_READ_SYSTEM }],
@@ -965,8 +970,14 @@ export const rewordAction: Op = async (req, body, started) => {
 
   let ctx: RewordCtx;
   let reserved: number;
+  let model: string;
+  let solverModel: string;
   try {
-    ctx = await rewordContext(sb, lecture, draft);
+    [ctx, model, solverModel] = await Promise.all([
+      rewordContext(sb, lecture, draft),
+      modelFor(sb, lecture.group_id, "reword", { pictures: draft.style === "image" }),
+      modelFor(sb, lecture.group_id, "solver"),
+    ]);
     const user = rewordUser(ctx, draft, key, note);
     reserved = await reserve(sb, {
       groupId: lecture.group_id,
@@ -974,7 +985,7 @@ export const rewordAction: Op = async (req, body, started) => {
       kind: "reword",
       ref: draftId,
       // An image draft is written again looking at up to PICTURES_MAX pictures of the part.
-      estimateUsd: estimateUsd(MODEL, questionsSystem(lecture, null).reduce((n, b) => n + b.text.length, 0) + user.length, maxTokensFor(1), draft.style === "image" ? PICTURES_MAX * imageTokens() : 0),
+      estimateUsd: estimateUsd(model, questionsSystem(lecture, null).reduce((n, b) => n + b.text.length, 0) + user.length, maxTokensFor(1), draft.style === "image" ? PICTURES_MAX * imageTokens() : 0),
     });
   } catch (e) {
     await releaseDraft(sb, draftId);
@@ -982,7 +993,7 @@ export const rewordAction: Op = async (req, body, started) => {
   }
   return textStream(async (raw) => {
     const write = safe(raw);
-    const res = await rewordDraft({ client, sb, lecture, draft, key, note, ctx, reserved, stopAt: started + TIME_LIMIT_MS, write });
+    const res = await rewordDraft({ client, sb, lecture, draft, key, note, ctx, reserved, stopAt: started + TIME_LIMIT_MS, write, model, solverModel });
     write(JSON.stringify({ t: "done", ...res, costUsd: round6(res.costUsd) } satisfies WriteLine) + "\n");
   });
 };
@@ -1087,8 +1098,13 @@ async function rewordDraft(o: {
   reserved: number;
   stopAt: number;
   write: (line: string) => void;
+  /** The reword key's model and the solver's (routes.ts; left out: the default). */
+  model?: string;
+  solverModel?: string;
 }): Promise<{ made: number; rejected: number; solverRejected: number; costUsd: number; unsettled: number }> {
   const out = { made: 0, rejected: 0, solverRejected: 0, costUsd: 0, unsettled: 0 };
+  const routed = o.model ?? MODEL;
+  const solverModel = o.solverModel ?? MODEL;
   const system = questionsSystem(o.lecture, null);
   const lectureSlides = new Set(o.lecture.slides.map((s) => s.n));
   const lectureText = deckText(o.lecture).toLowerCase();
@@ -1110,6 +1126,8 @@ async function rewordDraft(o: {
     let got: { item: SaveItem; servedBy: string } | null = null;
     const res = await generateItems({
       client: o.client,
+      model: routed,
+      reserveFallback: fallbackReserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "reword", ref: o.draft.id }, () => (out.unsettled += 1), (sp) => (out.costUsd += sp.costUsd)),
       kind: "reword",
       ref: o.draft.id,
       system,
@@ -1177,8 +1195,17 @@ async function rewordDraft(o: {
     if (o.stopAt - Date.now() >= SOLVER_MIN_MS) {
       const items = [solverItemOf(item, pictures)];
       try {
-        const rid = await reserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "solver", ref: id, estimateUsd: solverEstimate(o.lecture, items) });
-        const res = await solveQuestions({ client: o.client, lecture: o.lecture, items, ref: id, stopAt: o.stopAt, ledger: ledgerFor(rid) });
+        const rid = await reserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "solver", ref: id, estimateUsd: solverEstimate(o.lecture, items, solverModel) });
+        const res = await solveQuestions({
+          client: o.client,
+          lecture: o.lecture,
+          items,
+          ref: id,
+          stopAt: o.stopAt,
+          ledger: ledgerFor(rid),
+          model: solverModel,
+          reserveFallback: fallbackReserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "solver", ref: id }, () => (out.unsettled += 1), (sp) => (out.costUsd += sp.costUsd)),
+        });
         v = res.verdicts[0] ?? null;
       } catch (e) {
         console.error(`solver ${id}: ${errorText(e)}`);
@@ -1220,7 +1247,7 @@ async function rewordDraft(o: {
       };
       const user = rewordUser(o.ctx, asDraft, { ...o.key, answer: first.item.answer, takeaway: first.item.takeaway }, "", check.v ?? { choice: -1, ambiguous: true, ok: false });
       try {
-        const rid = await reserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "reword", ref: id, estimateUsd: estimateUsd(MODEL, system.reduce((n, b) => n + b.text.length, 0) + user.length, maxTokensFor(1), picturesTokens(seen)) });
+        const rid = await reserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "reword", ref: id, estimateUsd: estimateUsd(routed, system.reduce((n, b) => n + b.text.length, 0) + user.length, maxTokensFor(1), picturesTokens(seen)) });
         again = await writeOne(user, rid);
       } catch (e) {
         console.error(`reword rewrite ${id}: ${errorText(e)}`);

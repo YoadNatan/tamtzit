@@ -5,6 +5,7 @@ import { numberBlocks, type NumberedBlock } from "../../shared/study/blocks.js";
 import { POINT_KINDS, type PointKind, type PointsLine } from "../../shared/study/practice2.js";
 import { estimateUsd, reserve } from "./budget.js";
 import { generateItems, settleFor } from "./claude.js";
+import { fallbackReserve } from "./routes.js";
 import { POINTS_SYSTEM, pointsRequest, type PointsPartText } from "./prompts/points.js";
 import { placePara, tagSlides, tidy } from "./questions.js";
 import { similarity } from "./similar.js";
@@ -235,11 +236,11 @@ export const pointsRef = (pc: Pick<PointPiece<Pick<ClaimedPart, "part_idx" | "bl
   `part ${pc.part.part_idx}${pc.pieces > 1 ? ` (${pc.piece + 1}/${pc.pieces})` : ""}`;
 
 /** A call's worst case, which it reserves. */
-export function pointsEstimate(parts: readonly ClaimedPart[]): number {
+export function pointsEstimate(parts: readonly ClaimedPart[], model: string = MODEL): number {
   const c = pointsCall(parts);
-  return estimateUsd(MODEL, c.system.reduce((n, b) => n + b.text.length, 0) + c.user.length, c.maxTokens);
+  return estimateUsd(model, c.system.reduce((n, b) => n + b.text.length, 0) + c.user.length, c.maxTokens);
 }
-export const pieceEstimate = (pc: PointPiece): number => pointsEstimate([{ ...pc.part, blocks: pc.blocks }]);
+export const pieceEstimate = (pc: PointPiece, model: string = MODEL): number => pointsEstimate([{ ...pc.part, blocks: pc.blocks }], model);
 
 /* ── Reading the stale parts ── */
 
@@ -338,13 +339,16 @@ export async function readPoints(o: {
   concurrency?: number;
   /** PIECE_MIN_MS unless a test says otherwise. */
   pieceMinMs?: number;
+  /** The points key's model (routes.ts; left out: the default). */
+  model?: string;
 }): Promise<PointsResult> {
+  const routed = o.model ?? MODEL;
   const lectureSlides = new Set(o.lecture.slides.map((s) => s.n));
   const out: PointsResult = { parts: 0, points: 0, costUsd: 0, unsettled: 0 };
   const line = (l: PointsLine) => o.write(JSON.stringify(l) + "\n");
   const pieces = pointPieces(o.parts);
   type Run = { part: ClaimedPart; left: number; called: number; found: SavePoint[]; cost: number; model: string; why: string | null; warned: Map<string, number> };
-  const runs = new Map<number, Run>(o.parts.map((p) => [p.part_idx, { part: p, left: 0, called: 0, found: [], cost: 0, model: MODEL, why: null, warned: new Map() }]));
+  const runs = new Map<number, Run>(o.parts.map((p) => [p.part_idx, { part: p, left: 0, called: 0, found: [], cost: 0, model: routed, why: null, warned: new Map() }]));
   for (const pc of pieces) runs.get(pc.part.part_idx)!.left += 1;
   let halt: unknown = null;
   let started = false;
@@ -389,7 +393,7 @@ export async function readPoints(o: {
     if (!run.why && halt) run.why = errorText(halt);
     if (!run.why && Date.now() > o.stopAt - (o.pieceMinMs ?? PIECE_MIN_MS)) run.why = "timeout";
     if (run.why) {
-      if (pre !== undefined) await settleFor(o.sb, pre, () => (out.unsettled += 1))({ kind: "points", model: MODEL, usage: null, costUsd: 0, estimated: false });
+      if (pre !== undefined) await settleFor(o.sb, pre, () => (out.unsettled += 1))({ kind: "points", model: routed, usage: null, costUsd: 0, estimated: false });
       return done(run);
     }
     let rid: number;
@@ -401,7 +405,7 @@ export async function readPoints(o: {
           lectureId: o.lecture.id,
           kind: "points",
           ref: pointsRef(pc),
-          estimateUsd: pieceEstimate(pc),
+          estimateUsd: pieceEstimate(pc, routed),
           daily: false, // the read's first call counted it
         }));
     } catch (e) {
@@ -418,6 +422,8 @@ export async function readPoints(o: {
     try {
       res = await generateItems({
         client: o.client,
+        model: routed,
+        reserveFallback: fallbackReserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "points", ref: pointsRef(pc) }, () => (out.unsettled += 1), (sp) => (cost += sp.costUsd)),
         kind: "points",
         ref: pointsRef(pc),
         system: call.system,
@@ -465,7 +471,7 @@ export async function readPoints(o: {
     while (next < pieces.length) await readPiece(pieces[next++]);
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(o.concurrency ?? POINTS_CONCURRENCY, pieces.length)) }, worker));
-  if (firstRid !== undefined) await settleFor(o.sb, firstRid, () => (out.unsettled += 1))({ kind: "points", model: MODEL, usage: null, costUsd: 0, estimated: false });
+  if (firstRid !== undefined) await settleFor(o.sb, firstRid, () => (out.unsettled += 1))({ kind: "points", model: routed, usage: null, costUsd: 0, estimated: false });
   if (halt) throw halt;
   return out;
 }

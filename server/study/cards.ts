@@ -5,6 +5,7 @@ import { numberBlocks, type NumberedBlock } from "../../shared/study/blocks.js";
 import { clozeFull, clozeParts } from "../../shared/study/cloze.js";
 import { estimateUsd, reserve, settle } from "./budget.js";
 import { generateItems, settleFor } from "./claude.js";
+import { fallbackReserve, modelFor } from "./routes.js";
 import type { Op } from "./ops/types.js";
 import { CARDS_SYSTEM, cardsRequest, correctionsForCards, type Correction } from "./prompts/cards.js";
 import { placePara } from "./questions.js";
@@ -472,7 +473,10 @@ export async function writeCardBatch(o: {
   write: (line: string) => void;
   /** The first call's reservation, taken by the op before the stream started. */
   reserved?: number;
+  /** The cards key's model (routes.ts; left out: the default). */
+  model?: string;
 }): Promise<{ made: number; rejected: number; costUsd: number; unsettled: number }> {
+  const routed = o.model ?? MODEL;
   const ctx: CardCtx = {
     lectureSlides: new Set(o.lecture.slides.map((s) => s.n)),
     from: o.claim.slide_from,
@@ -506,7 +510,7 @@ export async function writeCardBatch(o: {
             lectureId: o.lecture.id,
             kind: "cards",
             ref: o.batchId,
-            estimateUsd: estimateUsd(MODEL, req.inputChars, req.maxTokens),
+            estimateUsd: estimateUsd(routed, req.inputChars, req.maxTokens),
           });
         } catch (e) {
           // A refused second call (the 80% line, the member's share) keeps what the first made.
@@ -523,6 +527,13 @@ export async function writeCardBatch(o: {
       });
       const res = await generateItems({
         client: o.client,
+        model: routed,
+        reserveFallback: fallbackReserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "cards", ref: o.batchId }, () => {
+          unsettled += 1;
+        }, (sp) => {
+          costUsd += sp.costUsd;
+          model = sp.model;
+        }),
         kind: "cards",
         ref: o.batchId,
         system: req.system,
@@ -590,7 +601,7 @@ export async function writeCardBatch(o: {
   } finally {
     await saving.catch(() => undefined);
     // A reservation no call used (nothing was left to write) is settled at $0.
-    if (reserved !== undefined) await settle(o.sb, reserved, { model: MODEL, usage: null });
+    if (reserved !== undefined) await settle(o.sb, reserved, { model: routed, usage: null });
     await finishBatch(o.sb, o.batchId, { made, rejected, model, costUsd, error, complete: o.claim.wanted <= 0 });
   }
   return { made, rejected, costUsd, unsettled };
@@ -697,8 +708,9 @@ export const cardsOp: Op = async (req, body, started) => {
   // From here the part is this request's: every way out finishes it.
   let inputs: { known: KnownCard[]; figures: Figure[]; corrections: Correction[]; blocks: NumberedBlock[] };
   let reserved: number | undefined;
+  let model: string;
   try {
-    inputs = await readInputs(sb, lecture, claim);
+    [inputs, model] = await Promise.all([readInputs(sb, lecture, claim), modelFor(sb, lecture.group_id, "cards")]);
     if (claim.wanted > 0) {
       const first = cardsCall({ lecture, claim, ...inputs }, claim.wanted);
       reserved = await reserve(sb, {
@@ -706,7 +718,7 @@ export const cardsOp: Op = async (req, body, started) => {
         lectureId,
         kind: "cards",
         ref: batchId,
-        estimateUsd: estimateUsd(MODEL, first.inputChars, first.maxTokens),
+        estimateUsd: estimateUsd(model, first.inputChars, first.maxTokens),
       });
     }
   } catch (e) {
@@ -724,7 +736,7 @@ export const cardsOp: Op = async (req, body, started) => {
         /* the stream is gone */
       }
     };
-    const r = await writeCardBatch({ client, sb, lecture, batchId, claim, ...inputs, stopAt: started + TIME_LIMIT_MS, write: out, reserved });
+    const r = await writeCardBatch({ client, sb, lecture, batchId, claim, ...inputs, stopAt: started + TIME_LIMIT_MS, write: out, reserved, model });
     out(JSON.stringify({ t: "done", made: r.made, rejected: r.rejected, costUsd: Math.round(r.costUsd * 1e6) / 1e6, unsettled: r.unsettled }) + "\n");
   });
 };

@@ -45,6 +45,7 @@ import {
   serverKey,
   textStream,
 } from "./study.js";
+import { fallbackReserve, modelFor } from "./routes.js";
 
 /* ── op "questions": one part of a practice round (spec §4.6; §12.3.Q; practice 2.0) ──
  *
@@ -458,9 +459,9 @@ export function typesCtx(lecture: Pick<Lecture, "slides" | "source_kind">, part:
 
 /** One call's worst case, which is what it reserves (budget.ts): its text,
  *  and the pictures' tokens (image items). */
-export function callEstimate(system: TextBlock[], user: readonly ContentBlock[], maxTokens: number, pictureTokens = 0): number {
+export function callEstimate(system: TextBlock[], user: readonly ContentBlock[], maxTokens: number, pictureTokens = 0, model: string = MODEL): number {
   const chars = [...system, ...user].reduce((n, b) => n + ("text" in b && typeof b.text === "string" ? b.text.length : 0), 0);
-  return estimateUsd(MODEL, chars, maxTokens, pictureTokens);
+  return estimateUsd(model, chars, maxTokens, pictureTokens);
 }
 
 /** The schema of the questions' format, as sent (cleanSchema of the zod). */
@@ -590,7 +591,13 @@ export async function writeBatch(o: {
   drafts?: DraftMode;
   /** Image items: the part's pictures, signed (the writer and the solver see them). */
   pictures?: ReadonlyMap<string, Picture>;
+  /** The writing's model (key practice, or set_write for a request's batch)
+   *  and the blind solver's (key solver); left out: the default (routes.ts). */
+  model?: string;
+  solverModel?: string;
 }): Promise<BatchResult> {
+  const routed = o.model ?? MODEL;
+  const solverModel = o.solverModel ?? MODEL;
   const optionCount = o.style?.optionCount ?? 5;
   const system = questionsSystem(o.lecture, o.style);
   const lectureSlides = new Set(o.lecture.slides.map((s) => s.n));
@@ -732,11 +739,13 @@ export async function writeBatch(o: {
     if (!fresh.length) return [];
     if (timeLeft() < SOLVER_MIN_MS) return fresh.map(() => null);
     const items = fresh.map((f) => solverItemOf(f.item, pictures));
-    const rid = await reserveOr("solver", solverEstimate(o.lecture, items));
+    const rid = await reserveOr("solver", solverEstimate(o.lecture, items, solverModel));
     if (rid === null) return fresh.map(() => null);
     try {
       const res = await solveQuestions({
         client: o.client,
+        model: solverModel,
+        reserveFallback: fallbackReserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "solver", ref }, () => (unsettled += 1), (sp) => (costUsd += sp.costUsd)),
         lecture: o.lecture,
         items,
         ref,
@@ -799,7 +808,7 @@ export async function writeBatch(o: {
       failed.length,
       failed.map(({ f }) => f.item.style ?? "case"),
     );
-    const rid = await reserveOr("practice", callEstimate(system, content, maxTokens, picturesTokens(seen)));
+    const rid = await reserveOr("practice", callEstimate(system, content, maxTokens, picturesTokens(seen), routed));
     if (rid === null) return none;
     for (const { f } of failed) tried.add(f);
     // The originals are not duplicates of their own rewrites.
@@ -810,6 +819,8 @@ export async function writeBatch(o: {
     try {
       await generateItems({
         client: o.client,
+        model: routed,
+        reserveFallback: fallbackReserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "practice", ref }, () => (unsettled += 1), (sp) => (costUsd += sp.costUsd)),
         kind: "practice",
         ref,
         system,
@@ -945,7 +956,7 @@ export async function writeBatch(o: {
       let rid: number;
       if (call === 0 && o.reserved !== undefined) rid = o.reserved;
       else {
-        const r = await reserveOr("practice", callEstimate(system, user, maxTokens, callStyles.includes("image") ? picturesTokens(pictureList) : 0));
+        const r = await reserveOr("practice", callEstimate(system, user, maxTokens, callStyles.includes("image") ? picturesTokens(pictureList) : 0, routed));
         if (r === null) break; // a refused second call keeps what the first made
         rid = r;
       }
@@ -954,6 +965,8 @@ export async function writeBatch(o: {
       let saving: Promise<void> = Promise.resolve();
       const res = await generateItems({
         client: o.client,
+        model: routed,
+        reserveFallback: fallbackReserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "practice", ref }, () => (unsettled += 1), (sp) => (costUsd += sp.costUsd)),
         kind: "practice",
         ref,
         system,
@@ -1151,6 +1164,8 @@ export async function questionsWriteOp(req: Request, body: AiBody, started: numb
   let part: PartText;
   let drafts: DraftMode | undefined;
   let reserved: number;
+  let model: string;
+  let solverModel: string;
   let pictures = new Map<string, Picture>();
   try {
     let pending: Known[];
@@ -1185,12 +1200,14 @@ export async function questionsWriteOp(req: Request, body: AiBody, started: numb
       extras: drafts ? { styles: drafts.styles.slice(0, claim.wanted), difficulty: drafts.difficulty, points: drafts.points, focus: drafts.focus } : undefined,
       memberStyle: drafts?.memberStyle ?? null,
     });
+    // A practice 2.0 request's batch (a practice set) is the set generator's key; a release-1 round, practice's.
+    [model, solverModel] = await Promise.all([modelFor(sb, lecture.group_id, row.request_id ? "set_write" : "practice"), modelFor(sb, lecture.group_id, "solver")]);
     reserved = await reserve(sb, {
       groupId: lecture.group_id,
       lectureId,
       kind: "practice",
       ref: batchId,
-      estimateUsd: callEstimate(call.system, call.messages[0].content as ContentBlock[], call.maxTokens, drafts?.styles.slice(0, claim.wanted).includes("image") ? picturesTokens([...pictures.values()]) : 0),
+      estimateUsd: callEstimate(call.system, call.messages[0].content as ContentBlock[], call.maxTokens, drafts?.styles.slice(0, claim.wanted).includes("image") ? picturesTokens([...pictures.values()]) : 0, model),
     });
   } catch (e) {
     await finishBatch(sb, batchId, { status: "failed", rejected: 0, model: null, cost: 0, error: errorText(e) });
@@ -1214,6 +1231,8 @@ export async function questionsWriteOp(req: Request, body: AiBody, started: numb
       part,
       drafts,
       pictures,
+      model,
+      solverModel,
     });
     write(doneLine(res));
   });
