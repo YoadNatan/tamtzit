@@ -148,7 +148,8 @@ test("settling: max(registry, reported) × the fee; the reported cost alone when
   const m = modelInfo(PRO)!;
   const u = normalizeChat(USAGE);
   const list = costUsd(u, PRO);
-  close(settled({ m, usage: u, final: true, chars: 1, opened: true, floorUsd: 1, reportedUsd: 0 }).costUsd, list * 1.055, "registry, the floor not applied to a final count");
+  close(settled({ m, usage: u, final: true, chars: 1, opened: true, floorUsd: 1, reportedUsd: 0 }).costUsd, list * 1.5 * 1.055, "an unverified registry price × 1.5 when nothing was reported (D16), the floor not applied to a final count");
+  close(settled({ m: { ...m, verified: true }, usage: u, final: true, chars: 1, opened: true, floorUsd: 1, reportedUsd: 0 }).costUsd, list * 1.055, "a verified price: the registry's");
   close(settled({ m, usage: u, final: true, chars: 1, opened: true, floorUsd: 1, reportedUsd: list * 3 }).costUsd, list * 3 * 1.055, "reported, when more");
   close(settled({ m, usage: null, final: false, chars: 0, opened: true, floorUsd: 0.01, reportedUsd: 0.5 }).costUsd, 0.5 * 1.055, "a reported cost above the reservation");
   assert.equal(settled({ m, usage: null, final: false, chars: 0, opened: false, floorUsd: 0.3 }).costUsd, 0, "refused before the stream: $0");

@@ -71,6 +71,7 @@ export async function streamCall(a: Adapter, o: RunOpts, m: ModelInfo): Promise<
   let final = false;
   let reportedUsd: number | null = null;
   let opened = false;
+  let sent = false;
   let started = false;
   let failed: string | null = null;
   let cost = 0;
@@ -113,11 +114,14 @@ export async function streamCall(a: Adapter, o: RunOpts, m: ModelInfo): Promise<
     const req = a.request(o, m, turns, key);
     let res: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
+      sent = true;
       res = await theFetch()(req.url, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "text/event-stream", ...req.headers },
         body: JSON.stringify(req.body),
         signal: ctl.signal,
+        // Never followed: a redirect would carry a key header (x-goog-api-key) to another host.
+        redirect: "error",
       });
       if (res.ok || attempt === 1 || !RETRY.has(res.status) || o.stopAt - Date.now() < RETRY_ROOM_MS) break;
       await res.body?.cancel().catch(() => undefined);
@@ -141,6 +145,10 @@ export async function streamCall(a: Adapter, o: RunOpts, m: ModelInfo): Promise<
     if (failed) throw new Error(`${a.provider}: ${scrub(failed, key)}`);
     if (stop === null) throw new Error(`${a.provider}: the stream ended before the model finished`);
   } catch (e) {
+    // Stopped (the deadline, the caller) after the request went out: the
+    // provider may already bill its input and thinking, so it settles at the
+    // reservation, as a stream that opened (D4).
+    if ((timedOut || o.signal?.aborted) && sent) opened = true;
     if (timedOut) stop = "timeout";
     else if (o.signal?.aborted) stop = "aborted";
     else {
@@ -150,6 +158,8 @@ export async function streamCall(a: Adapter, o: RunOpts, m: ModelInfo): Promise<
   } finally {
     clearTimeout(timer);
     o.signal?.removeEventListener("abort", onAbort);
+    // A loop left early (an error in the stream) closes the connection now.
+    if (!ctl.signal.aborted) ctl.abort();
     const s = settled({ m, usage, final, chars, opened, floorUsd: o.reservedUsd ?? requestUsd(o, m), reportedUsd });
     cost = s.costUsd;
     estimated = s.estimated;

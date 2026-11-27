@@ -29,8 +29,8 @@ const SOL = "openai:gpt-6.2-sol";
 const FLASH = "google:gemini-3.8-flash";
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 
-type Call = { url: string; headers: Headers; body: Record<string, any> | null };
-type Reply = { status?: number; events?: Array<{ event?: string; data: unknown }>; raw?: string; hang?: boolean; json?: unknown };
+type Call = { url: string; headers: Headers; body: Record<string, any> | null; redirect?: RequestRedirect };
+type Reply = { status?: number; events?: Array<{ event?: string; data: unknown }>; raw?: string; hang?: boolean; json?: unknown; noHeaders?: boolean };
 
 /** A fake fetch: the study's storage answers pictures; the provider answers `replies` in turn. */
 function fake(replies: Reply[]) {
@@ -38,9 +38,11 @@ function fake(replies: Reply[]) {
   const enc = new TextEncoder();
   const f = async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
-    calls.push({ url: u, headers: new Headers(init?.headers), body: init?.body ? JSON.parse(String(init.body)) : null });
+    calls.push({ url: u, headers: new Headers(init?.headers), body: init?.body ? JSON.parse(String(init.body)) : null, redirect: init?.redirect });
     if (u.startsWith("https://proj.supabase.test/")) return new Response(JPEG, { status: 200, headers: { "content-type": "image/jpeg" } });
     const r = replies.shift() ?? { status: 500, json: { error: { message: "no reply left" } } };
+    // The request went out, but no headers came back before the abort.
+    if (r.noHeaders) return new Promise<Response>((_, no) => init?.signal?.addEventListener("abort", () => no(new DOMException("aborted", "AbortError"))));
     if (r.status && r.status >= 400) return new Response(JSON.stringify(r.json ?? {}), { status: r.status, headers: { "content-type": "application/json" } });
     const text = r.raw ?? (r.events ?? []).map((e) => `${e.event ? `event: ${e.event}\n` : ""}data: ${typeof e.data === "string" ? e.data : JSON.stringify(e.data)}\n\n`).join("");
     const body = new ReadableStream<Uint8Array>({
@@ -143,6 +145,11 @@ test("settling (D4, D16): final usage at max(registry × fee, reported); no fina
   assert.equal(early.estimated, true);
   assert.equal(early.usage?.output_tokens, 100, "the streamed text is still counted");
   assert.equal(settled({ m: { id: SOL }, usage: null, final: false, chars: 0, opened: false, floorUsd: 0.25 }).costUsd, 0, "an HTTP refusal before the stream costs nothing");
+  // D16: an unverified registry row (the price not read on the vendor's page) settles × 1.5, as it was reserved; a reported cost replaces it.
+  const unchecked = { id: SOL, verified: false };
+  assert.ok(Math.abs(settled({ m: unchecked, usage: u, final: true, chars: 10, opened: true, floorUsd: 0 }).costUsd - list * 1.5) < 1e-12, "OpenAI's final usage on an unverified row: × 1.5");
+  assert.ok(Math.abs(settled({ m: { ...unchecked, verified: true }, usage: u, final: true, chars: 10, opened: true, floorUsd: 0 }).costUsd - list) < 1e-12, "verified: the registry's");
+  assert.ok(Math.abs(settled({ m: unchecked, usage: u, final: true, chars: 10, opened: true, floorUsd: 0, reportedUsd: list * 1.2 }).costUsd - list * 1.2) < 1e-12, "a reported cost is the provider's own figure");
 });
 
 test("OpenAI's request: instructions, input, pictures inline from the study's storage only, store false, effort, the output floor, a strict schema", async () => {
@@ -216,10 +223,12 @@ test("OpenAI's stream: text to onText as it comes, usage at the end, one settle 
   const s = o.spends[0];
   assert.equal(s.model, SOL);
   assert.equal(s.kind, "practice");
-  assert.ok(Math.abs(s.costUsd - costUsd(normalizeOpenAI(oaUsage), SOL)) < 1e-12);
+  // GPT-6.2 Sol's price is not verified: the ledger counts it × 1.5, as its reservation did (D16).
+  assert.ok(Math.abs(s.costUsd - costUsd(normalizeOpenAI(oaUsage), SOL) * 1.5) < 1e-12);
   assert.equal(res.costUsd, s.costUsd);
   const sent = calls.find((c) => c.url === OPENAI_URL)!;
   assert.equal(sent.headers.get("authorization"), `Bearer ${OPENAI_KEY}`);
+  assert.equal(sent.redirect, "error", "a redirect is never followed (it would carry a key header to another host)");
   assert.ok(!sent.url.includes(OPENAI_KEY) && !JSON.stringify(sent.body).includes(OPENAI_KEY), "the key is in the header only");
   assert.equal(sent.body?.max_output_tokens, 6_000);
 });
@@ -258,6 +267,14 @@ test("D4: an abort or a timeout before the final usage settles at the reservatio
   const c = opts(SOL, { reservedUsd: 0.3 });
   await assert.rejects(run({ ...c, appFallback: false }), /ended before the model finished/);
   assert.equal(c.spends[0].costUsd, 0.3);
+  // Stopped after the request went out but before its headers: the provider may bill the input already, so the reservation.
+  fake([{ noHeaders: true }]);
+  const pre = new AbortController();
+  const p = opts(SOL, { reservedUsd: 0.21, signal: pre.signal });
+  setTimeout(() => pre.abort(), 30);
+  const rp = await run(p);
+  assert.equal(rp.stop, "aborted");
+  assert.equal(p.spends[0].costUsd, 0.21);
 });
 
 test("errors: an HTTP refusal costs $0 and its words never hold the key; a 429 is tried once more", async () => {
@@ -368,7 +385,7 @@ test("Gemini's stream: thought parts skipped, the last usage counts with thinkin
   assert.equal(o.text.join(""), "שלום עולם");
   assert.equal(r.stop, "end_turn");
   assert.equal(r.estimated, false);
-  assert.ok(Math.abs(o.spends[0].costUsd - costUsd(normalizeGemini(gmUsage), FLASH)) < 1e-12);
+  assert.ok(Math.abs(o.spends[0].costUsd - costUsd(normalizeGemini(gmUsage), FLASH) * 1.5) < 1e-12, "unverified: × 1.5");
   assert.equal((o.spends[0].usage as { provider?: string }).provider, "google");
   for (const [reason, stop] of [["MAX_TOKENS", "max_tokens"], ["SAFETY", "refusal"], ["PROHIBITED_CONTENT", "refusal"], ["RECITATION", "refusal"]] as const) {
     fake([{ events: [gmChunk([], { finishReason: reason })] }]);

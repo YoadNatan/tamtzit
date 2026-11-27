@@ -1,5 +1,6 @@
 import type { ModelInfo } from "../../../shared/study/models.js";
 import { costUsd, floorUsage, type UsageLike } from "../budget.js";
+import { LAB_UNVERIFIED_FACTOR } from "../limits.js";
 
 /* ── Usage in Anthropic's shape, and what a call settles at (D4, D16) ──
  *
@@ -70,10 +71,13 @@ export function normalizeChat(u: unknown, provider = "openrouter"): UsageLike {
  *    providers report usage only at the end, and the thinking so far is
  *    billed (D4);
  *  - the provider refused the request before streaming (an HTTP error, no
- *    connection): $0, nothing was generated.
+ *    connection): $0, nothing was generated;
+ *  - a price the registry has not verified (verified: false) and no cost the
+ *    provider reported: the registry's figure × LAB_UNVERIFIED_FACTOR, as
+ *    its reservation was, so the ledger never counts less than a low guess.
  *  `estimated` marks a figure that is not the provider's final count. */
 export function settled(o: {
-  m: Pick<ModelInfo, "id" | "fee">;
+  m: Pick<ModelInfo, "id" | "fee"> & { verified?: boolean };
   usage: UsageLike | null;
   final: boolean;
   chars: number;
@@ -82,11 +86,14 @@ export function settled(o: {
   reportedUsd?: number | null;
 }): { usage: UsageLike | null; costUsd: number; estimated: boolean } {
   const fee = o.m.fee ?? 1;
+  // A price not checked on the vendor's page counts × 1.5 here too, as its
+  // reservation did, unless the provider reported what the call cost (D16).
+  const unchecked = o.m.verified === false && !((o.reportedUsd ?? 0) > 0) ? LAB_UNVERIFIED_FACTOR : 1;
   if (o.final && o.usage) {
-    const cost = Math.max(costUsd(o.usage, o.m.id), o.reportedUsd ?? 0) * fee;
+    const cost = Math.max(costUsd(o.usage, o.m.id) * unchecked, o.reportedUsd ?? 0) * fee;
     return { usage: o.usage, costUsd: cost, estimated: false };
   }
   const usage = floorUsage(o.usage, o.chars);
-  const counted = costUsd(usage, o.m.id) * fee;
+  const counted = costUsd(usage, o.m.id) * unchecked * fee;
   return { usage, costUsd: o.opened ? Math.max(counted, o.floorUsd, (o.reportedUsd ?? 0) * fee) : counted, estimated: true };
 }
