@@ -1,7 +1,7 @@
 import { getDeadline, waitUntil } from "@vercel/functions"; // 3.10.5, pinned
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { MODELS, modelInfo, ROUTE_KEYS, type RouteKey } from "../../../shared/study/models.js";
+import { ALL_MODELS, modelInfo, ROUTE_KEYS, type RouteKey } from "../../../shared/study/models.js";
 import { SHEET_READ_PAGES } from "../../../shared/study/sheetPrice.js";
 import { monthlyCap } from "../budget.js";
 import { run, settleFor, type RunResult, type Spend } from "../claude.js";
@@ -682,7 +682,7 @@ async function priceAction(req: Request, body: AiBody): Promise<Response> {
   const source = body.source && typeof body.source === "object" && !Array.isArray(body.source) ? (body.source as Record<string, unknown>) : {};
   const m = await material(sb, group, route, source, true);
   const pictures = picturePaths(m.frozen).length > 0;
-  const asked = Array.isArray(body.models) ? body.models.filter((x): x is string => typeof x === "string").slice(0, MODELS.length) : MODELS.map((x) => x.id);
+  const asked = Array.isArray(body.models) ? body.models.filter((x): x is string => typeof x === "string").slice(0, ALL_MODELS.length) : ALL_MODELS.map((x) => x.id);
   const models: Record<string, { usd: number } | { refused: string }> = {};
   for (const id of asked) {
     const info = modelInfo(id);

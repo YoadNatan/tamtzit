@@ -382,7 +382,7 @@ export class JsonArrayItems {
  *  reports them as `unsettled`). */
 export function settleFor(sb: SupabaseClient, reservationId: number, onFail?: () => void): Ledger {
   return async (s) => {
-    const ok = await settle(sb, reservationId, { model: s.model, usage: s.usage });
+    const ok = await settle(sb, reservationId, { model: s.model, usage: s.usage, cost: s.costUsd });
     if (!ok) onFail?.();
     return ok;
   };

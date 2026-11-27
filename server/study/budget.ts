@@ -38,6 +38,9 @@ export type UsageLike = TokenCounts & {
   iterations?: Array<TokenCounts & { model?: string | null; type?: string | null }> | null;
   estimated?: boolean;
   service_tier?: string | null;
+  /** Another provider's call (llm/usage.ts): its name and its own counts, kept as reported. */
+  provider?: string | null;
+  raw?: unknown;
 };
 
 /** The attempt's whole prompt in tokens (input, cache writes, cache hits):
@@ -247,13 +250,14 @@ export const unsettledCount = (): number => unsettled;
 
 /** Writes the call's real cost over its reservation, once. Never throws: a
  *  settle that fails is logged and counted, and the reservation keeps its
- *  estimate. False when it did not settle (an error, or no open reservation). */
-export async function settle(sb: SupabaseClient, id: number, s: { model: string; usage: UsageLike | null }): Promise<boolean> {
+ *  estimate. False when it did not settle (an error, or no open reservation).
+ *  `cost` is the call's own figure when it has one (another provider's fee,
+ *  its reported cost, or the reservation as a floor: llm/usage.ts);
+ *  otherwise the usage at the model's rates. */
+export async function settle(sb: SupabaseClient, id: number, s: { model: string; usage: UsageLike | null; cost?: number }): Promise<boolean> {
   try {
-    const { data, error } = await sb.rpc(
-      "study_settle",
-      keyed({ p_id: id, p_model: s.model, p_usage: s.usage, p_cost: costUsd(s.usage, s.model) }),
-    );
+    const cost = typeof s.cost === "number" && Number.isFinite(s.cost) && s.cost >= 0 ? s.cost : costUsd(s.usage, s.model);
+    const { data, error } = await sb.rpc("study_settle", keyed({ p_id: id, p_model: s.model, p_usage: s.usage, p_cost: cost }));
     if (error || data !== true) {
       unsettled += 1;
       console.error(`study_settle ${id}: ${error ? error.message : "no open reservation"}`);

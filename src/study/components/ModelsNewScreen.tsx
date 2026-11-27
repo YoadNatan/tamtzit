@@ -83,7 +83,8 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
   }
 
   const usable = quote ? models.filter((m) => quote.models[m.id]?.usd !== undefined) : models;
-  const first = usable.filter((m) => FIRST_MODELS.includes(m.id) || picked.includes(m.id) || m.id === today);
+  // An approved provider's models show with the newest Claude ones: the owner approved them to try them.
+  const first = usable.filter((m) => FIRST_MODELS.includes(m.id) || m.provider !== "anthropic" || picked.includes(m.id) || m.id === today);
   const rest = usable.filter((m) => !first.includes(m));
   const shown = more ? usable : first;
   const rated = RATED_KINDS.has(kind);

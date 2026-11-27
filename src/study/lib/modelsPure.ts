@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL, MODELS, modelInfo, priceRowOn, ROUTE_RULES, type ModelInfo, type RouteKey } from "../../../shared/study/models";
+import { ALL_MODELS, DEFAULT_MODEL, modelInfo, priceRowOn, ROUTE_RULES, type ModelInfo, type RouteKey } from "../../../shared/study/models";
 import { estimateUsd } from "../../../shared/study/estimate";
 
 /* ── "השוואת מודלים": the pure part (docs/study/models.md) ──
@@ -85,7 +85,7 @@ export const CANDIDATE: Readonly<Record<string, string>> = {
 
 /** The models a comparison may offer: listed, not Mythos, Claude or a provider whose key is set and the group approved. */
 export function offered(o: { providers: ModelsState["providers"]; keys: Record<string, boolean> | null; models?: readonly ModelInfo[] }): ModelInfo[] {
-  return (o.models ?? MODELS).filter((m) => !m.verifiedOrgsOnly && (m.provider === "anthropic" || (o.keys?.[m.provider] === true && o.providers[m.provider]?.allowed === true)));
+  return (o.models ?? ALL_MODELS).filter((m) => !m.verifiedOrgsOnly && (m.provider === "anthropic" || (o.keys?.[m.provider] === true && o.providers[m.provider]?.allowed === true)));
 }
 
 /** The first selection: today's model and the kind's candidate. */
@@ -264,7 +264,7 @@ export const PROVIDERS: ReadonlyArray<{ id: string; name: string; env: string }>
 ];
 
 /** The newest date any of a provider's models' prices were checked. */
-export function checkedOf(provider: string, models: readonly ModelInfo[] = MODELS): string | null {
+export function checkedOf(provider: string, models: readonly ModelInfo[] = ALL_MODELS): string | null {
   const ds = models.filter((m) => m.provider === provider).map((m) => m.checked);
   return ds.length ? ds.sort()[ds.length - 1] : null;
 }

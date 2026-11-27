@@ -510,7 +510,7 @@ function rerunReserve(store: Store, lectureId: string, unit: Unit, lecture: Lect
 }
 async function chargesOf(store: Store, lectureId: string, unit: Unit, first: number, spent: Spend | null, rerun: Rerun) {
   if (rerun.charge === null) return { charge: first, model: spent?.model ?? null, usage: spent?.usage ?? null, cost: spent?.costUsd ?? 0 };
-  if (!(await settle(store.sb, first, { model: spent?.model ?? MODEL, usage: spent?.usage ?? null }))) log(lectureId, unit, "settle", "the first call kept its estimate");
+  if (!(await settle(store.sb, first, { model: spent?.model ?? MODEL, usage: spent?.usage ?? null, ...(spent ? { cost: spent.costUsd } : {}) }))) log(lectureId, unit, "settle", "the first call kept its estimate");
   const s = rerun.spent;
   return { charge: rerun.charge, model: s?.model ?? null, usage: s?.usage ?? null, cost: s?.costUsd ?? 0 };
 }

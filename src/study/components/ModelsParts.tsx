@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { DEFAULT_MODEL, labelOf, MODELS, modelInfo } from "../../../shared/study/models";
+import { ALL_MODELS, DEFAULT_MODEL, labelOf, modelInfo } from "../../../shared/study/models";
 import type { Ctx } from "../features/types";
 import { flags } from "../lib/flags";
 import {
@@ -290,7 +290,7 @@ export function RecCallout({ rec, route, onUse }: { rec: Recommendation; route: 
 
 /** The models a key may take, the newest four first; the current one always shown. */
 function routeChoices(key: string, state: ModelsState, keys: Record<string, boolean> | null): string[] {
-  const ok = MODELS.filter((m) => routable(key, m, { providers: state.providers, keys })).map((m) => m.id);
+  const ok = ALL_MODELS.filter((m) => routable(key, m, { providers: state.providers, keys })).map((m) => m.id);
   return ok;
 }
 

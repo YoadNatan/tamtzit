@@ -133,6 +133,98 @@ export const MODELS: readonly ModelInfo[] = [
   }),
 ];
 
+/* ── Other providers (design-models phase 2, WP9: OpenAI and Google) ──
+ *
+ * Ledger ids are "<provider>:<the API's id>" (D3). Prices are USD per million
+ * tokens. Every row below is verified: false: the build session could not
+ * load the vendors' pricing pages (their hosts are outside its network), so
+ * the figures and ids come from searches limited to the vendors' own sites
+ * (openai.com, ai.google.dev), checked 2026-11-27, with the page each should
+ * be read from as `source`. An unverified price is estimated × 1.5 in
+ * comparisons and never routed in production (D16): the owner reads the
+ * vendor's page, sets verified: true and the date (RELEASE-Y2.md).
+ *
+ * Caching is automatic at both (no write premium; cached input is a part of
+ * the input, which usage.ts takes out). Writes are kept at 1.25 × and 2.5 ×
+ * the input so a reservation errs high. Thinking is output and shares the
+ * output cap (thinkingInMax), so every call sends at least 4,000 tokens of
+ * it. None has server-side fallback: D8's rerun on the default applies in
+ * production. Tokenizers count Hebrew differently: 2.0 characters a token
+ * until the ledger calibrates it. */
+const OPENAI_PRICING = "https://developers.openai.com/api/docs/pricing";
+const GEMINI_PRICING = "https://ai.google.dev/gemini-api/docs/pricing";
+const UNCHECKED = "Unverified: the vendor's page could not be loaded from the build session (figures from searches of the vendor's own site, 2026-11-27).";
+const LEVELS: Record<Effort, unknown> = { low: "low", medium: "medium", high: "high" };
+const other = {
+  checked: "2026-11-27",
+  verified: false,
+  vision: true,
+  caching: "auto",
+  batch: false,
+  effort: LEVELS,
+  thinkingInMax: true,
+  minMaxTokens: 4_000,
+  serverFallback: false,
+  charsPerToken: 2,
+} as const;
+/** OpenAI's rate card: above 272k input tokens, input and cache rates double and output is 1.5 × for the whole request. */
+const openaiRow = (input: number, hit: number, out: number): PriceRow => ({
+  in: input,
+  out,
+  w5m: input * 1.25,
+  w1h: input * 2.5,
+  hit,
+  upTo: { promptTokens: 272_000, then: { in: input * 2, out: out * 1.5, w5m: input * 2.5, w1h: input * 5, hit: hit * 2 } },
+});
+const oa = (apiId: string, label: string, tier: ModelInfo["tier"], row: PriceRow, more: Partial<ModelInfo> = {}): ModelInfo => ({
+  ...other,
+  id: `openai:${apiId}`,
+  provider: "openai",
+  apiId,
+  label,
+  prices: [row],
+  source: OPENAI_PRICING,
+  context: 1_050_000,
+  maxOut: 128_000,
+  json: "strict",
+  tier,
+  notes: `${UNCHECKED} Responses API; reasoning.effort low, medium or high.`,
+  ...more,
+});
+/** Gemini's implicit caching: hits at a tenth of the input, no write premium (kept high here as above). */
+const geminiRow = (input: number, out: number, from?: string): PriceRow => ({ ...(from ? { from } : {}), in: input, out, w5m: input * 1.25, w1h: input * 2.5, hit: input / 10 });
+const gm = (apiId: string, label: string, tier: ModelInfo["tier"], prices: PriceRow[], more: Partial<ModelInfo> = {}): ModelInfo => ({
+  ...other,
+  id: `google:${apiId}`,
+  provider: "google",
+  apiId,
+  label,
+  prices,
+  source: GEMINI_PRICING,
+  context: 1_048_576,
+  maxOut: 65_536,
+  json: "schema",
+  tier,
+  notes: `${UNCHECKED} streamGenerateContent; thinkingLevel low, medium or high. The key must come from a project with billing on (the free tier's data may be used by Google).`,
+  ...more,
+});
+
+/** OpenAI's and Google's models a kind may be compared on (and, once a price
+ *  is verified, routed to). Only ids the vendors' own pages show. */
+export const OTHER_MODELS: readonly ModelInfo[] = [
+  oa("gpt-6.2-astra", "GPT-6.2 Astra", "top", openaiRow(8, 0.4, 40), { expensive: true }),
+  oa("gpt-6.2-sol", "GPT-6.2 Sol", "mid", openaiRow(2, 0.1, 10)),
+  oa("gpt-6.1-terra", "GPT-6.1 Terra", "mid", openaiRow(1, 0.05, 5)),
+  oa("gpt-6-luna", "GPT-6 Luna", "small", openaiRow(0.1, 0.01, 0.5)),
+  // D16: Argon enters only at its price from 1 December ($4/$20), never the introductory one.
+  gm("gemini-4-argon", "Gemini 4 Argon", "top", [geminiRow(4, 20)]),
+  // The introductory price to 31 December 2026, then the standard one.
+  gm("gemini-3.8-flash", "Gemini 3.8 Flash", "mid", [geminiRow(0.75, 3.75), geminiRow(1.5, 7.5, "2027-01-01")]),
+];
+
+/** Every model the registry lists: Claude's first. */
+export const ALL_MODELS: readonly ModelInfo[] = [...MODELS, ...OTHER_MODELS];
+
 /* ── Route keys (design-models §7.2, §9.1): one per kind of work, the unit a
  * route is set for. Section Y's study_model_set accepts exactly these
  * (models.test.ts reads its list). Uploaded sheets (section O) reserve under
@@ -193,7 +285,7 @@ export function scopeAllows(scope: "text" | "all", key: RouteKey): boolean {
 export function modelInfo(model: string | null | undefined): ModelInfo | null {
   const m = model ?? "";
   const id = anthropicId(m) ?? m;
-  return MODELS.find((x) => x.id === id) ?? null;
+  return ALL_MODELS.find((x) => x.id === id) ?? null;
 }
 
 /** The row in force on a day (YYYY-MM-DD; today when left out). */

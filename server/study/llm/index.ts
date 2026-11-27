@@ -1,8 +1,14 @@
 /// <reference path="../env.d.ts" />
 import type { ModelInfo, Provider } from "../../../shared/study/models.js";
 import type { RunOpts, RunResult } from "../claude.js";
+import { geminiAdapter } from "./gemini.js";
+import { providersConfigured, PROVIDER_KEYS, type KeyedProvider } from "./keys.js";
+import { openaiAdapter } from "./openai.js";
+import { streamCall, type Adapter as StreamAdapter } from "./stream.js";
 
-/* ── The providers seam (design-models §7.1, §7.4; WP4) ──
+export { PROVIDER_KEYS, providersConfigured, type KeyedProvider };
+
+/* ── The providers seam (design-models §7.1, §7.4; WP4, WP9) ──
  *
  * claude.ts's run() calls a Claude model itself and every other provider
  * through its adapter here. An adapter streams the request (system,
@@ -12,8 +18,8 @@ import type { RunOpts, RunResult } from "../claude.js";
  * provider's final usage never came, D4), and never throws: a failure is
  * stop "error" with its `cause`, so run() can rerun on the default (D8).
  *
- * This build has no adapter: the providers' modules (openai, gemini, the
- * OpenAI-compatible one for OpenRouter) add themselves to ADAPTERS. Until a
+ * This build has OpenAI's (openai.ts, the Responses API) and Google's
+ * (gemini.ts, streamGenerateContent); stream.ts is what they share. Until a
  * provider has both its key and an adapter, routes.ts never resolves a key
  * to it, and run() fails such a call before any text.
  *
@@ -24,26 +30,16 @@ import type { RunOpts, RunResult } from "../claude.js";
 export type AdapterOutcome = RunResult & { cause?: unknown };
 export type Adapter = (o: RunOpts, m: ModelInfo) => Promise<AdapterOutcome>;
 
+const viaStream =
+  (a: StreamAdapter): Adapter =>
+  (o, m) =>
+    streamCall(a, o, m);
+
 /** The adapters of this build, by provider. */
-const ADAPTERS: Partial<Record<Provider, Adapter>> = {};
-
-/** The environment variable that holds each provider's key. The Chinese
- *  models go only through OpenRouter (OD22), so their direct providers have
- *  none here. */
-export const PROVIDER_KEYS = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  google: "GEMINI_API_KEY",
-  openrouter: "OPENROUTER_API_KEY",
-} as const;
-export type KeyedProvider = keyof typeof PROVIDER_KEYS;
-
-/** Whether each provider's key is set (booleans only: /api/study/health). */
-export function providersConfigured(env: Record<string, string | undefined> = process.env): Record<KeyedProvider, boolean> {
-  const out = {} as Record<KeyedProvider, boolean>;
-  for (const [p, name] of Object.entries(PROVIDER_KEYS) as Array<[KeyedProvider, string]>) out[p] = Boolean((env[name] ?? "").trim());
-  return out;
-}
+const ADAPTERS: Partial<Record<Provider, Adapter>> = {
+  openai: viaStream(openaiAdapter),
+  google: viaStream(geminiAdapter),
+};
 
 /** The adapter for a provider, or null (Anthropic is claude.ts's own). */
 export function adapterFor(p: Provider): Adapter | null {
