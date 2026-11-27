@@ -8,9 +8,9 @@ practice set per sheet, simulations of past exams only) are in
 [`DECISIONS-2026-11-26.md`](DECISIONS-2026-11-26.md) ("Uploaded sheets").
 Built on `dev`; each release point below works on its own and rolls back on
 its own. Release points not built yet are marked so. Release A1 (open and numeric
-questions) is built too: "Release A1, start to finish" below. Release B's SQL
-and server (similar questions, O9 and O10) are built; its app part (O11, O12)
-is not: "Release point 4" below.
+questions) is built too: "Release A1, start to finish" below. Release B
+(similar questions: SQL, server and app, O9 to O12) is built: "Release B,
+start to finish" below. The app's part adds no SQL: part 12 is the same.
 
 ## Rules for all of it
 
@@ -318,19 +318,22 @@ open and numeric items stay in the database but are never asked (the client
 draws choice items only), and the quiz, the meeting, the boss and Today never
 drew them (`q_plain`). The SQL stays (nothing to undo).
 
-## Release point 4 (release B: similar questions) — SQL and server built, the app's part not yet
+## Release B, start to finish (release point 4: similar questions)
 
 Built and tested on `dev`: the SQL (O9: section O 3 in **part 12**, with
 in-place edits in **part 1** (section F's `kind_on`), **part 7** (section E's
-source check, kept when wider) and **part 10** (section L's `kind_on`)) and
-the server (O10: the similar job, op `similar`, `/api/study/work
-{similar}`). Not built: the app's screens and their flag
-`VITE_STUDY_SIMILAR` (O11) and their e2e (O12). So the steps below up to 5
-can go now and change nothing members see; step 6 waits for O11. Details:
-[`sheets.md`](sheets.md) ("SQL section O 3", "Similar questions on the
-server"). Before: practice sets are released (`study_schema() ->> 'L'` is
-`1`, [`RELEASE-L1.md`](RELEASE-L1.md)): a run's questions go into a
-practice set.
+source check, kept when wider) and **part 10** (section L's `kind_on`)), the
+server (O10: the similar job, op `similar`, `/api/study/work {similar}`),
+the app (O11: "עוד שאלות כמוה" after a wrong answer, "שאלות דומות לכל
+הדף" at the end of a sheet and in the review's "⋯", the twins in the
+sheet's practice set, behind `VITE_STUDY_SIMILAR`) and its e2e (O12,
+`e2e/study/similar.cjs`, flag set `os`). Steps 1 to 5 change nothing
+members see; step 6 turns it on. Details: [`sheets.md`](sheets.md) ("SQL
+section O 3", "Similar questions on the server", "Release B in the app").
+Before: release A1 is out (`VITE_STUDY_SHEETS_FORMS`, O 2) and practice
+sets are released (`study_schema() ->> 'L'` is `1`,
+[`RELEASE-L1.md`](RELEASE-L1.md), `VITE_STUDY_MAKE` and `VITE_STUDY_SETS`
+on): a run's questions go into a practice set, and the flag needs both.
 
 1. **Read only** (SQL Editor):
    ```sql
@@ -367,9 +370,22 @@ practice set.
    ```sql
    update study_private.features set enabled = true, changed_at = now() where name = 'similar';
    ```
-6. **Not yet:** `VITE_STUDY_SIMILAR` = `1` (Production only) and a redeploy,
-   once O11's screens are built: "ליצור 2 כמוה" after a wrong answer and
-   "שאלות דומות לכל הדף" at the end of a sheet.
+6. **The app:** Vercel → Settings → Environment Variables → Production only:
+   `VITE_STUDY_SIMILAR` = `1` (with `VITE_STUDY_SHEETS`,
+   `VITE_STUDY_SHEETS_FORMS`, `VITE_STUDY_MAKE` and `VITE_STUDY_SETS`
+   already `1`), then redeploy. `/api/study/health`: `"schemaOk": true` (the
+   flag asks for O 3 and L 1). Checks that spend nothing: open a ready sheet
+   and answer one choice item wrong: the row "עוד שאלות כמוה" shows under it
+   and its sheet says "ליצור 2 כמוה · כ-$…" (close it without tapping); at the
+   end of that sheet's round "שאלות דומות לכל הדף · כ-$…" shows; the review's
+   "⋯" (top bar) offers the same. An open question answered wrong shows no row.
+7. **One real tap** (it spends, about $0.07 for 2 of an item): "ליצור 2
+   כמוה" on one item; within a minute or two the row says "נוצרו 2" (or how
+   many passed the check) and "לתרגל עכשיו" asks them next. Then, read only,
+   the queries below: one `ask` row settled at 0 and one or two `unit` rows.
+   The whole sheet ("שאלות דומות לכל הדף") is about $0.03 a question, once a
+   day a sheet; its questions appear in "סטים של הקבוצה" as "שאלות דומות ·
+   {sheet}", and its requester gets "השאלות הדומות מוכנות".
 
 **What it spends:** only on a member's tap, reserved whole under that member
 before it starts (2 similar questions of an item: about $0.07, at most about
@@ -392,8 +408,9 @@ Claude the rows (the closeness and blind-check rules are tunable).
 the runs that wait (`stopped`) and lets their reservations go. A call
 already running ends within 200 s.
 
-**Rolling back release B:** the switch off; then (once it exists) unset
-`VITE_STUDY_SIMILAR` and redeploy. Similar questions already made stay in
+**Rolling back release B:** the switch off (the app then offers nothing:
+the plan answers `off`); then, if wanted, unset `VITE_STUDY_SIMILAR` and
+redeploy. Similar questions already made stay in
 their sheet's practice set; the SQL stays (its widened checks cannot be
 narrowed once twin rows exist).
 

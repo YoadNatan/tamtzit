@@ -30,7 +30,7 @@ path, queue, lease, worker, review screen and ledger kind `exam` as past exams
 | A1 (O5, O6) | The SQL (O 2: forms open and numeric, exact items by label, answers files and worked solutions, edits, open-add, the budget pause; the pickers' in-place edits) and the server (the sheet reader, its answers file, solving with worked solutions, open-add, resume) | `VITE_STUDY_SHEETS_FORMS` (the client's, O7) | O 2 | Built (part 11; parts 2 to 9 changed in place) |
 | A1 (O7, O8) | The client: the forms in practice, the edit sheet, add and retire, answers and worked solutions, open-add, the paused state, the lecture page's row; its e2e (`e2e/study/sheets-forms.cjs`, flag set `o`) | `VITE_STUDY_SHEETS_FORMS` | O 2 | Built |
 | B (O9, O10) | The SQL (O 3: twins, runs and their jobs, the sheet's set in section L, R's `similar_ready`; E and F in place) and the server (the similar job, op `similar`, `/api/study/work {similar}`, the $5 line) | `VITE_STUDY_SIMILAR` (the client's, O11) | O 3 | Built (part 12; parts 1, 7 and 10 changed in place) |
-| B (O11, O12) | The client: "ליצור 2 כמוה" after a wrong answer, "שאלות דומות לכל הדף" at the end of a sheet, the twin's chip, the words of `similar_ready`; its e2e (flag set `os`) | `VITE_STUDY_SIMILAR` | O 3 | Not built yet |
+| B (O11, O12) | The client: "עוד שאלות כמוה" after a wrong answer, "שאלות דומות לכל הדף" at the end of a sheet and in the review's "⋯", the twins in the sheet's set, the twin's chip, the words of `similar_ready`; its e2e (`e2e/study/similar.cjs`, flag set `os`) | `VITE_STUDY_SIMILAR` | O 3 (and L 1) | Built |
 
 ## The fixture (O0)
 
@@ -1037,6 +1037,126 @@ flag set `os` on L's `ps`). L's set loader does not yet hide the items of a
 soft-deleted sheet (requested from L in design §15; `study_similar_of`
 does).
 
+## Release B in the app (O11; `VITE_STUDY_SIMILAR`)
+
+`src/study/components/SimilarSheet.tsx` (lazy), `src/study/lib/similar.ts`
+(lazy), the words in `src/study/lib/similarCopy.ts`, `styles/similar.css`;
+`PracticeSession.tsx`, `ExamView.tsx`, `practiceSession.ts`,
+`questionColumns.ts`, `sheetForms.ts`, `helpCopy.ts`, `shared/study/flags.ts`
+and `shared/study/notifyCopy.ts` changed.
+
+**The flag** `VITE_STUDY_SIMILAR` (`flags.similar`) needs release A1
+(`VITE_STUDY_SHEETS_FORMS`) and practice sets' shelf (`VITE_STUDY_MAKE`,
+`VITE_STUDY_SETS`), and asks for **section O 3 with L 1**
+(`requiredSchema`); it changes nothing else (`route.test.ts`). No new SQL:
+release B is O 3 (part 12, with the in-place edits in parts 1, 7 and 10).
+
+**After a wrong answer** (design §5.10) to an item of a **sheet** (its kind
+from the review, `sheetInfo`) or to a twin, in a round that is not "מצב
+מבחן" (and, in a set's round, only the sheet's own set: an answer to a twin
+that is not in the set would be "not in set"), a row under the question asks
+the op's **plan** (nothing reserved; an open item, one without a sure key, a
+past exam's item or the switch off show nothing):
+
+- the twins the item's root has and the round does not: "{n} שאלות דומות ·
+  לתרגל", free, asked **right after the question on screen**
+  (`practiceSession.insertNext`);
+- "עוד שאלות כמוה" (while the root has room under its 6): a bottom sheet,
+  "שאלות כמו שאלה {label}", "אותו נושא ואותה רמה, מקרה חדש.", and "ליצור 2
+  כמוה · כ-$…" (the op's usual price; one when only one fits). The start
+  sends `make: true` and the fresh links of the root's figure pages (D24);
+  the op reserves, starts, and the row says "יוצרים 2 שאלות ובודקים אותן… ·
+  אפשר להמשיך לתרגל" (not announced). The run's row (`study_similar_runs`)
+  is read every 3 seconds while it runs and the screen is seen; its end is
+  the **one polite line** ("נוצרה שאלה אחת · אחת לא עברה בדיקה", "הפעם אף
+  שאלה לא עברה בדיקה … · עלה כ-$…", skipped figures), and its twins are
+  asked right after the question ("לתרגל עכשיו"). A run of the same root
+  already making them is **joined** ("כבר מכינים שאלות כמו זו"), nothing
+  reserved. The run's id is kept per root in `sessionStorage`, so a lock or
+  an app switch comes back to its result. When the server cannot write, the
+  phone drives the run's job (action `unit`) while the screen is open.
+- A refusal is one line in `similarFail`'s words (the similar line, 10 taps
+  a day, 6 a root, the switch).
+
+**The whole sheet** (design §5.11, OD11, OD12): at the end of a sheet's
+round (`s=e.`) and in the review's new **"⋯"** in the head (a bottom sheet,
+"עוד פעולות לדף"; the head's "⋯" O7 left for this), never at the top of the
+review: "שאלות דומות לכל הדף · כ-$…", "שאלה דומה אחת לכל שאלה ({n}). זה
+לוקח כמה דקות; אפשר לסגור." (or the first 24 without one), "הן יופיעו
+ב״סטים של הקבוצה״, לכל הקבוצה."; once started, its progress and then
+"נוצרו {n} שאלות דומות · לפתור" to the sheet's set (`?v=sets&k=`, L's set
+page with its author line). Once a day: "היום כבר נוצרו שאלות דומות לדף
+הזה · לתרגל אותן", to the set. With the switch off the round's end shows
+nothing; the "⋯" says "שאלות דומות עוד לא פתוחות בקבוצה.".
+
+**Twins in practice:** a twin keeps its source's printed order, shown and
+after the answer (D10: `orderFor` and `keepPrinted` take source `twin`); a
+twin reusing a figure draws it from its sheet's page (`from_exam`, read with
+the flag only); its chip "דומה לשאלה {label} ב{title} · נבדקה" opens a
+read-only peek at the source question ("השאלה המקורית", "סגירה"). The
+twins live in the sheet's set on "סטים של הקבוצה" (L's shelf and set page
+draw a set of kind `sheet` as any set); a group-wide list never draws a twin
+(`plainOnly`, O7).
+
+**The notice:** R's `similar_ready` has its words: "השאלות הדומות מוכנות",
+the course, the count and "אפשר לפתור מ״סטים של הקבוצה״; the lock screen
+shows the course only (never the sheet's title or a name).
+
+**Bundle:** the entry chunk is 405,754 B of 410,000 with every flag on
+(`SIMILAR` included; 4,246 B free, at least 1,500 kept for the models
+package); O's own share is unchanged at 1,167 B of its 1,500: everything of
+release B loads lazily (the flag's row is the shell's).
+
+**Known gaps, accepted:**
+- A **numeric twin answered in its set's round** counts in the member's
+  answers and mistakes (`study_answer_value`) but not in the set's attempt
+  (L's wrappers stamp choice answers only; `study_answer_value` takes no
+  attempt), as a numeric item of a sheet already did in O 2. A set made of
+  similar questions scores its choice twins.
+- The design's "נשאר החודש לשאלות דומות: $…" (under $2 left) is not shown:
+  members have no read of the similar line; a tap over it is refused with
+  "התקציב לשאלות דומות נגמר החודש".
+- L's set loader does not hide the items of a soft-deleted sheet (O10's
+  note); `study_similar_of`, the chip and the offer do.
+
+**Fixed on the way:** a sheet's item with a figure in a round opened
+straight from a link drew its page crop without the crop's rules (they came
+only with the review's style sheet): 1,525 px wide on a phone. The session
+loads `exams.css` itself now.
+
+## The B e2e (O12)
+
+`e2e/study/similar.cjs` on the shared mock with the synthetic sheet only;
+`mocks/similar.cjs` plays study_similar_plan, study_similar_of, the members'
+read of `study_similar_runs` and the op `similar` (plan, start, unit) with
+O 3's rules (roots and their 6, existing twins first, joined, once a day,
+the line, the switch), and the worker's job (twins with `from_exam`, the
+check's drops, the sheet's set in L made ready with its one `set_shared`,
+the requester's `similar_ready`). Flag set **`os`** in `e2e/study/mock.cjs`
+(`o` with `VITE_STUDY_SIMILAR`; L's `ps` is under `o`), in `SQL_SETS` and
+the list.
+
+Covered (42 checks on `os`): help's row; a wrong answer's offer, its sheet
+and price, the start's `make: true`, the run in the requester's name, the
+running line (not live) and the result line (polite), one of two dropped,
+the twin asked next with its printed order, chip and peek; joining another
+member's run; existing twins first for another member ($0, no start); the
+refusals (the similar line, 10 a day, 6 a root, the switch off); the whole
+sheet at a round's end (one each for the roots without a twin), its set
+ready on the shelf with its title and author, `similar_ready` to the set
+and the group's `set_shared`; solving the set (the chip, more after a wrong
+answer); the review's "⋯" once a day. 320, 390, 820 and 1440 px, light and
+dark, no sideways scroll; the a11y check on every screen. On `o` nothing of
+it shows (5 checks). `problems: []`, `a11y: []` on both.
+
+Run with: `NODE_PATH=$(npm root -g) E2E_FLAGS=os node e2e/study/similar.cjs <dist-os> <out>`
+(a build with the flag sets' variables, as the other scripts). Also run for
+this package: `exams.cjs` (s2), `sheets.cjs` (o0) and `sets-b.cjs` (ps)
+pass; `sheets-forms.cjs` (o) stops at its desktop box drawing ("לשמור" of
+the edit sheet not found after the drag) **at the commit before O11 too**
+(`1d12f57`, the same build and script), a timing-dependent failure O10's
+first run also met; not changed here.
+
 ## Stopping and rolling back (releases A0 to B)
 
 | Switch off (`update study_private.features set enabled = false, changed_at = now() where name = '…'`) | Stops at once |
@@ -1051,7 +1171,7 @@ reversible by clearing it); then the flag off in Vercel and a redeploy. The
 columns stay (they are harmless to old code).
 
 Rolling back release B: the switch `similar` off (the line above), then the
-client's flag off in Vercel (O11's `VITE_STUDY_SIMILAR`) and a redeploy.
+client's flag `VITE_STUDY_SIMILAR` off in Vercel and a redeploy.
 Twins already made stay with their sheet and in its practice set (hiding the
 sheet hides its twins too, `study_similar_of`); the columns, the checks and
 the tables stay (the widened checks cannot be narrowed once twin rows exist).

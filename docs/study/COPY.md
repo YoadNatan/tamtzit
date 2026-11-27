@@ -388,6 +388,33 @@ verdicts, the pause, open-add, the lecture page's row), and
 `src/study/lib/sheetPure.test.ts` pins the vocabulary of the A1 components
 (no "פתרון מוצע", no "פותר עיוור"; "תשובה מוצעת · לא נבדקה").
 
+### Similar questions (docs/study/sheets.md, release B; `VITE_STUDY_SIMILAR`)
+
+One term a concept: a **שאלה דומה** is a twin; it goes into the sheet's
+practice **סט**, on practice sets' **״סטים של הקבוצה״**; "נבדקה" is the only
+label a twin has (an unchecked one is never kept); solving a set is
+practice sets' **לפתור**. The words live in `src/study/lib/similarCopy.ts`
+(lazy: `SIM`, `simTitle`, `simButton`, `simHave`, `simRunning`,
+`simResult`, `twinOf`, `sheetButton`, `sheetOne`, `sheetMade`, and the
+refusals `SIMILAR_FAIL`), the notice in `shared/study/notifyCopy.ts`.
+
+| Where | Now |
+|---|---|
+| After a wrong answer | {n} שאלות דומות · לתרגל (one: שאלה דומה אחת · לתרגל) · עוד שאלות כמוה |
+| The bottom sheet | שאלות כמו שאלה {label} · אותו נושא ואותה רמה, מקרה חדש. · ליצור 2 כמוה · כ-$… (one more fits: ליצור עוד אחת כמוה) · לשאלה הזאת יש כבר 6 שאלות דומות |
+| While it runs | יוצרים 2 שאלות ובודקים אותן… · אפשר להמשיך לתרגל · כבר מכינים שאלות כמו זו · יופיעו כאן בעוד כחצי דקה |
+| Its end (the polite line) | נוצרו {n} / נוצרה שאלה אחת · אחת לא עברה בדיקה / {k} לא עברו בדיקה · {k} שאלות עם איור דולגו (הקישורים לעמודים פגו) · הפעם אף שאלה לא עברה בדיקה. אפשר לנסות שוב מחר. · עלה כ-$… · יצירת השאלות נעצרה. מה שכבר נוצר נשמר. · לתרגל עכשיו · השאלות הדומות נוספו לסבב, מיד אחרי השאלה הזאת. |
+| A twin | דומה לשאלה {label} ב{title} · נבדקה (its peek: השאלה המקורית · סגירה) |
+| The whole sheet | שאלות דומות לכל הדף · כ-$… · שאלה דומה אחת לכל שאלה ({n}). זה לוקח כמה דקות; אפשר לסגור. / שאלה דומה ל-24 השאלות הראשונות שאין להן עדיין דומה. … · הן יופיעו ב״סטים של הקבוצה״, לכל הקבוצה. · מתחילים ליצור שאלות דומות לדף. הן יופיעו ב״סטים של הקבוצה״. · יוצרים שאלות דומות לדף · זה לוקח כמה דקות, ואפשר לסגור. · נוצרו {n} שאלות דומות · לפתור · היום כבר נוצרו שאלות דומות לדף הזה · לתרגל אותן · לכל השאלות בדף כבר יש שאלות דומות. |
+| The review's head | ⋯ (label: עוד פעולות לדף) |
+| Refusals | שאלות דומות עוד לא פתוחות בקבוצה. · התקציב לשאלות דומות נגמר החודש. מתחדש ב-1 בחודש. (every budget code) · היום כבר נוצרו הרבה שאלות דומות. אפשר שוב מחר. · לשאלה הזאת אי אפשר ליצור שאלות דומות: היא פתוחה, או שאין לה עדיין תשובה בדוקה. |
+| The notice (similar_ready) | השאלות הדומות מוכנות · {course} · {n} שאלות · אפשר לפתור מ״סטים של הקבוצה״ (the lock screen: the course only, never the sheet's title or a name) |
+| Help (מבחנים ותרגילים) | אחרי תשובה לא נכונה בדף תרגילים, ״עוד שאלות כמוה״ יוצר 2 שאלות דומות … ונספרות בתקציב חודשי משלהן. |
+
+`src/study/lib/similarCopy.test.ts` pins them (impersonal, no model's
+name, no "פתרון מוצע" or "פותר עיוור"); `shared/study/notifyCopy.test.ts`
+the notice; `e2e/study/similar.cjs` (O12) asserts them on screen.
+
 `e2e/study/sheets.cjs` (O4) asserts these words as they are on screen
 (help's two lines, the tiles and the Word line, the cover, the answers
 file's question, the exactness line, the landing card, the refusals), so a

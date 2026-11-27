@@ -1046,3 +1046,44 @@ Also decided for this build:
 - **Bundle:** no change to the entry chunk (405,524 B of 410,000 with every
   flag on; O's share 1,167 B of 1,500): O9 and O10 add only server code and
   a lazy module.
+
+### Uploaded sheets, O11 and O12 (release B in the app, its e2e), built on 27 November 2026
+
+- **The flag `VITE_STUDY_SIMILAR`** (`flags.similar`) needs release A1's flag
+  and practice sets' (`VITE_STUDY_MAKE`, `VITE_STUDY_SETS`), and asks for
+  section O 3 **with L 1** (`requiredSchema`); no SQL of its own.
+- **Where the offers are:** after a wrong answer to a sheet's item or a twin
+  (never a past exam's item: O 3 makes twins of sheets only; never in "מצב
+  מבחן"; in a set's round only the sheet's own set, where new twins go). The
+  whole sheet at the end of a sheet's round and in a new **"⋯" in the
+  review's head** (the one O7 left; OD12: never at the top of the review).
+- **Existing twins first, then the paid tap:** the row offers the twins a
+  root has, free, beside "עוד שאלות כמוה"; the bottom sheet's button sends
+  `make: true` (the op's `{twins}` answer is for a client that does not show
+  them first). Twins found or made are asked **right after the question on
+  screen** (`insertNext`), not at the round's end.
+- **The result is the only live line** (polite); "יוצרים…" is not
+  announced. A run's id is kept per root in `sessionStorage` (a lock or an
+  app switch reads its row again); `study_similar_runs` is read every 3
+  seconds while a run runs and the screen is seen.
+- **Words:** the shelf is practice sets' "סטים של הקבוצה" (the design's
+  "מדף התרגולים" would be a second name); solving the set is "לפתור"
+  (§13.2); `similar_ready`'s lock screen shows the course only, never the
+  sheet's title (it may be a file's name).
+- **Not built:** the design's "נשאר החודש לשאלות דומות: $…" (members cannot
+  read the similar line; a tap over it is refused in words). **Known gap:** a
+  numeric twin answered in its set's round is not stamped with the set's
+  attempt (`study_answer_value` takes none), so the set's score counts its
+  choice twins only, as with a sheet's numeric items in O 2.
+- **Fixed on the way:** a sheet's item with a figure in a round opened from a
+  link drew its page crop unstyled (1,525 px wide on a phone): the session
+  loads the crop's style sheet itself.
+- **e2e flag set `os`** = `o` with `VITE_STUDY_SIMILAR` (L's `ps` is under
+  `o`); `e2e/study/similar.cjs` passes on `os` (42 checks) and `o` (nothing
+  shows); `exams.cjs` (s2), `sheets.cjs` (o0) and `sets-b.cjs` (ps) pass.
+  `sheets-forms.cjs` (o) fails at its desktop box drawing at the commit
+  before O11 too, the same way (timing-dependent; O10's first run met it):
+  left as it is.
+- **Bundle:** the entry chunk is 405,754 B of 410,000 with every flag on
+  (4,246 B free; at least 1,500 kept for the models package); O's own share
+  stays 1,167 B of 1,500: release B's screens and words load lazily.
