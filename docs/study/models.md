@@ -70,7 +70,7 @@ the components `ModelsScreen`, `ModelsNewScreen`, `ModelsRunScreen`,
 ## SQL section Y 1
 
 After section O 3 at the end of `supabase/study-schema.sql`, so it is in
-**part 12** (130,433 B of 170,000). It is optional for every other path: no
+**part 12** (136,508 B of 170,000). It is optional for every other path: no
 other section reads its tables, and `REQUIRED_SCHEMA` does not list it (only
 the op `lab` and the flag will). Re-runnable; it records `('Y', 1)` last.
 

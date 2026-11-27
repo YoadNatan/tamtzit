@@ -35,7 +35,7 @@ package of this wave.
   ([`RELEASE-O.md`](RELEASE-O.md)). Running parts 1 to 12 installs I, R, L,
   O and Y together; nothing new shows or spends before its own flag and
   switch. Y adds no part: the file is still in 12 parts (part 12 is
-  130,433 B of the 170,000 a part may hold). Tested on a copy of
+  136,508 B of the 170,000 a part may hold). Tested on a copy of
   production's schema (`eed179e`) with parts 1 to 12 and `study.sql`, and
   as an upgrade from `1bcad51`.
 - **Money:** section Y spends nothing by itself. A comparison spends the
