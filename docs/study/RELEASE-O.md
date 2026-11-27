@@ -8,7 +8,9 @@ practice set per sheet, simulations of past exams only) are in
 [`DECISIONS-2026-11-26.md`](DECISIONS-2026-11-26.md) ("Uploaded sheets").
 Built on `dev`; each release point below works on its own and rolls back on
 its own. Release points not built yet are marked so. Release A1 (open and numeric
-questions) is built too: "Release A1, start to finish" below.
+questions) is built too: "Release A1, start to finish" below. Release B's SQL
+and server (similar questions, O9 and O10) are built; its app part (O11, O12)
+is not: "Release point 4" below.
 
 ## Rules for all of it
 
@@ -20,14 +22,24 @@ questions) is built too: "Release A1, start to finish" below.
   the SQL: the app would report the schema as missing (`"schemaOk": false`).
 - **Before:** sections R and L are installed (part 9, then part 10:
   [`RELEASE-R1.md`](RELEASE-R1.md), [`RELEASE-L1.md`](RELEASE-L1.md)). If
-  they are not, they come with this release's run: parts 2 to 11, in order
-  (part 9 holds I and R, part 10 L, part 11 O). That is exactly what the
-  tests ran on a copy of production's current schema (`eed179e`).
+  they are not, they come with this release's run: parts 1 to 12, in order
+  (part 9 holds I and R, part 10 L, parts 11 and 12 O). That is exactly what
+  the tests ran on a copy of production's current schema (`eed179e`).
 - **Since O5 (26 Nov 2026) section O starts part 11** and its version 2 (the
   sheet reader's SQL, dark until release A1's flag) edits sections Q, Z, M, H
   and T in place (parts 2, 3, 5 and 7): every SQL step below runs **parts 2 to
   11 in order**, each to the end. Part 11 alone stops at once with "section O
   2 needs parts 2 to 9 run first" (nothing is half done: run parts 2 to 11).
+- **Since O9 (27 Nov 2026) the file is in 12 parts** and section O's version 3
+  (similar questions, dark while the switch `similar` is off) is part 12. O 3
+  edits section F (part 1: `kind_on`) and section E (part 7) in place, besides
+  L's `kind_on` (part 10): from this `dev`, **every SQL step below runs parts 1
+  to 12 in order**, each to the end, whichever release it is for (a step's
+  "parts 2 to 11" from an older `dev` means parts 1 to 12 now; part 12 alone
+  stops at once with "section O 3 needs part 11 run first"). After it,
+  `study_schema() ->> 'O'` is `3`. Tested on a copy of production's schema
+  (`eed179e`), then parts 1 to 12 twice, and on `4b9b832`'s with twin rows in
+  the database before parts 1 to 12 ran twice again.
 - **Money:** release point 1 spends nothing. Reading a sheet spends the
   group's budget like a past exam (about $0.05 a page), within the sheets line
   ($6 a month) from release point 2.
@@ -49,20 +61,21 @@ until step 8. Do them in order; each says what to see.
 2. **Merge `dev` into `main`** and let Vercel deploy Production. Every new
    flag is off, so the app does not change. Check
    `https://<the app's address>/api/study/health` says `"schemaOk": true`.
-3. **The SQL: parts 2 to 11.** In Supabase → SQL Editor, first read only:
+3. **The SQL: parts 1 to 12** (parts 2 to 11 before O9). In Supabase → SQL Editor, first read only:
    ```sql
    select public.study_schema() ->> 'I' as i, public.study_schema() ->> 'R' as r,
           public.study_schema() ->> 'L' as l, public.study_schema() ->> 'O' as o;
    ```
    Whatever it says (production at `eed179e` has none of I, R, L, O): run
-   **`supabase/parts/2.sql`, `3.sql`, … `11.sql` in order**, each to the end.
+   **`supabase/parts/1.sql`, `2.sql`, … `12.sql` in order**, each to the end.
    Parts 2, 3, 5 and 7 carry O 2's edits of the pickers (the quiz, the
    meeting's quiz, the boss and Today draw only choice questions), part 9 I
-   and R, part 10 L, part 11 O (O 1 and O 2). Part 1 needs no re-run (only its
-   header changed). This is the order the tests ran, twice over, on a copy of
+   and R, part 10 L, part 11 O (O 1 and O 2), part 12 O 3 (similar questions,
+   dark: the switch `similar` is off); parts 1 and 7 carry O 3's in-place
+   edits (`kind_on`, E's source check). This is the order the tests ran, twice over, on a copy of
    production's schema. NOTICEs are harmless. Then, read only:
    ```sql
-   select public.study_schema() ->> 'O' as o, public.study_schema() ->> 'L' as l;   -- 2, 1
+   select public.study_schema() ->> 'O' as o, public.study_schema() ->> 'L' as l;   -- 3, 1 (2, 1 before O9)
    select to_regprocedure('public.study_sheet_create(uuid,jsonb)') is not null as sheet_create,
           to_regprocedure('public.study_sheet_room(uuid)') is not null as room,
           to_regprocedure('study_private.q_plain(text,text)') is not null as pickers;  -- true, true, true
@@ -153,13 +166,13 @@ takes"). Send Claude the rows.
 
 ## Release point 1: the SQL (sections O 1 and O 2; no change in the app yet)
 
-1. **Supabase → SQL Editor: run `supabase/parts/2.sql` to `11.sql` in order**,
+1. **Supabase → SQL Editor: run `supabase/parts/1.sql` to `12.sql` in order** (from an older `dev`: `2.sql` to `11.sql`),
    each to the end (safe to run again). Part 11 is section O (O 1, and O 2:
    the sheet reader's SQL, dark until release A1); parts 2, 3, 5 and 7 carry
    O 2's in-place edits of the pickers; parts 9 and 10 are I, R and L, which
    O follows. Then check, read only:
    ```sql
-   select public.study_schema() -> 'O' as o, public.study_schema() -> 'L' as l;   -- 2, 1
+   select public.study_schema() -> 'O' as o, public.study_schema() -> 'L' as l;   -- 3, 1 (2, 1 before O9)
    select name, enabled from study_private.features where name in ('exams', 'sheets') order by name;  -- exams as before; sheets false
    select column_name, column_default from information_schema.columns
     where table_schema = 'public' and table_name = 'study_exams' and column_name in ('kind', 'lecture_id') order by 1;
@@ -189,10 +202,10 @@ start to finish" above). Spends only when a
 member uploads: a sheet is read like a past exam (about $0.05 a page), and
 never past the sheets line ($6 a month) or the room under the 80% line.
 
-1. **Parts 2 to 11 again** if release point 1 ran from an older `dev` (part
+1. **Parts 1 to 12 again** (2 to 11 before O9) if release point 1 ran from an older `dev` (part
    10 then held O 1, without `study_sheet_room`). Check, read only:
    ```sql
-   select public.study_schema() -> 'O' as o;                                        -- 2
+   select public.study_schema() -> 'O' as o;                                        -- 2, or 3 from O9's dev
    select to_regprocedure('public.study_sheet_room(uuid)') is not null as room;     -- true
    ```
 2. **Vercel → Settings → Environment Variables (Production):** `STUDY_SHEETS_MONTHLY_USD`
@@ -239,15 +252,15 @@ spends money until step 7. Do them in order; each says what to see.
    `https://<the app's address>/api/study/health` says `"schemaOk": true`.
 3. **The SQL, only if needed.** Supabase → SQL Editor, read only:
    ```sql
-   select public.study_schema() ->> 'O' as o;                                                   -- 2
+   select public.study_schema() ->> 'O' as o;                                                   -- 2 or 3
    ```
-   If it says `2`, the SQL is in already (release A0's run of parts 2 to 11
-   from this `dev` has O 2): go on to step 4. If it says `1` or nothing: run
-   **`supabase/parts/2.sql`, `3.sql`, … `11.sql` in order**, each to the end
-   (part 11 alone stops at once with "section O 2 needs parts 2 to 9 run
-   first"; nothing is half done). Then, read only:
+   If it says `2` or `3`, the SQL is in already (release A0's run from this
+   `dev` has O 2, and from O9's O 3): go on to step 4. If it says `1` or
+   nothing: run **`supabase/parts/1.sql`, `2.sql`, … `12.sql` in order**,
+   each to the end (part 11 alone stops at once with "section O 2 needs parts
+   2 to 9 run first"; nothing is half done). Then, read only:
    ```sql
-   select public.study_schema() ->> 'O' as o;                                                   -- 2
+   select public.study_schema() ->> 'O' as o;                                                   -- 3 (2 before O9)
    select conname, pg_get_constraintdef(oid) like '%numeric%' as widened from pg_constraint
     where conname = 'study_questions_form_x' and conrelid = 'public.study_questions'::regclass;  -- true
    select count(*) as rows_not_plain from public.study_questions
@@ -305,14 +318,90 @@ open and numeric items stay in the database but are never asked (the client
 draws choice items only), and the quiz, the meeting, the boss and Today never
 drew them (`q_plain`). The SQL stays (nothing to undo).
 
-## Release point 4 (release B: similar questions) — not built yet
+## Release point 4 (release B: similar questions) — SQL and server built, the app's part not yet
 
-B (`VITE_STUDY_SIMILAR`, SQL O 3, after L) will list exactly which parts to
-run: its SQL edits sections E and F in place, so it runs more than part 11.
+Built and tested on `dev`: the SQL (O9: section O 3 in **part 12**, with
+in-place edits in **part 1** (section F's `kind_on`), **part 7** (section E's
+source check, kept when wider) and **part 10** (section L's `kind_on`)) and
+the server (O10: the similar job, op `similar`, `/api/study/work
+{similar}`). Not built: the app's screens and their flag
+`VITE_STUDY_SIMILAR` (O11) and their e2e (O12). So the steps below up to 5
+can go now and change nothing members see; step 6 waits for O11. Details:
+[`sheets.md`](sheets.md) ("SQL section O 3", "Similar questions on the
+server"). Before: practice sets are released (`study_schema() ->> 'L'` is
+`1`, [`RELEASE-L1.md`](RELEASE-L1.md)): a run's questions go into a
+practice set.
+
+1. **Read only** (SQL Editor):
+   ```sql
+   select public.study_schema() ->> 'O' as o, public.study_schema() ->> 'L' as l;   -- 2 (or 3), 1
+   select name, enabled from study_private.features where name in ('exams', 'sheets', 'similar') order by name;
+   ```
+   And the month's spend by kind (OD2's query, "Before anything" above): the
+   similar line ($5) assumes the month's spend without sheets and similar
+   questions stays under about $15.
+2. **Merge `dev` into `main`** and let Vercel deploy Production (nothing
+   changes: the switch `similar` is off once the SQL runs, and no screen asks
+   for it). `/api/study/health` says `"schemaOk": true`.
+3. **The SQL: parts 1 to 12**, exactly: **`supabase/parts/1.sql`, `2.sql`, …
+   `12.sql` in order**, each to the end (safe to run again; part 12 alone
+   stops at once with "section O 3 needs part 11 run first"). Part 1 carries
+   `kind_on`'s line for the kind `similar`, part 7 section E's source check
+   (replaced only while it lacks `member`, so a later run keeps O 3's wider
+   one), part 10 L's `kind_on` (the same text as part 1's), part 12 O 3 (the
+   twins' columns and checks, the runs, the jobs, the switch `similar` off,
+   the cron job `study-similar-dispatch`, R's kind `similar_ready`). Then,
+   read only:
+   ```sql
+   select public.study_schema() ->> 'O' as o;                                               -- 3
+   select name, enabled from study_private.features where name = 'similar';                 -- false
+   select jobname, schedule from cron.job where jobname = 'study-similar-dispatch';         -- one row, * * * * *
+   select pg_get_constraintdef(oid) like '%twin%' as twin from pg_constraint
+    where conname = 'study_questions_source_check' and conrelid = 'public.study_questions'::regclass;  -- true
+   ```
+4. **Vercel → Settings → Environment Variables → Production only:**
+   `STUDY_SIMILAR_MONTHLY_USD` = `5` (the code's default is 5 too; set it so
+   the line is visible), then redeploy. `/api/study/health`: `"schemaOk":
+   true`, `features.similar` false.
+5. **The switch on** (SQL Editor), only when step 6 is ready to follow:
+   ```sql
+   update study_private.features set enabled = true, changed_at = now() where name = 'similar';
+   ```
+6. **Not yet:** `VITE_STUDY_SIMILAR` = `1` (Production only) and a redeploy,
+   once O11's screens are built: "ליצור 2 כמוה" after a wrong answer and
+   "שאלות דומות לכל הדף" at the end of a sheet.
+
+**What it spends:** only on a member's tap, reserved whole under that member
+before it starts (2 similar questions of an item: about $0.07, at most about
+$0.19 held; a whole sheet of 14 questions: about $0.47, at most about $1.2
+held), never past the member's 40%, 10 taps a day, or the similar line ($5 a
+month), and charged call by call; what a run did not use is let go when it
+ends. Watch it, read only:
+```sql
+select (created_at at time zone 'Asia/Jerusalem')::date as day, ref, count(*) as rows, round(sum(cost_usd), 2) as usd
+  from public.study_usage where kind = 'similar' and created_at >= date_trunc('month', now())
+ group by 1, 2 order by 1 desc, 2;                                   -- ref ask: open reservations (0 once a run ends); ref unit: the calls
+select scope, status, count(*) as runs, sum(made) as made, sum(dropped) as dropped, round(sum(charged_usd), 2) as usd
+  from public.study_similar_runs where created_at >= date_trunc('month', now()) group by 1, 2 order by 1, 2;
+```
+Many `dropped` against `made` means the checks drop good questions: send
+Claude the rows (the closeness and blind-check rules are tunable).
+
+**Stopping:** the switch off (below). New runs and every reservation of kind
+`similar` stop at once, and so do the jobs' claims; the sweeper then stops
+the runs that wait (`stopped`) and lets their reservations go. A call
+already running ends within 200 s.
+
+**Rolling back release B:** the switch off; then (once it exists) unset
+`VITE_STUDY_SIMILAR` and redeploy. Similar questions already made stay in
+their sheet's practice set; the SQL stays (its widened checks cannot be
+narrowed once twin rows exist).
 
 ## Rolling back (switches, seconds, no redeploy)
 
 ```sql
+-- 0. No new similar questions, and the runs that wait stop (release B):
+update study_private.features set enabled = false, changed_at = now() where name = 'similar';
 -- 1. No new sheets (the members' sheets stay):
 update study_private.features set enabled = false, changed_at = now() where name = 'sheets';
 -- 2. Hide every sheet (reversible: set deleted_at back to null for those rows):

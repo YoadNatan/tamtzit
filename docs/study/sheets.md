@@ -29,7 +29,8 @@ path, queue, lease, worker, review screen and ledger kind `exam` as past exams
 | A0 (O4) | The A0 e2e script (`e2e/study/sheets.cjs`, flag set `o0`; it was `o` until O8) at 320/390/820/1440, a ready sheet in the mock (`mocks/sheets.cjs`), `devices.cjs` and `wide.cjs` with the new screens, the fixes they found, the copy list, Yoad's release steps | — | — | Built |
 | A1 (O5, O6) | The SQL (O 2: forms open and numeric, exact items by label, answers files and worked solutions, edits, open-add, the budget pause; the pickers' in-place edits) and the server (the sheet reader, its answers file, solving with worked solutions, open-add, resume) | `VITE_STUDY_SHEETS_FORMS` (the client's, O7) | O 2 | Built (part 11; parts 2 to 9 changed in place) |
 | A1 (O7, O8) | The client: the forms in practice, the edit sheet, add and retire, answers and worked solutions, open-add, the paused state, the lecture page's row; its e2e (`e2e/study/sheets-forms.cjs`, flag set `o`) | `VITE_STUDY_SHEETS_FORMS` | O 2 | Built |
-| B (O9-O12) | Similar questions after a wrong answer and for the whole sheet, in the sheet's set on L's shelf | `VITE_STUDY_SIMILAR` | O 3 | Not built yet |
+| B (O9, O10) | The SQL (O 3: twins, runs and their jobs, the sheet's set in section L, R's `similar_ready`; E and F in place) and the server (the similar job, op `similar`, `/api/study/work {similar}`, the $5 line) | `VITE_STUDY_SIMILAR` (the client's, O11) | O 3 | Built (part 12; parts 1, 7 and 10 changed in place) |
+| B (O11, O12) | The client: "ליצור 2 כמוה" after a wrong answer, "שאלות דומות לכל הדף" at the end of a sheet, the twin's chip, the words of `similar_ready`; its e2e (flag set `os`) | `VITE_STUDY_SIMILAR` | O 3 | Not built yet |
 
 ## The fixture (O0)
 
@@ -162,7 +163,8 @@ In `supabase/study-schema.sql` after section L (the order is now … S, I, R,
 L, O). O 1 was in part 10 with L (91 KB); O 2 would take part 10 to 188 KB,
 so **O starts part 11** (`tools/sql-parts.mjs`'s `STARTS` gains `"O"`; part 10
 is L alone, 71 KB; part 11 is O, 118 KB; the tests, the parts' headers and
-the README say 11 parts). Its tests are section O of `supabase/tests/study.sql`.
+the README say 11 parts; since O 3, 12: "SQL section O 3" below). Its tests
+are section O of `supabase/tests/study.sql`.
 
 - **`study_exams.kind`** (`'exam' | 'sheet'`, default `'exam'`, check
   `study_exams_kind_x`) and **`study_exams.lecture_id`** (one optional
@@ -806,14 +808,250 @@ SQL's (`study_private.q_plain`, O5's tests in `supabase/tests/study.sql`);
 the server's refusals for a fix (`answered`, `label taken`) are the SQL
 tests' and the mock's; the op's prices and gates are `server/study/sheets.test.ts`.
 
-## Stopping and rolling back (release A0)
+## SQL section O 3 (release B; O9)
+
+After O 2 in section O, in **part 12**: with O 3, part 11 would be 177 KB,
+over the SQL editor's 170 KB, so `tools/sql-parts.mjs` cuts section O at its
+own line `-- ════ SECTION O CONTINUES · O 3 …` (`STARTS` gains `"O 3"`; part
+11 is O 1 and O 2 as before, 118 KB; part 12 is O 3, 61 KB; the tests, the
+parts' headers and the README say 12 parts). A check at O 3's start stops
+part 12 with "section O 3 needs part 11 run first" when section O is not at
+2. Registry `('O', 3)`. Its tests are block O3 of `supabase/tests/study.sql`
+and `supabase/tests/similar-concurrency.sh`.
+
+**In place in other sections** (so release B runs **parts 1 to 12**):
+
+| Section (part) | Edit |
+|---|---|
+| F (part 1) and L (part 10) | `study_private.kind_on`: `when p_kind = 'similar' then study_private.feature_on('similar')`, in both texts (a unit test keeps them the same). With no row for the switch (before O 3) it is true, so harmless |
+| E (part 7) | The source check is replaced only while it lacks `'member'`; it was dropped and added again on every run, which would fail once twin rows exist. O 3 widens it by `'twin'` and a later run of part 7 keeps it |
+
+**A similar question ("a twin")** is a `study_questions` row with source
+`twin`: `from_exam` the sheet (on delete cascade), `twin_of` the root's part
+(on delete set null: a twin whose root was removed stays with its sheet),
+`twin_check` (`recalc`, `blind`, `slides`), no `exam_id`, no `lecture_id`, no
+`exam_no`; its sheet's lecture as `ref_lecture`, the root's topic, aspect and
+difficulty, the requester as `created_by`. A twin of a question with parts
+has parts of its own (a new `series`, `step` 1-12), each the twin of its
+root's part. Its key is origin `twin` at confidence 3 with its worked
+solution (origin `twin`). Answers to twins go to `study_answers` like any
+practice answer (OD7). Since a twin has no `exam_id`, S's and O's readers of
+an upload (`s=e.`, the review, `exam_advance`, the simulation) never see it,
+and `q_plain` keeps it out of the group's pickers (O 2).
+
+| Check | O 3 |
+|---|---|
+| `study_questions_source_check` | + `twin` (replaced only while it lacks it) |
+| Q's inline "an exam item, or a lecture's" and "only an exam item names a lecture to read" | found by their definitions, replaced by `study_questions_lecture_x` and `study_questions_ref_x`: source `exam` or `twin` |
+| `study_questions_twin_x` | a twin has its sheet and a check, no exam, lecture or number; only a twin has `from_exam` or a check |
+| `study_question_keys_origin_x`, `study_question_keys_sheet_x` | + `twin` for the key's and the solution's origin |
+
+**Tables.** `public.study_similar_runs` (members of the group read it; no
+writes): the sheet, scope `item` or `sheet`, the roots in printed order
+(1-24), twins a root (1-2), status (`running`, `done`, `failed`, `stopped`),
+made, dropped, `skipped_figs`, error, the member's reservation
+(`reserve_id`, `reserved_usd`), `charged_usd`, the sheet's set (`set_id`),
+the requester. Private, no grants: `study_private.similar_jobs` (a run's
+jobs, 1-8 roots each, with a 330-second lease, 4 attempts and
+`study_finish_similar_job`'s retry times, as exam units) and
+`study_private.similar_queue` (a running run's kicks and the pages' fresh
+links, D24, kept here so the members' run row never carries signed links;
+48 hours at most). The switch **`similar`**, inserted off.
+
+**Which items get similar questions** (`study_private.similar_ok`): a live
+item of a **sheet** (past exams are not offered: their twins would have no
+sheet set; a later decision), every part of it a choice form (`one`, `tf`,
+`match`, `order`; never `tap`, whose pins belong to its picture) or
+`numeric`, keyed (a number for a numeric part), and not keyed only by a
+model's guess under confidence 3 (it counts in no score, so nothing is built
+on it). Never an open item. The root of anything is the first part of its
+question; a twin's root is its source's. At most **6 twins a root**
+(`similar_count`: a twin with parts counts once).
+
+**The RPCs** (each `exam not found` for a stranger, a deleted sheet or not
+a sheet; `off` while `exams`, `sheets` or `similar` is off):
+
+- `study_similar_plan(p_exam, p_question, p_scope)` (member, read only):
+  item: the root, its label, form, parts and numeric parts, the twins it has
+  (free to practise), the room left, a run making it now (`joined`), its
+  figures' pages; sheet: up to 24 roots without a twin in printed order
+  (`items`, and each root's shape in `roots` for the price), how many more,
+  whether a run of the whole sheet ran today, a run making it now, the
+  pages. `question not found`, `not eligible`.
+- `study_similar_begin(p_exam, p_items, p_scope, p_per, p_reserve, p_worst,
+  p_cap, p_urls, p_until, p_key)` (the op: the member's token and the server
+  key): the reservation must be the caller's, of kind `similar`, open (`bad
+  reserve`); the links must be the sheet's pages (`bad urls`). Under **one
+  lock a sheet** (`similar:<sheet>`) it decides: an item: a run making this
+  root now → `{joined}`; 6 already → `max`; else up to 2 twins (fewer when
+  fewer fit). The whole sheet: a run of it making now → `{joined}`; one today
+  that did not fail empty → `today`; the roots of `p_items` still without a
+  twin (≤ 24) or `nothing to make`. Then under the group's budget lock (the
+  one `study_reserve` takes): this month's `similar` spend (every other run's
+  reservation included) plus this worst case within `p_cap`
+  (`STUDY_SIMILAR_MONTHLY_USD`) or `similar_cap`. The run, its jobs
+  (`study_private.similar_job_roots()` = **4** roots a job, the sheet
+  solver's measured unit; an item's run is one job), its links, and the
+  sheet's practice set: section L's set of kind `sheet` for this sheet, made
+  by the first run through `qset_for_similar` ("שאלות דומות · {sheet}"), and
+  the kick. `{run_id, set_id, jobs, items, per, server}`.
+- `study_claim_similar(p_run, p_key)` (the worker with the key alone; the
+  phone's fallback with the member's token): null when a switch is off, the
+  sheet was deleted, the run is over or fully charged, or the group runs its
+  three already (`group_live` now counts similar jobs with a live lease, so
+  summaries, exams and similar questions share the three, two while a
+  lecture waits). Returns the job, the run's money (reserved, charged, left),
+  the sheet, its lecture's slides (for the slides' check), and each root with
+  its parts, key, solution, figures, the figures' pages with the run's links
+  while they are good for 10 more minutes, and its twins' stems.
+- `study_similar_charge(p_job, p_lease, p_model, p_usage, p_cost,
+  p_next_worst, p_key)` (worker): one model call, a **settled** `similar` row
+  (ref `unit`) in the **requester's** name (their 40% share and the similar
+  line count it); the reservation drops by as much, so the two never pass
+  what was reserved; false when the next call's worst case no longer fits.
+- `study_similar_save(p_job, p_lease, p_twins, p_dropped, p_skipped,
+  p_model, p_key)` (worker): under the sheet's lock, each twin of a root of
+  this job that keeps its root's form, option and prompt counts, parts and a
+  fitting key, and whose root is still under 6; the rest are dropped. Then
+  `qset_add_items` (the set's size grows with it). `{saved, dropped}`.
+- `study_finish_similar_job(p_job, p_lease, p_status, p_error, p_key)`
+  (worker): as `study_finish_exam_job`; then the run moves on
+  (`similar_advance`): when nothing of it will run, its status (done;
+  `stopped` by a switch, the reservation, a deleted sheet or a day gone by;
+  failed when nothing was made and a job failed), its reservation settled at
+  **$0** (every real cost is in its charge rows), its links gone, its set made
+  ready through `qset_similar_done` (the set's one `set_shared` to the group,
+  L's), or soft-deleted when this run made the set and nothing came. A
+  whole-sheet run that made something tells its requester: R's
+  **`similar_ready`** (`mine`, pushed, held 90 s; registered again here,
+  guarded), route `{v: sets, k: <set>}`, args `{k: made, kind: sheet,
+  course}`. An item's run sends no notice (the member is in the session).
+- `study_similar_of(p_question)` (member): the twins of an item's root (from
+  the item, a part or a twin), no keys, hidden when the sheet was deleted or
+  the twin retired or hidden; the room left and a run making some now.
+- `study_private.similar_dispatch()`: its own cron job
+  **`study-similar-dispatch`** (every minute; S's `study-exam-dispatch` is
+  untouched). Kicks `/api/study/work {similar: <run>}` for jobs the caps
+  allow (2 minutes between the sweeper's kicks, none after 15 unclaimed);
+  with a switch off, a deleted sheet or a run older than a day it stops what
+  holds no live lease, so the reservation is let go.
+
+The words of the refusals a member can meet are in
+`src/study/lib/similarCopy.ts` (lazy; `similarFail`), for the client's
+screens (O11).
+
+**Tests.** `supabase/tests/study.sql` block O3 (26 checks: the shape and the
+widened checks, the plan, the start and its refusals, joining, members-only
+reads, the claim, the charge, the save, twins out of the upload's reads and
+the pickers, a twin answered, the finish at $0 and the set, the whole sheet
+once a day with `similar_ready`, six a root, the switch, a lost job, a
+deleted sheet, E's block run again with twins present, the sheet removed
+with its twins); an upgrade run with twins, a run and their keys in the
+database before parts 1 to 12 run twice (the checks stay widened; an ai
+question without a lecture and a twin without its sheet are still refused);
+`similar-concurrency.sh`: four taps on one item at once (10 rounds: one run,
+three joined) and an item's tap beside the whole sheet's (10 rounds, no
+deadlock).
+
+## Similar questions on the server (O10)
+
+`server/study/similarGen.ts`, `server/study/ops/similar.ts`; `prompts/sheets.ts`
+(`SIMILAR_SYSTEM`, `BLIND_SYSTEM`), `questions.ts` (their schemas),
+`budget.ts`, `study.ts`, `solver.ts` and `api/study/{ai,work}.ts` changed. The
+model is the current default (`SIMILAR_MODEL = MODEL`, OD17); no provider is
+refused (OD5 as Yoad changed it); the models package (Y) routes the key
+`similar` later.
+
+**The money (D20, OD3, OD20).** `POLICY.similar`: the 80% line, 40% a
+member, **10 taps a day** (ref `ask`). The op reserves a run's **whole worst
+case** under the member (`similarWorstUsd`, shared with the phone: per job,
+the writing call and the check at all of their max_tokens, every root as
+long as a root gets, the figures' pages and the lecture's slides when the
+sheet has one; 2 twins of an item about $0.19, 14 roots about $1.2, the
+24-root cap about $2.0, or $2.7 with a figure on every root and a
+60,000-character deck),
+and `study_similar_begin` checks it against the similar line,
+**`STUDY_SIMILAR_MONTHLY_USD`, $5 by default** (`similarMonthlyCap`). The
+worker reserves nothing: each call is charged against the run, and before
+each call its worst case must fit what the run has left. The usual price on
+the button (`similarPriceUsd`): about $0.07 for 2 twins of an item, about
+$0.47 for a whole sheet of 14 roots, $0.80 for 24 (the design's $0.08,
+$0.52 and $0.89).
+
+**A job** (`runSimilarJob`):
+
+1. One call writes the twins of the job's roots (`SIMILAR_SYSTEM`, cached;
+   the course, twins a root, each root with its key, its worked solution, its
+   existing twins' stems, and its figure's page as a picture). A root whose
+   figure has no fresh link is left out (counted in `skipped_figs`).
+   max_tokens 1,500 + 2,000 a twin part, at most 14,000.
+2. Pure checks (`toTwins`): the root's form, option and prompt counts and
+   parts kept, distinct options, a key that fits its form (a one-answer
+   index, true/false 0/1 a statement, a match's distinct options, an order's
+   permutation), a numeric part's number **recomputed** from its working
+   (`calc.ts`, within its tolerance, at least 0.5%), and not too close to the
+   root (trigram similarity 0.8) or to another twin of it (0.7). At most the
+   run's twins a root. A twin of numeric parts only is checked (`recalc`).
+3. One check for the twins with a choice part, answered again **without the
+   key**: the slides' solver (`solveQuestions`, kind `similar`) when the sheet
+   has a lecture with slides and no twin reuses a figure (`slides`), else
+   `BLIND_SYSTEM` with the figures' pages (`blind`: every choice part with its
+   key at confidence 2 or more). A twin is kept only when every part passes;
+   a twin the check never reached is dropped, never saved unchecked.
+4. `study_similar_save`, then `study_finish_similar_job`. When the charge
+   says the check would not fit, the numeric twins are saved and the rest
+   dropped (`reserve_used`).
+
+**Op `similar`** (`/api/study/ai`): `plan` (the plan, the price and the worst
+case; nothing reserved); `start` (the default): a run making them now →
+`{joined}`; an item with twins already → `{twins}` ($0, practise those
+first) unless `make: true`; `max`, `today` and `nothing to make` as 409
+before anything is reserved; then the reservation and the start (any
+refusal there settles the reservation at $0), 202 `{runId, setId, jobs,
+items, per, priceUsd, worstUsd, server}`; `unit` (the phone's fallback with
+the member's token when `server` is false). The section need is
+`VARIANT_SCHEMA.similar` (O 3, L 1; the router reads it by the op's name).
+**`/api/study/work {similar: <run>}`** claims with the key alone, answers
+202 and runs the run's jobs one after another until 200 s (a job starts
+only with at least 2 minutes left).
+
+**Tests** (`npm run test:study`): `similarGen.test.ts` (the prompts' lengths
+and the job size pinned to the shared numbers and the SQL; the policy and
+the line; the price and the worst case; `toTwins` for every form, the
+recompute, the closeness guards, parts; the blind check's request and
+verdicts; the writing call's figures; a job end to end against mocks of
+Supabase and the API, the spent-run and slides paths; the op's reservation,
+`{twins}`, `{joined}`, a refusal settled at $0, 503 before O 3),
+`solver.test.ts` (kind `similar`), `work.test.ts` (`{similar}`).
+
+**Known gap, accepted:** a charge that fails twice (the database
+unreachable) ends the job `unsettled`; that call's cost stays only in the
+run's reservation, which is settled at $0 when the run ends, so the ledger
+misses it (as a failed settle leaves an estimate elsewhere, budget.ts).
+
+**Not in O9-O10:** the client (O11: the flag `VITE_STUDY_SIMILAR` with
+`requiredSchema` O 3 and L 1, the bottom sheet after a wrong answer, the
+end-of-sheet offer, the twin's chip and peek, the words of `similar_ready`
+in `notifyCopy.ts`, which keeps it reserved until then) and its e2e (O12,
+flag set `os` on L's `ps`). L's set loader does not yet hide the items of a
+soft-deleted sheet (requested from L in design §15; `study_similar_of`
+does).
+
+## Stopping and rolling back (releases A0 to B)
 
 | Switch off (`update study_private.features set enabled = false, changed_at = now() where name = '…'`) | Stops at once |
 |---|---|
 | `sheets` | new sheets (`study_sheet_create` is `off`); the op `exam_read`'s sheet starts (403 `off`) |
 | `exams` | everything of past exams and sheets |
+| `similar` (O 3) | new runs (`study_similar_begin` and the op: `off`), every reservation of kind `similar` (`kind_on`), and the claims of jobs; the sweeper then stops every waiting run (`stopped`, its reservation let go). A model call already running ends (≤ 200 s) and its job stops |
 
 Rolling back, in order: the switch `sheets` off; hide the sheets
 (`update public.study_exams set deleted_at = now() where kind = 'sheet' and deleted_at is null`,
 reversible by clearing it); then the flag off in Vercel and a redeploy. The
 columns stay (they are harmless to old code).
+
+Rolling back release B: the switch `similar` off (the line above), then the
+client's flag off in Vercel (O11's `VITE_STUDY_SIMILAR`) and a redeploy.
+Twins already made stay with their sheet and in its practice set (hiding the
+sheet hides its twins too, `study_similar_of`); the columns, the checks and
+the tables stay (the widened checks cannot be narrowed once twin rows exist).

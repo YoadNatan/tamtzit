@@ -971,3 +971,78 @@ Also decided for this build:
   at least 1,500 B kept for the models package).
 - **Not reached by the e2e**: the quiz, meeting, boss and Today pickers (SQL
   `q_plain`, O5's tests); the e2e checks a topic session.
+
+### Uploaded sheets, O9 and O10 (release B's SQL and server), built on 27 November 2026
+
+- **Section O goes on in a 12th part.** O 3 would take part 11 to 177 KB, over
+  the SQL editor's 170 KB (OD18 put O after L and gave it part 11 when part 10
+  could not hold it; the same reason applies again). `tools/sql-parts.mjs`
+  can now also cut inside a section at its own top-level line `-- ════
+  SECTION O CONTINUES · O 3 …` (`STARTS` gains `"O 3"`); the section's BEGIN
+  and END lines and its registry stay one section. The tests, the parts'
+  headers, the README and the docs say 12 parts.
+- **Release B runs parts 1 to 12** (exactly; `RELEASE-O.md`, "Release point
+  4"): O 3 edits section F's `kind_on` (part 1) and section E's source check
+  (part 7) in place, besides L's `kind_on` (part 10). From this `dev`, every
+  release's SQL step is parts 1 to 12 (part 12 is dark while the switch
+  `similar` is off).
+- **Similar questions are made only of sheets** (kind `sheet`): their twins go
+  into the sheet's practice set; past exams' items are not offered (a later
+  decision, if wanted). The roots: choice forms `one`, `tf`, `match`, `order`
+  and `numeric` (never `tap`, whose pins belong to its picture, never `open`),
+  keyed, and **not keyed only by a model's guess under confidence 3** (it
+  counts in no score, so nothing is built on it). The root of a question with
+  parts is its first part, and its twin has the same parts.
+- **A twin whose root is removed stays with its sheet** (`twin_of` on delete
+  set null, and the twin's check does not require it): requiring it would make
+  a sheet's hard delete fail on its own twins.
+- **4 roots a job** for a whole sheet (`study_private.similar_job_roots()`,
+  `SIMILAR_JOB_ROOTS`; the design said 8): the sheet solver's unit measured in
+  O0 (a solve-sized job of 8 does not fit 120 s at a likely speed). An item's
+  run is one job of up to 2 twins (fewer when fewer fit under its 6).
+- **The money (D20):** the op reserves a run's whole worst case under the
+  member as kind `similar`, ref `ask` (`POLICY.similar`: the 80% line, 40% a
+  member, 10 taps a day); each model call is a settled `similar` row, ref
+  `unit`, in the requester's name, taken off the reservation; the reservation
+  ends at $0. The similar line (`STUDY_SIMILAR_MONTHLY_USD`, $5, OD20) counts
+  the month's `similar` rows, other runs' open reservations included, and is
+  checked under the group's budget lock in `study_similar_begin`.
+- **One check call per job:** the slides' solver (`solveQuestions` with kind
+  `similar`, the new parameter) when the sheet has a lecture with slides and
+  no twin reuses a figure, else the blind check (`BLIND_SYSTEM`) with the
+  figures' pages; a numeric part is recomputed ($0, `calc.ts`). A twin the
+  check never reached is dropped, never saved unchecked. The closeness guards
+  are the design's (0.8 to the root, 0.7 to another twin).
+- **Existing twins first:** the op answers `{twins}` ($0) for an item that has
+  some unless the tap says `make: true`; a run making the same root, or the
+  same sheet, answers `{joined}` with nothing reserved.
+- **The sheet's one set** (OD10) is made by the first run through L's
+  `qset_for_similar`; later runs (an item's or the whole sheet's) add to it
+  with `qset_add_items`, and the run's end calls `qset_similar_done` (L's one
+  `set_shared` to the group, once a set). A set a run made that got nothing is
+  soft-deleted. `similar_ready` (R's reserved kind, `mine`, push, 90 s) goes
+  only to the requester of a whole-sheet run that made something, to the set
+  (`?v=sets&k=`); an item's run sends none (the member is in the session).
+- **The pages' fresh links (D24)** are kept in a private table
+  (`study_private.similar_queue`, 48 hours at most), not on the run row
+  members read.
+- **The switch stops work in flight (D22):** with `similar` (or `sheets`,
+  `exams`) off, or the sheet deleted, the claim answers nothing and the
+  sweeper stops every waiting run (`stopped`), letting its reservation go; a
+  run still running after a day is stopped too (`stale`).
+- **`VARIANT_SCHEMA.similar`** (O 3, L 1), not `OP_SCHEMA`: the latter is
+  pinned to §12.2.2's ops by a test; the router reads either by the op's name.
+- **The refusals' words** are in the lazy `src/study/lib/similarCopy.ts`
+  (`similarFail`, as practice sets' `setsCopy.ts`), so the entry chunk does
+  not grow; the failText test counts them as worded.
+- **Known gap, accepted:** a charge that fails twice ends the job
+  `unsettled`, and that call's cost is not in the ledger (the reservation is
+  settled at $0 when the run ends), like a failed settle elsewhere.
+- **Not built here:** the client (O11: the flag `VITE_STUDY_SIMILAR` and its
+  `requiredSchema` O 3 with L 1, the screens, the words of `similar_ready` in
+  `notifyCopy.ts`, which keeps the kind reserved until then) and the e2e
+  (O12, flag set `os`). L's set loader does not hide a soft-deleted sheet's
+  twins yet (design §15's request to L); `study_similar_of` does.
+- **Bundle:** no change to the entry chunk (405,524 B of 410,000 with every
+  flag on; O's share 1,167 B of 1,500): O9 and O10 add only server code and
+  a lazy module.

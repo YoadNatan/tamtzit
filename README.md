@@ -53,24 +53,26 @@ npm run dev                  # http://localhost:5173/
 כל מסד הנתונים של האפליקציה הוא קובץ אחד:
 [`supabase/study-schema.sql`](supabase/study-schema.sql). אפשר להריץ אותו שוב
 בבטחה. הוא גדול מדי (כ-0.9 MB) להדבקה אחת ב-SQL Editor של Supabase, ולכן הוא
-מחולק לאחד-עשר קבצים ב-[`supabase/parts/`](supabase/parts/):
+מחולק לשנים-עשר קבצים ב-[`supabase/parts/`](supabase/parts/):
 
 1. Supabase → **SQL Editor** → New query.
 2. לפתוח את `supabase/parts/1.sql` ב-GitHub → **Copy raw file** → להדביק → **Run**.
 3. לחכות לסיום בלי שגיאה (הודעות NOTICE כמו "already exists, skipping" תקינות).
-4. אותו דבר עם `2.sql`, `3.sql` וכן הלאה, **לפי הסדר**, עד `11.sql`.
+4. אותו דבר עם `2.sql`, `3.sql` וכן הלאה, **לפי הסדר**, עד `12.sql`.
 5. לבדוק: `select public.study_schema();` ו-`/api/study/health` עם `"schemaOk":true`.
 
-החלקים הם הקובץ עצמו, חתוך רק בין הסעיפים שלו, כך שאחד-עשר חלקים לפי הסדר עושים
+החלקים הם הקובץ עצמו, חתוך רק בין הסעיפים שלו, כך ששנים-עשר חלקים לפי הסדר עושים
 בדיוק מה שהקובץ כולו עושה. שגיאה בחלק מסוים: לתקן ולהריץ שוב מאותו חלק.
-**כל הרצה ממשיכה עד `11.sql`**, גם כשמריצים שוב רק חלק מוקדם: חלק 8 (סעיף S)
+**כל הרצה ממשיכה עד `12.sql`**, גם כשמריצים שוב רק חלק מוקדם: חלק 8 (סעיף S)
 מצמצם שתי הרשאות שהחלקים הקודמים פותחים (העלאה לתיקיית `exams/` ושינוי ישיר
 של מצב מבחן), והן נשארות פתוחות עד שחלק 8 רץ שוב; חלק 9 (סעיף I, הקוד האישי)
 מגדיר מחדש את `study_member_saved` (הסימון "יש קוד"), שחלק 1 מחזיר לגרסה הישנה;
 חלק 10 (סעיף L, סטים של תרגול) מגדיר את `kind_on` באותו נוסח שבחלק 1; חלק 11
 (סעיף O, מבחנים ודפי תרגילים שמעלים) מגדיר מחדש שמונה פונקציות של חלק 8, וגרסה 2 שלו
 דורשת שחלקים 2 עד 9 ירוצו לפניו (שינויים במקום בסעיפים Q, Z, M, H, T); בלעדיהם הוא
-נעצר עם הודעה.
+נעצר עם הודעה. חלק 12 הוא המשך סעיף O (גרסה 3, שאלות דומות; עם חלק 11 היה עובר את
+170 KB), והוא נעצר עם הודעה אם חלק 11 לא רץ לפניו; גרסה 3 משנה במקום גם את סעיף E
+(חלק 7) ואת `kind_on` בחלקים 1 ו-10.
 אחרי כל שינוי בקובץ: `npm run sql:parts` (בדיקת היחידה נכשלת אם החלקים לא
 מעודכנים). מריצים את ה-SQL **לפני** שהקוד החדש עולה.
 
@@ -116,7 +118,7 @@ order are in [`docs/study/`](docs/study/README.md); the move out of the
 | `shared/study/` | code used by both the page and the server |
 | `api/study/*.ts` | the Vercel functions: `health`, `outline`, `section`, `work`, `ai`, `code` (the personal code, `docs/study/personal-code.md`) |
 | `server/study/` | the functions' shared code (outside `api/`, so Vercel does not count it as a function) |
-| `supabase/study-schema.sql` | the whole database; `supabase/parts/` the same in 11 parts |
+| `supabase/study-schema.sql` | the whole database; `supabase/parts/` the same in 12 parts |
 | `supabase/tests/` | SQL behaviour and concurrency tests, the stubs, a test copy of the board app's schema |
 | `e2e/study/` | Playwright flows against a mocked Supabase |
 | `tools/` | the unit-test runner, the contract and bundle checks, the SQL splitter, evals |
@@ -184,27 +186,27 @@ only after its SQL has run and its code is merged
 `E2E_FLAGS`, `NODE_PATH`, `STUDY_CONTRACT_PG`, `STUDY_CONTRACT_KEEP` and
 `STUDY_EVAL_FIXTURES`.
 
-## The SQL file, in 11 parts
+## The SQL file, in 12 parts
 
 [`supabase/study-schema.sql`](supabase/study-schema.sql) is the whole
 database: tables, Row Level Security, functions, the Storage bucket `study`,
 the realtime policies, the pg_cron jobs. It is safe to run again. At about
 0.9 MB it is too big for one paste into Supabase's SQL Editor, so
-[`supabase/parts/1.sql` … `11.sql`](supabase/parts/) hold the same file cut
-between its sections (`tools/sql-parts.mjs`):
+[`supabase/parts/1.sql` … `12.sql`](supabase/parts/) hold the same file cut
+between its sections, and once inside section O (`tools/sql-parts.mjs`):
 
 1. Supabase → **SQL Editor** → New query.
 2. Open `supabase/parts/1.sql` on GitHub → **Copy raw file** → paste → **Run**.
 3. Wait until it finishes without an error (NOTICEs such as "… already
    exists, skipping" are harmless).
-4. The same with `2.sql`, `3.sql` and on, **in order**, through `11.sql`.
+4. The same with `2.sql`, `3.sql` and on, **in order**, through `12.sql`.
 5. Check: `select public.study_schema();` lists every section, and
    `/api/study/health` says `"schemaOk":true`.
 
-Running the eleven in order does exactly what running the whole file does
+Running the twelve in order does exactly what running the whole file does
 (checked on a local Postgres, fresh and over an existing schema, with the
 full behaviour test). If one part fails, fix the cause and run again from
-that part. **Every run goes on through `11.sql`**, also when only an earlier
+that part. **Every run goes on through `12.sql`**, also when only an earlier
 part is run again: part 8 (section S) narrows two permissions the earlier
 parts open (an upload into an `exams/` folder, and a member updating an
 exam's status directly), and they stay open until part 8 runs again; part 9
@@ -220,7 +222,11 @@ page, the library's count, simulations, the key's undo, and the exam queue's
 claim, advance, printed count and "no key"); its version 2 took part 10 past
 170 KB. O 2 needs parts 2 to 9 run before it (it edits the pickers of sections
 Q, Z, M, H and T in place, so the quiz, the boss, the meeting and Today never
-draw an open or numeric item); run alone, it stops with a message saying so. After editing the schema, run `npm run sql:parts`; a unit test
+draw an open or numeric item); run alone, it stops with a message saying so.
+Part 12 is section O going on at its version 3 (similar questions; with part
+11 it would pass 170 KB, so the file is cut at O's own "SECTION O CONTINUES ·
+O 3" line); it stops with a message when part 11 has not run, and O 3 also
+edits section E (part 7) and `kind_on` (parts 1 and 10) in place. After editing the schema, run `npm run sql:parts`; a unit test
 fails while the parts are stale, or while one is over 170 KB (the SQL Editor's
 limit). Run the SQL **before** the code that needs
 it deploys: until then `/api/study/health` says `"schemaOk":false`.
@@ -235,7 +241,7 @@ board's staff. Keep it identical to the board app's own `board-schema.sql`.
 is already set up):
 
 1. Authentication: anonymous sign-ins on.
-2. Run the SQL in 11 parts as above. If it prints "realtime.messages not
+2. Run the SQL in 12 parts as above. If it prints "realtime.messages not
    found", the project has no Realtime Authorization and follow-the-reader
    cannot connect.
 3. The server key: a random value of 32+ letters and digits, set on Vercel as
@@ -304,7 +310,7 @@ deleting the secret turns server writing off, and the phones write.
 
 ## Updating
 
-1. Run the new SQL (in 11 parts) *before* the new code deploys.
+1. Run the new SQL (in 12 parts) *before* the new code deploys.
 2. Merge; after the deploy, check `/api/study/health` (`"schemaOk":true`).
 3. Ask the group to close the app and open it again: a copy opened before the
    deploy keeps the old code until then.
