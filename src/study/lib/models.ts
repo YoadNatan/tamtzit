@@ -7,7 +7,8 @@ export * from "./modelsPure";
 /* ── "השוואת מודלים" on the phone (docs/study/models.md; VITE_STUDY_MODELS, section Y) ──
  *
  * The reads of section Y (study_models, study_lab_*), the op "lab"
- * (/api/study/ai: price, run, resume, retry, route, cancel); the pure
+ * (/api/study/ai: price, run, resume, retry, check, judge, route, cancel),
+ * the blind rating (study_lab_rate, study_lab_reveal); the pure
  * helpers are lib/modelsPure.ts's, re-exported here. A lazy module: nothing in the entry
  * chunk imports it (tools/study-bundle.mjs, package Y). Blindness is the
  * server's (D12): nothing here ever learns which label is which model before
@@ -71,6 +72,11 @@ export type Output = {
   usage?: Record<string, unknown> | null;
   latency_ms?: number | null;
   first_ms?: number | null;
+  /** The caller's own rating (any time; never another member's). */
+  my?: { overall: number; accuracy: number | null; hebrew: number | null; structure: number | null; error: boolean; note: string } | null;
+  /** After the caller's reveal: the AI score (D13, its own column) and the group's ratings. */
+  ai?: { overall?: number; accuracy?: number; hebrew?: number; structure?: number; errors?: Array<{ quote: string; why: string }> } | null;
+  group?: { n: number; mean: number | null; errors: number } | null;
 };
 export type Run = {
   id: string;
@@ -87,12 +93,25 @@ export type Run = {
   owner: boolean;
   can_rate: boolean;
   mine: { rated: boolean; best: string | null } | null;
+  /** The AI score's state, after the caller's reveal: none, running, done, error. */
+  judge?: string | null;
   outputs: Output[];
 };
 export const readRun = (run: string): Promise<Run> => rpc<Run>("study_lab_run", { p_run: run });
 export type Source = { source: Record<string, unknown>; material: unknown; kept: boolean };
 export const readSource = (run: string): Promise<Source> => rpc<Source>("study_lab_source", { p_run: run });
-/** The caller's reveal (a kind members do not rate: the owner reveals without ratings). */
+/** One answer's blind rating (one score 1-5, the error tick and its note; the owner's detail): saved when tapped. */
+export const rate = (output: string, r: { overall: number; error: boolean; note: string; accuracy?: number | null; hebrew?: number | null; structure?: number | null }): Promise<void> =>
+  rpc<void>("study_lab_rate", {
+    p_output: output,
+    p_overall: r.overall,
+    p_accuracy: r.accuracy ?? null,
+    p_hebrew: r.hebrew ?? null,
+    p_structure: r.structure ?? null,
+    p_error: r.error,
+    p_note: r.note.slice(0, 300),
+  });
+/** The caller's reveal: after rating (with the best pick), or a skip; a kind members do not rate: the owner reveals without ratings. */
 export const reveal = (run: string, best: string | null = null, skip = false): Promise<void> => rpc<void>("study_lab_reveal", { p_run: run, p_best: best, p_skip: skip });
 
 export type Board = { route: string; today: string; models: BoardModel[]; usage30: Usage | null };
@@ -171,7 +190,7 @@ async function follow(res: Response, started?: (run: string, total: number) => v
 }
 
 /** Starts a run: resolves with its id once the server planned it; the count keeps coming into `live`. */
-export function startRun(o: { group: string; route: string; models: string[]; source?: Record<string, unknown> }): Promise<string> {
+export function startRun(o: { group: string; route: string; models: string[]; source?: Record<string, unknown>; judge?: boolean }): Promise<string> {
   return new Promise((ok, fail) => {
     let given = false;
     postStudy("/api/study/ai", { op: "lab", action: "run", ...o })
@@ -193,4 +212,19 @@ export function startRun(o: { group: string; route: string; models: string[]; so
 /** Resume (the slots still waiting) or retry (one label that timed out or failed): the count into `live`. */
 export async function continueRun(action: "resume" | "retry", run: string, label?: string): Promise<void> {
   await follow(await postStudy("/api/study/ai", { op: "lab", action, run, ...(label ? { label } : {}) }));
+}
+
+/** "לבדוק עכשיו" (the paid checks left pending) or the AI score, after the run: resolves when the server has run them. */
+export async function runSteps(action: "check" | "judge", run: string): Promise<void> {
+  const res = await postStudy("/api/study/ai", { op: "lab", action, run });
+  if (!res.ok) {
+    let code = `http_${res.status}`;
+    try {
+      code = ((await res.json()) as { error?: string }).error ?? code;
+    } catch {
+      /* not json */
+    }
+    throw new Error(code);
+  }
+  await readLines(res, () => undefined);
 }

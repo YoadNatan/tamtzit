@@ -44,17 +44,44 @@ export type BoardModel = {
   p50_ms: number | null;
 };
 export type Usage = Record<string, { calls: number; usd: number }>;
-export type Price = { route: string; title: string; source: Record<string, unknown>; pictures: boolean; models: Record<string, { usd?: number; refused?: string }>; runCap: number };
+/** The op's price: the material, each model's worst case, the run's cap; for
+ *  a rated kind the paid steps' worst cases (the solver's check of one answer,
+ *  the AI score by the number of answers, index 0-4). */
+export type Price = {
+  route: string;
+  title: string;
+  source: Record<string, unknown>;
+  pictures: boolean;
+  models: Record<string, { usd?: number; refused?: string }>;
+  runCap: number;
+  steps?: { check: number; judge: number[] };
+};
 
 /* ── Pure: what a new comparison offers ── */
 
-/** The kinds the server compares now (server/study/lab.ts's LAB_ROUTES). */
-export const LAB_KINDS = ["solver", "fix_check", "exam_read", "sheet_read"] as const;
+/** The kinds the server compares (server/study/lab.ts's LAB_ROUTES): the
+ *  answer-key kinds, then the short kinds members rate and the summaries
+ *  (server/study/labRated.ts). */
+export const LAB_KINDS = ["solver", "fix_check", "exam_read", "sheet_read", "practice", "set_write", "points", "cards", "ask", "part"] as const;
 export type LabKind = (typeof LAB_KINDS)[number];
+/** The kinds a comparison rates by people (not by an answer key): the AI score is offered only for these. */
+export const RATED_KINDS: ReadonlySet<string> = new Set(["practice", "set_write", "points", "cards", "ask", "part"]);
 /** The four models a comparison shows first (the newest of each tier); the rest fold. */
 export const FIRST_MODELS = ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
 /** The candidate preselected beside today's model (OD11): Haiku for the answer-key checks, Sonnet for reading. */
-export const CANDIDATE: Readonly<Record<string, string>> = { solver: "claude-haiku-5-5", fix_check: "claude-haiku-5-5", exam_read: "claude-sonnet-5-5", sheet_read: "claude-sonnet-5-5" };
+export const CANDIDATE: Readonly<Record<string, string>> = {
+  solver: "claude-haiku-5-5",
+  fix_check: "claude-haiku-5-5",
+  exam_read: "claude-sonnet-5-5",
+  sheet_read: "claude-sonnet-5-5",
+  // OD11: Sonnet for points first; Opus stays for summaries, practice and "לשאול" until a comparison says otherwise: Sonnet is what they are compared with.
+  practice: "claude-sonnet-5-5",
+  set_write: "claude-sonnet-5-5",
+  points: "claude-sonnet-5-5",
+  cards: "claude-sonnet-5-5",
+  ask: "claude-sonnet-5-5",
+  part: "claude-sonnet-5-5",
+};
 
 /** The models a comparison may offer: listed, not Mythos, Claude or a provider whose key is set and the group approved. */
 export function offered(o: { providers: ModelsState["providers"]; keys: Record<string, boolean> | null; models?: readonly ModelInfo[] }): ModelInfo[] {
@@ -67,8 +94,11 @@ export function preselect(route: string, today: string): string[] {
   return c && c !== today ? [today, c] : [today, today === DEFAULT_MODEL ? "claude-haiku-5-5" : DEFAULT_MODEL];
 }
 
-/** The run's worst case: the sum of the picked models' estimates. */
-export const totalOf = (picked: readonly string[], models: Price["models"]): number => picked.reduce((a, id) => a + (models[id]?.usd ?? 0), 0);
+/** The run's worst case: the sum of the picked models' estimates, with a
+ *  rated kind's paid steps (the solver's check of each answer; the AI score
+ *  when it is on). */
+export const totalOf = (picked: readonly string[], models: Price["models"], steps?: Price["steps"], judge = false): number =>
+  picked.reduce((a, id) => a + (models[id]?.usd ?? 0), 0) + (steps ? steps.check * picked.length + (judge ? (steps.judge[picked.length] ?? 0) : 0) : 0);
 
 /* ── Pure: quality, price and the month (design-models §6.4-§6.6) ── */
 
@@ -262,3 +292,92 @@ export function savePick(route: string, picked: string[]): void {
     /* private mode: no draft */
   }
 }
+
+/* ── The blind rating (design-models §5.5, OD6) ── */
+
+/** One answer's rating as the caller gives it: one score 1-5, the error
+ *  tick and its note; the owner's optional detail. `sent`: the server has it. */
+export type Rating = { overall: number | null; error: boolean; note: string; accuracy?: number | null; hebrew?: number | null; structure?: number | null; sent?: boolean };
+/** The caller's rating of a run: by answer id, and the best pick (a label, "=" no difference). */
+export type RateDraft = { by: Record<string, Rating>; best: string | null };
+
+const DRAFT_KEY = (run: string) => `study-models-rate:${run}`;
+/** The draft of a run's rating on this device (try/catch: private mode), or an empty one. */
+export function loadDraft(run: string): RateDraft {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY(run)) ?? "null") as RateDraft | null;
+    if (d && typeof d === "object" && d.by && typeof d.by === "object") return { by: d.by, best: typeof d.best === "string" ? d.best : null };
+  } catch {
+    /* none */
+  }
+  return { by: {}, best: null };
+}
+export function saveDraft(run: string, d: RateDraft): void {
+  try {
+    localStorage.setItem(DRAFT_KEY(run), JSON.stringify(d));
+  } catch {
+    /* private mode: no draft */
+  }
+}
+export function dropDraft(run: string): void {
+  try {
+    localStorage.removeItem(DRAFT_KEY(run));
+  } catch {
+    /* nothing kept */
+  }
+}
+
+/** The draft joined with what the server already has (study_lab_run's `my`): the server's wins where the device has nothing newer. */
+export function mergeDraft(d: RateDraft, mine: ReadonlyArray<{ id?: string; my?: { overall: number; error: boolean; note: string; accuracy?: number | null; hebrew?: number | null; structure?: number | null } | null }>): RateDraft {
+  const by = { ...d.by };
+  for (const o of mine) {
+    if (!o.id || !o.my) continue;
+    const local = by[o.id];
+    if (!local || local.sent) by[o.id] = { overall: o.my.overall, error: o.my.error, note: o.my.note ?? "", accuracy: o.my.accuracy ?? null, hebrew: o.my.hebrew ?? null, structure: o.my.structure ?? null, sent: true };
+  }
+  return { by, best: d.best };
+}
+
+/** The first answer (in label order) still without a score; null when every one has one. */
+export const missingScore = (ids: ReadonlyArray<{ id?: string; label: string }>, d: RateDraft): string | null => ids.find((o) => !o.id || !d.by[o.id]?.overall)?.label ?? null;
+
+/* ── An answer as the app shows it, for rating ── */
+
+export type ShownQuestion = { vignette: string; question: string; options: Array<{ text: string; correct: boolean }>; takeaway: string };
+export type Shown =
+  | { kind: "questions"; items: ShownQuestion[] }
+  | { kind: "points"; items: Array<{ subject: string; text: string; red: boolean }> }
+  | { kind: "cards"; items: Array<{ front: string; back: string }> }
+  | { kind: "text"; text: string };
+
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const rec = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
+
+/** An answer's text in the shape its kind shows: questions with their options, points, cards, or text. */
+export function shownOf(route: string, text: string | null | undefined): Shown {
+  const t = text ?? "";
+  let doc: Record<string, unknown> | null = null;
+  try {
+    doc = rec(JSON.parse(t));
+  } catch {
+    doc = null;
+  }
+  if (doc && (route === "practice" || route === "set_write") && Array.isArray(doc.questions))
+    return {
+      kind: "questions",
+      items: arr(doc.questions).map((q) => {
+        const x = rec(q);
+        return { vignette: str(x.vignette), question: str(x.question), options: arr(x.options).map((o) => ({ text: str(rec(o).text), correct: rec(o).correct === true })), takeaway: str(x.takeaway) };
+      }),
+    };
+  if (doc && route === "points" && Array.isArray(doc.points))
+    return { kind: "points", items: arr(doc.points).map((p) => ({ subject: str(rec(p).subject), text: str(rec(p).text), red: rec(p).red_flag === true })) };
+  if (doc && route === "cards" && Array.isArray(doc.cards))
+    return { kind: "cards", items: arr(doc.cards).map((c) => ({ front: str(rec(c).front).replace(/\{\{(.*?)\}\}/g, "___"), back: str(rec(c).back) || (str(rec(c).front).match(/\{\{(.*?)\}\}/)?.[1] ?? "") })) };
+  if (doc) return { kind: "text", text: JSON.stringify(doc, null, 2) };
+  return { kind: "text", text: t };
+}
+
+/** The codes of a run's `differs` (server/study/labRated.ts), one by one. */
+export const differsOf = (d: string | null | undefined): string[] => (d ?? "").split(",").map((x) => x.trim()).filter(Boolean);

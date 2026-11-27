@@ -2,8 +2,17 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_MODEL, MODELS, modelInfo, ROUTE_KEYS } from "../../../shared/study/models";
 import { KNOWN_KEYS, MC, ROUTE_NAMES, routeName, usd } from "./modelsCopy";
+import { MODELS_HELP, providersLine } from "./helpCopy";
 import {
   CANDIDATE,
+  differsOf,
+  dropDraft,
+  loadDraft,
+  mergeDraft,
+  missingScore,
+  RATED_KINDS,
+  saveDraft,
+  shownOf,
   FIRST_MODELS,
   kindsOf,
   LAB_KINDS,
@@ -191,4 +200,82 @@ test("a price checked 45 days ago or more is stale", () => {
   assert.equal(staleDate("2026-11-27", "2026-11-27"), false);
   assert.equal(staleDate("2026-10-13", "2026-11-27"), true);
   assert.equal(staleDate("2026-10-14", "2026-11-27"), false);
+});
+
+test("the kinds rated by people (WP8): every comparable kind is either keyed or rated; Sonnet is their candidate; the steps join the price", () => {
+  for (const k of LAB_KINDS) assert.ok(RATED_KINDS.has(k) !== ["solver", "fix_check", "exam_read", "sheet_read"].includes(k), k);
+  for (const k of ["practice", "set_write", "points", "cards", "ask", "part"]) {
+    assert.ok(RATED_KINDS.has(k), k);
+    assert.equal(CANDIDATE[k], "claude-sonnet-5-5", k);
+    assert.ok(ROUTE_NAMES[k], k);
+  }
+  const models = { a: { usd: 0.2 }, b: { usd: 0.1 } };
+  const steps = { check: 0.01, judge: [0, 0, 0.05, 0.07, 0.09] };
+  assert.equal(totalOf(["a", "b"], models).toFixed(3), "0.300");
+  assert.equal(totalOf(["a", "b"], models, steps).toFixed(3), "0.320", "practice's check of each answer");
+  assert.equal(totalOf(["a", "b"], models, steps, true).toFixed(3), "0.370", "and the AI score of 2 answers");
+  assert.deepEqual(differsOf("count, no threads"), ["count", "no threads"]);
+  assert.deepEqual(differsOf(""), []);
+  for (const d of ["count", "max_tokens", "no threads"]) assert.ok(MC.differsWords[d], d);
+});
+
+test("an answer as the app shows it: questions with the right option, points, cards, text", () => {
+  const q = shownOf("practice", JSON.stringify({ questions: [{ vignette: "", question: "מה?", options: [{ text: "א", correct: false }, { text: "ב", correct: true }], takeaway: "כי." }] }));
+  assert.deepEqual(q, { kind: "questions", items: [{ vignette: "", question: "מה?", options: [{ text: "א", correct: false }, { text: "ב", correct: true }], takeaway: "כי." }] });
+  assert.deepEqual(shownOf("points", JSON.stringify({ points: [{ subject: "X", text: "עובדה.", red_flag: true }] })), { kind: "points", items: [{ subject: "X", text: "עובדה.", red: true }] });
+  assert.deepEqual(shownOf("cards", JSON.stringify({ cards: [{ front: "X פועל על {{הכליה}}.", back: "" }] })), { kind: "cards", items: [{ front: "X פועל על ___.", back: "הכליה" }] });
+  assert.deepEqual(shownOf("ask", "לפי השקפים [ש' 3]."), { kind: "text", text: "לפי השקפים [ש' 3]." });
+  assert.equal(shownOf("practice", "not json").kind, "text");
+});
+
+test("the rating's draft: kept on the device (private mode too), joined with the server's, the first answer without a score", () => {
+  const store = new Map<string, string>();
+  const g = globalThis as { localStorage?: unknown };
+  g.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+  try {
+    assert.deepEqual(loadDraft("r1"), { by: {}, best: null });
+    saveDraft("r1", { by: { o1: { overall: 4, error: false, note: "", sent: false } }, best: "א" });
+    assert.deepEqual(loadDraft("r1"), { by: { o1: { overall: 4, error: false, note: "", sent: false } }, best: "א" });
+    const merged = mergeDraft(loadDraft("r1"), [
+      { id: "o1", my: { overall: 2, error: true, note: "x" } },
+      { id: "o2", my: { overall: 5, error: false, note: "" } },
+      { id: "o3", my: null },
+    ]);
+    assert.equal(merged.by.o1.overall, 4, "an unsent tap on this device wins");
+    assert.equal(merged.by.o2.overall, 5);
+    assert.equal(merged.by.o2.sent, true);
+    assert.equal(missingScore([{ id: "o1", label: "א" }, { id: "o2", label: "ב" }, { id: "o3", label: "ג" }], merged), "ג");
+    assert.equal(missingScore([{ id: "o1", label: "א" }, { id: "o2", label: "ב" }], merged), null);
+    dropDraft("r1");
+    assert.deepEqual(loadDraft("r1"), { by: {}, best: null });
+  } finally {
+    delete g.localStorage;
+  }
+  // Private mode: no storage at all, and nothing throws.
+  assert.deepEqual(loadDraft("r2"), { by: {}, best: null });
+  saveDraft("r2", { by: {}, best: null });
+});
+
+test("the rating's words: impersonal, one score of five labels, no model's name", () => {
+  const FORBIDDEN = /שלך|טעית|ענית|אליך|יצרת|ביקשת|העלית|פתרת|לחצת|תוכל|תוכלי|דירגת|בחרת|מעבדה/;
+  const lines = [
+    ...Object.values(MC.rate).flatMap((v) => (typeof v === "string" ? [v] : Array.isArray(v) ? v : typeof v === "function" ? [String((v as (x: string) => string)("ב"))] : Object.values(v as Record<string, string>))),
+    MC.share, MC.shareText("https://x/?v=models&r=1"), MC.shareNote, MC.checkNote, MC.aiTitle, MC.aiText, MC.yours(4), MC.groupScore("4.1", 4), MC.skippedNote, MC.bestMine("א"), MC.bestSame,
+    MODELS_HELP.text,
+  ];
+  for (const l of lines) {
+    assert.doesNotMatch(l, FORBIDDEN, l);
+    assert.doesNotMatch(l, /claude|opus|sonnet|haiku/i, l);
+  }
+  assert.equal(MC.rate.scale.length, 5);
+  assert.equal(MC.shareText("L"), "יש השוואה חדשה לדירוג בתמצית (בערך 2 דקות): L");
+});
+
+test("help's line on where the material goes (OD21): Anthropic, the routed providers, those approved for comparisons", () => {
+  assert.equal(providersLine({ inUse: [], approved: [] }), "החומר של הקבוצה נשלח לכתיבה ל-Anthropic (Claude). אף אחד מהם לא מקבל שמות של חברי הקבוצה.");
+  assert.equal(
+    providersLine({ inUse: ["openai"], approved: ["openai", "google", "openrouter"] }),
+    "החומר של הקבוצה נשלח לכתיבה ל-Anthropic (Claude) ו-OpenAI, ובהשוואת מודלים גם ל-Google ו-OpenRouter. אף אחד מהם לא מקבל שמות של חברי הקבוצה.",
+  );
+  assert.ok(!providersLine({ inUse: [], approved: ["google"] }).includes("לאן החומר הולך"), "not the privacy note Yoad removed");
 });
