@@ -116,6 +116,23 @@ export function requestEstimate(model: string, o: Pick<RunOpts, "system" | "mess
   return estimateUsd(model, chars, o.maxTokens, pictures * imageTokens());
 }
 
+/** A Claude model's fields for a call made outside run(), the outline's
+ *  messages.parse and the ask route's messages.create (D5: they only take a
+ *  model): its API id, max_tokens within its floor and cap, the effort
+ *  where it has effort control, and whether it has server-side fallback.
+ *  Left out, the default, so those requests stay exactly today's. A model
+ *  that is not Claude's is the default (their keys take Claude only). */
+export function claudeFields(model: string | undefined, maxTokens: number, effort: Effort): { model: string; max_tokens: number; effort?: Effort; serverFallback: boolean } {
+  const found = modelInfo(model ?? DEFAULT_MODEL);
+  const m = found && found.provider === "anthropic" ? found : infoOf(DEFAULT_MODEL);
+  return {
+    model: m.apiId,
+    max_tokens: Math.min(m.maxOut, Math.max(maxTokens, m.minMaxTokens ?? 0)),
+    ...(m.effort ? { effort: m.effort[effort] as Effort } : {}),
+    serverFallback: m.serverFallback,
+  };
+}
+
 /** One streamed call. Text arrives through onText with the model serving it
  *  at that moment (message_start's model, then a fallback block's). A timeout
  *  or a closed phone keeps what arrived; any other error is the caller's.
@@ -236,7 +253,7 @@ async function runAdapter(o: RunOpts, m: ModelInfo): Promise<Outcome> {
   const adapter = adapterFor(m.provider);
   if (adapter) return adapter(o, m);
   await o.ledger({ kind: o.kind, ref: o.ref, model: m.id, usage: null, costUsd: 0, estimated: false }).catch(() => undefined);
-  return { stop: "error", model: m.id, timedOut: false, costUsd: 0, estimated: false, chars: 0, cause: new HttpError(500, "not configured") };
+  return { stop: "error", model: m.id, timedOut: false, costUsd: 0, estimated: false, chars: 0, cause: new Error(`no adapter for ${m.provider}`) };
 }
 
 /** Structured generation: streams one {"<list>": [...]} document and hands

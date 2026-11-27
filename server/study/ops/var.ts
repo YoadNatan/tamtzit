@@ -3,10 +3,11 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { blockSources } from "../../../shared/study/edits.js";
 import { estimateUsd, imageTokens, reserve } from "../budget.js";
-import { cleanSchema, run, settleFor, type Ledger } from "../claude.js";
+import { cleanSchema, run, settleFor, type FallbackReserve, type Ledger } from "../claude.js";
 import { VAR_EFFORT, VAR_MAX_PICTURES, VAR_MAX_TOKENS, VAR_PART_CHARS, VAR_TIME_LIMIT_MS } from "../limits.js";
 import { VAR_SYSTEM, varRequest } from "../prompts/var.js";
-import { anthropic, HttpError, json, keyed, loadLecture, memberClient, MODEL, slideText, tidyMarkdown, type StoredSlide } from "../study.js";
+import { fallbackReserve, modelFor } from "../routes.js";
+import { anthropic, HttpError, json, keyed, loadLecture, memberClient, slideText, tidyMarkdown, type StoredSlide } from "../study.js";
 import { checkVerdict, Verdict, varSlides, type CheckedVerdict, type VerdictRaw } from "../var.js";
 import type { Op } from "./types.js";
 
@@ -113,10 +114,14 @@ export async function verdictCall(o: {
   ledger: Ledger;
   ref: string;
   signal?: AbortSignal;
+  model?: string;
+  reserveFallback?: FallbackReserve;
 }): Promise<{ raw: VerdictRaw | null; stop: string | null; model: string }> {
   let text = "";
   const r = await run({
     client: o.client,
+    model: o.model,
+    reserveFallback: o.reserveFallback,
     kind: "var",
     ref: o.ref,
     system: [{ type: "text", text: VAR_SYSTEM, cache_control: { type: "ephemeral" } }],
@@ -172,21 +177,24 @@ export const varOp: Op = async (req, body, started) => {
   content.push({ type: "text", text: tail });
 
   const chars = VAR_SYSTEM.length + head.length + tail.length + pictures.length * 16;
+  const model = await modelFor(sb, lecture.group_id, "var", { pictures: pictures.length > 0 });
   const reservation = await reserve(sb, {
     groupId: lecture.group_id,
     lectureId: lecture.id,
     kind: "var",
     ref: d.id,
     estimateUsd: estimateUsd(
-      MODEL,
+      model,
       chars,
       VAR_MAX_TOKENS,
       pictures.reduce((t, p) => t + imageTokens(p.w, p.h), 0),
     ),
   });
-  const { raw, stop, model } = await verdictCall({
+  const { raw, stop, model: servedBy } = await verdictCall({
     client: anthropic(),
     content,
+    model,
+    reserveFallback: fallbackReserve(sb, { groupId: lecture.group_id, lectureId: lecture.id, kind: "var", ref: d.id }),
     stopAt: started + VAR_TIME_LIMIT_MS,
     ledger: settleFor(sb, reservation),
     ref: d.id,
@@ -197,7 +205,7 @@ export const varOp: Op = async (req, body, started) => {
   const verdict: CheckedVerdict | null = raw ? checkVerdict(raw, sent) : null;
   if (!verdict) throw new HttpError(502, "truncated"); // max_tokens, JSON that is not a verdict, or no summary
 
-  const saved = await sb.rpc("study_dispute_verdict", keyed({ p_dispute: d.id, p_verdict: verdict, p_model: model }));
+  const saved = await sb.rpc("study_dispute_verdict", keyed({ p_dispute: d.id, p_verdict: verdict, p_model: servedBy }));
   if (saved.error) {
     // The database checks the shape again: a verdict it refuses is one this code should not have sent.
     if (saved.error.message === "bad verdict") throw new HttpError(502, "truncated");

@@ -5,7 +5,8 @@ import { estimateUsd, reserve } from "../budget.js";
 import { cleanSchema, run, settleFor } from "../claude.js";
 import { TRAP_CHECK_EFFORT, TRAP_CHECK_MAX_TOKENS, TRAP_CHECK_TIME_LIMIT_MS, TRAP_PARAGRAPH_CHARS } from "../limits.js";
 import { TRAP_CHECK_SYSTEM, trapRequest } from "../prompts/extras.js";
-import { anthropic, HttpError, json, keyed, lectureBlock, loadLecture, memberClient, MODEL, serverKey, tidyMarkdown } from "../study.js";
+import { fallbackReserve, modelFor } from "../routes.js";
+import { anthropic, HttpError, json, keyed, lectureBlock, loadLecture, memberClient, serverKey, tidyMarkdown } from "../study.js";
 import { checkTrap, TrapVerdict, type TrapVerdictRaw } from "../traps.js";
 import type { Op } from "./types.js";
 
@@ -114,16 +115,19 @@ export const trapCheckOp: Op = async (req, body, started) => {
   });
   const deck = lectureBlock(lecture);
   const client = anthropic();
+  const model = await modelFor(sb, lecture.group_id, "trap_check");
   const reservation = await reserve(sb, {
     groupId: lecture.group_id,
     lectureId: lecture.id,
     kind: "trap_check",
     ref: d.id,
-    estimateUsd: estimateUsd(MODEL, TRAP_CHECK_SYSTEM.length + deck.length + user.length, TRAP_CHECK_MAX_TOKENS),
+    estimateUsd: estimateUsd(model, TRAP_CHECK_SYSTEM.length + deck.length + user.length, TRAP_CHECK_MAX_TOKENS),
   });
   let text = "";
   const r = await run({
     client,
+    model,
+    reserveFallback: fallbackReserve(sb, { groupId: lecture.group_id, lectureId: lecture.id, kind: "trap_check", ref: d.id }),
     kind: "trap_check",
     ref: d.id,
     system: [

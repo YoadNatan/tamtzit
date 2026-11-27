@@ -6,7 +6,8 @@ import { settleFor } from "../claude.js";
 import { DAILY_DRAFTS, WALL_CHECK_CHARS, WALL_CHECK_MAX_TOKENS, WALL_DRAFTS_MAX_TOKENS, WALL_TIME_LIMIT_MS } from "../limits.js";
 import { mnemonicSource } from "../mnemonic.js";
 import { checkRequest, draftsRequest, WALL_CHECK_SYSTEM, WALL_DRAFTS_SYSTEM } from "../prompts/wall.js";
-import { anthropic, deckText, HttpError, json, keyed, loadLecture, memberClient, MODEL, serverKey, slideText, textStream, tidyMarkdown, type StoredSlide } from "../study.js";
+import { fallbackReserve, modelFor } from "../routes.js";
+import { anthropic, deckText, HttpError, json, keyed, loadLecture, memberClient, serverKey, slideText, textStream, tidyMarkdown, type StoredSlide } from "../study.js";
 import { checkCall, draftSlides, paragraphHash, streamDrafts } from "../wall.js";
 import type { Op } from "./types.js";
 
@@ -145,14 +146,16 @@ export const mnemonicOp: Op = async (req, body, started) => {
   const request = draftsRequest({ lectureTitle: lecture.title, course: lecture.course, partHeading: part.title, target: source.target, slides: source.slides });
   let reservation: Awaited<ReturnType<typeof reserve>>;
   let client: ReturnType<typeof anthropic>;
+  let model: string;
   try {
     client = anthropic();
+    model = await modelFor(sb, lecture.group_id, "mnemonic");
     reservation = await reserve(sb, {
       groupId: lecture.group_id,
       lectureId,
       kind: "mnemonic",
       ref,
-      estimateUsd: estimateUsd(MODEL, WALL_DRAFTS_SYSTEM.length + request.length, WALL_DRAFTS_MAX_TOKENS),
+      estimateUsd: estimateUsd(model, WALL_DRAFTS_SYSTEM.length + request.length, WALL_DRAFTS_MAX_TOKENS),
     });
   } catch (e) {
     await release();
@@ -173,6 +176,10 @@ export const mnemonicOp: Op = async (req, body, started) => {
     try {
       const r = await streamDrafts({
         client,
+        model,
+        reserveFallback: fallbackReserve(sb, { groupId: lecture.group_id, lectureId, kind: "mnemonic", ref }, () => {
+          unsettled += 1;
+        }),
         ref,
         request,
         target: source.target,
@@ -231,15 +238,18 @@ export const wallCheckOp: Op = async (req, body, started) => {
       .join("\n\n");
     const paragraph = block.text.trim().slice(0, WALL_CHECK_CHARS);
     const request = checkRequest({ paragraph, slides: slides.slice(0, Math.max(0, WALL_CHECK_CHARS - paragraph.length)), aid: b.body, fact: b.fact });
+    const model = await modelFor(sb, lecture.group_id, "wall_check");
     const reservation = await reserve(sb, {
       groupId: lecture.group_id,
       lectureId: lecture.id,
       kind: "wall_check",
       ref: aid,
-      estimateUsd: estimateUsd(MODEL, WALL_CHECK_SYSTEM.length + request.length, WALL_CHECK_MAX_TOKENS),
+      estimateUsd: estimateUsd(model, WALL_CHECK_SYSTEM.length + request.length, WALL_CHECK_MAX_TOKENS),
     });
     const r = await checkCall({
       client: anthropic(),
+      model,
+      reserveFallback: fallbackReserve(sb, { groupId: lecture.group_id, lectureId: lecture.id, kind: "wall_check", ref: aid }),
       ref: aid,
       request,
       stopAt: started + WALL_TIME_LIMIT_MS,

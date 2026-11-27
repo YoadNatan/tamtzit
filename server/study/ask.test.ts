@@ -1316,3 +1316,31 @@ test("op, course: a signed turn's lecture numbers are sent as they are now; a qu
   assert.deepEqual([none.status, await none.json()], [409, { error: "no match" }]);
   assert.equal(restCalls("/rest/v1/rpc/study_reserve").length, 0, "nothing reserved");
 });
+
+test("routing's model (design-models D5): no model or the default by name is today's request; a routed Claude model only changes its own fields", async () => {
+  const idx = lectureIndex([
+    { id: "b", title: "Examplazole", course: "x", lecture_date: "2026-11-08", parts: [] },
+    { id: "a", title: "Fabrimycin", course: "x", lecture_date: "2026-11-01", parts: [] },
+  ]);
+  const stopAt = Date.now() + 60_000;
+  const bodies: Array<Record<string, unknown>> = [];
+  const betas: string[] = [];
+  for (const model of [undefined, MODEL, "claude-haiku-5-5", "claude-haiku-4-5"]) {
+    const f = fake(() => ({ json: routeJson('{"lectures":["L1"]}') }));
+    await routeQuestion({ client: f.client, index: idx, question: "x", ledger, stopAt, model });
+    bodies.push(f.sent[0].body);
+    betas.push(f.sent[0].headers.get("anthropic-beta") ?? "");
+  }
+  assert.deepEqual(bodies[1], bodies[0], "the default by name: the same request");
+  assert.equal(bodies[0].model, MODEL);
+  assert.equal(bodies[0].fallbacks, "default");
+  assert.ok(betas[0].includes("server-side-fallback-2026-07-01"));
+  const { model: _m0, max_tokens: _t0, fallbacks: _f0, ...rest0 } = bodies[0];
+  const { model: m2, max_tokens: t2, fallbacks: f2, ...rest2 } = bodies[2];
+  assert.deepEqual([m2, t2, f2], ["claude-haiku-5-5", 2000, undefined], "Haiku 5.5: its id, its output floor, no server-side fallback");
+  assert.ok(!betas[2].includes("server-side-fallback"));
+  assert.deepEqual(rest2, rest0, "everything else as today");
+  const c3 = bodies[3].output_config as { effort?: string; format?: unknown };
+  assert.equal(c3.effort, undefined, "Haiku 4.5: no effort control");
+  assert.ok(c3.format, "the format stays");
+});

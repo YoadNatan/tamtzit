@@ -5,7 +5,8 @@ import { z } from "zod/v4";
 import { blockSources, citedSlides } from "../../shared/study/edits.js";
 import { badCites, CONTEXT_LECTURES, contextBlock, selectContext, type CourseContext, type CourseRow } from "./context.js";
 import { costUsd, estimateUsd, floorUsage, reserve, type UsageLike } from "./budget.js";
-import { cleanSchema, settleFor, streamText, type Ledger } from "./claude.js";
+import { claudeFields, cleanSchema, settleFor, streamText, type FallbackReserve, type Ledger } from "./claude.js";
+import { fallbackReserve, modelFor } from "./routes.js";
 import {
   ASK_EFFORT,
   ASK_LIMITS,
@@ -40,7 +41,6 @@ import {
   lectureBlock,
   loadLecture,
   memberClient,
-  MODEL,
   QUICK_TOKEN_SECONDS,
   schemaOk,
   serverKey,
@@ -370,8 +370,11 @@ export async function routeQuestion(o: {
   ledger: Ledger;
   stopAt: number;
   signal?: AbortSignal;
+  /** The ask_route key's model (a Claude model; left out: the default, today's request). */
+  model?: string;
 }): Promise<RouteResult> {
-  let model: string = MODEL;
+  const f = claudeFields(o.model, ROUTE_MAX_TOKENS, ROUTE_EFFORT);
+  let model: string = f.model;
   let usage: UsageLike | null = null;
   let final = false;
   const timeout = Math.max(5_000, o.stopAt - Date.now());
@@ -387,12 +390,11 @@ export async function routeQuestion(o: {
   try {
     const msg = await o.client.beta.messages.create(
       {
-        model: MODEL,
-        max_tokens: ROUTE_MAX_TOKENS,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
+        model: f.model,
+        max_tokens: f.max_tokens,
+        ...(f.serverFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
         output_config: {
-          effort: ROUTE_EFFORT,
+          ...(f.effort ? { effort: f.effort } : {}),
           format: { type: "json_schema", schema: cleanSchema(zodOutputFormat(Route).schema as Record<string, unknown>) },
         },
         system: [
@@ -467,11 +469,15 @@ export async function streamAnswer(o: {
   write: (line: string) => void;
   ledger: Ledger;
   signal?: AbortSignal;
+  model?: string;
+  reserveFallback?: FallbackReserve;
 }): Promise<AnswerResult> {
   const lines = lineBatcher(o.write, ASK_LINE_MS);
   try {
     return await streamText({
       client: o.client,
+      model: o.model,
+      reserveFallback: o.reserveFallback,
       kind: "ask",
       ref: "answer",
       system: o.system,
@@ -598,16 +604,20 @@ async function answerContext(
 }
 
 /** One prepared answer call: what the model reads, and its worst case. */
-type AnswerCall = { system: Anthropic.Beta.BetaTextBlockParam[]; messages: Anthropic.Beta.BetaMessageParam[]; userText: string; estimate: number };
+type AnswerCall = { system: Anthropic.Beta.BetaTextBlockParam[]; messages: Anthropic.Beta.BetaMessageParam[]; userText: string; estimate: number; model: string };
 
 async function prepareAnswer(sb: SupabaseClient, key: string, lecture: Lecture, input: AskInput): Promise<AnswerCall> {
-  const [ctx, history] = await Promise.all([answerContext(sb, lecture, input.focus), verifiedHistory(key, lecture.id, input.history)]);
+  const [ctx, history, model] = await Promise.all([
+    answerContext(sb, lecture, input.focus),
+    verifiedHistory(key, lecture.id, input.history),
+    modelFor(sb, lecture.group_id, "ask"),
+  ]);
   const userText = askTurnText(input.question, ctx.focus, ctx.recording);
   const system = askSystem(lecture, ctx.corrections, ctx.notes, ctx.summary, ctx.threads);
   const messages = askMessages(history, userText);
   const inputChars =
     system.reduce((n, b) => n + b.text.length, 0) + history.reduce((n, t) => n + t.u.length + t.a.length, 0) + userText.length;
-  return { system, messages, userText, estimate: estimateUsd(MODEL, inputChars, ASK_MAX_TOKENS) };
+  return { system, messages, userText, estimate: estimateUsd(model, inputChars, ASK_MAX_TOKENS), model };
 }
 
 /** Streams one prepared answer: the "turn" line, the answer, the done line
@@ -627,6 +637,10 @@ async function answer(o: {
   o.write(JSON.stringify({ t: "turn", u: o.call.userText }) + "\n");
   const res = await streamAnswer({
     client: o.client,
+    model: o.call.model,
+    reserveFallback: fallbackReserve(o.sb, { groupId: o.lecture.group_id, lectureId: o.lecture.id, kind: "ask", ref: "answer" }, () => {
+      o.unsettled.n += 1;
+    }),
     system: o.call.system,
     messages: o.call.messages,
     stopAt: o.stopAt,
@@ -820,12 +834,13 @@ async function courseAsk(o: {
   const messages = askMessages(courseHistory(history, ctx.all), userText);
   const inputChars =
     system.reduce((n, b) => n + b.text.length, 0) + history.reduce((n, t) => n + t.u.length + t.a.length, 0) + userText.length;
+  const model = await modelFor(sb, course.group_id, "ask");
   const reservation = await reserve(sb, {
     groupId: course.group_id,
     lectureId: null,
     kind: "ask",
     ref: "answer",
-    estimateUsd: estimateUsd(MODEL, inputChars, ASK_MAX_TOKENS),
+    estimateUsd: estimateUsd(model, inputChars, ASK_MAX_TOKENS),
   });
   const client = anthropic();
   const unsettled = { n: 0 };
@@ -835,6 +850,10 @@ async function courseAsk(o: {
     write(JSON.stringify({ t: "turn", u: userText }) + "\n");
     const res = await streamAnswer({
       client,
+      model,
+      reserveFallback: fallbackReserve(sb, { groupId: course.group_id, lectureId: null, kind: "ask", ref: "answer" }, () => {
+        unsettled.n += 1;
+      }),
       system,
       messages,
       stopAt: o.started + COLLAB_TIME_LIMIT_MS,
@@ -929,17 +948,19 @@ export const askOp: Op = async (req, body, started) => {
   }
 
   const index = lectureIndex(scope.map((l) => ({ id: l.id, title: l.title, course: l.course, lecture_date: l.lecture_date, parts: partHeadings(l.outline) })));
+  const routeModel = await modelFor(sb, groupId, "ask_route");
   const routeReservation = await reserve(sb, {
     groupId,
     lectureId: null,
     kind: "ask",
     ref: "route",
-    estimateUsd: estimateUsd(MODEL, ROUTE_SYSTEM.length + index.text.length + question.length + 20, ROUTE_MAX_TOKENS),
+    estimateUsd: estimateUsd(routeModel, ROUTE_SYSTEM.length + index.text.length + question.length + 20, ROUTE_MAX_TOKENS),
   });
   return textStream(async (raw) => {
     const write = safe(raw);
     const routed = await routeQuestion({
       client,
+      model: routeModel,
       index,
       question,
       stopAt,

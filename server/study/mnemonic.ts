@@ -4,7 +4,8 @@ import { z } from "zod/v4";
 import { blockSources, citedSlides, type Block } from "../../shared/study/edits.js";
 import { assertCollabSchema, usesLeft } from "./ask.js";
 import { estimateUsd, reserve } from "./budget.js";
-import { cleanSchema, JsonArrayItems, run, settleFor, type Ledger } from "./claude.js";
+import { cleanSchema, JsonArrayItems, run, settleFor, type FallbackReserve, type Ledger } from "./claude.js";
+import { fallbackReserve, modelFor } from "./routes.js";
 import {
   AID_SLIDES_CHARS,
   AID_TARGET_CHARS,
@@ -21,7 +22,6 @@ import {
   HttpError,
   loadLecture,
   memberClient,
-  MODEL,
   serverKey,
   slideText,
   textStream,
@@ -180,6 +180,8 @@ export async function streamMnemonics(o: {
   write: (line: string) => void;
   ledger: Ledger;
   signal?: AbortSignal;
+  model?: string;
+  reserveFallback?: FallbackReserve;
 }): Promise<MnemonicResult> {
   const scan = new JsonArrayItems();
   const seen = new Set<string>();
@@ -187,6 +189,8 @@ export async function streamMnemonics(o: {
   let rejected = 0;
   const res = await run({
     client: o.client,
+    model: o.model,
+    reserveFallback: o.reserveFallback,
     kind: "mnemonic",
     ref: o.ref,
     system: [{ type: "text", text: MNEMONIC_SYSTEM }],
@@ -256,12 +260,13 @@ export const mnemonicOp: Op = async (req, body, started) => {
     topic: source.topic,
   });
   const ref = `${partIdx}.${anchor}`;
+  const model = await modelFor(sb, lecture.group_id, "mnemonic");
   const reservation = await reserve(sb, {
     groupId: lecture.group_id,
     lectureId,
     kind: "mnemonic",
     ref,
-    estimateUsd: estimateUsd(MODEL, MNEMONIC_SYSTEM.length + request.length, MNEMONIC_MAX_TOKENS),
+    estimateUsd: estimateUsd(model, MNEMONIC_SYSTEM.length + request.length, MNEMONIC_MAX_TOKENS),
   });
 
   return textStream(async (raw) => {
@@ -276,6 +281,10 @@ export const mnemonicOp: Op = async (req, body, started) => {
     let unsettled = 0;
     const r = await streamMnemonics({
       client,
+      model,
+      reserveFallback: fallbackReserve(sb, { groupId: lecture.group_id, lectureId, kind: "mnemonic", ref }, () => {
+        unsettled += 1;
+      }),
       ref,
       request,
       source: source.target + "\n" + source.slides,

@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod/v4";
 import { citedSlides } from "../../shared/study/edits.js";
-import { cleanSchema, JsonArrayItems, run, type Ledger } from "./claude.js";
+import { cleanSchema, JsonArrayItems, run, type FallbackReserve, type Ledger } from "./claude.js";
 import { WALL_CHECK_EFFORT, WALL_CHECK_MAX_TOKENS, WALL_DRAFTS_EFFORT, WALL_DRAFTS_MAX_TOKENS } from "./limits.js";
 import { WALL_CHECK_SYSTEM, WALL_DRAFTS_SYSTEM } from "./prompts/wall.js";
 
@@ -144,6 +144,8 @@ export async function streamDrafts(o: {
   write: (line: string) => void;
   ledger: Ledger;
   signal?: AbortSignal;
+  model?: string;
+  reserveFallback?: FallbackReserve;
 }): Promise<DraftsResult> {
   const scan = new JsonArrayItems();
   const seen = new Set<string>();
@@ -152,6 +154,8 @@ export async function streamDrafts(o: {
   let text = "";
   const res = await run({
     client: o.client,
+    model: o.model,
+    reserveFallback: o.reserveFallback,
     kind: "mnemonic",
     ref: o.ref,
     system: [{ type: "text", text: WALL_DRAFTS_SYSTEM }],
@@ -204,10 +208,14 @@ export async function checkCall(o: {
   stopAt: number;
   ledger: Ledger;
   signal?: AbortSignal;
+  model?: string;
+  reserveFallback?: FallbackReserve;
 }): Promise<{ verdict: CheckItem | null; stop: string | null; model: string; timedOut: boolean }> {
   let text = "";
   const r = await run({
     client: o.client,
+    model: o.model,
+    reserveFallback: o.reserveFallback,
     kind: "wall_check",
     ref: o.ref,
     system: [{ type: "text", text: WALL_CHECK_SYSTEM }],
