@@ -6,6 +6,9 @@
   display: grid;
   gap: var(--sp-8);
   min-width: 0;
+  align-content: start; /* main is at least a screen tall: the rows keep their own height */
+  /* Warning text on the surface: --warn-line is a 3:1 line colour, this ink reads at 4.5:1 or more. */
+  --md-warn-text: color-mix(in srgb, var(--warn-line) 60%, var(--ink));
 }
 .md-screen > * {
   min-width: 0;
@@ -334,6 +337,9 @@
 .md-rec {
   display: grid;
   gap: var(--sp-5);
+  /* The recommendation: an ok accent, never the lecturer's pink (kit's .a-callout.rec). */
+  border-inline-start-color: var(--ok-line);
+  background: var(--surface-2);
 }
 .md-rec p {
   margin: 0;
@@ -372,8 +378,27 @@
   min-height: 44px;
   display: flex;
   align-items: center;
+  gap: var(--sp-3);
   cursor: pointer;
   font-weight: 700;
+  list-style: none;
+}
+.md-fold > summary::-webkit-details-marker {
+  display: none;
+}
+/* flex drops the disclosure triangle: a chevron says it opens. */
+.md-fold > summary::after {
+  content: "";
+  width: 0.5em;
+  height: 0.5em;
+  margin-inline-start: auto;
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s;
+}
+.md-fold[open] > summary::after {
+  transform: rotate(-135deg);
 }
 .md-providers {
   margin-block-start: var(--sp-4);
@@ -397,7 +422,7 @@
   color: var(--ink);
 }
 .md-stale {
-  color: var(--warn-line);
+  color: var(--md-warn-text);
   font-weight: 700;
 }
 /* "לאשר שליחה": what is sent (scope all or text). */
@@ -531,8 +556,15 @@
   display: grid;
   gap: var(--sp-6);
   overflow-wrap: anywhere;
-  max-height: 34rem;
-  overflow: auto;
+}
+/* Side by side (768 px and up) a long answer scrolls in its column (the
+   panel says so: MC.rate.scrollMore); on a phone the page scrolls, with no
+   box inside a box. */
+@media (min-width: 768px) {
+  .md-shown {
+    max-height: 34rem;
+    overflow: auto;
+  }
 }
 .md-shown p {
   margin: 0 0 var(--sp-2);
@@ -680,4 +712,57 @@
 .md-kind-group {
   margin: 0;
   font-weight: 700;
+}
+
+/* A model's name never breaks inside itself. */
+.md-name {
+  white-space: nowrap;
+}
+/* The run's bar while no answer is in yet: it moves, so the wait reads as work. */
+@media (prefers-reduced-motion: no-preference) {
+  .a-bar.md-wait > i {
+    width: 30% !important;
+    animation: md-wait 1.6s ease-in-out infinite;
+  }
+  @keyframes md-wait {
+    0% {
+      transform: translateX(120%);
+    }
+    100% {
+      transform: translateX(-340%);
+    }
+  }
+}
+/* תוצאות: the kind is one select, so the cards start above the fold. */
+.md-kind-pick {
+  display: grid;
+  gap: var(--sp-2);
+}
+.md-kind-pick select {
+  min-height: 44px;
+}
+/* A new comparison: models grouped by provider. */
+.md-group-h {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-size: 0.9375em;
+}
+.md-unroutable {
+  justify-self: start;
+}
+/* An answer-key kind's answer in words. */
+.md-keyed {
+  margin: 0;
+  padding-inline-start: var(--sp-8);
+  display: grid;
+  gap: var(--sp-2);
+}
+/* "תשובה ארוכה: גלילה בתוכה לעוד": only where the answer scrolls in its column. */
+.md-scroll-hint {
+  display: none;
+  margin: 0;
+}
+@media (min-width: 768px) {
+  .md-scroll-hint {
+    display: block;
+  }
 }

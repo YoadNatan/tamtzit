@@ -24,7 +24,7 @@ export function HelpSpend({ ctx }: { ctx: Ctx }) {
     void import("../lib/models")
       .then(async (m) => {
         const st = await m.readState(ctx.group.id);
-        const inUse = st.switches.routes ? Object.values(st.routes).map((r) => r.model.split(":")[0]).filter((p) => p && !p.startsWith("claude")) : [];
+        const inUse = m.routedProviders(st);
         const approved = Object.entries(st.providers)
           .filter(([, p]) => p.allowed)
           .map(([k]) => k);

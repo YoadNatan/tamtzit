@@ -1,5 +1,5 @@
 import { lazy, useCallback, useEffect, useMemo, useState } from "react";
-import { DEFAULT_MODEL } from "../../../shared/study/models";
+import { DEFAULT_MODEL, modelInfo } from "../../../shared/study/models";
 import type { Ctx, ScreenProps } from "../features/types";
 import type { Route } from "../lib/route";
 import { retryImport } from "../lib/staleChunk";
@@ -16,6 +16,7 @@ import {
   readBoard,
   readState,
   recommend,
+  routable,
   totalOf,
   type Board,
   type ModelsState,
@@ -115,7 +116,7 @@ function MemberList({ ctx, back }: { ctx: Ctx; back: React.ReactNode }) {
                     <b>{r.title}</b>
                     <div className="a-small a-muted">{dayOf(r.created_at)}</div>
                   </div>
-                  <span className="a-chip">{r.mine === "rated" ? MC.rated : MC.skipped}</span>
+                  <span className="a-chip">{r.mine === "rated" ? MC.ratedOne : MC.skippedOne}</span>
                 </RouteLink>
               </li>
             ))}
@@ -323,17 +324,25 @@ function BoardTab({ ctx, state, routeKey, onState }: { ctx: Ctx; state: ModelsSt
     if (!board) return 0;
     return Math.max(0, ...board.models.map((m) => (board.usage30 ? projection({ key: kind, model: m.model, today: board.today, usage: board.usage30, board: board.models }).usd : (m.mean_usd ?? 0))));
   }, [board, kind]);
-  const rec = board ? recommend({ route: kind, today: board.today, models: board.models, usage: board.usage30 }) : null;
+  // What production may take for this kind (routable): the recommendation and "להשתמש בו" offer nothing else.
+  const canUse = (id: string) => {
+    const info = modelInfo(id);
+    return Boolean(info && routable(kind, info, { providers: state.providers, keys }));
+  };
+  const rec = board ? recommend({ route: kind, today: board.today, models: board.models, usage: board.usage30, canUse }) : null;
   const models = board ? [...board.models].sort((a, b) => Number(b.today) - Number(a.today) || a.model.localeCompare(b.model)) : [];
   return (
     <section className="a-stack md-board">
-      <div className="a-wrap md-kinds" role="radiogroup" aria-label={MC.boardKinds}>
-        {kinds.map((k) => (
-          <button key={k} type="button" role="radio" aria-checked={k === kind} className={`a-chip md-kind${k === kind ? " on" : ""}`} onClick={() => ctx.go({ v: "models", x: "board", k }, { replace: true })}>
-            {routeName(k)}
-          </button>
-        ))}
-      </div>
+      <label className="md-kind-pick">
+        <span className="a-small a-muted">{MC.boardKinds}</span>
+        <select className="a-input" value={kind} onChange={(e) => ctx.go({ v: "models", x: "board", k: e.target.value }, { replace: true })}>
+          {kinds.map((k) => (
+            <option key={k} value={k}>
+              {routeName(k)}
+            </option>
+          ))}
+        </select>
+      </label>
       {ROUTE_SUBLINE[kind] ? <p className="a-small a-muted">{ROUTE_SUBLINE[kind]}</p> : null}
       {failed ? <p className="a-error">{MC.failed}</p> : null}
       {!board && !failed ? <Loading /> : null}
@@ -353,7 +362,15 @@ function BoardTab({ ctx, state, routeKey, onState }: { ctx: Ctx; state: ModelsSt
         <>
           <div className="md-cards" aria-label={MC.boardLabel}>
             {models.map((m) => (
-              <ModelCard key={m.model} m={m} route={kind} board={board} max={max} onUse={() => setSheet(m.model)} />
+              <ModelCard
+                key={m.model}
+                m={m}
+                route={kind}
+                board={board}
+                max={max}
+                onUse={() => setSheet(m.model)}
+                noUse={canUse(m.model) ? undefined : modelInfo(m.model)?.verified === false ? MC.noRoute : MC.noRouteOther}
+              />
             ))}
           </div>
           {board.usage30 ? (
@@ -376,6 +393,7 @@ function BoardTab({ ctx, state, routeKey, onState }: { ctx: Ctx; state: ModelsSt
             onState();
             ctx.go({ v: "models", x: "routes" }, { replace: true });
           }}
+          onUndo={onState}
         />
       ) : null}
     </section>
@@ -447,6 +465,7 @@ function RoutesTab({ ctx, state, onState }: { ctx: Ctx; state: ModelsState; onSt
             setSheet(null);
             onState();
           }}
+          onUndo={onState}
         />
       ) : null}
     </section>

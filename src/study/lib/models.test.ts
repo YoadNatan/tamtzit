@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ALL_MODELS, DEFAULT_MODEL, MODELS, modelInfo, ROUTE_KEYS } from "../../../shared/study/models";
-import { KNOWN_KEYS, MC, ROUTE_NAMES, routeName, usd } from "./modelsCopy";
+import { keyedLines, KNOWN_KEYS, MC, ROUTE_NAMES, routeName, usd } from "./modelsCopy";
 import { MODELS_HELP, providersLine } from "./helpCopy";
 import {
   PROVIDERS,
@@ -23,6 +23,7 @@ import {
   projection,
   recommend,
   routable,
+  routedProviders,
   staleDate,
   times,
   tooFew,
@@ -99,7 +100,9 @@ test("usd(): cents from 10 cents, tenths of a cent below, never a long fraction"
   assert.equal(usd(0.84), "$0.84");
   assert.equal(usd(0.06), "$0.06");
   assert.equal(usd(0.0071), "$0.007");
-  assert.equal(usd(0.0004), "פחות מ-$0.001");
+  // Left to right in an isolate, so inside a bdi or a Hebrew line it never reads "≈$0.001-פחות מ".
+  assert.equal(usd(0.0004), "\u2066<$0.001\u2069");
+  assert.ok(!/[\u0590-\u05ff]/.test(usd(0.0004)), "no Hebrew inside the amount");
   assert.equal(usd(0), "$0");
   assert.equal(usd(null), "$0");
   assert.equal(times(4.27), "4.3");
@@ -294,7 +297,44 @@ test("providers (WP9): every provider's key sheet names its limit first; approvi
 });
 
 test("C43: a model only its maker serves from China says where it is processed (OD22)", () => {
-  assert.equal(MC.chinaLine("Alibaba Cloud"), "המעבד של Alibaba Cloud נמצא בסין.");
+  assert.equal(MC.chinaLine("Alibaba Cloud"), "הבקשות למודל הזה מעובדות בסין (Alibaba Cloud).");
   const china = ALL_MODELS.filter((m) => m.china);
   assert.ok(china.length >= 1 && china.every((m) => m.provider === "openrouter" && m.host), "each through OpenRouter, with who processes it");
+});
+
+test("recommend and the results' button offer only what production may take (routable): an unverified price is no dead end", () => {
+  const usage = { solver: { calls: 100, usd: 2.7 } };
+  const opus = row(DEFAULT_MODEL, { runs: 3, answers: 3, mean_usd: 0.027, items: 30, match: 27, false_rejects: 1 });
+  const luna = row("openai:gpt-6-luna", { runs: 3, answers: 3, mean_usd: 0.0003, items: 30, match: 27, false_rejects: 1 });
+  assert.equal(recommend({ route: "solver", today: DEFAULT_MODEL, models: [opus, luna], usage })?.model, "openai:gpt-6-luna", "without the filter it would win");
+  const canUse = (id: string) => routable("solver", modelInfo(id)!, { providers: { openai: { allowed: true, scope: "all" } }, keys: { openai: true } });
+  assert.equal(canUse("openai:gpt-6-luna"), false, "its price is not verified");
+  assert.equal(recommend({ route: "solver", today: DEFAULT_MODEL, models: [opus, luna], usage, canUse }), null);
+});
+
+test("an answer-key kind's answer in words: the solver's choices, a correction check's verdict, a reader's questions", () => {
+  assert.deepEqual(keyedLines("solver", JSON.stringify({ answers: [{ id: "q1", choice: 1, ambiguous: false, seq: [] }, { id: "q2", choice: -1, ambiguous: true, seq: [1, 0] }] })), [
+    "שאלה 1: תשובה 2",
+    "שאלה 2: תשובות 1, 0 · המודל סימן שהשאלה לא חד-משמעית",
+  ]);
+  assert.deepEqual(keyedLines("fix_check", JSON.stringify({ ok: false, note: "בשקף 5 כתוב 500 mg" })), ["התיקון לא תואם את השקפים", "בשקף 5 כתוב 500 mg"]);
+  assert.deepEqual(keyedLines("exam_read", JSON.stringify({ questions: [{ no: 3, question: "מהו מנגנון הפעולה?", options: ["א", "ב", "ג", "ד"] }] })), ["3. מהו מנגנון הפעולה? · 4 אפשרויות"]);
+  assert.deepEqual(keyedLines("sheet_read", JSON.stringify({ questions: [{ label: "2א", question: "חשבו את הפינוי", options: [] }] })), ["2א. חשבו את הפינוי"]);
+  assert.deepEqual(keyedLines("solver", "not json"), []);
+});
+
+test("help's providers line: the routed models' providers from the registry, never a raw id", () => {
+  const st = (routes: Record<string, { model: string; set_at: string }>, on = true) => ({ routes, switches: { lab: true, routes: on } });
+  assert.deepEqual(routedProviders(st({ points: { model: "openai:gpt-6.2-sol", set_at: "" }, cards: { model: "google:gemini-3.8-flash", set_at: "" }, solver: { model: "claude-haiku-5-5", set_at: "" } })).sort(), ["google", "openai"]);
+  assert.deepEqual(routedProviders(st({ points: { model: "openai:gpt-6.2-sol", set_at: "" } }, false)), [], "routes off: Anthropic only");
+  assert.equal(providersLine({ inUse: routedProviders(st({ points: { model: "openai:gpt-6.2-sol", set_at: "" } })), approved: ["openai"] }).includes("gpt"), false);
+});
+
+test("copy the reviews pinned: the route sheet points to help's last line; scope text says what it sends; the run's words", () => {
+  assert.equal(MC.otherProvider("נקודות", "OpenAI"), "החומר של ״נקודות״ יישלח ל-OpenAI במקום ל-Anthropic, והקבוצה תראה את זה ב״עזרה״, בשורה האחרונה.");
+  assert.ok(!MC.otherProvider("x", "y").includes("פרטיות"), "help's section פרטיות is gone (19 Nov 2026)");
+  assert.ok(MC.scopeTextSub.startsWith("טקסט מההרצאות בלבד") && !MC.scopeTextSub.includes("כרטיסיות"), "cards read members' corrections: not under text");
+  assert.equal(MC.budget("$0.84", "$3.30", 0), "השוואות החודש: $0.84 מתוך $3.30 · אין עוד היום");
+  assert.ok(MC.blind.endsWith("אחרי ״הצגת השמות והעלות״."));
+  assert.equal(MC.upTo("$0.06"), "עד $0.06");
 });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_MODEL, modelInfo } from "../../../shared/study/models";
 import type { ScreenProps } from "../features/types";
-import { FIRST_MODELS, KEYED_KINDS, LAB_KINDS, offered, preselect, price, RATED_KINDS, readState, savedPick, savePick, startRun, totalOf, type ModelsState, type Price } from "../lib/models";
+import { FIRST_MODELS, KEYED_KINDS, LAB_KINDS, offered, preselect, price, PROVIDERS, RATED_KINDS, readState, savedPick, savePick, startRun, totalOf, type ModelsState, type Price } from "../lib/models";
 import { MC, modelsFail, ROUTE_SUBLINE, routeName, usd } from "../lib/modelsCopy";
 import "../styles/models.css";
 import { BudgetLine, ModelName, useKeys } from "./ModelsParts";
@@ -33,6 +33,7 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
   const [error, setError] = useState("");
   const [question, setQuestion] = useState("");
   const [judge, setJudge] = useState(false);
+  const [folds, setFolds] = useState<Record<string, boolean>>({});
   const online = useOnline();
   const keys = useKeys();
 
@@ -83,10 +84,14 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
   }
 
   const usable = quote ? models.filter((m) => quote.models[m.id]?.usd !== undefined) : models;
-  // An approved provider's models show with the newest Claude ones: the owner approved them to try them.
-  const first = usable.filter((m) => FIRST_MODELS.includes(m.id) || m.provider !== "anthropic" || picked.includes(m.id) || m.id === today);
-  const rest = usable.filter((m) => !first.includes(m));
-  const shown = more ? usable : first;
+  // Claude first: today's model, then the ones ticked, then the newest, the expensive ones last; the rest behind "עוד".
+  const rank = (m: (typeof usable)[number]) => (m.id === today ? 0 : picked.includes(m.id) ? 1 : m.expensive ? 3 : 2);
+  const claude = usable.filter((m) => m.provider === "anthropic").sort((a, b) => rank(a) - rank(b));
+  const first = claude.filter((m) => FIRST_MODELS.includes(m.id) || picked.includes(m.id) || m.id === today);
+  const rest = claude.filter((m) => !first.includes(m));
+  const shown = more ? claude : first;
+  // An approved provider's models: one group each, folded unless one of them is ticked, its price note said once.
+  const others = PROVIDERS.map((p) => ({ ...p, items: usable.filter((m) => m.provider === p.id) })).filter((g) => g.items.length > 0);
   const rated = RATED_KINDS.has(kind);
   const total = quote ? totalOf(picked, quote.models, quote.steps, rated && judge) : 0;
   const asked = question.replace(/\s+/g, " ").trim();
@@ -113,6 +118,24 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
               : quote && total > left
                 ? MC.overLine(usd(left))
                 : "";
+  const row = (m: (typeof usable)[number]) => {
+    const est = quote?.models[m.id]?.usd;
+    const on = picked.includes(m.id);
+    return (
+      <li key={m.id}>
+        <label className={`a-li md-check${on ? " on" : ""}`}>
+          <input type="checkbox" checked={on} onChange={() => toggle(m.id)} />
+          <span className="md-check-name">
+            <ModelName id={m.id} />
+            {m.id === today ? <span className="a-chip ok">{MC.tagToday}</span> : null}
+            {m.expensive ? <span className="a-chip warn">{MC.tagExpensive}</span> : null}
+            {m.china && m.host ? <span className="md-check-note a-small a-muted">{MC.chinaLine(m.host)}</span> : null}
+          </span>
+          <span className="md-check-usd a-small">{est !== undefined ? MC.upTo(usd(est)) : quote ? "" : "…"}</span>
+        </label>
+      </li>
+    );
+  };
   const toggle = (id: string) => {
     const next = picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
     setPicked(next);
@@ -214,33 +237,28 @@ export default function ModelsNewScreen({ route, ctx }: ScreenProps<"models">) {
           {MC.step3}
         </h2>
         <fieldset className="md-pick" aria-labelledby="md-s3" disabled={Boolean(noMaterial)}>
-          <ul className="a-list">
-            {shown.map((m) => {
-              const est = quote?.models[m.id]?.usd;
-              const on = picked.includes(m.id);
-              return (
-                <li key={m.id}>
-                  <label className={`a-li md-check${on ? " on" : ""}`}>
-                    <input type="checkbox" checked={on} onChange={() => toggle(m.id)} />
-                    <span className="md-check-name">
-                      <ModelName id={m.id} />
-                      {m.id === today ? <span className="a-chip ok">{MC.tagToday}</span> : null}
-                      {!m.verified ? <span className="a-chip warn">{MC.tagUnverified}</span> : null}
-                      {m.expensive ? <span className="a-chip warn">{MC.tagExpensive}</span> : null}
-                      {m.china && m.host ? <span className="md-check-note a-small a-muted">{MC.chinaLine(m.host)}</span> : null}
-                    </span>
-                    <span className="md-check-usd a-small">{est !== undefined ? <bdi dir="ltr">≈{usd(est)}</bdi> : quote ? "" : "…"}</span>
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
+          {others.length ? <h3 className="md-group-h">Claude</h3> : null}
+          <ul className="a-list">{shown.map(row)}</ul>
+          {rest.length ? (
+            <button type="button" className="a-link" onClick={() => setMore(!more)} aria-expanded={more}>
+              {more ? MC.fewerModels : MC.moreModels(rest.length)}
+            </button>
+          ) : null}
+          {others.map((g) => {
+            const ticked = g.items.some((m) => picked.includes(m.id));
+            return (
+              <details key={g.id} className="md-fold md-prov" open={folds[g.id] ?? ticked} onToggle={(e) => setFolds((f) => ({ ...f, [g.id]: (e.currentTarget as HTMLDetailsElement).open }))}>
+                <summary>
+                  <span>
+                    <bdi dir="ltr">{g.name}</bdi> · {MC.modelsN(g.items.length)}
+                  </span>
+                  {g.items.some((m) => !m.verified) ? <span className="a-chip warn">{MC.tagUnverified}</span> : null}
+                </summary>
+                <ul className="a-list">{g.items.map(row)}</ul>
+              </details>
+            );
+          })}
         </fieldset>
-        {rest.length ? (
-          <button type="button" className="a-link" onClick={() => setMore(!more)} aria-expanded={more}>
-            {more ? MC.fewerModels : MC.moreModels(rest.length)}
-          </button>
-        ) : null}
         {models.every((m) => modelInfo(m.id)?.provider === "anthropic") ? <p className="a-small a-muted">{MC.otherProviders}</p> : null}
         {quote ? <p className="a-small a-muted">{MC.priceNote}</p> : null}
         {rated ? (

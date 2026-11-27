@@ -32,7 +32,7 @@ import {
 } from "../lib/models";
 import { waLink } from "../lib/personalCode";
 import { shareUrl } from "../lib/route";
-import { MC, modelsFail, routeName, usd } from "../lib/modelsCopy";
+import { keyedLines, MC, modelsFail, routeName, usd } from "../lib/modelsCopy";
 import "../styles/models.css";
 import { ChecksLine, Confirm, LabelDot, ModelName, QualityPrice } from "./ModelsParts";
 import { BackLink, Head, Loading, RouteLink, Sheet, StickyActions, useOnline } from "./Shell";
@@ -216,10 +216,13 @@ export default function ModelsRunScreen({ route, ctx }: ScreenProps<"models">) {
           <p>
             <b>{MC.ready(ready, total)}</b>
           </p>
-          <div className="a-bar" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={ready} aria-valuetext={MC.ready(ready, total)}>
+          <div className={`a-bar${ready === 0 ? " md-wait" : ""}`} role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={ready} aria-valuetext={MC.ready(ready, total)}>
             <i style={{ width: `${total ? Math.round((ready / total) * 100) : 0}%` }} />
           </div>
-          <p className="a-small a-muted">{MC.leave}</p>
+          <p className="a-small a-muted">
+            {ready === 0 ? `${MC.usually} ` : ""}
+            {MC.leave}
+          </p>
           {run.owner ? (
             <button type="button" className="a-link danger" disabled={busy || !online} onClick={() => setConfirm(true)}>
               {MC.cancel}
@@ -236,7 +239,7 @@ export default function ModelsRunScreen({ route, ctx }: ScreenProps<"models">) {
           ))}
           {finished.length < 2 ? <p className="a-callout warn md-few">{finished.length === 1 ? MC.oneAnswer : MC.noAnswer}</p> : null}
           {!seen ? <p className="a-small md-blind">{rated || run.member_rate ? MC.blindRated : MC.blind}</p> : null}
-          {run.mine && !run.mine.rated ? <p className="a-small a-muted">{MC.skippedNote}</p> : null}
+          {RATED_KINDS.has(run.route) && run.mine && !run.mine.rated ? <p className="a-small a-muted">{MC.skippedNote}</p> : null}
           {run.mine?.rated && run.mine.best ? <p className="a-small">{run.mine.best === "=" ? MC.bestSame : MC.bestMine(run.mine.best)}</p> : null}
           {seen && finished.length ? <SideBySide run={run} keyed={keyed} maxCost={maxCost} /> : null}
           {pending ? (
@@ -357,7 +360,7 @@ function AnswerCard({ o, run, board, groupBusy, onRetry }: { o: Output; run: Run
           <button type="button" className="a-link" aria-expanded={open} onClick={() => setOpen(!open)}>
             {open ? MC.hideText : MC.showText}
           </button>
-          {open ? RATED_KINDS.has(run.route) ? <ShownAnswer route={run.route} text={o.text} /> : <pre className="md-text" dir="auto">{pretty(o.text)}</pre> : null}
+          {open ? RATED_KINDS.has(run.route) ? <ShownAnswer route={run.route} text={o.text} /> : <KeyedAnswer route={run.route} text={o.text} /> : null}
         </>
       ) : null}
       {canRetry ? (
@@ -376,6 +379,32 @@ function pretty(text: string): string {
   } catch {
     return text;
   }
+}
+
+/** An answer-key kind's answer in words (keyedLines): the solver's choice per
+ *  question, a correction check's verdict and reason, a reader's numbered
+ *  questions; the model's raw JSON stays behind a small fold. */
+function KeyedAnswer({ route, text }: { route: string; text: string }) {
+  const lines = keyedLines(route, text);
+  return (
+    <div className="md-shown">
+      {lines.length ? (
+        <ol className="md-keyed">
+          {lines.map((l, i) => (
+            <li key={i} dir="auto">
+              {l}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <details className="md-fold">
+        <summary className="a-small">{MC.rawJson}</summary>
+        <pre className="md-text" dir="auto">
+          {pretty(text)}
+        </pre>
+      </details>
+    </div>
+  );
 }
 
 /** "החומר": what the run was given, as the server marks it showable (never a key). */
@@ -577,6 +606,8 @@ function RateFlow({ run, ctx, onDone }: { run: Run; ctx: Ctx; onDone: () => void
   const go = (to: number | "best") => {
     setAt(to);
     top.current?.scrollIntoView({ block: "start" });
+    // The tapped "next" button hides with its panel: focus moves to what opened (its heading, or the best pick's).
+    requestAnimationFrame(() => document.getElementById(to === "best" ? `md-best-${run.id}` : `md-panel-${run.id}-${to}`)?.focus({ preventScroll: true }));
   };
   const missing = missingScore(outs, draft);
   const why = missing ? MC.rate.missing(missing) : !draft.best ? MC.rate.missingBest : !online ? MC.rate.offline : "";
@@ -615,9 +646,16 @@ function RateFlow({ run, ctx, onDone }: { run: Run; ctx: Ctx; onDone: () => void
     <section className="md-rate" aria-label={MC.rate.switcher}>
       <div ref={top} className="a-wrap md-switch" role="group" aria-label={MC.rate.switcher}>
         {outs.map((o, i) => (
-          <button key={o.label} type="button" className={`a-btn small md-switch-btn${at === i ? " on" : ""}`} aria-pressed={at === i} onClick={() => go(i)}>
+          <button
+            key={o.label}
+            type="button"
+            className={`a-btn small md-switch-btn${at === i ? " on" : ""}`}
+            aria-pressed={at === i}
+            aria-label={`${MC.answer(o.label)} · ${draft.by[o.id!]?.overall ? MC.rate.rated : MC.rate.notRated}`}
+            onClick={() => go(i)}
+          >
             <LabelDot label={o.label} />
-            {draft.by[o.id!]?.overall ? <span aria-label={MC.rate.rated}> ✓</span> : null}
+            {draft.by[o.id!]?.overall ? <span aria-hidden="true"> ✓</span> : null}
           </button>
         ))}
         <button type="button" className={`a-btn small md-switch-btn${at === "best" ? " on" : ""}`} aria-pressed={at === "best"} onClick={() => go("best")}>
@@ -633,7 +671,7 @@ function RateFlow({ run, ctx, onDone }: { run: Run; ctx: Ctx; onDone: () => void
         {outs.map((o, i) => (
           <article key={o.label} className={`a-card md-rate-panel${at === i ? " on" : ""}`} aria-label={MC.answer(o.label)}>
             <header className="a-row between md-answer-head">
-              <h3 className="md-answer-name">
+              <h3 className="md-answer-name" id={`md-panel-${run.id}-${i}`} tabIndex={-1}>
                 <LabelDot label={o.label} />
                 {MC.answer(o.label)}
               </h3>
@@ -641,6 +679,7 @@ function RateFlow({ run, ctx, onDone }: { run: Run; ctx: Ctx; onDone: () => void
             </header>
             <ChecksLine route={run.route} checks={o.checks} checkStatus={o.check_status} />
             <ShownAnswer route={run.route} text={o.text ?? ""} />
+            {(o.text ?? "").length > 1500 ? <p className="a-small a-muted md-scroll-hint">{MC.rate.scrollMore}</p> : null}
             <ScoreBox label={o.label} id={o.id!} r={draft.by[o.id!] ?? EMPTY} owner={run.owner} onChange={(p) => change(o.id!, p)} />
             <button type="button" className="a-btn wide md-next" onClick={() => go(i + 1 < outs.length ? i + 1 : "best")}>
               {i + 1 < outs.length ? MC.rate.next(outs[i + 1].label) : MC.rate.last}
@@ -659,7 +698,9 @@ function RateFlow({ run, ctx, onDone }: { run: Run; ctx: Ctx; onDone: () => void
       ) : null}
       <div className={`a-card md-rate-best${at === "best" ? " on" : ""}`}>
         <fieldset className="md-best">
-          <legend>{MC.rate.best}</legend>
+          <legend id={`md-best-${run.id}`} tabIndex={-1}>
+            {MC.rate.best}
+          </legend>
           <div className="a-wrap" role="radiogroup" aria-label={MC.rate.best}>
             {[...outs.map((o) => o.label), "="].map((l) => (
               <label key={l} className={`a-chip md-best-pick${draft.best === l ? " on" : ""}`}>

@@ -40,7 +40,11 @@ import { RouteLink, Sheet } from "./Shell";
  * names are never translated and sit in <bdi dir="ltr">. */
 
 /** A model's name, left to right inside the Hebrew line. */
-export const ModelName = ({ id }: { id: string }) => <bdi dir="ltr">{labelOf(id)}</bdi>;
+export const ModelName = ({ id }: { id: string }) => (
+  <bdi dir="ltr" className="md-name">
+    {labelOf(id)}
+  </bdi>
+);
 
 /** A blind answer's label (א-ד) in its circle. */
 export const LabelDot = ({ label }: { label: string }) => (
@@ -206,11 +210,12 @@ export function QualityPrice({ quality, qualityText, price, priceText, max, smal
 
 /* ── The results of a kind: one card a model ── */
 
-export function ModelCard({ m, route, board, max, onUse }: { m: BoardModel; route: string; board: Board; max: number; onUse?: () => void }) {
+/** `onUse` offers "להשתמש בו ל״…״"; `noUse` says instead why production cannot take the model (routable). */
+export function ModelCard({ m, route, board, max, onUse, noUse }: { m: BoardModel; route: string; board: Board; max: number; onUse?: () => void; noUse?: string }) {
   const { q, n } = qualityOf(m, route);
   const keyed = KEYED_KINDS.has(route);
   const p = projection({ key: route, model: m.model, today: board.today, usage: board.usage30, board: board.models });
-  const qText = q === null ? "—" : keyed ? `${Math.round(q * 100)}% · ${MC.items(n)}` : `${((m.score ?? 0) as number).toFixed(1)}/5 · ${n}`;
+  const qText = q === null ? "—" : keyed ? `${Math.round(q * 100)}% · ${MC.items(n)}` : `${((m.score ?? 0) as number).toFixed(1)}/5 · ${MC.runsN(n)}`;
   const monthly = board.usage30 ? p.usd : (m.mean_usd ?? 0);
   return (
     <article className={`a-card md-model${m.today ? " today" : ""}`} aria-label={labelOf(m.model)}>
@@ -261,7 +266,9 @@ export function ModelCard({ m, route, board, max, onUse }: { m: BoardModel; rout
         ) : null}
       </dl>
       {tooFew(route, m) ? <p className="a-small a-muted">{keyed ? MC.tooFewItems(m.items, 20) : MC.tooFew(m.runs)}</p> : null}
-      {onUse && !m.today ? (
+      {!m.today && noUse ? (
+        <span className="a-chip md-unroutable">{noUse}</span>
+      ) : onUse && !m.today ? (
         <button type="button" className="a-btn small" onClick={onUse}>
           {MC.use(routeName(route))}
         </button>
@@ -274,7 +281,7 @@ export function ModelCard({ m, route, board, max, onUse }: { m: BoardModel; rout
 export function RecCallout({ rec, route, onUse }: { rec: Recommendation; route: string; onUse: () => void }) {
   const name = iso(labelOf(rec.model));
   return (
-    <aside className="a-callout rec md-rec" aria-label={MC.use(routeName(route))}>
+    <aside className="a-callout md-rec" aria-label={MC.use(routeName(route))}>
       <p>
         {rec.keyed ? MC.recKey(name, times(rec.times), rec.a, rec.n, rec.b) : MC.recRated(name, times(rec.times), rec.a, rec.b)}
         {rec.small ? <span className="a-chip warn md-small">{MC.small}</span> : null}
@@ -294,11 +301,32 @@ function routeChoices(key: string, state: ModelsState, keys: Record<string, bool
   return ok;
 }
 
-export function RouteSheet({ ctx, routeKey, state, keys, preset, onClose, onDone }: { ctx: Ctx; routeKey: string; state: ModelsState; keys: Record<string, boolean> | null; preset?: string; onClose: () => void; onDone: () => void }) {
+export function RouteSheet({
+  ctx,
+  routeKey,
+  state,
+  keys,
+  preset,
+  onClose,
+  onDone,
+  onUndo,
+}: {
+  ctx: Ctx;
+  routeKey: string;
+  state: ModelsState;
+  keys: Record<string, boolean> | null;
+  preset?: string;
+  onClose: () => void;
+  onDone: () => void;
+  /** After "ביטול" on the toast put the old route back: read the state again. */
+  onUndo?: () => void;
+}) {
   const name = routeName(routeKey);
   const current = state.routes[routeKey]?.model ?? DEFAULT_MODEL;
   const [board, setBoard] = useState<Board | null>(null);
-  const [pick, setPick] = useState(preset ?? current);
+  const choices = useMemo(() => routeChoices(routeKey, state, keys), [routeKey, state, keys]);
+  // A preset production cannot take (not in the list) is ignored: the sheet opens on today's model.
+  const [pick, setPick] = useState(preset && choices.includes(preset) ? preset : current);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -311,7 +339,6 @@ export function RouteSheet({ ctx, routeKey, state, keys, preset, onClose, onDone
       alive = false;
     };
   }, [ctx.group.id, routeKey, current]);
-  const choices = useMemo(() => routeChoices(routeKey, state, keys), [routeKey, state, keys]);
   const first = choices.filter((id) => FIRST_MODELS.includes(id) || id === current || id === pick);
   const shown = more ? choices : first;
   const proj = (id: string) => projection({ key: routeKey, model: id, today: current, usage: board?.usage30 ?? null, board: board?.models });
@@ -325,8 +352,16 @@ export function RouteSheet({ ctx, routeKey, state, keys, preset, onClose, onDone
     setBusy(true);
     setError("");
     try {
+      // One tap back to the model the kind had before (OD10), not only to the default.
+      const prev = state.routes[routeKey]?.model ?? null;
       await setRoute(ctx.group.id, routeKey, model, confirmExpensive);
-      ctx.say(model ? MC.changed(name) : MC.backSay(name));
+      ctx.say(model ? MC.changed(name) : MC.backSay(name), {
+        label: MC.undo,
+        run: () =>
+          void setRoute(ctx.group.id, routeKey, prev, true)
+            .then(() => onUndo?.())
+            .catch((e: unknown) => ctx.say(modelsFail(e instanceof Error ? e.message : ""))),
+      });
       onDone();
     } catch (e) {
       setError(modelsFail(e instanceof Error ? e.message : ""));

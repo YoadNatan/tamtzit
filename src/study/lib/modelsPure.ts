@@ -1,4 +1,4 @@
-import { ALL_MODELS, DEFAULT_MODEL, modelInfo, priceRowOn, ROUTE_RULES, type ModelInfo, type RouteKey } from "../../../shared/study/models";
+import { ALL_MODELS, DEFAULT_MODEL, modelInfo, priceRowOn, providerOf, ROUTE_RULES, type ModelInfo, type RouteKey } from "../../../shared/study/models";
 import { estimateUsd } from "../../../shared/study/estimate";
 
 /* ── "השוואת מודלים": the pure part (docs/study/models.md) ──
@@ -201,13 +201,15 @@ export const times = (k: number): string => (k >= 10 ? String(Math.round(k)) : (
  *  rejects a question. Rated kinds: 5 shared runs, "same or better" in 80%,
  *  no more flagged errors. null: nothing to recommend (yet). */
 export type Recommendation = { model: string; times: number; keyed: boolean; a: number; b: number; n: number; small: boolean };
-export function recommend(o: { route: string; today: string; models: BoardModel[]; usage: Usage | null }): Recommendation | null {
+export function recommend(o: { route: string; today: string; models: BoardModel[]; usage: Usage | null; canUse?: (model: string) => boolean }): Recommendation | null {
   const now = o.models.find((m) => m.model === o.today);
   if (!now || !now.mean_usd) return null;
   const keyed = KEYED_KINDS.has(o.route);
   let best: Recommendation | null = null;
   for (const m of o.models) {
     if (m.model === o.today || !m.mean_usd) continue;
+    // Only a model production may take for the kind (routable: its price checked, its provider approved): no dead end.
+    if (o.canUse && !o.canUse(m.model)) continue;
     const p = projection({ key: o.route, model: m.model, today: o.today, usage: o.usage, board: o.models });
     const cheaper = p.base > 0 ? p.usd < 0.8 * p.base : m.mean_usd < 0.8 * now.mean_usd;
     if (!cheaper) continue;
@@ -255,6 +257,19 @@ export const dayOf = (iso: string): string => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("he-IL", { day: "numeric", month: "numeric", timeZone: "Asia/Jerusalem" });
 };
+
+/** The providers the group's routes send work to besides Anthropic (help's
+ *  line, OD21): each routed model's provider from the registry (an id with
+ *  no prefix, gpt-… or gemini-…, too), none while the switch routes is off. */
+export function routedProviders(state: Pick<ModelsState, "routes" | "switches">): string[] {
+  if (!state.switches.routes) return [];
+  const out = new Set<string>();
+  for (const r of Object.values(state.routes)) {
+    const p = r?.model ? providerOf(r.model) : null;
+    if (p && p !== "anthropic") out.add(p);
+  }
+  return [...out];
+}
 
 /** The providers this build knows, with their keys' variable names (C42b). */
 export const PROVIDERS: ReadonlyArray<{ id: string; name: string; env: string }> = [

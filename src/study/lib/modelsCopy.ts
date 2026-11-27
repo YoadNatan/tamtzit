@@ -103,9 +103,50 @@ export const routeName = (key: string): string => ROUTE_NAMES[key] ?? key;
 export function usd(x: number | null | undefined): string {
   const v = Number(x);
   if (!Number.isFinite(v) || v <= 0) return "$0";
-  if (v < 0.001) return "פחות מ-$0.001";
+  // Left to right inside any line, bdi or not: "<$0.001" in an isolate (never "≈$0.001-פחות מ").
+  if (v < 0.001) return "\u2066<$0.001\u2069";
   if (v < 0.1) return `$${v.toFixed(v < 0.01 ? 3 : 2)}`;
   return `$${v.toFixed(2)}`;
+}
+
+/** An answer-key kind's answer in words, one line an item (the run's
+ *  "להציג את התשובה"): the question check's choice per question, a
+ *  correction check's verdict and reason, a reader's numbered questions.
+ *  [] when the text is not the JSON the kind asks for. */
+export function keyedLines(route: string, text: string): string[] {
+  let doc: unknown;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!doc || typeof doc !== "object") return [];
+  const d = doc as Record<string, unknown>;
+  const list = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => Boolean(x) && typeof x === "object") : []);
+  const cut = (t: unknown, n = 120): string => {
+    const x = String(t ?? "").replace(/\s+/g, " ").trim();
+    return x.length > n ? `${x.slice(0, n - 1)}…` : x;
+  };
+  if (route === "solver") {
+    return list(d.answers).map((a, i) => {
+      const seq = Array.isArray(a.seq) ? a.seq.filter((n) => Number.isInteger(n)) : [];
+      const pick = Number.isInteger(a.choice) && Number(a.choice) >= 0 ? MC.keyed.choice(Number(a.choice) + 1) : seq.length ? MC.keyed.seq(seq.join(", ")) : MC.keyed.none;
+      return `${MC.keyed.question(i + 1)}: ${pick}${a.ambiguous === true ? ` · ${MC.keyed.ambiguous}` : ""}`;
+    });
+  }
+  if (route === "fix_check") {
+    if (typeof d.ok !== "boolean") return [];
+    const note = cut(d.note, 300);
+    return [d.ok ? MC.keyed.fixOk : MC.keyed.fixNo, ...(note ? [note] : [])];
+  }
+  if (route === "exam_read" || route === "sheet_read") {
+    return list(d.questions).map((q, i) => {
+      const no = String(q.label ?? q.no ?? i + 1);
+      const options = Array.isArray(q.options) ? q.options.length : 0;
+      return `${no}. ${cut(q.question)}${options ? ` · ${MC.keyed.options(options)}` : ""}`;
+    });
+  }
+  return [];
 }
 
 export const MC = {
@@ -118,7 +159,7 @@ export const MC = {
   title: "השוואת מודלים",
   tabs: { runs: "השוואות", board: "תוצאות", routes: "מי כותב מה" },
   tabsLabel: "מה בהשוואת מודלים",
-  budget: (spent: string, line: string, left: number) => `השוואות החודש: ${spent} מתוך ${line} · ${left === 0 ? "היום כבר לא" : left === 1 ? "עוד אחת היום" : `עוד ${left} היום`}`,
+  budget: (spent: string, line: string, left: number) => `השוואות החודש: ${spent} מתוך ${line} · ${left === 0 ? "אין עוד היום" : left === 1 ? "עוד אחת היום" : `עוד ${left} היום`}`,
   budgetAria: (spent: string, line: string) => `נוצלו ${spent} מתוך ${line} להשוואות החודש`,
   // The owner's home (C5, C6, C50)
   empty: "עוד אין השוואות. השוואה שולחת את אותו חומר לכמה מודלים ומציגה את התשובות בלי שמות, כדי לדרג אותן בלי לדעת מי כתב.",
@@ -149,8 +190,9 @@ export const MC = {
   tagNoVision: "בלי תמונות",
   tagExpensive: "יקר",
   /** C43: a model only its maker serves, from China (OD22). */
-  chinaLine: (host: string) => `המעבד של ${host} נמצא בסין.`,
+  chinaLine: (host: string) => `הבקשות למודל הזה מעובדות בסין (${host}).`,
   moreModels: (n: number) => `עוד ${n} מודלים`,
+  modelsN: (n: number) => (n === 1 ? "מודל אחד" : `${n} מודלים`),
   fewerModels: "פחות מודלים",
   otherProviders: "ספקים נוספים: ב״מי כותב מה״",
   pickTwo: "צריך לבחור לפחות 2 מודלים.",
@@ -185,7 +227,8 @@ export const MC = {
   aiTitle: "גם ציון של AI",
   aiText: "מודל נוסף בודק כל תשובה. הציון שלו מסומן ״ציון AI״ ונשמר בנפרד מהדירוג של הקבוצה.",
   aiPrice: (x: string) => `עוד עד ${x}`,
-  priceNote: "≈ המחיר הגבוה ביותר של כל מודל על החומר הזה. בפועל לרוב פחות.",
+  priceNote: "״עד״ הוא המחיר הגבוה ביותר של כל מודל על החומר הזה. בפועל לרוב פחות.",
+  upTo: (x: string) => `עד ${x}`,
   starting: "מתחילים…",
   // A run (C20, C21, C22, C47, C48, C53)
   material: "החומר",
@@ -200,7 +243,7 @@ export const MC = {
   leave: "אפשר לצאת מהמסך: ההשוואה ממשיכה גם בלי הטלפון.",
   status: { done: "מוכנה", truncated: "נקטעה באמצע", refused: "המודל סירב", timeout: "לא הספיקה בזמן", error: "משהו השתבש", waiting: "לא התחילה", running: "נכתבת" } as Record<string, string>,
   notStarted: "לא התחילה",
-  blind: "התשובות בלי שמות. השמות, הזמן והעלות יופיעו אחרי שמציגים אותם.",
+  blind: "התשובות בלי שמות. השמות, הזמן והעלות יופיעו אחרי ״הצגת השמות והעלות״.",
   blindRated: "התשובות בלי שמות. השמות, הזמן והעלות יופיעו אחרי הדירוג.",
   answer: (l: string) => `תשובה ${l}`,
   showText: "להציג את התשובה",
@@ -226,6 +269,8 @@ export const MC = {
   rate: {
     switcher: "התשובות",
     rated: "דורגה",
+    notRated: "עוד לא דורגה",
+    scrollMore: "תשובה ארוכה: גלילה בתוכה לעוד",
     score: (l: string) => `כמה טובה תשובה ${l}?`,
     scale: ["לא שמיש", "חלש", "סביר", "טוב", "מצוין"] as readonly string[],
     error: "יש כאן טעות עובדתית",
@@ -360,7 +405,7 @@ export const MC = {
   changed: (name: string) => `המודל של ״${name}״ הוחלף.`,
   noBoard: "בלי השוואות של הסוג הזה המחיר הוא הערכה גסה, לפי מחירי המודלים בלבד.",
   sheetNo: "ביטול",
-  otherProvider: (name: string, p: string) => `החומר של ״${name}״ יישלח ל-${p} במקום ל-Anthropic, והקבוצה תראה את זה ב״פרטיות״.`,
+  otherProvider: (name: string, p: string) => `החומר של ״${name}״ יישלח ל-${p} במקום ל-Anthropic, והקבוצה תראה את זה ב״עזרה״, בשורה האחרונה.`,
   // Providers (C41, C42, C42b)
   onlyClaude: "כרגע רק Claude",
   providers: "ספקים",
@@ -378,7 +423,7 @@ export const MC = {
   scopeAll: "כל החומר",
   scopeAllSub: "הרצאות עם תמונות, מבחנים ודפים שהועלו, ונוסח שחברי הקבוצה כתבו",
   scopeText: "רק טקסט",
-  scopeTextSub: "נקודות שצריך לדעת, כרטיסיות, הערות מהקלטה וציון AI בהשוואות",
+  scopeTextSub: "טקסט מההרצאות בלבד: בלי תמונות, בלי מבחנים ודפים שהועלו ובלי נוסח של חברי הקבוצה. מתאים רק לנקודות שצריך לדעת, להערות מהקלטה ולציון AI בהשוואות",
   scopeTextChip: "רק טקסט",
   approveYes: "לאשר",
   keyTitle: (p: string) => `להוסיף את ${p}`,
@@ -399,7 +444,27 @@ export const MC = {
   memberEmpty: "אין כרגע השוואות לדירוג.",
   rated: "דורגו",
   skipped: "דולגו",
+  /** One run's chip on the member's list. */
+  ratedOne: "דורגה",
+  skippedOne: "דולגה",
   toRate: "לדרג",
+  // An answer-key kind's answer in words (keyedLines)
+  keyed: {
+    question: (n: number) => `שאלה ${n}`,
+    choice: (n: number) => `תשובה ${n}`,
+    seq: (list: string) => `תשובות ${list}`,
+    none: "בלי תשובה",
+    ambiguous: "המודל סימן שהשאלה לא חד-משמעית",
+    fixOk: "התיקון תואם את השקפים",
+    fixNo: "התיקון לא תואם את השקפים",
+    options: (n: number) => (n === 1 ? "אפשרות אחת" : `${n} אפשרויות`),
+  },
+  rawJson: "התשובה כפי שהגיעה (JSON)",
+  usually: "בדרך כלל עד 2-3 דקות.",
+  undo: "ביטול",
+  /** A model the results show that cannot take the kind in production (routable). */
+  noRoute: "המחיר עוד לא נבדק, אי אפשר להעביר אליו עבודה",
+  noRouteOther: "אי אפשר להעביר אליו את סוג העבודה הזה",
   // Loading and failure
   loading: "טוען…",
   failed: "לא הצליח לטעון. אפשר לנסות שוב.",
