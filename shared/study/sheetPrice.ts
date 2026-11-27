@@ -176,3 +176,78 @@ export function openAddWorstUsd(o: { pages: number; skipped: number }, model: st
   }
   return Math.ceil(usd * 100) / 100;
 }
+
+/* ── Similar questions (release B, section O 3; server/study/similarGen.ts) ──
+ * A run is reserved whole under the member before it starts (its worst
+ * case, design D20) and charged call by call; the button shows the usual
+ * price. Each job is one call that writes the twins of its roots and, for
+ * twins with a choice part, one call that answers them again without the
+ * key (with the slides when the sheet has a lecture). A numeric part is
+ * recomputed for $0. Pure: the phone shows the price, the op reserves the
+ * worst case with the same numbers (server/study/similarGen.test.ts pins
+ * the prompts' lengths and the job size to the server's). */
+
+/** Roots a job of the whole sheet takes (study_private.similar_job_roots()). */
+export const SIMILAR_JOB_ROOTS = 4;
+/** At most this many roots in one run of the whole sheet; twins a root; twins a tap on an item. */
+export const SIMILAR_MAX_ROOTS = 24;
+export const SIMILAR_MAX_PER_ROOT = 6;
+export const SIMILAR_ITEM_PER = 2;
+/** The prompts' lengths in characters (server/study/prompts/sheets.ts SIMILAR_SYSTEM, BLIND_SYSTEM). */
+export const SIMILAR_PROMPT_CHARS = { gen: 3019, blind: 773 } as const;
+/** max_tokens of the writing call for n twin parts, and of the check for n parts. */
+export const similarGenTokens = (parts: number): number => Math.min(14_000, 1_500 + 2_000 * Math.max(1, Math.round(parts)));
+export const similarCheckTokens = (parts: number): number => Math.min(6_000, 1_000 + 400 * Math.max(1, Math.round(parts)));
+/** A root's shape: its parts, how many of them are numbers, its figures' pages. */
+export type SimilarRootShape = { parts: number; numeric: number; pages: number };
+/** A root as the request writes it at most (text, options, key, solution), a part; and its existing twins' stems. */
+const SIMILAR_WORST_PART_CHARS = 3_500;
+const SIMILAR_WORST_STEMS_CHARS = 2_400;
+/** What a usual twin writes (with thinking) and its check. */
+const SIMILAR_TYPICAL = { outPerPart: 1_200, checkOutPerPart: 200, inPerPart: 1_200 };
+
+/** The run's jobs: an item's run is one job; the whole sheet SIMILAR_JOB_ROOTS roots a job. */
+export function similarJobs<T>(roots: readonly T[], scope: "item" | "sheet"): T[][] {
+  if (scope === "item") return roots.length ? [[...roots]] : [];
+  const out: T[][] = [];
+  for (let i = 0; i < roots.length; i += SIMILAR_JOB_ROOTS) out.push(roots.slice(i, i + SIMILAR_JOB_ROOTS));
+  return out;
+}
+
+/** "ליצור 2 כמוה · כ-$0.08" / "שאלות דומות לכל הדף · כ-$0.55": the usual price, to the cent. */
+export function similarPriceUsd(o: { roots: readonly SimilarRootShape[]; per: number; scope: "item" | "sheet" }, prompts: { gen: number; blind: number } = SIMILAR_PROMPT_CHARS): number {
+  const per = Math.max(1, Math.round(o.per));
+  let usd = 0;
+  for (const job of similarJobs(o.roots, o.scope)) {
+    const parts = job.reduce((n, r) => n + Math.max(1, r.parts), 0) * per;
+    const choice = job.reduce((n, r) => n + Math.max(0, Math.max(1, r.parts) - r.numeric), 0) * per;
+    const pages = job.reduce((n, r) => n + r.pages, 0);
+    usd += readerCallUsd(prompts.gen + 400 + parts * SIMILAR_TYPICAL.inPerPart, parts * SIMILAR_TYPICAL.outPerPart, pages * PAGE_TOKENS);
+    if (choice) usd += readerCallUsd(prompts.blind + choice * SIMILAR_TYPICAL.inPerPart, choice * SIMILAR_TYPICAL.checkOutPerPart);
+  }
+  return Math.round(usd * 100) / 100;
+}
+
+/** The worst case, rounded up to the cent: per job, the writing call at all
+ *  of its max_tokens with every root as long as a root gets, and the check
+ *  at all of its max_tokens (with the lecture's slides, deckChars, when the
+ *  sheet has one, and the figures' pages). What the op reserves. */
+export function similarWorstUsd(
+  o: { roots: readonly SimilarRootShape[]; per: number; scope: "item" | "sheet"; deckChars?: number },
+  model: string,
+  prompts: { gen: number; blind: number } = SIMILAR_PROMPT_CHARS,
+): number {
+  const per = Math.max(1, Math.round(o.per));
+  let usd = 0;
+  for (const job of similarJobs(o.roots, o.scope)) {
+    const rootParts = job.reduce((n, r) => n + Math.max(1, r.parts), 0);
+    const parts = rootParts * per;
+    const choice = job.reduce((n, r) => n + Math.max(0, Math.max(1, r.parts) - r.numeric), 0) * per;
+    const pages = job.reduce((n, r) => n + r.pages, 0);
+    usd += estimateUsd(model, prompts.gen + 600 + rootParts * SIMILAR_WORST_PART_CHARS + job.length * SIMILAR_WORST_STEMS_CHARS, similarGenTokens(parts), pages * PAGE_TOKENS);
+    if (choice) {
+      usd += estimateUsd(model, prompts.blind + choice * SIMILAR_WORST_PART_CHARS + Math.max(0, o.deckChars ?? 0), similarCheckTokens(choice), pages * PAGE_TOKENS);
+    }
+  }
+  return Math.ceil(usd * 100) / 100;
+}

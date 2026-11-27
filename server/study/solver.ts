@@ -138,7 +138,7 @@ export function verdictsOf(
 }
 
 /** Answers the items without their keys, through `ledger` (the caller's
- *  reservation, kind "solver"). Returns each item's verdict (null: not
+ *  reservation, kind "solver" unless `kind` says otherwise). Returns each item's verdict (null: not
  *  judged, the reply stopped before it), the items kept, how many the
  *  solver rejected, and the call's cost. A model error is the caller's: a
  *  question it could not check is "unchecked", never rejected. */
@@ -149,6 +149,10 @@ export async function solveQuestions<T extends SolverItem>(o: {
   ledger: Ledger;
   stopAt: number;
   ref?: string | null;
+  /** The ledger kind the call is made as: "solver" (practice), or "similar"
+   *  when it checks a sheet's similar questions inside their run's
+   *  reservation (section O 3; the ledger itself is the caller's). */
+  kind?: string;
 }): Promise<{ verdicts: Array<Verdict | null>; kept: T[]; rejected: number; costUsd: number }> {
   if (!o.items.length) return { verdicts: [], kept: [], rejected: 0, costUsd: 0 };
   const { all, twin } = withTwins(o.items);
@@ -157,7 +161,7 @@ export async function solveQuestions<T extends SolverItem>(o: {
   let costUsd = 0;
   const res = await generateItems({
     client: o.client,
-    kind: "solver",
+    kind: o.kind ?? "solver",
     ref: o.ref ?? null,
     system: call.system,
     messages: call.messages,

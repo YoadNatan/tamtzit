@@ -24,6 +24,10 @@ export const MODEL = "claude-opus-5-5";
  *  pinned to a provider, OD5). The models package (Y, not built) will route
  *  the keys "sheet_read" and "similar" here. */
 export const SHEET_MODEL = MODEL;
+/** Similar questions' model (section O 3; OD17 and OD5 as Yoad changed it:
+ *  the current default, any provider allowed). The models package (Y, not
+ *  built) will route the key "similar" here. */
+export const SIMILAR_MODEL = MODEL;
 
 /** geo: the picture's label geometry, when the upload (or the backfill) found labels (question types);
  *  crop: a PPTX picture's visible frame (its srcRect), 0..1 of the stored, uncropped picture. */
@@ -211,6 +215,11 @@ export const VARIANT_SCHEMA: Readonly<Record<string, Readonly<Record<string, num
   // Notifications (section R, docs/study/DECISIONS-2026-11-26.md): work.ts's
   // {notify} branch claims pushes and reports them through R 1.
   notify: { R: 1 },
+  // Similar questions (section O 3, docs/study/sheets.md): op "similar"
+  // (not one of §12.2.2's, so its need is here: the router's schemaFor
+  // reads it by the op's name) and work.ts's {similar} branch; a run's
+  // twins go into a practice set of section L at 1.
+  similar: { O: 3, L: 1 },
 };
 
 /** What a call of `op` (or of a variant, VARIANT_SCHEMA) needs of the

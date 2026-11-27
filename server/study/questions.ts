@@ -739,6 +739,42 @@ export const SheetSolvedItem = z.object({
 export const SheetSolved = z.object({ answers: z.array(SheetSolvedItem) });
 export type SheetSolvedItem = z.infer<typeof SheetSolvedItem>;
 
+/* ── Similar questions (section O 3; prompts/sheets.ts SIMILAR_SYSTEM and BLIND_SYSTEM) ── */
+export const SimilarPartOut = z.object({
+  question: z.string().describe("The part's own text, in Hebrew"),
+  options: z.array(z.string()).describe("A choice part's options (tf: the statements; order: the steps, shuffled); none for a numeric part"),
+  prompts: z.array(z.string()).describe('Form "match": the prompts; otherwise empty'),
+  answer: z.number().int().describe('Form "one": the 0-based index of the correct option; otherwise -1'),
+  seq: z.array(z.number().int()).describe('Forms "tf", "match" and "order": the key in order; otherwise empty'),
+  has_num: z.boolean().describe('Form "numeric": true'),
+  num: z.number().describe('Form "numeric": the answer; otherwise 0'),
+  unit: z.string().describe('Form "numeric": its unit; otherwise ""'),
+  tol: z.number().describe('Form "numeric": the tolerance in percent (1-5); otherwise 0'),
+  calc: z
+    .object({ inputs: z.array(SheetCalcInput), formula: z.string() })
+    .describe('Form "numeric": named inputs and a formula over them that gives num; otherwise no inputs and ""'),
+  whys: z.array(z.string()).describe("A choice part: one line per option, in order; otherwise empty"),
+  solution: z.string().describe("A short worked solution in Hebrew"),
+});
+export const SimilarTwinOut = z.object({
+  ref: z.number().int().describe("The source's ref"),
+  vignette: z.string().describe('The shared case text, or ""'),
+  reuse_figure: z.boolean().describe("true only when it asks something new about the source's own figure"),
+  takeaway: z.string().describe("The fact it tests, one Hebrew sentence"),
+  parts: z.array(SimilarPartOut).describe("One per part of the source, in order"),
+});
+export const SimilarOut = z.object({ twins: z.array(SimilarTwinOut) });
+export type SimilarTwinOut = z.infer<typeof SimilarTwinOut>;
+export const BlindAnswer = z.object({
+  ref: z.number().int().describe("The ref given"),
+  part: z.number().int().describe("The part given"),
+  answer: z.number().int().describe('Form "one": the 0-based index; otherwise -1'),
+  seq: z.array(z.number().int()).describe('Forms "tf", "match" and "order": the values in order; otherwise empty'),
+  conf: z.number().int().describe("3: settled beyond doubt; 2: likely; 1: unsure"),
+});
+export const BlindOut = z.object({ answers: z.array(BlindAnswer) });
+export type BlindAnswer = z.infer<typeof BlindAnswer>;
+
 export const Explained = z.object({
   no: z.number().int().describe("The question number given"),
   covered: z.boolean().describe("false when the slides do not deal with the question's subject at all"),

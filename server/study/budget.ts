@@ -137,6 +137,13 @@ export const POLICY: Record<string, Policy> = {
   points: { share: 0.8, memberShare: 0.4, daily: 20, dailyRef: "read" },
   style: { share: 0.8, memberShare: 0.4, daily: 10 },
   reword: { share: 0.8, memberShare: 0.4, daily: 40 },
+  // Similar questions (section O 3, design D20): the op reserves a run's
+  // whole worst case under the member (ref "ask": the 10 a day count taps,
+  // an item's or the whole sheet's); the worker's calls are charged against
+  // that reservation as settled rows of this kind (ref "unit") in the
+  // member's name, so the 40% share counts them. The similar line
+  // (similarMonthlyCap) is checked by study_similar_begin.
+  similar: { share: 0.8, memberShare: 0.4, daily: 10, dailyRef: "ask" },
 };
 
 /** STUDY_MONTHLY_USD: the group's monthly cap in USD; 33 when it is not set
@@ -157,6 +164,15 @@ export const setsMonthlyCap = (): number => {
 export const sheetsMonthlyCap = (): number => {
   const v = Number(process.env.STUDY_SHEETS_MONTHLY_USD || 6);
   return Number.isFinite(v) && v >= 0 ? v : 6;
+};
+/** STUDY_SIMILAR_MONTHLY_USD: the monthly line for similar questions in
+ *  USD (kind "similar": each run's reservation while it runs, then its
+ *  calls); 5 when it is not set (Yoad's OD3 and OD20). Checked against a
+ *  run's whole worst case before it starts (study_similar_begin), so a
+ *  started run finishes within it. */
+export const similarMonthlyCap = (): number => {
+  const v = Number(process.env.STUDY_SIMILAR_MONTHLY_USD || 5);
+  return Number.isFinite(v) && v >= 0 ? v : 5;
 };
 /** The kinds the sets line counts. */
 export const SETS_LINE_KINDS = ["practice", "solver", "reword", "style"] as const;

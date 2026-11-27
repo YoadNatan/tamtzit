@@ -250,3 +250,13 @@ test("question types: the request names a set question's kind, a match's prompts
   assert.ok(!JSON.stringify(call.messages).includes("seq") && !/\[2,0,1\]/.test(JSON.stringify(call.messages)));
   assert.ok(SOLVER_SYSTEM.includes("ORDER") && SOLVER_SYSTEM.includes("MATCH") && SOLVER_SYSTEM.includes("TRUE/FALSE"));
 });
+
+test("section O 3: the slides' check of similar questions is made as kind similar, through the run's ledger", async () => {
+  const client = new Anthropic({ apiKey: "test-key", baseURL: base, maxRetries: 0 });
+  reply = JSON.stringify({ answers: [{ id: "q1", choice: 0, ambiguous: false }, { id: "q2", choice: 0, ambiguous: false }] });
+  stop = "end_turn";
+  const spends: Spend[] = [];
+  const res = await solveQuestions({ client, lecture, items: ITEMS, ref: "unit", kind: "similar", stopAt: Date.now() + 60_000, ledger: async (s) => spends.push(s) });
+  assert.deepEqual(res.verdicts.map((v) => v?.ok), [true, false]);
+  assert.deepEqual([spends.length, spends[0].kind, spends[0].ref], [1, "similar", "unit"]);
+});
