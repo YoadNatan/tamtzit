@@ -46,16 +46,19 @@ test("characters a token: 2.5 for Claude, 1.9 for Haiku 5.5 (about 30% more toke
   assert.equal(charsPerToken("claude-haiku-5-5"), 1.9);
   assert.equal(charsPerToken("claude-someday-9"), 2.5);
   const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-12, `${a} vs ${b}`);
-  near(estimateUsd("claude-haiku-5-5", 1_900, 0), (1_000 * 0.125) / 1_000_000);
+  // Haiku 5.5's calls send at least 2,000 of max_tokens (thinking shares it): reserved too.
+  near(estimateUsd("claude-haiku-5-5", 1_900, 0), (1_000 * 0.125 + 2_000 * 0.5) / 1_000_000);
+  near(estimateUsd("claude-haiku-5-5", 1_900, 3_000), (1_000 * 0.125 + 3_000 * 0.5) / 1_000_000);
   near(estimateUsd("claude-sonnet-5-5", 2_500, 1_000), (1_000 * 2.5 + 1_000 * 10) / 1_000_000);
 });
 
 test("a reservation never takes the cheaper card for a prompt estimated just under the dearer card's line", () => {
   const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-12, `${a} vs ${b}`);
   // About 95k tokens estimated (Haiku 5.5's line is 100k): reserved at the dearer card.
-  near(estimateUsd("claude-haiku-5-5", 95_000 * 1.9, 0), (95_000 * 0.625) / 1_000_000);
+  // (Each with Haiku's output floor of 2,000 tokens.)
+  near(estimateUsd("claude-haiku-5-5", 95_000 * 1.9, 0), (95_000 * 0.625 + 2_000 * 2.5) / 1_000_000);
   // About 80k: well under the line, the usual card.
-  near(estimateUsd("claude-haiku-5-5", 80_000 * 1.9, 0), (80_000 * 0.125) / 1_000_000);
+  near(estimateUsd("claude-haiku-5-5", 80_000 * 1.9, 0), (80_000 * 0.125 + 2_000 * 0.5) / 1_000_000);
 });
 
 test("imageTokens: width × height / 750, unknown sizes at the largest picture stored", () => {

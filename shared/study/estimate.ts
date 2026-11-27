@@ -41,9 +41,12 @@ export function imageTokens(w?: number | null, h?: number | null): number {
  *  server-side fallback finishes can cost more: see budget.ts's fallbackUsd.
  *  A request sent through Message Batches (`opts.batch`, the bank's worker)
  *  is priced at half (§12.2.4: the fifth argument, so F0's four keep their
- *  meaning). */
+ *  meaning). A model's output floor (the registry's minMaxTokens, which
+ *  run() sends at least) is reserved too. */
 export function estimateUsd(model: string, inputChars: number, maxTokens: number, extraInputTokens = 0, opts: { batch?: boolean } = {}): number {
   const input = Math.max(0, inputChars) / charsPerToken(model) + Math.max(0, extraInputTokens);
+  // A model whose calls send at least so many (Haiku 5.5's 2,000: thinking shares max_tokens) reserves that many.
+  maxTokens = Math.max(maxTokens, modelInfo(model)?.minMaxTokens ?? 0);
   // The card is chosen as if the prompt were a fifth longer: characters ÷ a
   // factor is an estimate, and a prompt just under the dearer card's line
   // that turns out just over it must not be reserved at a fifth of its cost.
