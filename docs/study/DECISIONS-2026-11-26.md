@@ -1139,4 +1139,17 @@ Every "must" and "should" is fixed; the nits too but one. Details:
 - **A test that fails at night:** study.sql's M11 (and SR4-2) fail between
   00:00 and 04:00 Israel time on any commit (the study day starts at 04:00);
   every SQL run of these checks was after 04:00.
+- **The final run** (logs in the workflow's `sheets-build/final/`): unit,
+  contract, build, bundle (entry chunk 406,087 B of 410,000 with every flag
+  on, O's share 1,167 B of 1,500), sql-parts, the SQL (fresh, parts, upgrades
+  from `4b9b832` and `baed964`, the live path from `eed179e` with parts 1 to
+  12 and with R1's and L1's parts first, and with O 3's rows in the
+  database), every concurrency script and every e2e script one at a time.
+  The machine's disk filled during the run (another session's scratch
+  files) and Chromium crashed in about a dozen scripts; they passed when run
+  again. Three findings of the run were fixed: the guide's ring on the
+  review's actions at 320 px, the part chip on a lecture's case in steps,
+  and two harness counts (similar-concurrency's SC1, qtypes' step 9).
+  `plan.cjs` fails its "הוזז מאתמול" step in the early morning on `4b9b832`
+  too (checked): not this package's, left as it is.
 
