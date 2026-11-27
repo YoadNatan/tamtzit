@@ -1180,7 +1180,7 @@ every other row is the recommended default.
 | OD14 | Claude Fable 5.2 (and every model at about twice the default's price or more) in comparisons; a production route to it needs a second confirmation |
 | OD15 | **Changed by Yoad:** the entry chunk's limit is 410,000 B (about 406,087 B used with every flag on); Y's entry share is capped at **1,500 B** (bundle owner `Y`); everything else lazy |
 | OD16 | Check `/api/study/health` for `budgetUsd: 33`; the code's default is 33 |
-| OD17 | **Changed by the build order:** section Y comes **after O 3** in `study-schema.sql` (O was built first); it goes into part 12 while part 12 stays at or under 170 KB (it does: 125,965 B with WP4's two functions), otherwise it would start part 13 |
+| OD17 | **Changed by the build order:** section Y comes **after O 3** in `study-schema.sql` (O was built first); it goes into part 12 while part 12 stays at or under 170 KB (it does: 130,433 B with WP4's and WP5's functions), otherwise it would start part 13 |
 | OD18 | $5 prepaid credit per provider with auto-recharge off (Gemini: a low requests-per-day quota); keys on Production only, never Preview |
 | OD19 | **Changed by Yoad:** other providers may see everything (lectures with pictures, past exams, sheets, members' text). Once Yoad approves a provider in the app ("לאשר שליחה", recorded per provider, D17), its scope is `all`; scope `text` stays an option |
 | OD20 | **Changed by Yoad:** past exam pages and sheets may go to an approved provider (scope `all`) |
@@ -1237,3 +1237,51 @@ every other row is the recommended default.
   model (Claude only); moving them into `run()` stays WP12.
 - A sheet's hold counts the dearest of its reader's three keys' models.
 - `estimateUsd` reserves a model's output floor (Haiku 5.5: 2,000 tokens).
+
+### The op lab (WP5), built on 27 November 2026
+
+- **Op `lab`** (`server/study/ops/lab.ts`, the pure part in
+  `server/study/lab.ts`; see [`models.md`](models.md), "The op lab"):
+  `run`, `resume`, `retry`, `route` and `cancel`, the owner only; `check`
+  and `judge` answer 501 until WP8 (practice's paid check and the AI score
+  come with the blind rating's kinds). The router serves it with section Y 1
+  (`VARIANT_SCHEMA.lab`, like `similar`: not one of the addendum's ops); no
+  other op needs Y (D22).
+- **The kinds compared now** are the answer-key kinds: the question check
+  (`solver`, on the bank's keys), `fix_check` (a decided correction:
+  applied means the check should say ok, withdrawn means it should not),
+  `exam_read` (a past exam's read unit against the items the group
+  reviewed) and, as the task asked, the sheet reader's read (`sheet_read`, a
+  ready sheet's unit against its saved items, by label). Each frozen request
+  is production's request exactly: these kinds keep production's
+  `max_tokens` (D15's smaller caps are for the long kinds of WP8) and differ
+  only in sending no server-side fallback.
+- **Section Y 1 gains two functions** (still unreleased, so no Y 2):
+  `study_lab_bank` (the owner's server reads keyed bank questions with their
+  keys, which no member's read gives) and `study_lab_skip` (a slot whose
+  claim was refused ends with the reason, so the run closes instead of
+  waiting for the sweep). Part 12 is 130,433 B.
+- **In comparisons**, an unverified price is allowed and estimated × 1.5,
+  and an expensive model (Fable) is allowed (OD14); Mythos and ids the
+  registry does not list are refused. A production route keeps
+  `routeRefusal`'s rule (verified prices only, `confirmExpensive`).
+- **Money:** each slot is claimed and reserved on the worker's path before
+  the stream (no user: OD5), at its model's worst case; the run's worst case
+  is checked against the run's cap ($1.50) before anything is planned, and
+  section Y checks the cap, 3 runs a day, the $3.30 line and the group's 80%
+  line again. A first refused claim is the request's status; a later one
+  ends only its slot.
+- **Detached and blind:** the slots run in one invocation that goes on when
+  the phone leaves (`detachedStream` + `waitUntil`), stop at 270 s or 25 s
+  before the deadline, and stop within 10 s of a cancel. The response is
+  counts only; models, statuses, texts, costs and times are read through
+  `study_lab_run`, after the caller's own reveal.
+- **Pictures** are frozen as storage paths and signed per call with the
+  owner's token: 30 minutes for Claude (as production), 120 s for another
+  provider (D18).
+- **`solveQuestions`' verdict rule** moved into `judgeItems` (pure) so a
+  comparison judges answers exactly as production does; nothing changed in
+  production's request or verdicts.
+- **Offline eval:** `tools/evals/lab.mjs` (`--print`, `--check`), synthetic
+  material in `e2e/study/fixtures/lab/lab.json`; it refuses a folder inside
+  the repository.

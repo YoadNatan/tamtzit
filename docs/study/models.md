@@ -12,8 +12,9 @@ same frozen request to 2-4 models side by side under a hard cap, and members
 rate the short answers blind (labels א-ד), then see names, time and cost.
 
 This file grows with the package. Built so far: the registry (WP1), the
-bundle room (WP2), the SQL (WP3) and the routing seam (WP4). The op `lab`,
-the adapters and the screens come next.
+bundle room (WP2), the SQL (WP3), the routing seam (WP4) and the op `lab`
+for the kinds with an answer key (WP5). The adapters, the screens, the
+blind rating's paid check and AI score (WP8) come next.
 
 ## The registry (`shared/study/models.ts`, `prices.ts`, `estimate.ts`)
 
@@ -57,7 +58,7 @@ the components `ModelsScreen`, `ModelsNewScreen`, `ModelsRunScreen`,
 ## SQL section Y 1
 
 After section O 3 at the end of `supabase/study-schema.sql`, so it is in
-**part 12** (125,965 B of 170,000). It is optional for every other path: no
+**part 12** (130,433 B of 170,000). It is optional for every other path: no
 other section reads its tables, and `REQUIRED_SCHEMA` does not list it (only
 the op `lab` and the flag will). Re-runnable; it records `('Y', 1)` last.
 
@@ -116,6 +117,8 @@ skipped), `study_lab_judgements`.
 | `study_lab_todo(group)` | member | "השוואות לדירוג · {n} מחכות" |
 | `study_lab_board(group, route)` | member | Per model over the runs the caller revealed: score (capped at 2.5 when over a third flagged an error), flags, best picks, AI mean, refusals, checks, match and false rejects, $ per call, p50 time, "same or better" against today's model; `usage30` by ledger kind for the owner |
 | `study_lab_cancel(run)` | owner | Waiting answers end `cancelled` |
+| `study_lab_bank(group, lecture?, n, key)` | owner + key | The question check's material: up to n (2-20, default 10) active keyed questions of the lecture (or the group's newest with 5 or more), picked at random, **with their keys** (no member's read gives them; they stay in the frozen request, which only the server reads) |
+| `study_lab_skip(run, label, reason, key)` | worker | A slot whose claim was refused (the line, the cap) ends `error` with the reason; the run closes with its last answer |
 | `study_private.lab_sweep()` | pg_cron `7,22,37,52 * * * *` | Waiting 15 min: `not started`; running 10 min: `timeout`; a check or AI score running 10 min: `error`; closes runs; blanks requests after `keep_days` |
 
 **Conventions for the server.** The frozen request's `material` key is what
@@ -251,3 +254,96 @@ fields, D8 before and after text); `ask.test.ts` (the ask route);
 `writer.test.ts` and `collab.test.ts` (`partRequest`, `fixCheckOpts`);
 `section.test.ts` still pins the outline's and the parts' bytes against
 bc01207's; `health.test.ts`.
+
+## The op `lab` (WP5, `server/study/ops/lab.ts`, `server/study/lab.ts`)
+
+`POST /api/study/ai {op: "lab", action, …}`, the owner only (the group's
+creator or a lab admin; section Y checks again in every function). It needs
+section Y 1 (`VARIANT_SCHEMA.lab`: 503 `schema` without it); every other op
+works without Y.
+
+| Action | Body | Answer |
+|---|---|---|
+| `run` | `group, route, models: [2-4 ids], source?` | NDJSON (below) |
+| `resume` | `run` | NDJSON: the slots still waiting, claimed and run |
+| `retry` | `run, label` | NDJSON: one slot that timed out or failed, once |
+| `route` | `group, route, model \| null, note?, confirmExpensive?` | `{route, model}` |
+| `cancel` | `run` | `{cancelled: true}` |
+| `check`, `judge` | | 501 `not built` (WP8: practice's paid check, the AI score) |
+
+**The kinds compared (slice 2, those with an answer key):**
+
+| Route | Material (read with the owner's token) | Frozen by | Checked against |
+|---|---|---|---|
+| `solver` | `study_lab_bank`: 10 random keyed questions of a lecture's bank (`source: {lecture?, n?}`) | `solverCall` over the questions and each image question again without its picture (as `solveQuestions`) | the bank's keys: `match` (verdicts kept, production's rule `judgeItems`), `false_rejects` (good questions it got wrong), `blind`, `ambiguous`, `missing` |
+| `fix_check` | the newest decided correction with a slide as its source (`source: {proposal?}`) | `fixCheckOpts(fixCheckRequest(…))` | the group's decision: applied, the check should say ok; withdrawn, it should not (`match`, `false_rejects` for an applied one called wrong) |
+| `exam_read` | the newest ready past exam (`source: {exam?, pages?}`), its first read unit (4 pages, the page before and after as context, the numbers saved before it) | `unitCall` over a read claim | the reviewed items on those pages: `numbered`, `options`, `copied` (text at least 90% alike), `figures`, `extra`; `match` = options and text both right |
+| `sheet_read` | the same for a ready sheet (3 pages, labels) | `sheetCall` | its saved items by label |
+
+Each frozen request is **production's request exactly** (`DIFFERS` is empty
+for these kinds); the tests compare it with the body production sends. A
+comparison never sends the server-side fallback and has no app fallback
+(D15). Pictures are kept as storage paths (`study-path:<path>`) and signed
+per call with the owner's token: 30 minutes for Claude, 120 s for another
+provider (D18). The request holds `material` (what the phone may show,
+`study_lab_source`; never a key) and `key` (the checks' reference; the
+server reads it back through `study_lab_slot`).
+
+**`run`:** owner gate (`study_lab_owner`), the switch `lab` (`study_models`,
+read fresh), the material, each model (`labRefusal`: in the registry and not
+Mythos; another provider needs its key and an adapter in this build, the
+group's "לאשר שליחה" and a scope that takes the kind; pictures need vision;
+an unverified price is allowed, × 1.5; an expensive model is allowed), the
+worst case (the sum of each model's, which must be under the run's cap
+before anything is planned), then `study_lab_plan`. Before the stream, each
+label's model is read (`study_lab_slot`) and claimed on the worker's path
+(`study_lab_claim`, its estimate reserved with no user). A first claim that
+is refused is the request's status (402 `lab_budget`, `reserve`, `budget`;
+403 `off`; 409 `closed`), every slot ending with that reason
+(`study_lab_skip`); a later one ends only its own slot. The claimed slots run
+in one detached invocation (`detachedStream` + `waitUntil`; the phone may
+lock or leave), in parallel, each stopping 270 s after the function started
+or 25 s before its deadline; the run's status is read every 10 s and
+`cancelled` stops the calls. Each answer is settled through its reservation
+(the worker), checked (`checksFor`, $0) and saved (`study_lab_output_save`),
+and the last one closes the run (and sends R's `lab_new` for a rated kind).
+
+**Blindness (D12):** the NDJSON is `{t:"run", run, total}`,
+`{t:"progress", ready, total}` (a count, never a label), `{t:"done"}`. No
+model, label status, text, cost or time ever travels in it; the phone reads
+the run through `study_lab_run`, which shows models and costs only after the
+caller's own reveal.
+
+**`route`:** `routeRefusal` (the production rule: a verified price, a ready
+and approved provider within its scope, vision, Claude only for outline and
+ask_route, `expensive` unless `confirmExpensive`), then `study_model_set`
+(owner + key); `model: null` is back to the default. The instance's route
+cache is cleared at once.
+
+**Status codes:** 403 `not the creator`, `off`, `forbidden`; 402 `run_cap`,
+`lab_budget`, `reserve`, `budget`; 429 `daily_runs`; 409 `closed`,
+`not waiting`, `expensive`; 400 `bad slots`, `bad route`, `bad model`,
+`no material`, the route refusals; 503 `pictures` (a page that could not be
+signed), `schema`. Words: `src/study/lib/modelsCopy.ts`.
+
+**The numbers** (`server/study/limits.ts`): `LAB_RUN_CAP_USD` 1.50 (section
+Y's `run_cap` decides), `LAB_UNVERIFIED_FACTOR` 1.5, `LAB_ANSWER_MS` 270 s,
+`LAB_SAVE_MS` 25 s, `LAB_POLL_MS` 10 s, `LAB_SOLVER_ITEMS` 10 (at most 20),
+`LAB_SIGN_SECONDS` 1,800 and `LAB_SIGN_SECONDS_OTHER` 120. POLICY `lab`:
+share 0.8, no member share, no daily count.
+
+**Offline:** `node tools/evals/lab.mjs --print <dir>` writes each kind's
+frozen request and key from `STUDY_EVAL_FIXTURES` (or the synthetic
+`e2e/study/fixtures/lab/lab.json` and `exam/exam12.json`); `--check <dir>`
+runs `checksFor` on answers saved there as `<kind>.<name>.out.txt`. It
+refuses a folder inside the repository.
+
+**Tests:** `server/study/lab.test.ts` (each frozen request against
+production's body, pictures as paths, estimates and × 1.5, `checksFor` per
+kind, `labRefusal`, the statuses, the eval's refusal of a folder in the
+repository); `server/study/labop.test.ts` (the op through `/api/study/ai`:
+the response carries no model id or label status, the owner's token reads
+and the worker claims and saves, the refusals before the plan, a first and
+a later refused claim, retry once, resume, route, cancel);
+`server/study/ai.test.ts` (Y 1 for op lab only); `supabase/tests/study.sql`
+Y19-Y20 (`study_lab_bank`, `study_lab_skip`).
