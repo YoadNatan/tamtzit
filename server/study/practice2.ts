@@ -221,7 +221,7 @@ async function planInputs(
 ): Promise<PlanInputs> {
   const lectureId = o.lecture.id;
   const groupId = o.lecture.group_id;
-  const [overview, sets] = await Promise.all([
+  const [overview, sets, writeModel] = await Promise.all([
     sb.rpc("study_practice_overview", { p_group: groupId }),
     // Section L 1 (practice sets): without it, no open or recent sets and no sets line.
     schemaHas(sb, { L: 1 }).then((has) =>
@@ -233,6 +233,8 @@ async function planInputs(
           ])
         : null,
     ),
+    // A set's batches reserve at set_write's routed model: its price is shown at that model too.
+    modelFor(sb, groupId, "set_write"),
   ]);
   const row = overview.error
     ? null
@@ -279,7 +281,7 @@ async function planInputs(
       line,
     },
     dailyLeft,
-    perQuestionUsd: expectedQuestionUsd(MODEL),
+    perQuestionUsd: expectedQuestionUsd(writeModel),
     readUsd: o.readUsd,
     styleUsd: EXPECTED_USD.style,
   };
@@ -374,13 +376,15 @@ export const planAction: Op = async (req, body) => {
   // No model call and about a second of reads: a token near its end still serves.
   const { sb } = await memberClient(req, { minSeconds: QUICK_TOKEN_SECONDS });
   const lecture = await loadLecture(sb, lectureId);
-  const [state, points, sections, spent, mine, bank] = await Promise.all([
+  const [state, points, sections, spent, mine, bank, writeModel] = await Promise.all([
     pointsState(sb, lectureId),
     planPoints(sb, lectureId),
     sb.from("study_sections").select("idx, markdown").eq("lecture_id", lectureId),
     sb.rpc("study_spent", { p_group: lecture.group_id }),
     sb.rpc("study_my_spent", { p_group: lecture.group_id }),
     bankCoverage(sb, lectureId),
+    // The price at the model the batches will reserve at (sets are the screen's flow: set_write).
+    modelFor(sb, lecture.group_id, "set_write"),
   ]);
   if (sections.error) throw new HttpError(500, sections.error.message);
   const stale = state.filter((s) => s.summary === "ready" && !s.current).map((s) => s.part_idx);
@@ -412,12 +416,12 @@ export const planAction: Op = async (req, body) => {
     estimate: {
       readUsd,
       // Weighted by the planned types (a label item half, a staged case 2.5).
-      questionsUsd: requestUsd(planned),
+      questionsUsd: requestUsd(planned, writeModel),
       // The blind solver's part of questionsUsd, shown apart ("כל שאלה נבדקת בידי פותר עיוור").
       solverUsd: solverUsd(planned),
-      totalUsd: Math.round((readUsd + requestUsd(planned)) * 100) / 100,
-      perQuestionUsd: expectedQuestionUsd(MODEL),
-      levels: { focused: requestUsd(levels.focused), full: requestUsd(levels.full), deep: requestUsd(levels.deep) },
+      totalUsd: Math.round((readUsd + requestUsd(planned, writeModel)) * 100) / 100,
+      perQuestionUsd: expectedQuestionUsd(writeModel),
+      levels: { focused: requestUsd(levels.focused, writeModel), full: requestUsd(levels.full, writeModel), deep: requestUsd(levels.deep, writeModel) },
       rewordUsd: EXPECTED_USD.reword,
       styleUsd: EXPECTED_USD.style,
     },
@@ -644,6 +648,8 @@ export const createAction: Op = async (req, body) => {
   if (plan.total === 0 && !phaseRead) throw new HttpError(400, "no points");
   if (continued !== null && plan.total > continued) throw new HttpError(400, "bad set");
   const used = plan.parts.filter((p) => p.questions > 0).map((p) => p.part_idx);
+  // The batches reserve at their key's routed model: the headroom checks and the price use it too.
+  const writeModel = await modelFor(sb, lecture.group_id, set ? "set_write" : "practice");
   if (planId) {
     // Checked first, to answer at once; study_request_create_in_plan checks
     // again under the round's lock, and a refusal there undoes the request.
@@ -666,14 +672,14 @@ export const createAction: Op = async (req, body) => {
   let setId: string | null = null;
   if (set?.id) {
     // The lines again with the real plan (the day's count already has this set).
-    await setHeadroom(sb, lecture.group_id, requestUsd(plannedStyles(plan)), false);
+    await setHeadroom(sb, lecture.group_id, requestUsd(plannedStyles(plan), writeModel), false);
     setId = set.id;
   } else if (set) {
     const phase: CreatePhase["phase"] | null = phaseRead ? "read" : set.phase === "style" ? "style" : null;
     const chars = ((sections.data ?? []) as Array<{ idx: number; markdown: string }>)
       .filter((x) => stale.includes(x.idx))
       .reduce((n, x) => n + (x.markdown ?? "").length, 0);
-    const questionsUsd = plan.total > 0 ? requestUsd(plannedStyles(plan)) : set.want * expectedQuestionUsd(MODEL);
+    const questionsUsd = plan.total > 0 ? requestUsd(plannedStyles(plan), writeModel) : set.want * expectedQuestionUsd(writeModel);
     const expected = questionsUsd + (stale.length ? pointsUsd(chars, stale.length) : 0) + (phase === "style" ? EXPECTED_USD.style : 0);
     await setHeadroom(sb, lecture.group_id, expected);
     // Never the member's points or a focus (design §7.1): the set page shows these again.
@@ -736,7 +742,7 @@ export const createAction: Op = async (req, body) => {
     },
     batches: rows.map((r) => ({ id: r.batch_id, part_idx: Number(r.part_idx), seq: Number(r.seq), wanted: Number(r.wanted) })),
     plan: plan.parts,
-    estimate: { questionsUsd: requestUsd(plannedStyles(plan)) },
+    estimate: { questionsUsd: requestUsd(plannedStyles(plan), writeModel) },
   };
   if (planId) answer.round = { planId, lectures: Number(rows[0].lectures) };
   if (setId) answer.set = { id: setId, state: "making" };

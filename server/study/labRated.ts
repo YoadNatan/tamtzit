@@ -368,7 +368,10 @@ export function askedOf(material: Record<string, unknown>): string {
 }
 
 /** The judge's request: the slides' text only (no pictures, also for a summary part), then the answers in `order`. */
-export function judgeCall(o: { lecture: Pick<Lecture, "lecturer" | "slides">; route: string; material: Record<string, unknown>; answers: ReadonlyArray<{ label: string; text: string }> }): {
+/** 12 hex characters from Web Crypto: the AI score's per-call tag id. */
+const nonceHex = (): string => [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+export function judgeCall(o: { lecture: Pick<Lecture, "lecturer" | "slides">; route: string; material: Record<string, unknown>; answers: ReadonlyArray<{ label: string; text: string }>; nonce?: string }): {
   system: TextBlock[];
   messages: Anthropic.Beta.BetaMessageParam[];
   maxTokens: number;
@@ -380,7 +383,7 @@ export function judgeCall(o: { lecture: Pick<Lecture, "lecturer" | "slides">; ro
       { type: "text", text: LAB_JUDGE_SYSTEM },
       { type: "text", text: lectureBlock(o.lecture), cache_control: { type: "ephemeral" } },
     ],
-    messages: [{ role: "user", content: judgeRequest({ kind: RATED_NAMES[o.route as RatedRoute] ?? o.route, asked: askedOf(o.material), answers: o.answers }) }],
+    messages: [{ role: "user", content: judgeRequest({ kind: RATED_NAMES[o.route as RatedRoute] ?? o.route, asked: askedOf(o.material), answers: o.answers, nonce: o.nonce ?? nonceHex() }) }],
     maxTokens: LAB_JUDGE_TOKENS + LAB_JUDGE_TOKENS_EACH * o.answers.length,
     effort: JUDGE_EFFORT,
     format: { type: "json_schema", schema: schemaOf(JudgeOut) },
@@ -404,7 +407,7 @@ export function judgeScores(text: string, labels: readonly string[]): Map<string
 /** The judge's worst case before a run: the slides, what was asked, and every
  *  answer at its whole max_tokens (2.5 characters a token), on `model`. */
 export function judgeEstimate(f: Pick<Frozen, "material" | "maxTokens">, lecture: Pick<Lecture, "lecturer" | "slides">, n: number, model: string): number {
-  const chars = LAB_JUDGE_SYSTEM.length + lectureBlock(lecture).length + askedOf(f.material).length + n * (f.maxTokens * 2.5 + 40);
+  const chars = LAB_JUDGE_SYSTEM.length + lectureBlock(lecture).length + askedOf(f.material).length + n * (f.maxTokens * 2.5 + 60) + 240;
   return estimateUsd(model, chars, LAB_JUDGE_TOKENS + LAB_JUDGE_TOKENS_EACH * n);
 }
 

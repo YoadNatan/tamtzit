@@ -318,7 +318,7 @@ export const ROUTE_RULES: Readonly<Record<RouteKey, RouteRule>> = {
   reword: { pictures: true },
   style: { pictures: true },
   points: {},
-  cards: {},
+  cards: { memberText: true }, // its input carries members' corrections (study_edits: their before and after text)
   ask: { memberText: true },
   ask_route: { memberText: true, anthropicOnly: true },
   mnemonic: { memberText: true },

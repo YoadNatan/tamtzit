@@ -160,7 +160,9 @@ test("route keys: every key has its rules, and section Y accepts exactly these k
   // The outline and the ask route are not made through run() (D5).
   assert.deepEqual(ROUTE_KEYS.filter((k) => ROUTE_RULES[k].anthropicOnly), ["outline", "ask_route"]);
   // Scope "text" takes only keys without pictures, members' wording, or exam and sheet pages; "all" takes every key.
-  assert.deepEqual(ROUTE_KEYS.filter((k) => scopeAllows("text", k)), ["outline", "notes", "points", "cards", "judge"]);
+  // cards reads members' corrections (study_edits): members' wording, so not under "text".
+  assert.deepEqual(ROUTE_KEYS.filter((k) => scopeAllows("text", k)), ["outline", "notes", "points", "judge"]);
+  assert.equal(scopeAllows("text", "cards"), false);
   assert.ok(ROUTE_KEYS.every((k) => scopeAllows("all", k)));
   const sql = readFileSync(join(process.cwd(), "supabase", "study-schema.sql"), "utf8");
   const y = sql.slice(sql.indexOf("-- ════ BEGIN SECTION Y "));
