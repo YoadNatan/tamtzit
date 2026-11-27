@@ -15,6 +15,7 @@ import { AskScreen } from "./features/collab";
 import { TrapScreen } from "./features/extras";
 import { GuideHowTo, TryScreen } from "./features/guide";
 import { InstallScreen } from "./features/install";
+import { ModelsRoute } from "./features/models";
 import { NotifyRoute } from "./features/notify";
 import { CatchupScreen, MeetingScreen } from "./features/meeting";
 import { PlanScreen } from "./features/plan";
@@ -463,6 +464,8 @@ function renderRoute(route: Route, ctx: Ctx, courses: string[]) {
       return <NotifyRoute route={route} ctx={ctx} />;
     case "sets":
       return <SetsRoute route={route} ctx={ctx} />;
+    case "models":
+      return <ModelsRoute route={route} ctx={ctx} />;
     case "library":
       return <Library ctx={ctx} />;
     default:

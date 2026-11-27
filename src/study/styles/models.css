@@ -1,0 +1,449 @@
+/* "השוואת מודלים" (docs/study/models.md; design-models §5): the owner's tabs,
+   a new comparison, a run, the results, "מי כותב מה" and its sheet. Tokens
+   and kit classes only (tokens.css, kit.css); lazy with the screens. */
+
+.md-screen {
+  display: grid;
+  gap: var(--sp-8);
+  min-width: 0;
+}
+.md-screen > * {
+  min-width: 0;
+}
+.md-tabs > .a-btn {
+  min-height: 44px;
+  padding-inline: var(--sp-4);
+}
+
+/* The month's line and its bar. */
+.md-budget {
+  display: grid;
+  gap: var(--sp-3);
+}
+.md-budget p {
+  margin: 0;
+}
+
+/* The runs. */
+.md-run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-5);
+}
+.md-run-card {
+  display: grid;
+  gap: var(--sp-3);
+  color: inherit;
+  text-decoration: none;
+  min-height: 44px;
+}
+.md-run-title {
+  overflow-wrap: anywhere;
+}
+.md-run-foot {
+  gap: var(--sp-4);
+}
+.md-first,
+.md-board-empty {
+  display: grid;
+  gap: var(--sp-5);
+}
+.md-first p,
+.md-board-empty p {
+  margin: 0;
+}
+
+/* Kinds as chips: one choice. */
+.md-kinds {
+  gap: var(--sp-4);
+}
+.md-kind {
+  min-height: 44px;
+  padding-inline: var(--sp-7);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+}
+.md-kind.on,
+.md-kind[aria-checked="true"] {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  color: var(--accent-fill-ink);
+  font-weight: 700;
+}
+.md-kind[aria-disabled="true"] {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+/* A new comparison's steps. */
+.md-step {
+  gap: var(--sp-5);
+}
+.md-step-h {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin: 0;
+  font-size: var(--text-body);
+}
+.md-step-n {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
+  flex: none;
+}
+.md-material {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.md-material p {
+  margin: 0;
+}
+.md-pick {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.md-check,
+.md-radio {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-5);
+  min-height: 48px;
+  cursor: pointer;
+}
+.md-check input,
+.md-radio input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.md-check.on,
+.md-radio.on {
+  background: var(--accent-soft);
+}
+.md-check-name,
+.md-radio-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.md-check-usd,
+.md-radio-usd {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.md-run-foot-bar {
+  display: grid;
+  gap: var(--sp-3);
+  width: 100%;
+}
+.md-run-foot-bar p {
+  margin: 0;
+  text-align: center;
+}
+.md-why:empty {
+  display: none;
+}
+
+/* A run. */
+.md-run-head {
+  gap: var(--sp-4);
+}
+.md-progress {
+  display: grid;
+  gap: var(--sp-5);
+}
+.md-progress p {
+  margin: 0;
+}
+.md-progress .a-link {
+  justify-self: start;
+  min-height: 44px;
+}
+.md-blind {
+  margin: 0;
+  padding: var(--sp-4) var(--sp-6);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.md-answers {
+  display: grid;
+  gap: var(--sp-5);
+}
+@media (min-width: 768px) {
+  .md-answers,
+  .md-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+.md-answer {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.md-answer-head {
+  gap: var(--sp-4);
+}
+.md-answer-name,
+.md-model-name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin: 0;
+  font-size: var(--text-body);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.md-answer-facts {
+  margin: 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.md-answer .a-link,
+.md-answer .a-btn.small {
+  justify-self: start;
+  min-height: 44px;
+}
+.md-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 800;
+  flex: none;
+}
+.md-text {
+  margin: 0;
+  max-height: 22rem;
+  overflow: auto;
+  padding: var(--sp-5);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: var(--text-small);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.md-checks {
+  gap: var(--sp-3);
+}
+.md-checks .a-chip {
+  white-space: normal;
+}
+
+/* Quality against price, side by side. */
+.md-side {
+  display: grid;
+  gap: var(--sp-6);
+}
+.md-side .a-h2 {
+  margin: 0;
+}
+.md-side-row {
+  display: grid;
+  gap: var(--sp-3);
+}
+.md-qp {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-6);
+}
+.md-qp-cell {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.md-qp-n {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+.md-q > i {
+  background-color: var(--ok-pop);
+  background-image: none;
+}
+.md-p > i {
+  background-color: var(--group-pop);
+  background-image: none;
+}
+.md-small {
+  font-weight: 600;
+}
+
+/* The results. */
+.md-cards {
+  display: grid;
+  gap: var(--sp-5);
+}
+.md-model {
+  display: grid;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+.md-model.today {
+  border-color: var(--ok-line);
+}
+.md-model .a-btn.small {
+  justify-self: start;
+  min-height: 44px;
+}
+.md-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5em, 1fr));
+  gap: var(--sp-4) var(--sp-6);
+  margin: 0;
+}
+.md-facts div {
+  display: grid;
+  gap: var(--sp-1);
+}
+.md-facts dt {
+  color: var(--muted);
+}
+.md-facts dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.md-rec {
+  display: grid;
+  gap: var(--sp-5);
+}
+.md-rec p {
+  margin: 0;
+}
+.md-rec .a-chip {
+  margin-inline-start: var(--sp-4);
+}
+
+/* מי כותב מה. */
+.md-route-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3) var(--sp-6);
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.md-route-name {
+  display: grid;
+  gap: var(--sp-1);
+}
+.md-route-model {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.md-fold > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 700;
+}
+.md-providers {
+  margin-block-start: var(--sp-4);
+}
+.md-provider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.md-provider .a-btn.small,
+.md-provider .a-link,
+.md-chip-btn {
+  min-height: 44px;
+}
+.md-chip-btn {
+  border: 1px dashed var(--field-line);
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+}
+.md-stale {
+  color: var(--warn-line);
+  font-weight: 700;
+}
+
+/* Sheets. */
+.md-sheet .md-radios {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.md-sheet .md-radios legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.md-say {
+  display: grid;
+  gap: var(--sp-3);
+}
+.md-say p {
+  margin: 0;
+}
+.md-sheet-actions {
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+.md-sheet-actions .a-btn {
+  min-height: 44px;
+}
+.md-back-default {
+  min-height: 44px;
+}
+.md-material-list {
+  display: grid;
+  gap: var(--sp-6);
+  padding-inline-start: var(--sp-10);
+}
+.md-material-list p,
+.md-fix p {
+  margin: 0;
+}
+.md-options {
+  margin: var(--sp-3) 0 0;
+  padding-inline-start: var(--sp-10);
+  color: var(--muted);
+}
+.md-me-row {
+  min-height: 56px;
+}

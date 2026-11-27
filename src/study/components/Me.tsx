@@ -33,6 +33,8 @@ import ErrorBoundary from "./ErrorBoundary";
 const NotifyRow = lazy(() => import("./NotifyParts").then((m) => ({ default: m.NotifyMeRow })));
 // Practice sets (VITE_STUDY_SETS): showing one's name among who solved a set (OD7), loaded only with the flag.
 const SetsNamesRow = lazy(() => import("./SetsEntries").then((m) => ({ default: m.MeNamesRow })));
+/** "השוואת מודלים" (VITE_STUDY_MODELS): the owner's row, and anyone's "השוואות לדירוג" while runs wait. */
+const ModelsMeRows = lazy(() => import("./ModelsParts").then((m) => ({ default: m.ModelsRows })));
 /** Signing out: this device stops getting pushes first (best effort, at most 3 s). */
 const dropPushes = () => (flags.notify ? import("../lib/notify").then((m) => m.dropThisDevice()).catch(() => undefined) : Promise.resolve());
 
@@ -222,6 +224,13 @@ export default function Me({ ctx }: ScreenProps<"me">) {
         <ErrorBoundary reset="notify" fallback="none">
           <Suspense fallback={null}>
             <NotifyRow ctx={ctx} />
+          </Suspense>
+        </ErrorBoundary>
+      ) : null}
+      {flags.models ? (
+        <ErrorBoundary reset="models" fallback="none">
+          <Suspense fallback={null}>
+            <ModelsMeRows ctx={ctx} />
           </Suspense>
         </ErrorBoundary>
       ) : null}
